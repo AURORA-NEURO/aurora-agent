@@ -112,6 +112,21 @@ export {
 } from "./autonomous-task-intent.js";
 export type { AutonomousTaskIntent } from "./autonomous-task-intent.js";
 export {
+  AUTONOMOUS_CAPABILITY_ROUTE_SCHEMA,
+  AUTONOMOUS_CAPABILITY_ROUTE_SOURCE,
+  AUTONOMOUS_CAPABILITY_ROUTE_REASONS,
+  MAX_AUTONOMOUS_CAPABILITY_ROUTE_CANDIDATES,
+  MAX_AUTONOMOUS_CAPABILITY_ROUTE_MATCHED_TERMS,
+  autonomousCapabilityVocabulary,
+  routeAutonomousCapability,
+  validateAutonomousCapabilityRoute,
+} from "./autonomous-capability-routing.js";
+export type {
+  AutonomousCapabilityRouteReason,
+  AutonomousCapabilityRouteCandidate,
+  AutonomousCapabilityRoute,
+} from "./autonomous-capability-routing.js";
+export {
   AUTONOMOUS_TASK_DECISION_SCHEMA,
   AUTONOMOUS_TASK_DECISION_VERSION,
   AUTONOMOUS_TASK_DECISION_POSTURES,

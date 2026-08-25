@@ -183,6 +183,10 @@ import {
   type AutonomousTaskIntent,
 } from "./autonomous-task-intent.js";
 import {
+  routeAutonomousCapability,
+  type AutonomousCapabilityRoute,
+} from "./autonomous-capability-routing.js";
+import {
   autonomousTaskDecisionPromptContract,
   inferAutonomousTaskDecision,
   type AutonomousTaskDecision,
@@ -730,6 +734,8 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   task_intent: AutonomousTaskIntent;
   /** Intent-to-action posture; guidance metadata never authorizes execution. */
   task_decision: AutonomousTaskDecision;
+  /** Provider-free capability selection used to shape this blueprint; never execution authority. */
+  capability_route: AutonomousCapabilityRoute;
   prompt: AutonomousPromptResult;
   plan: AutonomousPlan;
   /** Present only when the caller explicitly enables the reviewed structured domain response. */
@@ -768,6 +774,7 @@ export interface AutonomousAutoBlueprint {
   route: AutonomousRouteProposal;
   blueprint: AutonomousTaskBlueprint | null;
   cross_domain_blueprint?: AutonomousCrossDomainBlueprint | null;
+  capability_route?: AutonomousCapabilityRoute | null;
   execution: "not_started";
   authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized";
 }
@@ -2893,6 +2900,7 @@ async function buildTaskBlueprint(
     taskDigest?: string;
     routeDigest?: string;
     capability?: string;
+    capabilityRoute?: AutonomousCapabilityRoute;
     context?: readonly AutonomousPromptChunk[];
     maxInputTokens?: number;
     activeToolNames?: readonly string[];
@@ -2907,11 +2915,13 @@ async function buildTaskBlueprint(
   const selectedToolNames = [...new Set(options.selectedToolNames ?? activeToolNames)];
   const domainPolicy = autonomousDomainPolicy(profile.domain);
   const taskLens = autonomousDomainTaskLens(profile.domain);
+  const capabilityRoute = options.capabilityRoute ?? routeAutonomousCapability(taskText, profile.domain, options.capability === undefined ? {} : { explicitCapability: options.capability });
+  const effectiveCapability = options.capability ?? capabilityRoute.selected_capability ?? profile.default_capability;
   const taskIntent = inferAutonomousTaskIntent({
     task: taskText,
     taskDigest,
     domain: profile.domain,
-    capability: options.capability ?? profile.default_capability,
+    capability: effectiveCapability,
     riskClass: profile.risk_class,
     workflowId: profile.workflow.workflow_id,
     lens: taskLens,
@@ -2943,7 +2953,7 @@ async function buildTaskBlueprint(
   });
   const selectionContext: BrainModelSelectionContext = {
     domain: profile.domain,
-    capability: options.capability ?? profile.default_capability,
+    capability: effectiveCapability,
     risk_class: profile.risk_class,
     task_family: profile.workflow.workflow_id,
     task_lens_id: taskLens.lens_id,
@@ -2963,6 +2973,9 @@ async function buildTaskBlueprint(
     task_decision_recommended_path: taskDecision.recommended_path,
     task_decision_approval_requirements: [...taskDecision.approval_requirements],
     task_decision_review_reasons: [...taskDecision.review_reasons],
+    capability_route_digest: capabilityRoute.route_digest,
+    capability_route_reason: capabilityRoute.reason,
+    capability_route_confidence: capabilityRoute.confidence,
   };
   // Match the Rust/Python context identity byte-for-byte: field order is part of this
   // cross-language value contract, while task text and provider payloads stay outside it.
@@ -2991,6 +3004,7 @@ async function buildTaskBlueprint(
     task_lens: taskLens,
     task_intent: taskIntent,
     task_decision: taskDecision,
+    capability_route: capabilityRoute,
     prompt,
     plan,
     ...(responseContract ? { response_contract: responseContract } : {}),
@@ -5902,9 +5916,11 @@ export class AutonomousAgent {
       return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: crossDomain.child_blueprints[0] ?? null, cross_domain_blueprint: crossDomain, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
     }
     const profile = await profileFor(route.primary_domain);
-    const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], options.capability, options.toolSelectionState, options.toolSelectionExploration);
-    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: options.capability, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames, structuredDomainResponse: options.structuredDomainResponse });
-    return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+    const capabilityRoute = routeAutonomousCapability(taskText, profile.domain, options.capability === undefined ? {} : { explicitCapability: options.capability });
+    const effectiveCapability = options.capability ?? capabilityRoute.selected_capability ?? undefined;
+    const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], effectiveCapability, options.toolSelectionState, options.toolSelectionExploration);
+    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: effectiveCapability, capabilityRoute, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames, structuredDomainResponse: options.structuredDomainResponse });
+    return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, capability_route: capabilityRoute, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
   }
 
   /**
@@ -6009,6 +6025,9 @@ export class AutonomousAgent {
     const executionOptions: AutonomousRunOptions = {
       ...runOptions,
       routeOverride: route,
+      ...(runOptions.capability === undefined && envelope.blueprint?.capability_route?.selected_capability
+        ? { capability: envelope.blueprint.capability_route.selected_capability }
+        : {}),
       costBudget,
       maxTotalCostUnits: undefined,
     };
@@ -7157,7 +7176,7 @@ export class AutonomousAgent {
       tools: tools.length ? tools : undefined,
       toolChoice: tools.length ? "auto" : undefined,
     };
-    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: options.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: effectiveMinSelectionConfidence, candidates, request };
+    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: blueprint.selection_context.capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: effectiveMinSelectionConfidence, candidates, request };
     const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);

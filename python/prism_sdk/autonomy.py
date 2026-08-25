@@ -59,6 +59,10 @@ from .autonomous_task_intent import (
     AutonomousTaskIntent,
     infer_autonomous_task_intent,
 )
+from .autonomous_capability_routing import (
+    AutonomousCapabilityRoute,
+    route_autonomous_capability,
+)
 from .autonomous_task_decision import (
     AUTONOMOUS_TASK_DECISION_SCHEMA,
     AutonomousTaskDecision,
@@ -3397,6 +3401,8 @@ class AutonomousTaskBlueprint:
     task_intent: AutonomousTaskIntent | None = None
     # Intent-to-action posture; guidance metadata never authorizes execution.
     task_decision: AutonomousTaskDecision | None = None
+    # Provider-free capability selection; this never authorizes provider, tool, or effect work.
+    capability_route: AutonomousCapabilityRoute | None = None
     # Digest-bound opt-in response contract for this reviewed workflow.
     response_contract: AutonomousDomainResponseContract | None = None
 
@@ -3476,6 +3482,14 @@ class AutonomousTaskBlueprint:
                     required_model_capabilities=self.required_capabilities,
                 )
             ).to_dict(),
+            "capability_route": (
+                self.capability_route
+                or route_autonomous_capability(
+                    self.spec.task,
+                    self.spec.domain,
+                    explicit_capability=self.spec.capability,
+                )
+            ).to_dict(),
             "response_contract": None if self.response_contract is None else {
                 "schema": self.response_contract.schema,
                 "contract_digest": self.response_contract.contract_digest,
@@ -3499,11 +3513,37 @@ class AutonomousTaskBlueprint:
 def _memory_selection_context(blueprint: AutonomousTaskBlueprint) -> dict[str, Any]:
     """Project live selector metadata into the smaller episodic-memory envelope."""
 
-    return {
-        key: value
-        for key, value in blueprint.selection_context.items()
-        if not key.startswith(("task_lens_", "task_intent_", "task_decision_"))
-    }
+    # The live selector context intentionally contains the complete catalogue and workflow
+    # projections. Episodic memory has a smaller bounded envelope, so retain stable identity
+    # and digest fields explicitly instead of allowing catalogue arrays to grow the record or
+    # silently crowd out capability-route identity.
+    keys = (
+        "schema",
+        "workflow",
+        "domain",
+        "capability",
+        "risk_class",
+        "execution_mode",
+        "domain_pack_id",
+        "domain_pack_version",
+        "domain_pack_digest",
+        "workflow_id",
+        "workflow_digest",
+        "evidence_plan_digest",
+        "evidence_requirement_count",
+        "task_digest",
+        "user_context_digest",
+        "required_model_capabilities",
+        "capability_contract_digest",
+        "capability_route_digest",
+        "capability_route_reason",
+        "capability_route_confidence",
+        "execution_plan_digest",
+        "execution_plan_status",
+        "stage_execution_plan_digest",
+        "stage_id",
+    )
+    return {key: blueprint.selection_context[key] for key in keys if key in blueprint.selection_context}
 
 
 def _memory_task_lens_digest(blueprint: AutonomousTaskBlueprint) -> str:
@@ -3571,6 +3611,7 @@ class AutonomousAutoBlueprint:
     blueprint: AutonomousTaskBlueprint | None = None
     cross_domain_blueprint: "AutonomousCrossDomainBlueprint | None" = None
     semantic_route: AutonomousSemanticRouteResult | None = None
+    capability_route: AutonomousCapabilityRoute | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.route, AutonomousRouteProposal):
@@ -3585,6 +3626,11 @@ class AutonomousAutoBlueprint:
             self.semantic_route, AutonomousSemanticRouteResult
         ):
             raise BrainRunError("automatic blueprint contains an invalid semantic route result")
+        if self.capability_route is not None and not isinstance(self.capability_route, AutonomousCapabilityRoute):
+            raise BrainRunError("automatic blueprint contains an invalid capability route")
+        if self.blueprint is not None and self.capability_route is not None:
+            if self.blueprint.capability_route is not None and self.blueprint.capability_route.route_digest != self.capability_route.route_digest:
+                raise BrainRunError("automatic blueprint capability route does not match its task blueprint")
         if self.semantic_route is not None and self.semantic_route.status == "completed":
             if self.semantic_route.route.route_digest != self.route.route_digest:
                 raise BrainRunError("completed semantic route must match the automatic blueprint route")
@@ -3601,6 +3647,9 @@ class AutonomousAutoBlueprint:
             "schema": "bioprism-python-autonomous-auto-blueprint/0.1",
             "route": self.route.to_dict(),
             "blueprint": None if self.blueprint is None else self.blueprint.to_dict(),
+            "capability_route": None
+            if self.capability_route is None
+            else self.capability_route.to_dict(),
             "cross_domain_blueprint": None
             if self.cross_domain_blueprint is None
             else self.cross_domain_blueprint.to_dict(),
@@ -9178,7 +9227,12 @@ class AutonomousTaskOrchestrator:
                 "workflow requires capabilities outside the domain profile: "
                 + ", ".join(unsupported_workflow_capabilities)
             )
-        resolved_capability = profile.default_capability if capability is None else _identifier("capability", capability)
+        capability_route = route_autonomous_capability(
+            task,
+            profile.domain,
+            explicit_capability=None if capability is None else _identifier("capability", capability),
+        )
+        resolved_capability = capability_route.selected_capability or profile.default_capability
         resolved_risk = profile.risk_class if risk_class is None else _identifier("risk_class", risk_class)
         capability_contract = _resolve_domain_capability_contract(
             profile,
@@ -9292,6 +9346,9 @@ class AutonomousTaskOrchestrator:
             "capability_stage_ids": list(capability_contract.stage_ids),
             "capability_evidence_outputs": list(capability_contract.evidence_outputs),
             "capability_evaluator_signals": list(capability_contract.evaluator_signals),
+            "capability_route_digest": capability_route.route_digest,
+            "capability_route_reason": capability_route.reason,
+            "capability_route_confidence": capability_route.confidence,
         }
         runtime_execution_plan = spec.context.get(_AUTONOMOUS_EXECUTION_PLAN_CONTEXT_KEY)
         if runtime_execution_plan is not None:
@@ -9337,6 +9394,7 @@ class AutonomousTaskOrchestrator:
             task_lens=task_lens,
             task_intent=task_intent,
             task_decision=task_decision,
+            capability_route=capability_route,
             response_contract=response_contract,
         )
 
@@ -9490,6 +9548,7 @@ class AutonomousTaskOrchestrator:
                 route=route,
                 blueprint=blueprint,
                 semantic_route=semantic_route,
+                capability_route=blueprint.capability_route,
             )
         subtasks = [
             {

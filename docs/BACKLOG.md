@@ -1723,3 +1723,15 @@ guarded resume helper preserve the metadata-only boundary and make post-dispatch
 explicit. Remaining production work is application wiring: durable protected rehydrators, real
 identity/approval stores, deployment-level ledger/journal atomicity, and external resolution of
 genuinely uncertain provider/effect outcomes.
+
+Capability-level automatic intake is now also shared by both SDKs. After domain routing, a
+provider-free vocabulary router proposes a more specific reviewed capability for every built-in
+domain, including debugging versus implementation, lineage versus analysis, rollback versus
+observability, biomedical safety versus provenance, multimodal alignment, specialist synthesis,
+and evaluation replay. Confidence and margin thresholds abstain instead of guessing, explicit
+caller capabilities remain authoritative, and the selected value flows into task intent,
+model-selection context, learning identity, and tool planning. The proposal is digest-bound and
+metadata-only; task text, prompts, credentials, provider payloads, tool arguments, and effects
+remain caller-owned. The remaining production responsibility is still to connect those reviewed
+capabilities to deployment-specific adapters and evidence sources rather than treating a lexical
+classification as execution or domain truth.

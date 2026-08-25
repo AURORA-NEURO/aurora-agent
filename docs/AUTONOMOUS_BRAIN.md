@@ -10387,3 +10387,38 @@ effects, credentials, evaluator evidence, and durable stores remain caller-owned
 synthesis, and execution. All built-in single-domain profiles and the cross-domain route are
 covered by offline tests, including learner settlement, cross-domain fan-out, and semantic
 approval refusal.
+## Capability-level task routing
+
+Domain routing is only the first decision in an autonomous run. A task routed to `coding`,
+`science`, or `operations` still has materially different planning, model, tool, and evaluator
+requirements depending on whether it asks for debugging, literature review, rollback, or another
+capability. Both SDKs now run a second provider-free capability route during blueprint creation.
+
+`routeAutonomousCapability()` in TypeScript and `route_autonomous_capability()` in Python use the
+same reviewed vocabulary for all twelve built-in domains: coding (`review`, `debugging`,
+`implementation`, `testing`); browser (`web_research`, `navigation`, `source_comparison`); data
+(`data_analysis`, `schema_validation`, `lineage`, `quality_control`); science (`literature`,
+`hypothesis`, `experiment`, `statistics`, `reproducibility`); biomedical (`biomedical_review`,
+`provenance`, `safety_boundary`, `human_review`); neuroscience (`neuroscience_analysis`,
+`signal_interpretation`, `study_design`, `reproducibility`); operations (`observability`,
+`incident_response`, `risk_review`, `rollback`, `approval`, `runbook`); enterprise (`workflow`,
+`governance`, `compliance`, `analytics`, `coordination`); multi-agent (`delegation`,
+`coordination`, `consensus`, `conflict_resolution`, `handoff`); multimodal (`image`, `audio`,
+`video`, `document`, `cross_modal_alignment`); cross-domain (`routing`, `synthesis`,
+`evidence_alignment`, `workflow_composition`); and evaluation (`benchmarking`, `rubric`, `replay`,
+`failure_analysis`, `reproducibility`).
+
+The router returns a digest-bound, metadata-only proposal with ranked capability candidates,
+matched vocabulary terms, confidence, and an explicit abstention reason. A low-confidence or
+low-margin result falls back to the domain default during preparation; it cannot silently invent a
+capability. A caller-provided capability remains authoritative and is represented as an explicit
+override. `validateAutonomousCapabilityRoute()` / `validate_autonomous_capability_route()` bind a
+rehydrated proposal back to the exact task digest before it can shape a blueprint.
+
+When a capability is selected, it is copied into the task intent, model-selection context,
+learning context, and capability/tool planning request. It is still classification metadata:
+the route does not select a provider, execute a tool, grant credentials, authorize an effect, or
+turn lexical matches into semantic truth. The task text and provider payloads remain transient;
+only the capability labels, scores, matched catalogue terms, and digests cross the blueprint
+boundary. Focused parity coverage exercises all twelve domains, explicit overrides, abstention,
+tamper rejection, and automatic blueprint propagation.
