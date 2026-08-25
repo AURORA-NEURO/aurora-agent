@@ -129,7 +129,11 @@ impl ToolchainFacts {
         self
     }
 
-    pub fn with_crate_version(mut self, name: impl Into<String>, version: impl Into<String>) -> Self {
+    pub fn with_crate_version(
+        mut self,
+        name: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
         self.crate_versions.insert(name.into(), version.into());
         self
     }
@@ -287,7 +291,10 @@ mod tests {
         let host = ToolchainFacts::declared().with_crate_version("bioprism-section", "0.1.0");
         let differences = bundle.compare(&host);
         let fields: Vec<&str> = differences.iter().map(ToolchainDifference::field).collect();
-        assert_eq!(fields, vec!["crate:bioprism-fiber", "crate:bioprism-section"]);
+        assert_eq!(
+            fields,
+            vec!["crate:bioprism-fiber", "crate:bioprism-section"]
+        );
         assert!(differences.iter().all(|d| !d.is_disagreement()));
     }
 

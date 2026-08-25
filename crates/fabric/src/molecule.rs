@@ -44,9 +44,7 @@ use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A semantic version, compared field by field.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Version {
     pub major: u32,
     pub minor: u32,
@@ -190,12 +188,13 @@ impl Molecule {
         }
 
         for field in exported.fields.keys() {
-            let role = attribution
-                .get(field)
-                .ok_or_else(|| MoleculeError::UnattributableOutput {
-                    molecule: name.clone(),
-                    output: field.clone(),
-                })?;
+            let role =
+                attribution
+                    .get(field)
+                    .ok_or_else(|| MoleculeError::UnattributableOutput {
+                        molecule: name.clone(),
+                        output: field.clone(),
+                    })?;
             if !roles.contains(role) {
                 return Err(MoleculeError::AttributionToUnboundRole {
                     molecule: name.clone(),
@@ -218,13 +217,13 @@ impl Molecule {
 
     /// Which participant produced an exported output.
     pub fn attribute(&self, output: &str) -> Result<&Binding, MoleculeError> {
-        let role = self
-            .attribution
-            .get(output)
-            .ok_or_else(|| MoleculeError::UnattributableOutput {
-                molecule: self.name.clone(),
-                output: output.to_string(),
-            })?;
+        let role =
+            self.attribution
+                .get(output)
+                .ok_or_else(|| MoleculeError::UnattributableOutput {
+                    molecule: self.name.clone(),
+                    output: output.to_string(),
+                })?;
         self.bindings
             .iter()
             .find(|b| &b.role == role)
@@ -323,7 +322,11 @@ impl MoleculeCard {
                 _ => None,
             },
             policy_hash: Some(molecule.identity()?),
-            expected_latency_units: molecule.composition.contract.envelope.declared_latency_units,
+            expected_latency_units: molecule
+                .composition
+                .contract
+                .envelope
+                .declared_latency_units,
             expected_cost_minor: molecule.composition.contract.envelope.declared_cost_minor,
         })
     }
@@ -472,11 +475,7 @@ pub fn specialize(
     Ok(Molecule {
         bindings,
         composition,
-        version: Version::new(
-            molecule.version.major,
-            molecule.version.minor + 1,
-            0,
-        ),
+        version: Version::new(molecule.version.major, molecule.version.minor + 1, 0),
         ..molecule.clone()
     })
 }

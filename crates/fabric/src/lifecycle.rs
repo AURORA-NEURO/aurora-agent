@@ -369,7 +369,9 @@ pub struct OpenCondition {
 pub enum ClosureOutcome {
     Closed,
     /// Terminal, valid, and not clean. The conditions are named, which is what makes it valid.
-    PartialTerminal { open: Vec<OpenCondition> },
+    PartialTerminal {
+        open: Vec<OpenCondition>,
+    },
 }
 
 impl ClosureOutcome {
@@ -407,9 +409,7 @@ pub fn close_thread(
             .filter(|id| {
                 graph
                     .get(id)
-                    .map(|object| {
-                        kinds.contains(&object.kind) && states.contains(&object.state)
-                    })
+                    .map(|object| kinds.contains(&object.kind) && states.contains(&object.state))
                     .unwrap_or(false)
             })
             .cloned()
@@ -523,11 +523,7 @@ impl DerivationGraph {
     }
 
     /// `conclusion` rests on `premises`.
-    pub fn deriving(
-        mut self,
-        conclusion: impl Into<String>,
-        premises: &[&str],
-    ) -> Self {
+    pub fn deriving(mut self, conclusion: impl Into<String>, premises: &[&str]) -> Self {
         self.premises.insert(
             ClaimId::new(conclusion),
             premises.iter().map(|p| ClaimId::new(*p)).collect(),
@@ -635,9 +631,7 @@ impl CompactionPlan {
             .cloned()
             .collect();
         if !unresolved.is_empty() {
-            return Err(CompactionRefusal::UnresolvedConflict {
-                claims: unresolved,
-            });
+            return Err(CompactionRefusal::UnresolvedConflict { claims: unresolved });
         }
         let lineage: BTreeSet<ClaimId> = self
             .drop
@@ -743,10 +737,7 @@ pub enum CompactionRefusal {
     LegalHold { claims: BTreeSet<ClaimId> },
 
     #[error("retained window [{from:?}, {to:?}) is empty; a compaction that retains nothing is not auditable")]
-    EmptyRetainedWindow {
-        from: LogicalTime,
-        to: LogicalTime,
-    },
+    EmptyRetainedWindow { from: LogicalTime, to: LogicalTime },
 
     #[error("canonical encoding failed: {0}")]
     Encoding(String),
@@ -871,10 +862,8 @@ pub fn claim_global_deletion(
     required: &BTreeSet<String>,
     attestations: &[DeletionAttestation],
 ) -> Result<GlobalDeletion, LifecycleError> {
-    let seen: BTreeMap<&str, &DeletionAttestation> = attestations
-        .iter()
-        .map(|a| (a.participant(), a))
-        .collect();
+    let seen: BTreeMap<&str, &DeletionAttestation> =
+        attestations.iter().map(|a| (a.participant(), a)).collect();
     let missing: BTreeSet<String> = required
         .iter()
         .filter(|participant| !seen.contains_key(participant.as_str()))
@@ -943,7 +932,5 @@ pub enum LifecycleError {
     DeletionAttestationMissing { participants: BTreeSet<String> },
 
     #[error("deletion is not global: {refused:?}")]
-    DeletionNotUniversal {
-        refused: Vec<DeletionAttestation>,
-    },
+    DeletionNotUniversal { refused: Vec<DeletionAttestation> },
 }

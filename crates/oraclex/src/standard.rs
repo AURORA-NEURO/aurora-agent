@@ -206,10 +206,14 @@ impl SourceObservation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "call", rename_all = "snake_case")]
 pub enum ClassCall {
-    Definite { class: String },
+    Definite {
+        class: String,
+    },
     /// Mass over candidate classes. Not normalised by this type: a caller who supplies masses that
     /// do not sum to one has an unnormalised belief, and silently rescaling it would invent one.
-    Spread { mass: BTreeMap<String, f64> },
+    Spread {
+        mass: BTreeMap<String, f64>,
+    },
 }
 
 impl ClassCall {

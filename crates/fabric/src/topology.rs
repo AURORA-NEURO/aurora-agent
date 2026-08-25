@@ -289,11 +289,12 @@ impl Topology {
                     .insert(molecule.clone(), requested_authority.clone());
             }
             TopologyAction::Split { molecule } => {
-                let members = self.molecules.remove(molecule).ok_or_else(|| {
-                    TopologyError::NotAMolecule {
-                        participant: molecule.clone(),
-                    }
-                })?;
+                let members =
+                    self.molecules
+                        .remove(molecule)
+                        .ok_or_else(|| TopologyError::NotAMolecule {
+                            participant: molecule.clone(),
+                        })?;
                 self.members.remove(molecule);
                 self.drop_edges(molecule);
                 change.removed.insert(molecule.clone());
@@ -351,11 +352,12 @@ impl Topology {
                         capability: capability.clone(),
                     });
                 }
-                let member = self.members.get_mut(participant).ok_or_else(|| {
-                    TopologyError::NotPresent {
-                        participant: participant.clone(),
-                    }
-                })?;
+                let member =
+                    self.members
+                        .get_mut(participant)
+                        .ok_or_else(|| TopologyError::NotPresent {
+                            participant: participant.clone(),
+                        })?;
                 member.authority.insert(capability.clone());
                 change.authority_delta.insert(
                     participant.clone(),
@@ -366,11 +368,12 @@ impl Topology {
                 participant,
                 capability,
             } => {
-                let member = self.members.get_mut(participant).ok_or_else(|| {
-                    TopologyError::NotPresent {
-                        participant: participant.clone(),
-                    }
-                })?;
+                let member =
+                    self.members
+                        .get_mut(participant)
+                        .ok_or_else(|| TopologyError::NotPresent {
+                            participant: participant.clone(),
+                        })?;
                 member.authority.remove(capability);
             }
         }

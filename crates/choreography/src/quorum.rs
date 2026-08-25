@@ -566,7 +566,10 @@ impl Jury {
 
         let mut grouped: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for member in 0..count {
-            grouped.entry(find(&mut parent, member)).or_default().push(member);
+            grouped
+                .entry(find(&mut parent, member))
+                .or_default()
+                .push(member);
         }
 
         let clusters = grouped

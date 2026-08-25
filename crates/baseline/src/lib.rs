@@ -36,7 +36,7 @@ pub mod strategy;
 pub mod sweep;
 
 pub use compare::{
-    compare, default_panel, Comparison, CompareError, Judgement, RowRefusal, RowVerdict,
+    compare, default_panel, CompareError, Comparison, Judgement, RowRefusal, RowVerdict,
     StrategyResult,
 };
 pub use directed::DirectedDependencyWalk;
@@ -45,4 +45,6 @@ pub use incidence::{ConnectedComponent, KHopIncidence, QueryGraph};
 pub use index::PanelIndex;
 pub use lexical::LexicalTopK;
 pub use strategy::{ContextStrategy, FiberCompiled, FullContext, Selection};
-pub use sweep::{run_cell, run_sweep, sweep_panel, SweepCell, SweepError, SweepGrid, SweepRow, SweepTable};
+pub use sweep::{
+    run_cell, run_sweep, sweep_panel, SweepCell, SweepError, SweepGrid, SweepRow, SweepTable,
+};

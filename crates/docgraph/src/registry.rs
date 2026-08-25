@@ -460,7 +460,10 @@ impl DocGraph {
     }
 
     /// Successors of a superseded module: sources of incoming `supersedes` edges.
-    pub fn successors_of<'a>(&'a self, id: &'a ModuleId) -> impl Iterator<Item = &'a ModuleId> + 'a {
+    pub fn successors_of<'a>(
+        &'a self,
+        id: &'a ModuleId,
+    ) -> impl Iterator<Item = &'a ModuleId> + 'a {
         self.in_edges(id)
             .filter(|edge| edge.kind == DocEdgeType::Supersedes)
             .map(|edge| &edge.from)

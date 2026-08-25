@@ -144,7 +144,12 @@ pub(crate) fn rank(world: &World, query: &Query, embeddings: &[Vec<f64>]) -> Vec
     scored.sort_by(|a, b| {
         b.1.partial_cmp(&a.1)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| world.facts[a.0].id.as_str().cmp(world.facts[b.0].id.as_str()))
+            .then_with(|| {
+                world.facts[a.0]
+                    .id
+                    .as_str()
+                    .cmp(world.facts[b.0].id.as_str())
+            })
     });
 
     scored

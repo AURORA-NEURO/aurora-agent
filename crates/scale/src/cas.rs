@@ -418,7 +418,8 @@ pub fn put_world_release(
 ) -> Result<WorldRelease, CacheError> {
     let manifest = bioprism_store::build(world, directory)
         .map_err(|error| CacheError::Store(error.to_string()))?;
-    let bytes = serde_json::to_vec(&manifest).map_err(|error| CacheError::Store(error.to_string()))?;
+    let bytes =
+        serde_json::to_vec(&manifest).map_err(|error| CacheError::Store(error.to_string()))?;
     Ok(WorldRelease {
         manifest_address: store.put(bytes),
         world_sha256: manifest.world_sha256,

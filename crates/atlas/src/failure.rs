@@ -405,7 +405,9 @@ impl CausalChain {
 
     /// How far the error propagated before it terminated, in trajectory steps.
     pub fn propagation_span(&self) -> usize {
-        self.terminal.step.saturating_sub(self.first_divergence.step)
+        self.terminal
+            .step
+            .saturating_sub(self.first_divergence.step)
     }
 }
 

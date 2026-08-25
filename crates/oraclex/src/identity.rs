@@ -90,7 +90,10 @@ pub enum Concordance {
     Concordant,
     Discordant,
     /// The comparison ran and did not separate the hypotheses. Carries what would.
-    Ambiguous { reason: String, would_settle: String },
+    Ambiguous {
+        reason: String,
+        would_settle: String,
+    },
 }
 
 /// Evidence bearing on whether two artifacts belong to the same subject.

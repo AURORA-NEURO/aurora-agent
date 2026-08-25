@@ -68,10 +68,7 @@ impl Neighbourhood {
         for factor in &world.factors {
             let node = Node::Factor(factor.id.as_str().to_string());
             for variable in factor.inputs.iter().chain(factor.outputs.iter()) {
-                link(
-                    node.clone(),
-                    Node::Variable(variable.as_str().to_string()),
-                );
+                link(node.clone(), Node::Variable(variable.as_str().to_string()));
             }
         }
         for fact in &world.facts {
@@ -314,8 +311,7 @@ pub fn profile(
         .filter(|fact| distractor_fact_ids.contains(fact.id.as_str()))
         .filter(|fact| {
             fact.tags.iter().any(|tag| {
-                !query.protects(tag)
-                    && tag.split('_').any(|token| protected_tokens.contains(token))
+                !query.protects(tag) && tag.split('_').any(|token| protected_tokens.contains(token))
             })
         })
         .count();

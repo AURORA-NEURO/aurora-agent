@@ -118,11 +118,7 @@ impl ContextStrategy for LexicalTopK {
 /// The whole ranking rather than one budget's slice, because `k` enters only at the final
 /// `take`: the two shipped budgets were scoring the same corpus against the same query twice to
 /// read different depths of the same list.
-pub(crate) fn rank(
-    world: &World,
-    query: &Query,
-    documents: &[Vec<String>],
-) -> Vec<(usize, f64)> {
+pub(crate) fn rank(world: &World, query: &Query, documents: &[Vec<String>]) -> Vec<(usize, f64)> {
     let total = documents.len() as f64;
     let average_length = if documents.is_empty() {
         1.0
@@ -146,8 +142,10 @@ pub(crate) fn rank(
             let length = document.len() as f64;
             let mut score = 0.0;
             for token in &query_tokens {
-                let frequency =
-                    document.iter().filter(|t| t.as_str() == token.as_str()).count() as f64;
+                let frequency = document
+                    .iter()
+                    .filter(|t| t.as_str() == token.as_str())
+                    .count() as f64;
                 if frequency == 0.0 {
                     continue;
                 }
@@ -165,7 +163,12 @@ pub(crate) fn rank(
     scored.sort_by(|a, b| {
         b.1.partial_cmp(&a.1)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| world.facts[a.0].id.as_str().cmp(world.facts[b.0].id.as_str()))
+            .then_with(|| {
+                world.facts[a.0]
+                    .id
+                    .as_str()
+                    .cmp(world.facts[b.0].id.as_str())
+            })
     });
 
     scored

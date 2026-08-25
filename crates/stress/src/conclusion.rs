@@ -67,9 +67,9 @@ pub enum Procedure {
 impl Procedure {
     pub fn character(&self) -> Character {
         match self {
-            Procedure::MarkerRanking
-            | Procedure::MarkerSeparation
-            | Procedure::GroupContrast => Character::Discriminative,
+            Procedure::MarkerRanking | Procedure::MarkerSeparation | Procedure::GroupContrast => {
+                Character::Discriminative
+            }
             Procedure::CalibratedLogOdds { .. } | Procedure::PositivePredictiveValue { .. } => {
                 Character::Calibrated
             }
@@ -123,8 +123,9 @@ impl Procedure {
                 if analysable == 0 {
                     return Err(undefined("every subject is below the limit of detection"));
                 }
-                let prior = logit(cohort.prevalence())
-                    .ok_or_else(|| undefined("base rate is degenerate, so log-odds are infinite"))?;
+                let prior = logit(cohort.prevalence()).ok_or_else(|| {
+                    undefined("base rate is degenerate, so log-odds are infinite")
+                })?;
                 let total: f64 = cohort
                     .resolved()
                     .map(|subject| prior + slope * (subject.marker - reference))
@@ -193,9 +194,7 @@ impl ConclusionValue {
     pub fn ids(&self) -> Vec<&str> {
         match self {
             ConclusionValue::Scalar(_) => Vec::new(),
-            ConclusionValue::Ordering(items) => {
-                items.iter().map(|item| item.id.as_str()).collect()
-            }
+            ConclusionValue::Ordering(items) => items.iter().map(|item| item.id.as_str()).collect(),
             ConclusionValue::Membership(items) => items.iter().map(String::as_str).collect(),
         }
     }

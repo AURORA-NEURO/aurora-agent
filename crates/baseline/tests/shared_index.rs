@@ -123,7 +123,11 @@ fn panel_order_does_not_change_any_row_the_comparison_reports() {
             "{} reached a different verdict when the panel ran backwards",
             result.name
         );
-        assert_eq!(result.notes, mirrored.notes, "{} drifted its notes", result.name);
+        assert_eq!(
+            result.notes, mirrored.notes,
+            "{} drifted its notes",
+            result.name
+        );
     }
 }
 
@@ -154,6 +158,10 @@ fn a_panel_of_one_reaches_the_same_row_it_reaches_inside_the_full_panel() {
             "{} exposed a different number of facts on its own",
             row.name
         );
-        assert_eq!(row.notes, inside.notes, "{} drifted its notes on its own", row.name);
+        assert_eq!(
+            row.notes, inside.notes,
+            "{} drifted its notes on its own",
+            row.name
+        );
     }
 }

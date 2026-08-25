@@ -380,14 +380,24 @@ fn push_leaf(item: &str, names: &mut BTreeSet<String>) {
 pub enum ReferenceStatus {
     Present,
     /// No package of that name is a workspace member.
-    CrateNotInWorkspace { krate: String },
+    CrateNotInWorkspace {
+        krate: String,
+    },
     /// The crate exists but a source file on the path could not be read. Distinct from a missing
     /// symbol: an unreadable file is a fact about the checkout, not about the cookbook.
-    SourceUnreadable { path: String },
+    SourceUnreadable {
+        path: String,
+    },
     /// An intermediate path segment is not a public module of its parent.
-    ModuleNotExported { module: String, from: String },
+    ModuleNotExported {
+        module: String,
+        from: String,
+    },
     /// The final segment is not exported by the module that should hold it.
-    ItemNotExported { item: String, from: String },
+    ItemNotExported {
+        item: String,
+        from: String,
+    },
 }
 
 impl ReferenceStatus {

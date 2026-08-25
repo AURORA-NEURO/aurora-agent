@@ -355,7 +355,9 @@ mod tests {
             ..LabReport::default()
         };
         assert!(report.blocks_release());
-        assert!(report.to_markdown().contains("Retired by repeated optimization"));
+        assert!(report
+            .to_markdown()
+            .contains("Retired by repeated optimization"));
     }
 
     #[test]

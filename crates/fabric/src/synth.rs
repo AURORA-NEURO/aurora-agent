@@ -334,16 +334,12 @@ pub fn reject(goal: &Goal, candidate: &Candidate, deadlock: Option<&str>) -> Vec
         }
     }
 
-    if !matches!(
-        goal.effects_allowed.includes(&effects),
-        Inclusion::Holds
-    ) || !effects
-        .escalation_over(&goal.effects_forbidden)
-        .is_empty()
-        && goal
-            .effects_forbidden
-            .iter()
-            .any(|forbidden| effects.iter().any(|e| e.kind == forbidden.kind))
+    if !matches!(goal.effects_allowed.includes(&effects), Inclusion::Holds)
+        || !effects.escalation_over(&goal.effects_forbidden).is_empty()
+            && goal
+                .effects_forbidden
+                .iter()
+                .any(|forbidden| effects.iter().any(|e| e.kind == forbidden.kind))
     {
         out.push(RejectionReason::AuthorityEscalation {
             roles: candidate.bindings.keys().cloned().collect(),

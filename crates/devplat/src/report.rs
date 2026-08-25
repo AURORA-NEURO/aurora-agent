@@ -411,7 +411,6 @@ impl Rendering {
             .iter()
             .find(|rendered| rendered.figure.name() == name)
     }
-
 }
 
 /// Project an evidence state for one audience.

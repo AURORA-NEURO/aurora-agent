@@ -44,8 +44,14 @@ impl ScopeValue {
             }
             ScopeValue::Window(interval) => format!(
                 "[{},{})",
-                interval.start.map(|t| t.to_rfc3339()).unwrap_or_else(|| "-inf".into()),
-                interval.end.map(|t| t.to_rfc3339()).unwrap_or_else(|| "+inf".into()),
+                interval
+                    .start
+                    .map(|t| t.to_rfc3339())
+                    .unwrap_or_else(|| "-inf".into()),
+                interval
+                    .end
+                    .map(|t| t.to_rfc3339())
+                    .unwrap_or_else(|| "+inf".into()),
             ),
         }
     }

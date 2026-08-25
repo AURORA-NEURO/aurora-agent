@@ -472,7 +472,11 @@ pub struct SpecimenObservation {
 }
 
 impl SpecimenObservation {
-    pub fn new(marker: MolecularMarker, sampling: SpecimenSampling, call: Observed<MarkerCall>) -> Self {
+    pub fn new(
+        marker: MolecularMarker,
+        sampling: SpecimenSampling,
+        call: Observed<MarkerCall>,
+    ) -> Self {
         SpecimenObservation {
             marker,
             sampling,
@@ -761,10 +765,7 @@ mod tests {
     fn a_marker_absent_from_a_specimen_is_not_absent_from_the_tumour() {
         let observation = negative_specimen(&["core"], 500);
         let claim = observation.as_tumour_claim().expect("a bound is available");
-        assert!(matches!(
-            claim,
-            TumourClaim::UndetectedAboveFraction { .. }
-        ));
+        assert!(matches!(claim, TumourClaim::UndetectedAboveFraction { .. }));
         assert!(claim.excludes_subclone(fraction(1_000), &region("core")));
         assert!(!claim.excludes_subclone(fraction(100), &region("core")));
     }
@@ -845,7 +846,10 @@ mod tests {
         ] {
             let mut other = observation.clone();
             other.call = Observed::Unobserved(status);
-            assert!(other.as_tumour_claim().is_err(), "{status:?} bounded a tumour");
+            assert!(
+                other.as_tumour_claim().is_err(),
+                "{status:?} bounded a tumour"
+            );
         }
     }
 
@@ -977,8 +981,7 @@ mod tests {
         let population = TumourPopulation::new()
             .with(Subclone::new(SubcloneId::new("C1"), fraction(4_000)))
             .with(Subclone::new(SubcloneId::new("C2"), fraction(6_000)));
-        let history =
-            ClonalHistory::new().descends(SubcloneId::new("C1"), SubcloneId::new("C2"));
+        let history = ClonalHistory::new().descends(SubcloneId::new("C1"), SubcloneId::new("C2"));
         assert!(matches!(
             history.check(&population).unwrap_err(),
             PhylogenyRefusal::ChildExceedsParent { .. }
@@ -988,7 +991,10 @@ mod tests {
     #[test]
     fn nested_subclones_that_fit_inside_their_parent_are_compatible() {
         let population = TumourPopulation::new()
-            .with(Subclone::new(SubcloneId::new("C1"), CellularFraction::WHOLE))
+            .with(Subclone::new(
+                SubcloneId::new("C1"),
+                CellularFraction::WHOLE,
+            ))
             .with(Subclone::new(SubcloneId::new("C2"), fraction(4_000)))
             .with(Subclone::new(SubcloneId::new("C3"), fraction(3_000)));
         let history = ClonalHistory::new()
@@ -1000,8 +1006,14 @@ mod tests {
     #[test]
     fn an_ancestry_cycle_is_rejected() {
         let population = TumourPopulation::new()
-            .with(Subclone::new(SubcloneId::new("C1"), CellularFraction::WHOLE))
-            .with(Subclone::new(SubcloneId::new("C2"), CellularFraction::WHOLE));
+            .with(Subclone::new(
+                SubcloneId::new("C1"),
+                CellularFraction::WHOLE,
+            ))
+            .with(Subclone::new(
+                SubcloneId::new("C2"),
+                CellularFraction::WHOLE,
+            ));
         let history = ClonalHistory::new()
             .descends(SubcloneId::new("C1"), SubcloneId::new("C2"))
             .descends(SubcloneId::new("C2"), SubcloneId::new("C1"));
@@ -1037,7 +1049,10 @@ mod tests {
     #[test]
     fn two_compatible_histories_do_not_make_one_history() {
         let population = TumourPopulation::new()
-            .with(Subclone::new(SubcloneId::new("C1"), CellularFraction::WHOLE))
+            .with(Subclone::new(
+                SubcloneId::new("C1"),
+                CellularFraction::WHOLE,
+            ))
             .with(Subclone::new(SubcloneId::new("C2"), fraction(3_000)))
             .with(Subclone::new(SubcloneId::new("C3"), fraction(2_000)));
         let linear = ClonalHistory::new()
@@ -1059,9 +1074,6 @@ mod tests {
         assert!(CellularFraction::from_parts_per_ten_thousand(10_001).is_err());
         assert!(CellularFraction::from_ratio(1.5).is_err());
         assert!(CellularFraction::from_ratio(f64::NAN).is_err());
-        assert_eq!(
-            CellularFraction::from_ratio(0.25).unwrap(),
-            fraction(2_500)
-        );
+        assert_eq!(CellularFraction::from_ratio(0.25).unwrap(), fraction(2_500));
     }
 }

@@ -93,9 +93,9 @@ pub fn maximum_influence(
     let mut evaluated = 0usize;
 
     let evaluate = |candidate: &[Vec<f64>],
-                        best: &mut f64,
-                        best_witness: &mut Vec<Vec<f64>>,
-                        evaluated: &mut usize|
+                    best: &mut f64,
+                    best_witness: &mut Vec<Vec<f64>>,
+                    evaluated: &mut usize|
      -> Result<(), InfluenceError> {
         let mut altered: Option<QueryRegion> = None;
         for (id, table) in factor_ids.iter().zip(candidate) {

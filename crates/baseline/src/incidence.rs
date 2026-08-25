@@ -107,8 +107,12 @@ impl ContextStrategy for KHopIncidence {
     }
 
     fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
-        Selection::new(reachable(index.incidence(), index.query(), Some(self.depth)))
-            .noting("undirected incidence projection; edges carry no direction, so hubs expand")
+        Selection::new(reachable(
+            index.incidence(),
+            index.query(),
+            Some(self.depth),
+        ))
+        .noting("undirected incidence projection; edges carry no direction, so hubs expand")
     }
 }
 

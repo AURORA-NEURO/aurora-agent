@@ -319,10 +319,7 @@ pub fn confirm(
             EvidenceTier::Statistical,
             Witness::RelationViolated {
                 relation: format!("cross-modal expectation for '{}'", expectation.claim),
-                expected: format!(
-                    "{} in both channels",
-                    expectation.direction.as_str()
-                ),
+                expected: format!("{} in both channels", expectation.direction.as_str()),
                 observed: format!(
                     "{} {} while {} {}, with every candidate explanation ruled out",
                     left.modality.name,

@@ -209,7 +209,9 @@ impl Classification {
     /// The author's claim, contradicted where the evidence disagrees.
     pub fn audit_claim(&self, claimed: CompatibilityClass) -> ClaimAudit {
         if claimed >= self.class {
-            ClaimAudit::Upheld { derived: self.class }
+            ClaimAudit::Upheld {
+                derived: self.class,
+            }
         } else {
             ClaimAudit::Contradicted {
                 claimed,
@@ -427,11 +429,7 @@ mod tests {
     use crate::diff::diff;
     use serde_json::json;
 
-    fn schema(
-        version: &str,
-        mode: CompatibilityMode,
-        fields: Vec<FieldSpec>,
-    ) -> SchemaDescriptor {
+    fn schema(version: &str, mode: CompatibilityMode, fields: Vec<FieldSpec>) -> SchemaDescriptor {
         SchemaDescriptor::new(
             SchemaId::parse(&format!("test-format/{version}")).expect("parses"),
             mode,
@@ -612,7 +610,10 @@ mod tests {
 
     #[test]
     fn an_empty_diff_requires_no_version_bump_at_all() {
-        let classification = classify_between(&base(CompatibilityMode::Reject), &base(CompatibilityMode::Reject));
+        let classification = classify_between(
+            &base(CompatibilityMode::Reject),
+            &base(CompatibilityMode::Reject),
+        );
         assert_eq!(classification.class, CompatibilityClass::Compatible);
         assert_eq!(classification.required_bump, VersionBump::None);
         assert!(classification.version_gate().is_ok());
