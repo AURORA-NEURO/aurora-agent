@@ -54,6 +54,7 @@ pub mod multimodal_protocol_adapter;
 pub mod multimodal_research_workbench;
 pub mod multimodal_safety_assurance;
 pub mod throughput_contract_model;
+pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
 pub mod throughput_research_workbench;
 pub mod throughput_safety_assurance;
@@ -221,6 +222,13 @@ pub use throughput_contract_model::{
     ThroughputContractModelError, ThroughputContractModelReceipt, ThroughputContractModelRequest,
     CONTRACT_VERSION as THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_operations_control_plane::{
+    operate_throughput_evidence, throughput_operations_control_plane_manifest,
+    ThroughputOperationsDisposition, ThroughputOperationsError, ThroughputOperationsReceipt,
+    ThroughputOperationsRequest,
+    CONTRACT_VERSION as THROUGHPUT_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
 };
 pub use throughput_protocol_adapter::{
     serve_throughput_protocol, throughput_protocol_adapter_manifest, ThroughputProtocolError,
