@@ -1739,6 +1739,34 @@ an operator or replay evaluator rather than hidden in a best-effort prompt heuri
 restore validates the report, policy, canonical ordering, and snapshot digest before the agent can
 use any lesson reference.
 
+#### Closed-loop lesson recall
+
+Consolidation becomes useful to the autonomous planner only when a run explicitly opts into the
+transient resolver bridge. Supplying `memoryConsolidator`/`memory_consolidator` and
+`memoryLessonResolver`/`memory_lesson_resolver` makes direct, automatic, workflow, and
+cross-domain execution query stable lessons for each selected domain before prompt assembly:
+
+```typescript
+const result = await agent.run("review the next bounded implementation step", {
+  domain: "coding",
+  memoryLessonResolver: (lessonDigest) => lessonStore.readTransient(lessonDigest),
+  consolidatedMemoryRequired: true,
+  approveProviderCall: false,
+});
+```
+
+The resolver is never persisted or sent to the control plane. Its returned text is inserted into
+one advisory developer context with explicit non-authority and non-effect language. The run
+projection keeps only consolidated lesson IDs, lesson digests, and a retrieval digest; the prompt
+and provider response remain caller-transient. `consolidatedMemoryRequired`/`consolidated_memory_required`
+turns missing resolver/index configuration or malformed resolution into a fail-closed error.
+Without that flag, consolidated recall remains advisory and ordinary episodic retrieval keeps its
+existing failure semantics. Domain-local lessons are queried only in their owning domain;
+portable lessons are deduplicated across a cross-domain route, and candidate, stale, or conflicted
+rows never enter the prompt. The digest is also bound into the selection context and versioned
+prompt request identity, so changing the recalled lesson set cannot silently reuse a prior run
+boundary.
+
 ### Metadata-only run traces
 
 For operator dashboards, offline evaluation, and cross-process handoff, Python now exposes the

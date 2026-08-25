@@ -1770,3 +1770,16 @@ never stores arguments, outputs, prompts, tasks, provider payloads, credentials,
 all twelve built-in domains are covered by integration tests. The remaining deployment work is
 still caller-owned effect-store/resolver wiring, external idempotency enforcement, durable ledger
 placement, and operator reconciliation policy; exactly-once execution is not claimed by the SDK.
+
+Evaluator-gated memory now closes its high-level prompt loop in both SDKs. Direct, automatic,
+workflow, and cross-domain runs can query stable consolidated lessons per routed domain and resolve
+their digest through an explicit caller-owned callback immediately before prompt assembly. Local
+lessons remain domain-scoped, explicitly portable lessons are deduplicated across fan-out, and
+candidate/stale/conflicted rows are excluded. The prompt receives transient advisory text with
+non-authority/non-effect framing, while run projections and selection/request identity retain only
+lesson IDs, lesson digests, and a consolidated retrieval digest. Required mode fails closed when
+the index or resolver is unavailable; default mode preserves advisory memory failure semantics.
+All twelve built-in domains have approval-only integration coverage without API keys or provider
+dispatch. Remaining deployment work is to supply the application’s protected lesson text store,
+resolver tenancy/authorization, and evaluator/consolidator scheduling; the SDK does not invent
+those external authorities.

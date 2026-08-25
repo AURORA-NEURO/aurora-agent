@@ -148,3 +148,36 @@ test("local lessons do not transfer and stale status is explicit", () => {
   assert.equal(staleReport.lessons[0].status, "stale");
   assert.equal(report.domains[0].portable_count, 0);
 });
+
+test("high-level approval plans recall stable lessons across every domain without retaining text", async () => {
+  const consolidator = new AutonomousMemoryConsolidator({ minObservations: 1, minSupportLowerBound: 0, clock: () => 100 });
+  consolidator.consolidate(AUTONOMOUS_DOMAIN_NAMES.map((domain, index) => observation({ episodeId: `integrated-${index}`, domain })));
+  const lessonText = "Use current evaluator-backed evidence and state uncertainty before acting.";
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }), { memoryConsolidator: consolidator });
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await agent.run(`prepare a bounded ${domain} review`, {
+      domain,
+      memoryLessonResolver: () => lessonText,
+      consolidatedMemoryRequired: true,
+      approveProviderCall: false,
+    });
+    assert.equal(result.status, "approval_required", domain);
+    assert.ok(result.blueprint);
+    assert.ok(result.blueprint.prompt.messages.some((message) => String(message.content).includes(lessonText)), domain);
+    assert.equal(result.memory.consolidated_lesson_ids.length, 1, domain);
+    assert.equal(result.memory.consolidated_lesson_digests.length, 1, domain);
+    assert.ok(result.memory.consolidated_retrieval_digest, domain);
+    assert.ok(result.blueprint.selection_context.consolidated_memory_retrieval_digest, domain);
+    assert.equal(JSON.stringify(result.memory).includes(lessonText), false, domain);
+  }
+});
+
+test("required consolidated recall fails closed when the resolver is unavailable", async () => {
+  const consolidator = new AutonomousMemoryConsolidator({ minObservations: 1, minSupportLowerBound: 0, clock: () => 100 });
+  consolidator.consolidate([observation({ episodeId: "required-lesson", domain: "coding" })]);
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }), { memoryConsolidator: consolidator });
+  await assert.rejects(
+    agent.run("prepare a bounded coding review", { domain: "coding", consolidatedMemoryRequired: true }),
+    /memoryLessonResolver/,
+  );
+});

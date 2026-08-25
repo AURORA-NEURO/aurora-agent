@@ -200,6 +200,8 @@ export interface BrainModelSelectionContext extends JsonObject {
   capability: string;
   risk_class: string;
   task_family?: string | null;
+  /** Digest-only identity for transient evaluator-gated lesson references. */
+  consolidated_memory_retrieval_digest?: string | null;
   task_lens_id?: string;
   task_lens_digest?: string;
   task_lens_model_capability_hints?: string[];

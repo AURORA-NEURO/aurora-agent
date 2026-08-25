@@ -193,6 +193,97 @@ class AutonomousMemoryConsolidationTests(unittest.TestCase):
         self.assertEqual(stale_report["lessons"][0]["status"], "stale")
         self.assertEqual(report["domains"][0]["portable_count"], 0)
 
+    def test_high_level_approval_plans_recall_stable_lessons_across_every_domain_without_retaining_text(self) -> None:
+        consolidator = AutonomousMemoryConsolidator(min_observations=1, min_support_lower_bound=0.0, clock=lambda: 100.0)
+        consolidator.consolidate([
+            _observation(episode_id=f"integrated-{index}", domain=domain)
+            for index, domain in enumerate(AUTONOMOUS_DOMAINS)
+        ])
+        lesson_text = "Use current evaluator-backed evidence and state uncertainty before acting."
+        runtime = LLMRuntime()
+        runtime.register_in_memory_provider("offline", lambda _request: {"output_text": "unused"})
+        class Workspace:
+            def __init__(self) -> None:
+                self.prompt_contexts: list[object] = []
+
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                if name == "brain_model_select_contextual":
+                    context = dict((arguments or {}).get("context", {}))
+                    identity = {field: context.get(field) for field in ("domain", "capability", "risk_class", "task_family")}
+                    context_digest = _digest(json.dumps(identity, ensure_ascii=False, separators=(",", ":")))
+                    return {
+                        "context_digest": context_digest,
+                        "selection_status": "selected",
+                        "selection": {
+                            "selected_model": {"provider": "offline", "model": "offline-model"},
+                            "decision_digest": "d" * 64,
+                        },
+                    }
+                if name == "brain_prompt_assemble":
+                    self.prompt_contexts.append((arguments or {}).get("context"))
+                    return {
+                        "messages": [
+                            {"role": "system", "content": str((arguments or {}).get("system", ""))},
+                            {"role": "user", "content": str((arguments or {}).get("task", ""))},
+                        ],
+                        "prompt_digest": "a" * 64,
+                    }
+                if name == "brain_plan":
+                    return {
+                        "ok": True,
+                        "plan": {
+                            "requires_approval": True,
+                            "steps": [{"effect": "provider_call"}],
+                            "plan_digest": "b" * 64,
+                        },
+                    }
+                raise AssertionError(f"unexpected workspace tool: {name}")
+
+        workspace = Workspace()
+        agent = AutonomousAgent(workspace, runtime, memory_consolidator=consolidator)
+        candidate = {
+            "provider": "offline",
+            "model": "offline-model",
+            "capabilities": ["reasoning", "code", "science", "data", "web", "biomedical", "operations", "enterprise", "coordination", "multimodal", "evaluation", "structured_output"],
+            "context_window_tokens": 16_000,
+            "max_output_tokens": 2_048,
+            "quality": 0.9,
+            "latency_ms": 20,
+            "cost_per_million_tokens": 10,
+            "reliability": 0.95,
+        }
+        for domain in AUTONOMOUS_DOMAINS:
+            result = agent.orchestrator.run(
+                task=f"prepare a bounded {domain} review",
+                domain=domain,
+                model_candidates=[candidate],
+                credentials={},
+                memory_consolidator=consolidator,
+                memory_lesson_resolver=lambda _digest: lesson_text,
+                consolidated_memory_required=True,
+                approve_provider_call=False,
+            )
+            self.assertEqual(result.status, "approval_required", domain)
+            prompt = json.dumps(workspace.prompt_contexts[-1], sort_keys=True)
+            self.assertIn(lesson_text, prompt, domain)
+            self.assertNotIn(lesson_text, json.dumps(result.selection, sort_keys=True))
+            self.assertIn(_digest("lesson-bounded-review-bounded-v1"), prompt)
+
+    def test_required_consolidated_recall_fails_closed_when_the_resolver_is_unavailable(self) -> None:
+        consolidator = AutonomousMemoryConsolidator(min_observations=1, min_support_lower_bound=0.0, clock=lambda: 100.0)
+        consolidator.consolidate([_observation(episode_id="required-lesson", domain="coding")])
+        agent = AutonomousAgent(object(), LLMRuntime(), memory_consolidator=consolidator)
+        with self.assertRaisesRegex(Exception, "consolidated_memory_required"):
+            agent.orchestrator.run(
+                task="prepare a bounded coding review",
+                domain="coding",
+                model_candidates=[],
+                credentials={},
+                memory_consolidator=consolidator,
+                consolidated_memory_required=True,
+                approve_provider_call=False,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
