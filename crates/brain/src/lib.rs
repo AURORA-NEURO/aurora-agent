@@ -65,6 +65,7 @@ pub mod context_uncertainty_envelope;
 pub mod context_contradiction_resolution;
 pub mod context_dependency_closure;
 pub mod context_decision_projection;
+pub mod federated_decision_projection;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -350,6 +351,13 @@ pub use context_decision_projection::{
     ContextDecisionProjectionRequest,
     CONTRACT_VERSION as CONTEXT_DECISION_PROJECTION_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_DECISION_PROJECTION_FEATURE_ID,
+};
+pub use federated_decision_projection::{
+    federated_decision_projection_manifest, project_federated_decision_section,
+    FederatedDecisionProjectionError, FederatedDecisionProjectionReceipt,
+    FederatedDecisionProjectionRequest, PeerDecisionAttestation,
+    CONTRACT_VERSION as FEDERATED_DECISION_PROJECTION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_DECISION_PROJECTION_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
