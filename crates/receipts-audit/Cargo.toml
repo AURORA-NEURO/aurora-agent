@@ -1,0 +1,21 @@
+[package]
+name = "bioprism-receipts-audit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Adversarial mutation battery for digest-sealed receipts: seeded structure-aware generators over canonical JSON, applied at every position of a document its verifier accepts"
+
+[dependencies]
+serde_json = { workspace = true }
+bioprism-ids = { workspace = true }
+
+[dev-dependencies]
+serde = { workspace = true }
+sha2 = { workspace = true }
+bioprism-section = { workspace = true }
+bioprism-autopilot = { workspace = true }
+bioprism-research = { workspace = true }
+bioprism-devplat = { workspace = true }
+bioprism-figures = { workspace = true }

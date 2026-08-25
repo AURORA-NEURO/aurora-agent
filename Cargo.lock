@@ -262,6 +262,7 @@ dependencies = [
  "bioprism-devplat",
  "bioprism-domain",
  "bioprism-fiber",
+ "bioprism-figures",
  "bioprism-ids",
  "bioprism-mcp",
  "bioprism-mutation",
@@ -865,6 +866,21 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "bioprism-receipts-audit"
+version = "0.1.0"
+dependencies = [
+ "bioprism-autopilot",
+ "bioprism-devplat",
+ "bioprism-figures",
+ "bioprism-ids",
+ "bioprism-research",
+ "bioprism-section",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
