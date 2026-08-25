@@ -71,6 +71,7 @@ pub mod multimodal_context_workflow_fabric;
 pub mod throughput_context_workflow_fabric;
 pub mod federated_context_workflow_fabric;
 pub mod context_research_workbench;
+pub mod multimodal_context_workbench;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -396,6 +397,13 @@ pub use context_research_workbench::{
     ContextWorkbenchError, ContextWorkbenchReceipt, ContextWorkbenchRequest,
     CONTRACT_VERSION as CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use multimodal_context_workbench::{
+    multimodal_context_workbench_manifest, render_multimodal_context_workbench,
+    MultimodalContextWorkbenchCell, MultimodalContextWorkbenchError, MultimodalContextWorkbenchReceipt,
+    MultimodalContextWorkbenchRequest,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_WORKBENCH_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,
