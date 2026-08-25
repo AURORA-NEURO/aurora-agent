@@ -68,6 +68,7 @@ from prism_sdk.hubapi_interpretation import HUBAPI_INTERPRETATION_ASSURANCE_FEAT
 from prism_sdk.biolang_publication import BIOLANG_PUBLICATION_COPILOT_FEATURE_ID, BIOLANG_PUBLICATION_COPILOT_CONTRACT_VERSION, BiolangPublicationCopilotReceipt
 from prism_sdk.api_release import API_RELEASE_ASSURANCE_FEATURE_ID, API_RELEASE_ASSURANCE_CONTRACT_VERSION, ApiReleaseAssuranceReceipt
 from prism_sdk.bioevalx_federation import BIOEVALX_FEDERATION_GATEWAY_FEATURE_ID, BIOEVALX_FEDERATION_GATEWAY_CONTRACT_VERSION, BioevalxFederationGatewayReceipt
+from prism_sdk.section_interpretation import SectionInterpretationAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2205,4 +2206,38 @@ def test_bioevalx_federation_gateway_preserves_endpoint_and_protocol_gate():
     receipt.validate()
     assert receipt.feature_id == BIOEVALX_FEDERATION_GATEWAY_FEATURE_ID
     assert receipt.contract_version == BIOEVALX_FEDERATION_GATEWAY_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_section_interpretation_assurance_keeps_federation_denial_explicit():
+    receipt = SectionInterpretationAssuranceReceipt(
+        request_id="request:section",
+        workflow_id="workflow:interpretation",
+        federation_id="federation:commons",
+        scope="organoid:neural",
+        disposition="blocked",
+        candidate_order=("interpretation:a",),
+        admitted_order=(),
+        blocked_order=("interpretation:a",),
+        unknown_order=(),
+        result_order=(),
+        visualization_order=(),
+        study_order=(),
+        modality_order=(),
+        support_order=(900,),
+        semantic_order=(),
+        artifact_order=(),
+        evidence_order=(),
+        provenance_order=(),
+        comparability_order=(),
+        omissions=("request:protected-closure-incomplete",),
+        uncertainty=(),
+        negative_evidence=("request:policy-denied",),
+        replay_identity="a" * 64,
+        benchmark_digest=None,
+        effect_receipts=("block:unsafe-release",),
+        interpretations=(),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
     assert receipt.digest() == receipt.digest()

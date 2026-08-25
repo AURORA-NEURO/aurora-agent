@@ -306,6 +306,7 @@ from .bioevalx_federation import (
     BIOEVALX_FEDERATION_GATEWAY_CONTRACT_VERSION,
     BioevalxFederationGatewayReceipt,
 )
+from .section_interpretation import SectionInterpretationAssuranceReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

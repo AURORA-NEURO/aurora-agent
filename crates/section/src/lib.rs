@@ -8,17 +8,25 @@
 //! the engine that produced it.
 
 pub mod certificate;
+pub mod interpretation_assurance;
 pub mod layers;
 pub mod omission;
 pub mod plan;
 pub mod section;
 pub mod verdict;
 
-pub use layers::{Layer, RenderContext};
 pub use certificate::{
     CertificateProfile, CertificateVerification, ContextCertificate, ReferenceOmissions,
     SourceHashes, CERTIFICATE_SCHEMA_VERSION, CERTIFICATE_SCHEMA_VERSION_EXTENDED,
 };
+pub use interpretation_assurance::{
+    assure_interpretations, interpretation_assurance_manifest, EvidenceBackedResult,
+    EvidenceBackedState, InteractiveInterpretation, InterpretationAssuranceError,
+    InterpretationAssuranceReceipt, InterpretationAssuranceRequest, InterpretationDisposition,
+    CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
+};
+pub use layers::{Layer, RenderContext};
 pub use omission::{InfluenceClass, OmissionGroup, OmissionManifest};
 pub use plan::{Backend, Fallback, FallbackReason, PlanDescriptor};
 pub use section::{
