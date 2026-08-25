@@ -189,6 +189,8 @@ GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-governance-P14-F27"
 GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "governance-interpretation-assurance/1.0"
 ORACLE_INGESTION_CONTROL_FEATURE_ID = "AFA-oracle-P06-F30"
 ORACLE_INGESTION_CONTROL_CONTRACT_VERSION = "oracle-federated-multimodal-ingestion-control/1.0"
+STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID = "AFA-stewardship-P16-F20"
+STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION = "stewardship-federated-release-workbench/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -4413,3 +4415,54 @@ class OracleIngestionControlReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "federation_id": self.federation_id, "disposition": self.disposition, "modality_order": list(self.modality_order), "accepted_order": list(self.accepted_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "study_order": list(self.study_order), "semantic_profile_order": list(self.semantic_profile_order), "artifact_order": list(self.artifact_order), "provenance_order": list(self.provenance_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "aggregate_manifest": dict(self.aggregate_manifest), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class StewardshipReleaseWorkbenchReceipt:
+    """Cross-language validator for digest-only continual release qualification."""
+
+    request_id: str
+    workflow_id: str
+    federation_id: str
+    disposition: str
+    object_order: tuple[str, ...]
+    admitted_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    unknown_order: tuple[str, ...]
+    origin_order: tuple[str, ...]
+    artifact_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    evidence_order: tuple[str, ...]
+    release_order: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    replay_identity: str
+    effect_receipts: tuple[str, ...]
+    federation_manifest: Mapping[str, Any]
+    feature_id: str = STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID
+    contract_version: str = STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID or self.contract_version != STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION:
+            raise ResearchContractError("stewardship release workbench schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.federation_id.strip() or not self.object_order or not self.effect_receipts:
+            raise ResearchContractError("stewardship release identity, objects, locality, or effects are incomplete")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("stewardship release disposition is unknown")
+        for values in (self.object_order, self.admitted_order, self.blocked_order, self.unknown_order, self.origin_order, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts, self.artifact_order, self.provenance_order, self.evidence_order, self.release_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("stewardship release ordering is invalid")
+        for value in (*self.artifact_order, *self.provenance_order, *self.evidence_order, *self.release_order, self.replay_identity, self.federation_manifest.get("content_hash")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("stewardship release digest is invalid")
+        if self.admitted_order and any(not effect.startswith("exchange:signed-research-object-manifest:") for effect in self.effect_receipts):
+            raise ResearchContractError("admitted releases require signed manifest exchange")
+        if not self.admitted_order and self.effect_receipts != ("block:release-workbench-publish",):
+            raise ResearchContractError("empty release result must be explicitly blocked")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "federation_id": self.federation_id, "disposition": self.disposition, "object_order": list(self.object_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "origin_order": list(self.origin_order), "artifact_order": list(self.artifact_order), "provenance_order": list(self.provenance_order), "evidence_order": list(self.evidence_order), "release_order": list(self.release_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "federation_manifest": dict(self.federation_manifest), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

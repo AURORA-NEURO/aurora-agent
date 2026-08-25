@@ -59,6 +59,7 @@ from prism_sdk.research_contracts import REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_F
 from prism_sdk.research_contracts import SERVICES_MECHANISM_WORKBENCH_FEATURE_ID, SERVICES_MECHANISM_WORKBENCH_CONTRACT_VERSION, ServicesMechanismWorkbenchReceipt
 from prism_sdk.research_contracts import GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID, GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION, GovernanceInterpretationAssuranceReceipt
 from prism_sdk.research_contracts import ORACLE_INGESTION_CONTROL_FEATURE_ID, ORACLE_INGESTION_CONTROL_CONTRACT_VERSION, OracleIngestionControlReceipt
+from prism_sdk.research_contracts import STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID, STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION, StewardshipReleaseWorkbenchReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1912,4 +1913,32 @@ def test_oracle_ingestion_control_preserves_missing_modality_and_aggregate_excha
     receipt.validate()
     assert receipt.feature_id == ORACLE_INGESTION_CONTROL_FEATURE_ID
     assert receipt.contract_version == ORACLE_INGESTION_CONTROL_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_stewardship_release_workbench_preserves_unknown_and_signed_manifest_exchange():
+    receipt = StewardshipReleaseWorkbenchReceipt(
+        request_id="request:release",
+        workflow_id="workflow:publish",
+        federation_id="federation:commons",
+        disposition="partial",
+        object_order=("object:a", "object:b"),
+        admitted_order=("object:a",),
+        blocked_order=("object:b",),
+        unknown_order=("object:b",),
+        origin_order=("institution:a",),
+        artifact_order=("a" * 64,),
+        provenance_order=("b" * 64,),
+        evidence_order=("c" * 64,),
+        release_order=("d" * 64,),
+        omissions=("object:object:b:source-evidence-missing",),
+        uncertainty=("object:object:b:state-unknown-not-admitted",),
+        negative_evidence=(),
+        replay_identity="e" * 64,
+        effect_receipts=("exchange:signed-research-object-manifest:request:release",),
+        federation_manifest={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID
+    assert receipt.contract_version == STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

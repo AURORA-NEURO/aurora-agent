@@ -969,6 +969,7 @@ name = "bioprism-stewardship"
 version = "0.1.0"
 dependencies = [
  "bioprism-atlas",
+ "bioprism-foundation",
  "bioprism-governance",
  "bioprism-ids",
  "bioprism-registry",

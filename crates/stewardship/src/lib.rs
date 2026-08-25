@@ -124,6 +124,7 @@ pub mod claim;
 pub mod error;
 pub mod id;
 pub mod predeclaration;
+pub mod release_workbench;
 pub mod review;
 
 pub use access::{
@@ -149,6 +150,13 @@ pub use predeclaration::{
     AnalysisPlan, ClusteringUnit, ConfirmatoryFinding, ExclusionRule, ExploratoryFinding,
     MetricDefinition, MetricDirection, MetricRegistry, ObservedResults, SealedPlan,
     TrialDisposition,
+};
+pub use release_workbench::{
+    prepare_release_workbench, release_workbench_manifest, ReleaseObjectCandidate,
+    ReleaseObjectState, ReleaseWorkbenchDisposition, ReleaseWorkbenchError,
+    ReleaseWorkbenchReceipt, ReleaseWorkbenchRequest,
+    CONTRACT_VERSION as RELEASE_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as RELEASE_WORKBENCH_FEATURE_ID,
 };
 pub use review::{
     full_corpus, CorpusClass, DimensionScopedApproval, EvaluatorRevision, Finding, ReviewDimension,

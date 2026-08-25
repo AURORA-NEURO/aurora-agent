@@ -171,6 +171,8 @@ export const GOVERNANCE_INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-governance-P1
 export const GOVERNANCE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "governance-interpretation-assurance/1.0" as const;
 export const ORACLE_INGESTION_CONTROL_FEATURE_ID = "AFA-oracle-P06-F30" as const;
 export const ORACLE_INGESTION_CONTROL_CONTRACT_VERSION = "oracle-federated-multimodal-ingestion-control/1.0" as const;
+export const STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID = "AFA-stewardship-P16-F20" as const;
+export const STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION = "stewardship-federated-release-workbench/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2974,6 +2976,45 @@ export function validateOracleIngestionControlReceipt(receipt: OracleIngestionCo
 }
 
 export function oracleIngestionControlReceiptDigest(receipt: OracleIngestionControlReceipt): string { validateOracleIngestionControlReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface StewardshipReleaseWorkbenchReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  federation_id: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  object_order: string[];
+  admitted_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  origin_order: string[];
+  artifact_order: string[];
+  provenance_order: string[];
+  evidence_order: string[];
+  release_order: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  replay_identity: string;
+  effect_receipts: string[];
+  federation_manifest: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateStewardshipReleaseWorkbenchReceipt(receipt: StewardshipReleaseWorkbenchReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID || receipt.contract_version !== STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION) throw new Error("stewardship release workbench schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.federation_id.trim() || !receipt.object_order.length || !receipt.effect_receipts.length) throw new Error("stewardship release identity, objects, locality, or effects are incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("stewardship release disposition is unknown");
+  for (const values of [receipt.object_order, receipt.admitted_order, receipt.blocked_order, receipt.unknown_order, receipt.origin_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts, receipt.artifact_order, receipt.provenance_order, receipt.evidence_order, receipt.release_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("stewardship release ordering is invalid");
+  for (const value of [...receipt.artifact_order, ...receipt.provenance_order, ...receipt.evidence_order, ...receipt.release_order, receipt.replay_identity, receipt.federation_manifest.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("stewardship release digest is invalid");
+  if (receipt.admitted_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:signed-research-object-manifest:"))) throw new Error("admitted releases require signed manifest exchange");
+  if (!receipt.admitted_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:release-workbench-publish"])) throw new Error("empty release result must be explicitly blocked");
+}
+
+export function stewardshipReleaseWorkbenchReceiptDigest(receipt: StewardshipReleaseWorkbenchReceipt): string { validateStewardshipReleaseWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
