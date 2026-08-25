@@ -83,6 +83,7 @@ pub mod throughput_protocol_adapter;
 pub mod throughput_research_workbench;
 pub mod throughput_retrieval_assurance_harness;
 pub mod throughput_retrieval_contract_model;
+pub mod throughput_retrieval_control_plane;
 pub mod throughput_retrieval_copilot;
 pub mod throughput_retrieval_protocol_gateway;
 pub mod throughput_retrieval_synthesis;
@@ -446,6 +447,14 @@ pub use throughput_retrieval_contract_model::{
     ThroughputRetrievalContractRequest,
     CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_retrieval_control_plane::{
+    operate_throughput_retrieval_control_plane, throughput_retrieval_control_plane_manifest,
+    ThroughputRetrievalControlPlaneError, ThroughputRetrievalControlPlaneReceipt,
+    ThroughputRetrievalControlPlaneRequest,
+    ACTION_ORDER as THROUGHPUT_RETRIEVAL_CONTROL_ACTION_ORDER,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_CONTROL_PLANE_FEATURE_ID,
 };
 pub use throughput_retrieval_copilot::{
     compile_throughput_retrieval_copilot, throughput_retrieval_copilot_manifest,
