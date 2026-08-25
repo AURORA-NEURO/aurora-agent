@@ -66,6 +66,99 @@ def test_route_is_provider_free_and_secret_safe() -> None:
     assert payload["authorization"] == "routing_evidence_only; no_tools_or_effects_authorized"
 
 
+def test_action_process_compiles_all_domains_persists_reviews_and_emits_only_downstream_handoff(tmp_path: Path) -> None:
+    task = "review a private task that must never be retained"
+    code, planned, errors = _invoke("action-plan", "--task", task, "--all-domains")
+    assert code == 0
+    assert errors == ""
+    assert planned["plan_count"] == len(AUTONOMOUS_DOMAINS)
+    assert all(len(plan["plan_digest"]) == 64 for plan in planned["plans"])
+    assert task not in json.dumps(planned)
+
+    plan_path = tmp_path / "action-plan.json"
+    store_path = tmp_path / "action-admissions.json"
+    plan_path.write_text(json.dumps(planned["plans"][0]), encoding="utf-8")
+    code, submitted, errors = _invoke(
+        "action-admission-submit",
+        "--admission-store", str(store_path),
+        "--plan-file", str(plan_path),
+        "--action-id", "cli-coding-action",
+    )
+    assert code == 0
+    assert errors == ""
+    assert submitted["row"]["status"] == "pending_review"
+    assert submitted["snapshot_digest"]
+    expected_record_digest = submitted["row"]["record_digest"]
+    required = submitted["row"]["required_approvals"]
+
+    review_args = [
+        "action-admission-review",
+        "--admission-store", str(store_path),
+        "--action-id", "cli-coding-action",
+        "--authorization-digest", "a" * 64,
+        "--expected-record-digest", expected_record_digest,
+        "--reviewed",
+    ]
+    for gate in required:
+        review_args.extend(("--approve-gate", gate))
+    code, reviewed, errors = _invoke(*review_args)
+    assert code == 0
+    assert errors == ""
+    assert reviewed["row"]["status"] == "admitted"
+    assert reviewed["row"]["revision"] == 2
+    assert task not in json.dumps(reviewed)
+
+    stale_code, stale_payload, stale_errors = _invoke(
+        "action-admission-review",
+        "--admission-store", str(store_path),
+        "--action-id", "cli-coding-action",
+        "--authorization-digest", "b" * 64,
+        "--expected-record-digest", expected_record_digest,
+        "--reviewed",
+    )
+    assert stale_code == 2
+    assert stale_payload is None
+    assert "command failed" in stale_errors
+
+    code, handoff, errors = _invoke(
+        "action-admission-handoff",
+        "--admission-store", str(store_path),
+        "--action-id", "cli-coding-action",
+        "--domain", "coding",
+    )
+    assert code == 0
+    assert errors == ""
+    assert handoff["handoff"]["status"] == "ready_for_downstream_gates"
+    assert handoff["handoff"]["requested_domains"] == ["coding"]
+    assert "credential_scope" in handoff["handoff"]["downstream_gates"]
+    assert task not in json.dumps(handoff)
+
+    code, default_handoff, errors = _invoke(
+        "action-admission-handoff",
+        "--admission-store", str(store_path),
+        "--action-id", "cli-coding-action",
+    )
+    assert code == 0
+    assert errors == ""
+    assert default_handoff["handoff"]["requested_domains"] == ["coding"]
+
+    code, status, errors = _invoke("action-admission-status", "--admission-store", str(store_path))
+    assert code == 0
+    assert errors == ""
+    assert status["queue"]["counts"]["admitted"] == 1
+    assert set(status["queue"]["domain_counts"]) == set(AUTONOMOUS_DOMAINS)
+
+    tampered = json.loads(store_path.read_text(encoding="utf-8"))
+    tampered["records"][0]["status"] = "blocked"
+    store_path.write_text(json.dumps(tampered), encoding="utf-8")
+    tamper_code, tamper_payload, tamper_errors = _invoke(
+        "action-admission-status", "--admission-store", str(store_path)
+    )
+    assert tamper_code == 2
+    assert tamper_payload is None
+    assert "command failed" in tamper_errors
+
+
 def test_provider_status_never_collects_or_returns_a_key() -> None:
     code, payload, errors = _invoke(
         "provider-status",

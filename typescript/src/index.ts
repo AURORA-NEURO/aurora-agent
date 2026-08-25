@@ -1750,6 +1750,7 @@ export type {
   AutonomousActionReviewQueue,
   AutonomousActionDispatchHandoff,
   AutonomousActionOperatorReviewOptions,
+  AutonomousActionOperatorSubmitOptions,
 } from "./autonomous-action-admission-controller.js";
 export {
   AUTONOMOUS_DOMAIN_AUDIT_SCHEMA,

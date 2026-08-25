@@ -170,7 +170,7 @@ def test_operator_controller_projects_every_domain_and_requires_authorized_revie
     controller = AutonomousActionAdmissionController(ledger)
     for domain in AUTONOMOUS_DOMAIN_NAMES:
         plan = agent.action_plan(task=_TASKS[domain], domain=domain, allow_cross_domain=False)
-        ledger.submit(plan, admit_autonomous_action_plan(plan), action_id=f"operator-{domain}")
+        controller.submit(f"operator-{domain}", plan)
     queue = controller.queue()
     assert len(queue["rows"]) == len(AUTONOMOUS_DOMAIN_NAMES)
     assert set(queue["domain_counts"]) == set(AUTONOMOUS_DOMAIN_NAMES)
@@ -178,7 +178,13 @@ def test_operator_controller_projects_every_domain_and_requires_authorized_revie
     assert _TASKS["coding"] not in json.dumps(queue)
 
     plan = agent.action_plan(task=_TASKS["data"], domain="data", allow_cross_domain=False)
-    pending = ledger.submit(plan, admit_autonomous_action_plan(plan), action_id="operator-approved-data")
+    pending = ledger.get("operator-data")
+    assert pending is not None and pending["status"] == "pending_review"
+    submitted = controller.submit("operator-approved-data", plan)
+    assert submitted["status"] == "pending_review"
+    pending_approved = ledger.get("operator-approved-data")
+    assert pending_approved is not None
+    assert pending_approved["record_digest"] == submitted["record_digest"]
     with pytest.raises(ArgumentError, match="not ready"):
         controller.dispatch_handoff("operator-approved-data")
     reviewed = controller.review(
@@ -186,7 +192,7 @@ def test_operator_controller_projects_every_domain_and_requires_authorized_revie
         approvals=_all_approvals(plan),
         reviewed=True,
         authorization_digest="c" * 64,
-        expected_record_digest=pending["record_digest"],
+        expected_record_digest=pending_approved["record_digest"],
     )
     assert reviewed["status"] == "admitted"
     with pytest.raises(ArgumentError, match="expected_record_digest"):
@@ -195,7 +201,7 @@ def test_operator_controller_projects_every_domain_and_requires_authorized_revie
             approvals=_all_approvals(plan),
             reviewed=True,
             authorization_digest="d" * 64,
-            expected_record_digest=pending["record_digest"],
+            expected_record_digest=pending_approved["record_digest"],
         )
     handoff = controller.dispatch_handoff("operator-approved-data")
     assert handoff["status"] == "ready_for_downstream_gates"
@@ -210,8 +216,20 @@ def test_operator_controller_projects_every_domain_and_requires_authorized_revie
         hints=("coding", "biomedical"),
         allow_cross_domain=True,
     )
-    cross_admission = admit_autonomous_action_plan(cross_plan, approvals=_all_approvals(cross_plan), reviewed=True)
-    ledger.submit(cross_plan, cross_admission, action_id="operator-cross", reviewer_digest="e" * 64)
+    with pytest.raises(ArgumentError, match="authorization_digest"):
+        controller.submit(
+            "operator-cross-without-auth",
+            cross_plan,
+            approvals=_all_approvals(cross_plan),
+            reviewed=True,
+        )
+    controller.submit(
+        "operator-cross",
+        cross_plan,
+        approvals=_all_approvals(cross_plan),
+        reviewed=True,
+        authorization_digest="e" * 64,
+    )
     cross_handoff = controller.dispatch_handoff("operator-cross")
     assert cross_handoff["cross_domain"] is True
     assert len(cross_handoff["selected_domains"]) >= 2

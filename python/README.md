@@ -439,9 +439,32 @@ owns task rehydration, credentials, provider invocation, evaluator truth, and ef
 `AutonomousActionAdmissionController` adds the operator view above the ledger. `queue()` projects
 all domains and gate state without task text, `review()` requires the deployment's authorization
 digest plus the expected current record digest, and `dispatch_handoff()` refuses held/blocked
-records while returning only the plan/admission identities and downstream gates. It is a review
 records while returning the redacted plan/admission projections and downstream gates. It is a
 review controller, not an execution or authorization oracle.
+
+For a complete keyless operator process, the CLI now composes planning, durable submission,
+optimistic-concurrency review, and downstream handoff:
+
+```bash
+python -m prism_sdk action-plan --task "review a bounded dataset" --all-domains > plan.json
+python -m prism_sdk action-admission-submit \
+  --admission-store action-admissions.json --plan-file plan.json --action-id dataset-review-42
+python -m prism_sdk action-admission-status --admission-store action-admissions.json
+python -m prism_sdk action-admission-review \
+  --admission-store action-admissions.json --action-id dataset-review-42 \
+  --authorization-digest "$REVIEW_AUTHORIZATION_DIGEST" \
+  --expected-record-digest "$CURRENT_RECORD_DIGEST" --reviewed \
+  --approve-gate provider_call
+python -m prism_sdk action-admission-handoff \
+  --admission-store action-admissions.json --action-id dataset-review-42
+```
+
+`action-plan` is provider-free and `--all-domains` compiles the same metadata-only contract for
+all twelve domains. The CLI never accepts a key as an argument, restores and validates the
+canonical action ledger before each operation, uses atomic compare-and-set persistence, and
+persists only plan/admission/reviewer digests. The authorization digest is an external reviewer
+identity, not a provider credential. The final handoff lists downstream gates but does not invoke
+a provider, source, tool, evaluator, learner, connector, or effect.
 
 ### One-call deployment-managed execution
 

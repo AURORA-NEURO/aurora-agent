@@ -2839,6 +2839,45 @@ and stale-operator refusal. The handoff includes the already-redacted plan and a
 a worker resolver can rehydrate them directly without reaching into the ledger; it still contains
 no task, prompt, credential, provider, connector, evaluator, or effect value.
 
+The controller also exposes `submit(action_id, plan)` in both SDKs. This is the safe queue entry
+point for an application that has just compiled a plan: it derives the initial admission from the
+exact plan, persists a `pending_review`/`blocked` row, and refuses an already-admitted submission
+unless the caller supplies an external authorization digest. The Python process boundary now
+uses that same path end to end, without collecting a credential:
+
+```bash
+python -m prism_sdk action-plan \
+  --task "review a bounded dataset and expose uncertainty" \
+  --all-domains > plan.json
+
+python -m prism_sdk action-admission-submit \
+  --admission-store action-admissions.json \
+  --plan-file plan.json \
+  --action-id dataset-review-42
+
+python -m prism_sdk action-admission-status \
+  --admission-store action-admissions.json
+
+python -m prism_sdk action-admission-review \
+  --admission-store action-admissions.json \
+  --action-id dataset-review-42 \
+  --authorization-digest "$REVIEW_AUTHORIZATION_DIGEST" \
+  --expected-record-digest "$CURRENT_RECORD_DIGEST" \
+  --reviewed \
+  --approve-gate provider_call
+
+python -m prism_sdk action-admission-handoff \
+  --admission-store action-admissions.json \
+  --action-id dataset-review-42
+```
+
+The CLI validates canonical snapshots, restores the ledger before every mutation, flushes with
+the existing compare-and-set fence, and atomically replaces the caller-owned file. Authorization
+digests are reviewer identities, not API keys. The action-plan output, queue, review response, and
+handoff contain no task text, prompts, credentials, provider responses, source values, tool
+arguments, evaluator evidence, or effects. A handoff only names the downstream gates; a separate
+worker/application must still rehydrate transient inputs and satisfy each gate before dispatch.
+
 ```python
 plan = agent.action_plan(task="analyze a bounded dataset", domain="data")
 execution = agent.execute_action_plan(

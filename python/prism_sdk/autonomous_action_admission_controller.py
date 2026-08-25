@@ -15,7 +15,7 @@ from .autonomous_action_admission_persistence import (
     InMemoryAutonomousActionAdmissionLedger,
     validate_autonomous_action_admission_record,
 )
-from .autonomous_action_execution import AutonomousActionAdmission
+from .autonomous_action_execution import AutonomousActionAdmission, admit_autonomous_action_plan
 from .autonomous_action_plan import AutonomousActionPlan
 from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
 from .errors import ArgumentError
@@ -126,6 +126,37 @@ class AutonomousActionAdmissionController:
     def get(self, action_id: str) -> dict[str, Any] | None:
         record = self.ledger.get(action_id)
         return None if record is None else _row(record)
+
+    def submit(
+        self,
+        action_id: str,
+        plan: AutonomousActionPlan | Mapping[str, Any],
+        *,
+        approvals: Mapping[str, bool] | None = None,
+        reviewed: bool = False,
+        authorization_digest: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Submit a provider-free plan to the durable review queue.
+
+        Ordinary submissions stay pending until :meth:`review` is called. A caller may submit
+        an already-admitted plan only when it also supplies the external authorization digest;
+        that digest is recorded as review identity, never treated as a provider credential.
+        """
+
+        parsed = plan if isinstance(plan, AutonomousActionPlan) else AutonomousActionPlan.from_dict(plan)
+        admission = admit_autonomous_action_plan(parsed, approvals=approvals, reviewed=reviewed)
+        authorization = None if authorization_digest is None else _digest("authorization_digest", authorization_digest)
+        if admission.status == "admitted" and authorization is None:
+            _fail("an admitted submission requires an authorization_digest")
+        record = self.ledger.submit(
+            parsed,
+            admission,
+            action_id=action_id,
+            reviewer_digest=authorization,
+            reason=reason,
+        )
+        return _row(record)
 
     def review(
         self,

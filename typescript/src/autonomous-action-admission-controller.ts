@@ -5,6 +5,7 @@ import {
   AutonomousActionPlan,
   type AutonomousActionAdmissionJSON,
   type AutonomousActionPlanJSON,
+  admitAutonomousActionPlan,
 } from "./autonomous-action-plan.js";
 import {
   InMemoryAutonomousActionAdmissionLedger,
@@ -14,6 +15,7 @@ import {
 } from "./autonomous-action-admission-persistence.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
+import type { AutonomousActionPlanApproval } from "./autonomous-action-plan.js";
 
 /** Bounded operator review projection; it never includes the task or a runtime payload. */
 export const AUTONOMOUS_ACTION_REVIEW_QUEUE_SCHEMA = "bioprism-typescript-autonomous-action-review-queue/0.1" as const;
@@ -91,6 +93,13 @@ export interface AutonomousActionDispatchHandoff extends JsonObject {
 
 export interface AutonomousActionOperatorReviewOptions extends Omit<AutonomousActionAdmissionReviewOptions, "reviewerDigest"> {
   authorizationDigest: string;
+}
+
+export interface AutonomousActionOperatorSubmitOptions {
+  approvals?: Partial<Record<AutonomousActionPlanApproval, boolean>>;
+  reviewed?: boolean;
+  authorizationDigest?: string | null;
+  reason?: string | null;
 }
 
 function fail(message: string): never {
@@ -188,6 +197,28 @@ export class AutonomousActionAdmissionController {
   get(actionId: string): AutonomousActionReviewRow | null {
     const record = this.ledger.get(actionId);
     return record === null ? null : rowFor(record);
+  }
+
+  /**
+   * Submit one provider-free plan to the durable review queue.
+   *
+   * A submitter may attach a caller authorization digest only when the plan is already
+   * admitted; ordinary submissions remain pending until the separate review operation.
+   */
+  submit(actionId: string, source: AutonomousActionPlan | AutonomousActionPlanJSON, options: AutonomousActionOperatorSubmitOptions = {}): AutonomousActionReviewRow {
+    if (!options || typeof options !== "object") fail("submit options are malformed");
+    const plan = source instanceof AutonomousActionPlan ? source : AutonomousActionPlan.fromJSON(source);
+    const admission = admitAutonomousActionPlan(plan, { approvals: options.approvals, reviewed: options.reviewed ?? false });
+    const authorizationDigest = options.authorizationDigest === undefined || options.authorizationDigest === null
+      ? null
+      : digest("authorizationDigest", options.authorizationDigest);
+    if (admission.status === "admitted" && authorizationDigest === null) fail("an admitted submission requires an authorizationDigest");
+    const record = this.ledger.submit(plan, admission, {
+      actionId,
+      reviewerDigest: authorizationDigest,
+      reason: options.reason,
+    });
+    return rowFor(record);
   }
 
   review(actionId: string, options: AutonomousActionOperatorReviewOptions): AutonomousActionReviewRow {

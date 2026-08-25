@@ -39,6 +39,14 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TextIO
 
 from .authoring import content_digest
+from .autonomous_action_admission_controller import AutonomousActionAdmissionController
+from .autonomous_action_admission_persistence import (
+    AutonomousActionAdmissionPersistenceCoordinator,
+    InMemoryAutonomousActionAdmissionLedger,
+    TransactionalJsonAutonomousActionAdmissionSnapshotPersistence,
+)
+from .autonomous_action_plan import AutonomousActionPlan
+from .autonomous_task_decision import AUTONOMOUS_TASK_DECISION_APPROVALS
 from .autonomy import (
     AUTONOMOUS_DOMAINS,
     AutonomousAgent,
@@ -99,6 +107,8 @@ _MAX_LOCAL_RESPONSE_SEQUENCE = 32
 _MAX_MCP_PROVIDER_TOOLS = 128
 _MAX_DOMAIN_TOOL_BINDING_FILE_BYTES = 512_000
 _MAX_EVIDENCE_FILE_BYTES = 128_000
+_MAX_ACTION_PLAN_FILE_BYTES = 4_000_000
+_MAX_ACTION_ADMISSION_STORE_BYTES = 4_000_000
 CLI_DOMAIN_TOOL_BINDINGS_SCHEMA = "aurora-cli-domain-tool-bindings/0.1"
 
 
@@ -929,6 +939,219 @@ def _route(args: argparse.Namespace) -> dict[str, Any]:
         "command": "route",
         "route": agent.route(task=args.task, hints=tuple(args.hint or ())).to_dict(),
         "authorization": "routing_evidence_only; no_tools_or_effects_authorized",
+        "secret_material": "never_returned",
+    }
+
+
+def _action_plan(args: argparse.Namespace) -> dict[str, Any]:
+    """Compile one or all explicit-domain action plans without provider access."""
+
+    if args.all_domains and args.domain:
+        raise ValueError("action-plan --all-domains cannot be combined with --domain")
+    agent = AutonomousAgent(_OfflineWorkspace(), LLMRuntime())
+    requested_domains: tuple[str | None, ...]
+    if args.all_domains:
+        requested_domains = tuple(AUTONOMOUS_DOMAINS)
+    elif args.domain:
+        requested_domains = tuple(args.domain)
+    else:
+        requested_domains = (None,)
+    route_options = {
+        "hints": tuple(args.hint or ()),
+        "allow_cross_domain": not args.single_domain,
+        "max_domains": args.max_domains,
+    }
+    plans: list[dict[str, Any]] = []
+    for domain in requested_domains:
+        plan = agent.action_plan(task=args.task, domain=domain, **route_options)
+        if '"task":' in json.dumps(plan, ensure_ascii=False):
+            raise ValueError("action-plan unexpectedly retained task material")
+        plans.append(plan)
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "action-plan",
+        "plans": plans,
+        "plan_count": len(plans),
+        "requested_domains": [domain for domain in requested_domains if domain is not None],
+        "automatic": requested_domains == (None,),
+        "authorization": "planning_evidence_only;no_provider_source_tool_evaluator_credential_or_effect_authority",
+        "retention": "metadata_only;task_prompt_and_runtime_values_not_returned",
+        "secret_material": "never_returned",
+    }
+
+
+class _ActionAdmissionFileStore:
+    """Atomic text store used by the CLI's caller-owned action admission ledger."""
+
+    def __init__(self, path_value: str) -> None:
+        self.path = Path(path_value)
+
+    def read(self) -> str | None:
+        if not self.path.exists():
+            return None
+        if not self.path.is_file() or self.path.stat().st_size > _MAX_ACTION_ADMISSION_STORE_BYTES:
+            raise ValueError("action admission store is outside its bounded file contract")
+        try:
+            return self.path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as error:
+            raise ValueError("action admission store is unreadable") from error
+
+    def write(self, value: str) -> None:
+        self._atomic_write(value)
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+        current = self.read()
+        if current is None:
+            if expected_snapshot_digest is not None:
+                return False
+        else:
+            try:
+                current_digest = json.loads(current).get("snapshot_digest")
+            except (TypeError, ValueError, AttributeError):
+                return False
+            if current_digest != expected_snapshot_digest:
+                return False
+        self._atomic_write(value)
+        return True
+
+    def _atomic_write(self, value: str) -> None:
+        if not isinstance(value, str) or len(value.encode("utf-8")) > _MAX_ACTION_ADMISSION_STORE_BYTES:
+            raise ValueError("action admission store exceeds its bounded size")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_name: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(self.path.parent),
+                prefix=f".{self.path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_name = temporary.name
+                temporary.write(value)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            os.replace(temporary_name, self.path)
+            temporary_name = None
+        finally:
+            if temporary_name is not None:
+                try:
+                    os.unlink(temporary_name)
+                except FileNotFoundError:
+                    pass
+
+
+def _action_admission_context(
+    path_value: str,
+) -> tuple[AutonomousActionAdmissionController, AutonomousActionAdmissionPersistenceCoordinator]:
+    store = _ActionAdmissionFileStore(path_value)
+    persistence = TransactionalJsonAutonomousActionAdmissionSnapshotPersistence(store)
+    ledger = InMemoryAutonomousActionAdmissionLedger()
+    coordinator = AutonomousActionAdmissionPersistenceCoordinator(ledger, persistence)
+    coordinator.restore()
+    return AutonomousActionAdmissionController(ledger), coordinator
+
+
+def _action_plan_from_file(path_value: str) -> AutonomousActionPlan:
+    path = Path(path_value)
+    if not path.exists() or not path.is_file() or path.stat().st_size > _MAX_ACTION_PLAN_FILE_BYTES:
+        raise ValueError("action plan file is outside its bounded file contract")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("action plan file is unreadable") from error
+    if isinstance(raw, Mapping) and isinstance(raw.get("plan"), Mapping):
+        raw = raw["plan"]
+    if not isinstance(raw, Mapping):
+        raise ValueError("action plan file must contain a serialized plan")
+    try:
+        plan = AutonomousActionPlan.from_dict(raw)
+    except Exception as error:
+        raise ValueError("action plan file is not a valid metadata-only plan") from error
+    if '"task":' in json.dumps(plan.to_dict(), ensure_ascii=False):
+        raise ValueError("action plan file retained task material")
+    return plan
+
+
+def _action_admission_status(args: argparse.Namespace) -> dict[str, Any]:
+    controller, coordinator = _action_admission_context(args.admission_store)
+    queue = controller.queue()
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "action-admission-status",
+        "admission_store": args.admission_store,
+        "queue": queue,
+        "snapshot_digest": coordinator.expected_snapshot_digest,
+        "authorization": "metadata_read_only;no_provider_source_tool_evaluator_credential_or_effect_authority",
+        "retention": "metadata_only;task_prompt_and_runtime_values_not_returned",
+        "secret_material": "never_returned",
+    }
+
+
+def _action_admission_submit(args: argparse.Namespace) -> dict[str, Any]:
+    controller, coordinator = _action_admission_context(args.admission_store)
+    plan = _action_plan_from_file(args.plan_file)
+    row = controller.submit(args.action_id, plan)
+    snapshot = coordinator.flush()
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "action-admission-submit",
+        "admission_store": args.admission_store,
+        "row": row,
+        "snapshot_digest": snapshot["snapshot_digest"],
+        "queue": controller.queue(),
+        "authorization": "submission_only;review_and_downstream_provider_source_tool_evaluator_credential_and_effect_gates_remain_required",
+        "retention": "metadata_only;task_prompt_and_runtime_values_not_returned",
+        "secret_material": "never_returned",
+    }
+
+
+def _action_review_approvals(args: argparse.Namespace) -> dict[str, bool]:
+    approved = tuple(args.approve_gate or ())
+    denied = tuple(args.deny_gate or ())
+    overlap = sorted(set(approved).intersection(denied))
+    if overlap:
+        raise ValueError("the same approval gate cannot be both approved and denied")
+    return {**{gate: True for gate in approved}, **{gate: False for gate in denied}}
+
+
+def _action_admission_review(args: argparse.Namespace) -> dict[str, Any]:
+    controller, coordinator = _action_admission_context(args.admission_store)
+    row = controller.review(
+        args.action_id,
+        authorization_digest=args.authorization_digest,
+        approvals=_action_review_approvals(args),
+        reviewed=args.reviewed,
+        reason=args.reason,
+        expected_record_digest=args.expected_record_digest,
+    )
+    snapshot = coordinator.flush()
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "action-admission-review",
+        "admission_store": args.admission_store,
+        "row": row,
+        "snapshot_digest": snapshot["snapshot_digest"],
+        "queue": controller.queue(),
+        "authorization": "external_authorization_digest_recorded;does_not_authorize_provider_source_tool_evaluator_credential_or_effect_dispatch",
+        "retention": "metadata_only;task_prompt_and_runtime_values_not_returned",
+        "secret_material": "never_returned",
+    }
+
+
+def _action_admission_handoff(args: argparse.Namespace) -> dict[str, Any]:
+    controller, coordinator = _action_admission_context(args.admission_store)
+    requested_domains = None if not args.domain else tuple(args.domain)
+    handoff = controller.dispatch_handoff(args.action_id, requested_domains=requested_domains)
+    return {
+        "schema": CLI_SCHEMA,
+        "command": "action-admission-handoff",
+        "admission_store": args.admission_store,
+        "handoff": handoff,
+        "snapshot_digest": coordinator.expected_snapshot_digest,
+        "authorization": "downstream_gate_handoff_only;provider_source_tool_evaluator_credential_and_effect_authority_remain_external",
+        "retention": "metadata_only;task_prompt_and_runtime_values_not_returned",
         "secret_material": "never_returned",
     }
 
@@ -2945,6 +3168,52 @@ def _parser() -> argparse.ArgumentParser:
     route.add_argument("--task", required=True)
     route.add_argument("--hint", action="append", default=[], help="caller routing hint; repeatable")
 
+    action_plan = subparsers.add_parser(
+        "action-plan",
+        help="compile a digest-bound provider-free action plan for review",
+    )
+    action_plan.add_argument("--task", required=True)
+    action_plan.add_argument("--domain", action="append", choices=AUTONOMOUS_DOMAINS, help="explicit domain; repeatable")
+    action_plan.add_argument("--all-domains", action="store_true", help="compile one plan for every reviewed domain")
+    action_plan.add_argument("--hint", action="append", default=[], help="routing hint; repeatable")
+    action_plan.add_argument("--max-domains", type=int, default=3, help="maximum automatic route fan-out")
+    action_plan.add_argument("--single-domain", action="store_true", help="prevent automatic cross-domain fan-out")
+
+    action_status = subparsers.add_parser(
+        "action-admission-status",
+        help="inspect a durable metadata-only action review queue",
+    )
+    action_status.add_argument("--admission-store", required=True, help="canonical action-admission snapshot path")
+
+    action_submit = subparsers.add_parser(
+        "action-admission-submit",
+        help="submit one serialized provider-free action plan to the review queue",
+    )
+    action_submit.add_argument("--admission-store", required=True, help="canonical action-admission snapshot path")
+    action_submit.add_argument("--plan-file", required=True, help="serialized action plan or action-plan command output")
+    action_submit.add_argument("--action-id", required=True, help="stable caller-owned action identity")
+
+    action_review = subparsers.add_parser(
+        "action-admission-review",
+        help="append an authorized, digest-fenced review decision to an action queue",
+    )
+    action_review.add_argument("--admission-store", required=True, help="canonical action-admission snapshot path")
+    action_review.add_argument("--action-id", required=True)
+    action_review.add_argument("--authorization-digest", required=True, help="external reviewer authorization digest; never a provider key")
+    action_review.add_argument("--expected-record-digest", required=True, help="exact queue row digest shown to the reviewer")
+    action_review.add_argument("--approve-gate", action="append", choices=AUTONOMOUS_TASK_DECISION_APPROVALS, default=[], help="approve one named gate; repeatable")
+    action_review.add_argument("--deny-gate", action="append", choices=AUTONOMOUS_TASK_DECISION_APPROVALS, default=[], help="deny one named gate; repeatable")
+    action_review.add_argument("--reviewed", action="store_true", help="acknowledge retained task-decision review reasons")
+    action_review.add_argument("--reason", default=None, help="bounded operator reason; only its digest is persisted")
+
+    action_handoff = subparsers.add_parser(
+        "action-admission-handoff",
+        help="emit a reviewed action's downstream-only handoff",
+    )
+    action_handoff.add_argument("--admission-store", required=True, help="canonical action-admission snapshot path")
+    action_handoff.add_argument("--action-id", required=True)
+    action_handoff.add_argument("--domain", action="append", choices=AUTONOMOUS_DOMAINS, default=[], help="optional admitted subset; repeatable")
+
     provider_parent = _ArgumentParser(add_help=False)
     provider_parent.add_argument("--provider", default="openai", help="provider identifier")
     provider_parent.add_argument("--base-url", help="provider base URL; required for custom providers")
@@ -3340,6 +3609,16 @@ def main(
             payload = _evidence_plan(args)
         elif args.command == "route":
             payload = _route(args)
+        elif args.command == "action-plan":
+            payload = _action_plan(args)
+        elif args.command == "action-admission-status":
+            payload = _action_admission_status(args)
+        elif args.command == "action-admission-submit":
+            payload = _action_admission_submit(args)
+        elif args.command == "action-admission-review":
+            payload = _action_admission_review(args)
+        elif args.command == "action-admission-handoff":
+            payload = _action_admission_handoff(args)
         elif args.command == "provider-status":
             payload = _provider_status(args)
         elif args.command == "onboard":

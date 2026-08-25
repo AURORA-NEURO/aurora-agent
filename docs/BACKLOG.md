@@ -56,6 +56,14 @@ worker renews its lease while private resolution/provider execution is in flight
 falls into the existing typed transport/reconciliation path. Production deployments still own
 the actual queue transport, distributed lease clock, approval authorization, and secret manager.
 
+The action-admission controller now has a complete keyless Python operator process in addition to
+the TypeScript/Python library surfaces: provider-free action-plan compilation (including an
+all-twelve-domain matrix), durable submit/status/review/handoff commands, exact-record optimistic
+concurrency, canonical atomic file persistence, and downstream-only handoffs. It still does not
+pretend that a reviewer digest is a credential or that a local file is distributed authorization;
+deployment-owned identity, queue transport, encryption, worker rehydration, provider/source/tool
+authority, evaluator truth, and effect approval remain explicit integration responsibilities.
+
 The TypeScript runtime now includes a keyless provider protocol conformance gate. It runs all seven
 built-in provider presets through the actual request, credential, response, model-discovery, and SSE
 stream boundaries using an intercepted fetch fixture, and refuses missing credentials before any

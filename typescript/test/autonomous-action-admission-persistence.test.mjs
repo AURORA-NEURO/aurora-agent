@@ -149,7 +149,7 @@ test("operator controller exposes every domain, enforces authorization and stale
   const controller = new AutonomousActionAdmissionController(ledger);
   for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
     const plan = await brain.actionPlan({ task: tasks[domain], domain, capability: "bounded_task", allow_cross_domain: false });
-    ledger.submit(plan, admitAutonomousActionPlan(plan), { actionId: `operator-${domain}` });
+    controller.submit(`operator-${domain}`, plan);
   }
   const queue = controller.queue();
   assert.equal(queue.rows.length, AUTONOMOUS_DOMAIN_NAMES.length);
@@ -158,20 +158,25 @@ test("operator controller exposes every domain, enforces authorization and stale
   assert.equal(JSON.stringify(queue).includes(tasks.coding), false);
 
   const plan = await brain.actionPlan({ task: tasks.data, domain: "data", capability: "bounded_task", allow_cross_domain: false });
-  const pending = ledger.submit(plan, admitAutonomousActionPlan(plan), { actionId: "operator-approved-data" });
+  const pending = ledger.get("operator-data");
+  assert.equal(pending.status, "pending_review");
+  const submitted = controller.submit("operator-approved-data", plan);
+  assert.equal(submitted.status, "pending_review");
+  const pendingApproved = ledger.get("operator-approved-data");
+  assert.equal(pendingApproved.record_digest, submitted.record_digest);
   assert.throws(() => controller.dispatchHandoff("operator-approved-data"), /not ready/);
   const reviewed = controller.review("operator-approved-data", {
     approvals: allApprovals(plan),
     reviewed: true,
     authorizationDigest: "c".repeat(64),
-    expectedRecordDigest: pending.record_digest,
+    expectedRecordDigest: pendingApproved.record_digest,
   });
   assert.equal(reviewed.status, "admitted");
   assert.throws(() => controller.review("operator-approved-data", {
     approvals: allApprovals(plan),
     reviewed: true,
     authorizationDigest: "d".repeat(64),
-    expectedRecordDigest: pending.record_digest,
+    expectedRecordDigest: pendingApproved.record_digest,
   }), /expectedRecordDigest/);
   const handoff = controller.dispatchHandoff("operator-approved-data");
   assert.equal(handoff.status, "ready_for_downstream_gates");
@@ -182,8 +187,15 @@ test("operator controller exposes every domain, enforces authorization and stale
   assert.equal(JSON.stringify(handoff).includes(tasks.data), false);
 
   const crossPlan = await brain.actionPlan({ task: "coordinate coding and biomedical evidence", hints: ["coding", "biomedical"], allow_cross_domain: true });
-  const crossAdmission = admitAutonomousActionPlan(crossPlan, { approvals: allApprovals(crossPlan), reviewed: true });
-  ledger.submit(crossPlan, crossAdmission, { actionId: "operator-cross", reviewerDigest: "e".repeat(64) });
+  assert.throws(() => controller.submit("operator-cross-without-auth", crossPlan, {
+    approvals: allApprovals(crossPlan),
+    reviewed: true,
+  }), /authorizationDigest/);
+  controller.submit("operator-cross", crossPlan, {
+    approvals: allApprovals(crossPlan),
+    reviewed: true,
+    authorizationDigest: "e".repeat(64),
+  });
   const crossHandoff = controller.dispatchHandoff("operator-cross");
   assert.equal(crossHandoff.cross_domain, true);
   assert.ok(crossHandoff.selected_domains.length >= 2);
