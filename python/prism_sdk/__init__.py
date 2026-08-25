@@ -118,6 +118,8 @@ from .research_contracts import (
     FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
     RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
     RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+    MULTIMODAL_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+    MULTIMODAL_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
     RetrievalSynthesisReceipt,
     ADAPTER_CONTEXT_COMPILATION_FEATURE_ID,
     ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION,
@@ -364,6 +366,7 @@ from .brain_multimodal_retrieval import BrainMultimodalEvidenceSynthesis
 from .brain_throughput_retrieval import BrainThroughputEvidenceSynthesis
 from .brain_federated_retrieval import BrainFederatedEvidenceSynthesis
 from .brain_retrieval_contract import BrainRetrievalContractModelReceipt
+from .brain_multimodal_retrieval_contract import BrainMultimodalRetrievalContractModelReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

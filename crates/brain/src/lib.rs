@@ -54,6 +54,7 @@ pub mod multimodal_evidence_workflow_fabric;
 pub mod multimodal_operations_control_plane;
 pub mod multimodal_protocol_adapter;
 pub mod multimodal_research_workbench;
+pub mod multimodal_retrieval_contract_model;
 pub mod multimodal_retrieval_synthesis;
 pub mod multimodal_safety_assurance;
 pub mod retrieval_contract_model;
@@ -229,6 +230,13 @@ pub use multimodal_research_workbench::{
     MultimodalWorkbenchError, MultimodalWorkbenchReceipt, MultimodalWorkbenchRequest,
     CONTRACT_VERSION as MULTIMODAL_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use multimodal_retrieval_contract_model::{
+    model_multimodal_retrieval_contract, multimodal_retrieval_contract_model_manifest,
+    MultimodalRetrievalContractError, MultimodalRetrievalContractReceipt,
+    MultimodalRetrievalContractRequest,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
 };
 pub use multimodal_retrieval_synthesis::{
     multimodal_retrieval_synthesis_manifest, synthesize_multimodal_retrieval,
