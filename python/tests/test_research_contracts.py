@@ -8,6 +8,7 @@ from prism_sdk.research_contracts import MECHANISM_CONTROL_PLANE_FEATURE_ID, MEC
 from prism_sdk.research_contracts import MECHANISM_GATEWAY_FEATURE_ID, MECHANISM_GATEWAY_CONTRACT_VERSION, MechanismGatewayReceipt
 from prism_sdk.research_contracts import EVIDENCE_SURVEILLANCE_FEATURE_ID, EVIDENCE_SURVEILLANCE_CONTRACT_VERSION, EvidenceSurveillanceReceipt
 from prism_sdk.research_contracts import RETRIEVAL_SYNTHESIS_FEATURE_ID, RETRIEVAL_SYNTHESIS_CONTRACT_VERSION, RetrievalSynthesisReceipt
+from prism_sdk.research_contracts import ADAPTER_CONTEXT_COMPILATION_FEATURE_ID, ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION, AdapterContextCompilationReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -764,4 +765,21 @@ def test_retrieval_synthesis_keeps_missing_modality_unknown():
     receipt.validate()
     assert receipt.feature_id == RETRIEVAL_SYNTHESIS_FEATURE_ID
     assert receipt.contract_version == RETRIEVAL_SYNTHESIS_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_adapter_context_compilation_keeps_missing_fact_unknown():
+    receipt = AdapterContextCompilationReceipt(
+        request_id="request:context",
+        query_id="query:mechanism",
+        resolved_fact_ids=("fact:a",),
+        disposition="unknown",
+        evidence_receipt_digest=None,
+        checks=("incomplete decision context remains unknown rather than certified",),
+        omissions=("required decision fact unavailable: fact:b",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == ADAPTER_CONTEXT_COMPILATION_FEATURE_ID
+    assert receipt.contract_version == ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

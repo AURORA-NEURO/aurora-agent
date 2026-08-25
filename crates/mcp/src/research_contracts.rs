@@ -8,6 +8,10 @@ use crate::resource_discovery_contract::{
     ResourceDiscoveryContractResponse, FEATURE_ID as RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
 };
 use bioprism_adapter::{
+    assure_context_compilation as assure_adapter_context_compilation, ContextCompilationReceipt,
+    ContextCompilationRequest, CONTEXT_COMPILATION_FEATURE_ID,
+};
+use bioprism_adapter::{
     compile_evidence_synthesis, EvidenceSynthesisRequest, RetrievalSynthesisReceipt,
     RETRIEVAL_SYNTHESIS_FEATURE_ID,
 };
@@ -144,6 +148,7 @@ pub const MECHANISM_CONTROL_PLANE_TOOL: &str = "federated_mechanism_control_plan
 pub const MECHANISM_GATEWAY_TOOL: &str = "federated_mechanism_gateway";
 pub const EVIDENCE_SURVEILLANCE_TOOL: &str = "evidence_surveillance_copilot";
 pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
+pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -802,6 +807,27 @@ pub fn validate_evidence_synthesis_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != RETRIEVAL_SYNTHESIS_FEATURE_ID {
         return Err("retrieval synthesis feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_adapter_context_compilation_json(value: &Value) -> Result<Value, String> {
+    let request: ContextCompilationRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adapter context compilation request: {error}"))?;
+    let receipt =
+        assure_adapter_context_compilation(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize adapter context compilation receipt: {error}"))
+}
+
+pub fn validate_adapter_context_compilation_json(
+    value: &Value,
+) -> Result<ContextCompilationReceipt, String> {
+    let receipt: ContextCompilationReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adapter context compilation receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != CONTEXT_COMPILATION_FEATURE_ID {
+        return Err("adapter context compilation feature id mismatch".into());
     }
     Ok(receipt)
 }

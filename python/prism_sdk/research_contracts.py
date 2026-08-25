@@ -74,6 +74,8 @@ EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-adapter-P01-F09"
 EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0"
 RETRIEVAL_SYNTHESIS_FEATURE_ID = "AFA-adapter-P02-F06"
 RETRIEVAL_SYNTHESIS_CONTRACT_VERSION = "multimodal-retrieval-synthesis/1.0"
+ADAPTER_CONTEXT_COMPILATION_FEATURE_ID = "AFA-adapter-P03-F27"
+ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION = "prospective-context-compilation-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2028,3 +2030,36 @@ class RetrievalSynthesisReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "query_id": self.query_id, "disposition": self.disposition, "synthesis": dict(self.synthesis), "effect_receipts": [dict(item) for item in self.effect_receipts], "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class AdapterContextCompilationReceipt:
+    request_id: str
+    query_id: str
+    resolved_fact_ids: tuple[str, ...]
+    disposition: str
+    evidence_receipt_digest: str | None
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = ADAPTER_CONTEXT_COMPILATION_FEATURE_ID
+    contract_version: str = ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != ADAPTER_CONTEXT_COMPILATION_FEATURE_ID or self.contract_version != ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION:
+            raise ResearchContractError("adapter context compilation schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.request_id.strip() or not self.query_id.strip() or not self.checks:
+            raise ResearchContractError("adapter context compilation identity or checks are incomplete")
+        if self.disposition not in {"passed", "blocked", "unknown"}:
+            raise ResearchContractError("adapter context compilation disposition is unknown")
+        if not self.resolved_fact_ids or len(set(self.resolved_fact_ids)) != len(self.resolved_fact_ids):
+            raise ResearchContractError("resolved decision fact identities are invalid")
+        if self.evidence_receipt_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", self.evidence_receipt_digest):
+            raise ResearchContractError("adapter context evidence digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("adapter context artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "query_id": self.query_id, "resolved_fact_ids": list(self.resolved_fact_ids), "disposition": self.disposition, "evidence_receipt_digest": self.evidence_receipt_digest, "checks": list(self.checks), "omissions": list(self.omissions), "artifact": dict(self.artifact), "boundary": self.boundary})

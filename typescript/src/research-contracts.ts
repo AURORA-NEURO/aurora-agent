@@ -68,6 +68,8 @@ export const EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-adapter-P01-F09" as const;
 export const EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "evidence-surveillance-copilot/1.0" as const;
 export const RETRIEVAL_SYNTHESIS_FEATURE_ID = "AFA-adapter-P02-F06" as const;
 export const RETRIEVAL_SYNTHESIS_CONTRACT_VERSION = "multimodal-retrieval-synthesis/1.0" as const;
+export const ADAPTER_CONTEXT_COMPILATION_FEATURE_ID = "AFA-adapter-P03-F27" as const;
+export const ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION = "prospective-context-compilation-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1197,6 +1199,10 @@ export function validateRetrievalSynthesisReceipt(receipt: RetrievalSynthesisRec
 }
 
 export function retrievalSynthesisReceiptDigest(receipt: RetrievalSynthesisReceipt): string { validateRetrievalSynthesisReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface AdapterContextCompilationReceipt { schema_version: string; feature_id: string; contract_version: string; request_id: string; query_id: string; resolved_fact_ids: string[]; disposition: "passed" | "blocked" | "unknown"; evidence_receipt_digest: string | null; checks: string[]; omissions: string[]; artifact: Record<string, unknown>; boundary: string; }
+export function validateAdapterContextCompilationReceipt(receipt: AdapterContextCompilationReceipt): void { if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ADAPTER_CONTEXT_COMPILATION_FEATURE_ID || receipt.contract_version !== ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION) throw new Error("adapter context compilation schema, feature, or version mismatch"); if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.request_id.trim() || !receipt.query_id.trim() || !receipt.checks.length) throw new Error("adapter context compilation identity or checks are incomplete"); if (!new Set(["passed", "blocked", "unknown"]).has(receipt.disposition)) throw new Error("adapter context compilation disposition is unknown"); if (!receipt.resolved_fact_ids.length || new Set(receipt.resolved_fact_ids).size !== receipt.resolved_fact_ids.length) throw new Error("resolved decision fact identities are invalid"); if (receipt.evidence_receipt_digest !== null && !/^[0-9a-f]{64}$/.test(receipt.evidence_receipt_digest)) throw new Error("adapter context evidence digest is invalid"); if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("adapter context artifact digest is invalid"); }
+export function adapterContextCompilationReceiptDigest(receipt: AdapterContextCompilationReceipt): string { validateAdapterContextCompilationReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

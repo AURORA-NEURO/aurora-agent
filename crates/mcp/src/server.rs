@@ -1834,6 +1834,9 @@ impl Server {
             "federated_mechanism_gateway" => self.federated_mechanism_gateway(&arguments),
             "evidence_surveillance_copilot" => self.evidence_surveillance_copilot(&arguments),
             "multimodal_retrieval_synthesis" => self.multimodal_retrieval_synthesis(&arguments),
+            "adapter_context_compilation_assurance" => {
+                self.adapter_context_compilation_assurance(&arguments)
+            }
             "research_release_validate" => self.research_release_validate(&arguments),
             "research_release_batch_validate" => self.research_release_batch_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
@@ -24880,6 +24883,28 @@ impl Server {
         }))
     }
 
+    fn adapter_context_compilation_assurance(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a ContextCompilationRequest")?;
+        let receipt = crate::research_contracts::assure_adapter_context_compilation_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_adapter::CONTEXT_COMPILATION_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "required decision facts and derivation receipt are explicit",
+                "missing facts remain unknown rather than certified",
+                "prospective admission and protected-closure gates are deterministic"
+            ],
+            "limitations": [
+                "the harness verifies a caller-supplied context and does not infer missing facts",
+                "a passed receipt is not a clinical or treatment decision"
+            ]
+        }))
+    }
+
     fn research_release_validate(&self, arguments: &Value) -> Result<Value, String> {
         let receipt = arguments
             .get("receipt")
@@ -36350,7 +36375,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "release_assurance_harness", "protocol_assurance_harness", "federated_multimodal_assurance", "federated_knowledge_gateway", "federated_lens_assurance", "lab_semantic_parity", "federated_retrieval_assurance", "federated_continual_retrieval_copilot", "federated_context_compilation_assurance", "federated_knowledge_representation_assurance", "federated_resource_control_plane", "weavelang_release_assurance", "federated_mechanism_control_plane", "federated_mechanism_gateway", "evidence_surveillance_copilot", "multimodal_retrieval_synthesis", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "release_assurance_harness", "protocol_assurance_harness", "federated_multimodal_assurance", "federated_knowledge_gateway", "federated_lens_assurance", "lab_semantic_parity", "federated_retrieval_assurance", "federated_continual_retrieval_copilot", "federated_context_compilation_assurance", "federated_knowledge_representation_assurance", "federated_resource_control_plane", "weavelang_release_assurance", "federated_mechanism_control_plane", "federated_mechanism_gateway", "evidence_surveillance_copilot", "multimodal_retrieval_synthesis", "adapter_context_compilation_assurance", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -38991,6 +39016,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized EvidenceSynthesisRequest with scoped query, candidates, comparability profile, policy decision, protected closure, locality, and preclinical boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "adapter_context_compilation_assurance",
+            "description": "Verify prospective decision-context closure with required fact identities, derivation receipt, admission reference, protected closure, and explicit unknown states.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ContextCompilationRequest with DecisionQuery, policy, protected closure, admission reference, and preclinical boundary." }
                 },
                 "required": ["request"]
             }

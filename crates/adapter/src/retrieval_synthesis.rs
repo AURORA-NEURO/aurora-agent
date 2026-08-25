@@ -424,6 +424,7 @@ mod tests {
                     availability: EvidenceAvailability::Available,
                     relevance_score: 80,
                     negative_result: true,
+                    locator: "local://omics".into(),
                 },
             ],
             policy_decision: PolicyDecision::Allow,

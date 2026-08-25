@@ -80,6 +80,7 @@
 
 pub mod adapter;
 pub mod conformance;
+pub mod context_assurance;
 pub mod csv;
 pub mod error;
 pub mod evidence_surveillance;
@@ -101,6 +102,12 @@ pub mod tabular;
 
 pub use adapter::{Adapter, AdapterManifest, ConformanceLevel};
 pub use conformance::{certify, Check, CheckOutcome, ConformanceReport, Status};
+pub use context_assurance::{
+    assure_context_compilation, ContextCompilationDisposition, ContextCompilationError,
+    ContextCompilationReceipt, ContextCompilationRequest, DecisionQuery,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_FEATURE_ID,
+};
 pub use csv::Table;
 pub use error::{AdapterError, CsvError};
 pub use evidence_surveillance::{
