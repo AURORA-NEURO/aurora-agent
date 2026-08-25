@@ -36,7 +36,7 @@ Any MCP client (`.mcp.json` / `mcpServers` style):
 ```
 
 On first run the launcher downloads the signed release bundle (~15 MB) from
-[GitHub Releases](https://github.com/MurariAmbati/aurora-agent-releases/releases),
+[GitHub Releases](https://github.com/AURORA-NEURO/aurora-agent/releases),
 verifies it against a SHA-256 pinned inside this package, caches it under
 `%LOCALAPPDATA%\aurora-agent-mcp`, and starts the server confined to the
 bundled reference fixtures. It refuses to run anything that fails the hash

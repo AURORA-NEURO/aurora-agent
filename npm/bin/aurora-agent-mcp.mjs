@@ -19,11 +19,11 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync,
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-const BUNDLE_VERSION = "0.1.1";
+const BUNDLE_VERSION = "0.1.3";
 const BUNDLE_URL =
-  "https://github.com/MurariAmbati/aurora-agent-releases/releases/download/v0.1.1/aurora-agent.mcpb";
+  "https://github.com/AURORA-NEURO/aurora-agent/releases/download/v0.1.3/aurora-agent.mcpb";
 const BUNDLE_SHA256 =
-  "e987c396a01eb2ae812efa8226f6892fc3f70cb441102217476990816458f025";
+  "8bf38df07b2a5eab2c1ab759756a70e714a9956f7546d95b819f2267ecea91d8";
 
 const log = (msg) => process.stderr.write(`[aurora-agent-mcp] ${msg}\n`);
 
