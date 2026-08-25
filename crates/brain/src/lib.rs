@@ -59,6 +59,7 @@ pub mod multimodal_retrieval_contract_model;
 pub mod multimodal_retrieval_synthesis;
 pub mod multimodal_safety_assurance;
 pub mod retrieval_contract_model;
+pub mod retrieval_research_copilot;
 pub mod retrieval_synthesis;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
@@ -264,6 +265,12 @@ pub use retrieval_contract_model::{
     RetrievalContractModelReceipt, RetrievalContractModelRequest,
     CONTRACT_VERSION as RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use retrieval_research_copilot::{
+    compile_retrieval_copilot, retrieval_research_copilot_manifest, RetrievalCopilotError,
+    RetrievalCopilotReceipt, RetrievalCopilotRequest,
+    CONTRACT_VERSION as RETRIEVAL_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_RESEARCH_COPILOT_FEATURE_ID,
 };
 pub use retrieval_synthesis::{
     retrieval_synthesis_manifest, synthesize_retrieval, EvidenceSynthesis, RetrievalCandidate,
