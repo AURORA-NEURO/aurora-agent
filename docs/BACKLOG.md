@@ -1655,3 +1655,12 @@ leaving credentials, evidence, evaluator settlement, connector execution, effect
 authorization caller-owned. Remaining deployment work is to connect these handoffs to an
 application-owned authorization store and operator UI, then exercise them in the live worker
 and release environments.
+
+The action-plan deployment seam is now implemented as a durable review ledger in both SDKs.
+`InMemoryAutonomousActionAdmissionLedger` stores revisioned plan/admission records, reviewer
+authorization digests, reason digests, and predecessor links; a review derives a fresh admission
+from the exact stored plan instead of mutating approval state in place. Canonical JSON snapshot
+adapters, generation links, and transactional compare-and-set fencing support restart and
+multi-writer recovery. All twelve domains and cross-domain plans are covered, and the ledger
+remains metadata-only. The remaining production responsibility is wiring the caller's identity
+provider/operator UI and secret/effect/evaluator systems to these explicit records.

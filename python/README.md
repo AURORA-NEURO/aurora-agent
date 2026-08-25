@@ -426,6 +426,16 @@ admission records before dispatch. Its metadata projections retain only plan/adm
 selected domains, gate state, and bounded next actions; task text, prompts, credentials, source
 values, tool arguments, provider responses, and secret material remain transient.
 
+For a restart-safe operator workflow, persist the handoff through
+`InMemoryAutonomousActionAdmissionLedger` and
+`TransactionalJsonAutonomousActionAdmissionSnapshotPersistence`. Submit revision one, then call
+`ledger.review(...)` with the exact predecessor digest, an explicit reviewer authorization digest,
+and the gate approvals. The ledger derives a new admission from the stored plan, increments the
+revision, and retains the predecessor link. It refuses stale reviewers, plan/admission mismatch,
+tampered status, missing reviewer identity, and admitted records without an operator digest.
+Snapshots contain only the redacted plan/admission projections and their digests; the caller still
+owns task rehydration, credentials, provider invocation, evaluator truth, and effect authority.
+
 ### One-call deployment-managed execution
 
 When an application has already registered an environment source or secret-manager resolver,

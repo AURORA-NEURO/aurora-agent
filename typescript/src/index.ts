@@ -1705,6 +1705,37 @@ export type {
   AutonomousActionAdmissionJSON,
 } from "./autonomous-action-plan.js";
 export {
+  AUTONOMOUS_ACTION_ADMISSION_RECORD_SCHEMA,
+  AUTONOMOUS_ACTION_ADMISSION_SNAPSHOT_SCHEMA,
+  AUTONOMOUS_ACTION_ADMISSION_RETENTION,
+  AUTONOMOUS_ACTION_ADMISSION_SECRET_MATERIAL,
+  AUTONOMOUS_ACTION_ADMISSION_AUTHORITY,
+  AUTONOMOUS_ACTION_ADMISSION_EXECUTION,
+  MAX_AUTONOMOUS_ACTION_ADMISSION_RECORDS,
+  MAX_AUTONOMOUS_ACTION_ADMISSION_SNAPSHOT_BYTES,
+  createAutonomousActionAdmissionRecord,
+  reviewAutonomousActionAdmissionRecord,
+  validateAutonomousActionAdmissionRecord,
+  sealAutonomousActionAdmissionSnapshot,
+  validateAutonomousActionAdmissionSnapshot,
+  InMemoryAutonomousActionAdmissionLedger,
+  JsonAutonomousActionAdmissionSnapshotPersistence,
+  TransactionalJsonAutonomousActionAdmissionSnapshotPersistence,
+  AutonomousActionAdmissionPersistenceCoordinator,
+} from "./autonomous-action-admission-persistence.js";
+export type {
+  AutonomousActionAdmissionRecordStatus,
+  AutonomousActionAdmissionRecordDecision,
+  AutonomousActionAdmissionRecord,
+  AutonomousActionAdmissionSnapshot,
+  AutonomousActionAdmissionRecordCreateOptions,
+  AutonomousActionAdmissionReviewOptions,
+  AutonomousActionAdmissionSnapshotTextStore,
+  TransactionalAutonomousActionAdmissionSnapshotTextStore,
+  AutonomousActionAdmissionSnapshotPersistence,
+  TransactionalAutonomousActionAdmissionSnapshotPersistence,
+} from "./autonomous-action-admission-persistence.js";
+export {
   AUTONOMOUS_DOMAIN_AUDIT_SCHEMA,
   AUTONOMOUS_DOMAIN_AUDIT_ROW_SCHEMA,
   MAX_AUTONOMOUS_DOMAIN_AUDIT_BYTES,

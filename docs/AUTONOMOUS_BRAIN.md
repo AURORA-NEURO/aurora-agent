@@ -2794,6 +2794,39 @@ metadata-only result, so a UI can resume the same plan after review without acci
 a provider. The admission and execution projections retain no task text, prompt, source value,
 tool argument, provider response, credential, or secret material.
 
+### Durable action-admission review ledger
+
+The action handoff now has a caller-owned persistence process rather than requiring every
+application to invent one. TypeScript exposes `InMemoryAutonomousActionAdmissionLedger`, and
+Python exposes `InMemoryAutonomousActionAdmissionLedger`, with the same lifecycle: submit a
+plan/admission as revision one, review it with a required reviewer authorization digest, derive a
+new admission from the exact stored plan, and append revision two with the predecessor record
+digest. An admitted record cannot be created without an operator identity; held and blocked
+records remain durable review state and cannot be mistaken for dispatch authority.
+
+```typescript
+const pending = createAutonomousActionAdmissionRecord(plan, admission, {
+  actionId: "data-review-42",
+});
+ledger.put(pending);
+const reviewed = ledger.review("data-review-42", {
+  approvals: Object.fromEntries(plan.required_approvals.map((gate) => [gate, true])),
+  reviewed: true,
+  reviewerDigest: callerAuthorizationDigest,
+  expectedRecordDigest: pending.record_digest,
+});
+```
+
+`JsonAutonomousActionAdmissionSnapshotPersistence` and its Python equivalent seal canonical,
+digest-bound snapshots with generation and previous-snapshot links. The transactional variants
+use compare-and-set to fence concurrent operators; restore validates every plan, admission,
+revision, predecessor, status, digest, retention marker, and record id before replacing memory.
+The ledger covers all twelve built-in domains and cross-domain plans, while retaining only the
+already-redacted plan/admission projections. A restored record can be handed to the durable brain
+workers' resolver, whose existing job-spec digest then binds the review decision to dispatch.
+This closes the operator-review → persistence → worker-rehydration path without storing the task,
+prompt, credentials, provider response, evaluator evidence, connector payload, or effect value.
+
 ```python
 plan = agent.action_plan(task="analyze a bounded dataset", domain="data")
 execution = agent.execute_action_plan(
