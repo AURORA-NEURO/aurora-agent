@@ -8,18 +8,26 @@
 #![recursion_limit = "256"]
 
 mod brain_control;
+pub mod evolution_assurance;
 pub mod research_contracts;
 pub mod resource_discovery_contract;
 pub mod rpc;
 pub mod server;
 
+pub use evolution_assurance::{
+    assure_bounded_evolution, AssuranceCheck, AssuranceVerdict, EvolutionAssuranceError,
+    EvolutionAssuranceReceipt, EvolutionAssuranceRequest,
+    CONTRACT_VERSION as EVOLUTION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVOLUTION_ASSURANCE_FEATURE_ID,
+    REQUIRED_CHECKS as EVOLUTION_ASSURANCE_REQUIRED_CHECKS, TOOL_NAME as EVOLUTION_ASSURANCE_TOOL,
+};
 pub use research_contracts::{
     admit_autonomy_batch_json, admit_bounded_evolution_json, admit_computational_execution_json,
     admit_federated_commons_json, admit_federated_knowledge_json, admit_mechanism_gateway_json,
     admit_policy_json, assess_protocol_assurance_json, assess_release_harness_json,
-    assure_adapter_context_compilation_json, assure_context_compilation_json,
-    assure_evaluation_run_json, assure_federated_lens_json, assure_federated_multimodal_json,
-    assure_federated_retrieval_json, assure_interpretation_json,
+    assure_adapter_context_compilation_json, assure_bounded_evolution_json,
+    assure_context_compilation_json, assure_evaluation_run_json, assure_federated_lens_json,
+    assure_federated_multimodal_json, assure_federated_retrieval_json, assure_interpretation_json,
     assure_knowledge_representation_json, assure_provenance_json, assure_release_json,
     assure_replication_json, assure_weavelang_release_json, close_adapter_limitations_json,
     compile_adapter_capability_manifest_json, compile_evaluation_card_json,
@@ -42,24 +50,25 @@ pub use research_contracts::{
     validate_adapter_resource_workbench_json, validate_adapter_scale_frontier_json,
     validate_adapter_semantic_parity_json, validate_adversarial_recovery_json,
     validate_analysis_portfolio_json, validate_autonomy_batch_receipt_json,
-    validate_bounded_evolution_json, validate_computational_execution_json,
-    validate_context_compilation_assurance_json, validate_contract_frontier_json,
-    validate_dependency_composition_json, validate_design_frontier_receipt_json,
-    validate_determinism_json, validate_evaluation_assurance_json,
-    validate_evaluation_card_receipt_json, validate_evidence_receipt_json,
-    validate_evidence_surveillance_json, validate_evidence_synthesis_json,
-    validate_experiment_design_json, validate_federated_commons_json,
-    validate_federated_continual_retrieval_json, validate_federated_evaluation_receipt_json,
-    validate_federated_knowledge_gateway_json, validate_federated_lens_assurance_json,
-    validate_federated_multimodal_assurance_json, validate_federated_retrieval_assurance_json,
-    validate_federation_workflow_json, validate_governance_research_release_json,
-    validate_harmonized_research_object_json, validate_ingestion_gateway_json,
-    validate_instrument_mesh_json, validate_instrument_preflight_receipt_json,
-    validate_interoperability_gateway_json, validate_interpretation_assurance_json,
-    validate_knowledge_representation_assurance_json, validate_knowledge_workflow_json,
-    validate_limitation_closure_json, validate_mechanism_control_plane_json,
-    validate_mechanism_gateway_json, validate_multimodal_replication_report_json,
-    validate_policy_gateway_json, validate_policy_receipt_json, validate_protocol_assurance_json,
+    validate_bounded_evolution_assurance_json, validate_bounded_evolution_json,
+    validate_computational_execution_json, validate_context_compilation_assurance_json,
+    validate_contract_frontier_json, validate_dependency_composition_json,
+    validate_design_frontier_receipt_json, validate_determinism_json,
+    validate_evaluation_assurance_json, validate_evaluation_card_receipt_json,
+    validate_evidence_receipt_json, validate_evidence_surveillance_json,
+    validate_evidence_synthesis_json, validate_experiment_design_json,
+    validate_federated_commons_json, validate_federated_continual_retrieval_json,
+    validate_federated_evaluation_receipt_json, validate_federated_knowledge_gateway_json,
+    validate_federated_lens_assurance_json, validate_federated_multimodal_assurance_json,
+    validate_federated_retrieval_assurance_json, validate_federation_workflow_json,
+    validate_governance_research_release_json, validate_harmonized_research_object_json,
+    validate_ingestion_gateway_json, validate_instrument_mesh_json,
+    validate_instrument_preflight_receipt_json, validate_interoperability_gateway_json,
+    validate_interpretation_assurance_json, validate_knowledge_representation_assurance_json,
+    validate_knowledge_workflow_json, validate_limitation_closure_json,
+    validate_mechanism_control_plane_json, validate_mechanism_gateway_json,
+    validate_multimodal_replication_report_json, validate_policy_gateway_json,
+    validate_policy_receipt_json, validate_protocol_assurance_json,
     validate_protocol_matrix_receipt_json, validate_protocol_simulation_json,
     validate_provenance_json, validate_qualified_analysis_result_json,
     validate_qualified_resource_set_json, validate_quality_drift_receipt_json,

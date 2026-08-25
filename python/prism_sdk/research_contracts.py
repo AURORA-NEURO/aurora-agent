@@ -135,6 +135,20 @@ BOUNDED_EVOLUTION_FEATURE_ID = "AFA-adapter-P32-F23"
 BOUNDED_EVOLUTION_CONTRACT_VERSION = "adapter-bounded-evolution/1.0"
 EVOLUTION_IDENTITY_FEATURE_ID = "AFA-ids-P32-F31"
 EVOLUTION_IDENTITY_CONTRACT_VERSION = "ids-bounded-evolution/1.0"
+EVOLUTION_ASSURANCE_FEATURE_ID = "AFA-mcp-P32-F27"
+EVOLUTION_ASSURANCE_CONTRACT_VERSION = "mcp-bounded-evolution-assurance/1.0"
+EVOLUTION_ASSURANCE_REQUIRED_CHECKS = (
+    "adversarial-containment",
+    "canonical-order",
+    "locality",
+    "negative-evidence",
+    "policy-authority",
+    "protected-closure",
+    "release-boundary",
+    "replay-integrity",
+    "signed-approval",
+    "source-receipt",
+)
 
 
 class ResearchContractError(ValueError):
@@ -3306,3 +3320,47 @@ class EvolutionIdentityReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "workflow_id": self.workflow_id, "candidate_id": self.candidate_id, "generation": self.generation, "parent_digest": self.parent_digest, "baseline_digest": self.baseline_digest, "artifact_digest": self.artifact_digest, "replay_identity": self.replay_identity, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class EvolutionAssuranceReceipt:
+    """Cross-language validator for MCP bounded-evolution release assurance."""
+
+    request_id: str
+    workflow_id: str
+    source_receipt_digest: str
+    replay_identity: str
+    benchmark_digest: str
+    verdict: str
+    passed_checks: tuple[str, ...]
+    failed_checks: tuple[str, ...]
+    missing_checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = EVOLUTION_ASSURANCE_FEATURE_ID
+    contract_version: str = EVOLUTION_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != EVOLUTION_ASSURANCE_FEATURE_ID or self.contract_version != EVOLUTION_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("bounded evolution assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.effect_receipts:
+            raise ResearchContractError("bounded evolution assurance identity, effects, locality, or boundary is incomplete")
+        if self.verdict not in {"pass", "unknown", "blocked"}:
+            raise ResearchContractError("bounded evolution assurance verdict is unknown")
+        for values in (self.passed_checks, self.failed_checks, self.missing_checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("bounded evolution assurance ordering is invalid")
+        for digest in (self.source_receipt_digest, self.replay_identity, self.benchmark_digest):
+            if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise ResearchContractError("bounded evolution assurance digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("bounded evolution assurance artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "source_receipt_digest": self.source_receipt_digest, "replay_identity": self.replay_identity, "benchmark_digest": self.benchmark_digest, "verdict": self.verdict, "passed_checks": list(self.passed_checks), "failed_checks": list(self.failed_checks), "missing_checks": list(self.missing_checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

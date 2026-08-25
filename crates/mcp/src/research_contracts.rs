@@ -3,6 +3,10 @@
 //! The MCP transport accepts JSON, but it does not own scientific semantics. These helpers perform
 //! the same schema/boundary/policy checks as the Rust service before a tool result is returned.
 
+use crate::evolution_assurance::{
+    assure_bounded_evolution, EvolutionAssuranceError, EvolutionAssuranceReceipt,
+    EvolutionAssuranceRequest, FEATURE_ID as EVOLUTION_ASSURANCE_FEATURE_ID,
+};
 use crate::resource_discovery_contract::{
     compile_resource_discovery_contract_v2, ResourceDiscoveryContractRequest,
     ResourceDiscoveryContractResponse, FEATURE_ID as RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
@@ -1554,6 +1558,28 @@ pub fn validate_bounded_evolution_json(value: &Value) -> Result<BoundedEvolution
         .map_err(|error: BoundedEvolutionError| error.to_string())?;
     if receipt.feature_id != BOUNDED_EVOLUTION_FEATURE_ID {
         return Err("bounded evolution feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_bounded_evolution_json(value: &Value) -> Result<Value, String> {
+    let request: EvolutionAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid bounded evolution assurance request: {error}"))?;
+    let receipt = assure_bounded_evolution(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize bounded evolution assurance receipt: {error}"))
+}
+
+pub fn validate_bounded_evolution_assurance_json(
+    value: &Value,
+) -> Result<EvolutionAssuranceReceipt, String> {
+    let receipt: EvolutionAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid bounded evolution assurance receipt: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: EvolutionAssuranceError| error.to_string())?;
+    if receipt.feature_id != EVOLUTION_ASSURANCE_FEATURE_ID {
+        return Err("bounded evolution assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

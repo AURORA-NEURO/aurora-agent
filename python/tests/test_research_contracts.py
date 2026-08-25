@@ -38,6 +38,7 @@ from prism_sdk.research_contracts import ADVERSARIAL_RECOVERY_FEATURE_ID, ADVERS
 from prism_sdk.research_contracts import FEDERATED_COMMONS_FEATURE_ID, FEDERATED_COMMONS_CONTRACT_VERSION, FederatedCommonsReceipt
 from prism_sdk.research_contracts import BOUNDED_EVOLUTION_FEATURE_ID, BOUNDED_EVOLUTION_CONTRACT_VERSION, BoundedEvolutionReceipt
 from prism_sdk.research_contracts import EVOLUTION_IDENTITY_FEATURE_ID, EVOLUTION_IDENTITY_CONTRACT_VERSION, EvolutionIdentityReceipt
+from prism_sdk.research_contracts import EVOLUTION_ASSURANCE_FEATURE_ID, EVOLUTION_ASSURANCE_CONTRACT_VERSION, EvolutionAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1473,4 +1474,27 @@ def test_evolution_identity_preserves_generation_lineage_and_digest():
     receipt.validate()
     assert receipt.feature_id == EVOLUTION_IDENTITY_FEATURE_ID
     assert receipt.contract_version == EVOLUTION_IDENTITY_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_evolution_assurance_rejects_missing_release_evidence_and_preserves_digest():
+    receipt = EvolutionAssuranceReceipt(
+        request_id="assurance:request",
+        workflow_id="workflow:high-throughput",
+        source_receipt_digest="a" * 64,
+        replay_identity="b" * 64,
+        benchmark_digest="c" * 64,
+        verdict="blocked",
+        passed_checks=("canonical-order",),
+        failed_checks=("release-boundary",),
+        missing_checks=(),
+        omissions=("assurance:unsafe-release",),
+        uncertainty=(),
+        negative_evidence=("check:release-boundary:deployment effect",),
+        effect_receipts=("block:unsafe-release:blocked",),
+        artifact={"content_hash": "d" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == EVOLUTION_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == EVOLUTION_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

@@ -128,6 +128,9 @@ export const BOUNDED_EVOLUTION_FEATURE_ID = "AFA-adapter-P32-F23" as const;
 export const BOUNDED_EVOLUTION_CONTRACT_VERSION = "adapter-bounded-evolution/1.0" as const;
 export const EVOLUTION_IDENTITY_FEATURE_ID = "AFA-ids-P32-F31" as const;
 export const EVOLUTION_IDENTITY_CONTRACT_VERSION = "ids-bounded-evolution/1.0" as const;
+export const EVOLUTION_ASSURANCE_FEATURE_ID = "AFA-mcp-P32-F27" as const;
+export const EVOLUTION_ASSURANCE_CONTRACT_VERSION = "mcp-bounded-evolution-assurance/1.0" as const;
+export const EVOLUTION_ASSURANCE_REQUIRED_CHECKS = ["adversarial-containment", "canonical-order", "locality", "negative-evidence", "policy-authority", "protected-closure", "release-boundary", "replay-integrity", "signed-approval", "source-receipt"] as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2159,6 +2162,39 @@ export function validateEvolutionIdentityReceipt(receipt: EvolutionIdentityRecei
 }
 
 export function evolutionIdentityReceiptDigest(receipt: EvolutionIdentityReceipt): string { validateEvolutionIdentityReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface EvolutionAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  source_receipt_digest: string;
+  replay_identity: string;
+  benchmark_digest: string;
+  verdict: "pass" | "unknown" | "blocked";
+  passed_checks: string[];
+  failed_checks: string[];
+  missing_checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateEvolutionAssuranceReceipt(receipt: EvolutionAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EVOLUTION_ASSURANCE_FEATURE_ID || receipt.contract_version !== EVOLUTION_ASSURANCE_CONTRACT_VERSION) throw new Error("bounded evolution assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.effect_receipts.length) throw new Error("bounded evolution assurance identity, effects, locality, or boundary is incomplete");
+  if (!new Set(["pass", "unknown", "blocked"]).has(receipt.verdict)) throw new Error("bounded evolution assurance verdict is unknown");
+  for (const values of [receipt.passed_checks, receipt.failed_checks, receipt.missing_checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("bounded evolution assurance ordering is invalid");
+  for (const digest of [receipt.source_receipt_digest, receipt.replay_identity, receipt.benchmark_digest]) if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error("bounded evolution assurance digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("bounded evolution assurance artifact digest is invalid");
+}
+
+export function evolutionAssuranceReceiptDigest(receipt: EvolutionAssuranceReceipt): string { validateEvolutionAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
