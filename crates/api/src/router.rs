@@ -1747,6 +1747,9 @@ impl ApiRouter {
                 self.get_artifact(&request, &request_id)
             }
             ("GET", "/v1/tools") => self.tools(),
+            ("POST", "/v1/research/evolution/admit") => {
+                self.bounded_evolution_admit(&request, &request_id)
+            }
             ("GET", "/v1/metrics") => self.metrics(),
             ("GET", "/v1/events") => self.events(&request),
             ("GET", "/v1/events/stream") => self.event_stream(&request),
@@ -3980,6 +3983,56 @@ impl ApiRouter {
                 "api_version": API_VERSION,
                 "tools": bioprism_mcp::tool_definitions(),
                 "call_shape": "POST /v1/tools/{name} with a JSON object body"
+            }),
+        )
+    }
+
+    fn bounded_evolution_admit(&self, request: &HttpRequest, request_id: &str) -> HttpResponse {
+        let arguments = match self.json_object(request) {
+            Ok(arguments) => arguments,
+            Err(error) => return self.error(400, "invalid_json", &error, request_id),
+        };
+        let call = Request {
+            id: Some(Value::String(request_id.to_string())),
+            method: "tools/call".into(),
+            params: json!({
+                "name": "adapter_bounded_evolution",
+                "arguments": arguments,
+            }),
+        };
+        let mut server = self.server.clone();
+        let Some(response) = server.handle(&call) else {
+            return self.error(
+                500,
+                "dispatch_failed",
+                "bounded evolution dispatch produced no response",
+                request_id,
+            );
+        };
+        let wire = response.to_json();
+        self.record_tool_event(request_id, "adapter_bounded_evolution", &wire);
+        let transport_ok = wire.get("error").is_none();
+        HttpResponse::json(
+            if transport_ok {
+                200
+            } else {
+                response_status(&wire)
+            },
+            &json!({
+                "ok": transport_ok,
+                "api_version": API_VERSION,
+                "feature_id": bioprism_adapter::BOUNDED_EVOLUTION_FEATURE_ID,
+                "tool": "adapter_bounded_evolution",
+                "request_id": request_id,
+                "mcp": wire,
+                "guarantees": [
+                    "REST and MCP use the same bounded evolution dispatcher and receipt contract",
+                    "replay, evidence, safety, policy, budget, protected-closure, and preclinical gates remain explicit",
+                    "the endpoint admits receipt metadata only and never mutates or deploys candidate artifacts"
+                ],
+                "limitations": [
+                    "sandbox execution, independent review, signing, and release governance remain outside this transport endpoint"
+                ]
             }),
         )
     }
@@ -8845,6 +8898,7 @@ impl ApiRouter {
                     "/v1/artifacts/persistence": { "get": { "responses": { "200": { "description": "restart-aware artifact registry checkpoint status" } } } },
                     "/v1/artifacts/persistence/flush": { "post": { "responses": { "200": { "description": "force a bounded artifact registry checkpoint" }, "409": { "description": "persistence is disabled" } } } },
                     "/v1/tools": { "get": { "responses": { "200": { "description": "MCP tool catalog" } } } },
+                    "/v1/research/evolution/admit": { "post": { "responses": { "200": { "description": "bounded-evolution admission receipt shared with MCP" }, "400": { "description": "evolution request JSON was invalid" }, "422": { "description": "candidate admission was blocked or unresolved" } } } },
                     "/v1/tools/{name}": { "post": { "parameters": [{ "name": "name", "in": "path", "required": true }], "responses": { "200": { "description": "tool result" } } } },
                     "/v1/domain-reports": { "post": { "responses": { "200": { "description": "bounded domain-report projection" } } } },
                     "/v1/domain-reports/coverage": { "get": { "responses": { "200": { "description": "domain-report coverage diagnostic" } } } },
@@ -10906,6 +10960,54 @@ mod tests {
         rpc.headers
             .insert("authorization".into(), "Bearer 0123456789abcdef".into());
         assert_eq!(router.handle(rpc).status, 200);
+    }
+
+    #[test]
+    fn bounded_evolution_rest_alias_returns_typed_receipt_and_preserves_boundary() {
+        let router =
+            ApiRouter::new(std::env::current_dir().unwrap(), ApiConfig::default()).unwrap();
+        let boundary = "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions";
+        let response = router.handle(request(
+            "POST",
+            "/v1/research/evolution/admit",
+            json!({
+                "request": {
+                    "request_id": "evolution:api",
+                    "workflow_id": "workflow:high-throughput",
+                    "objective_id": "objective:bounded-evolution",
+                    "candidates": [{
+                        "candidate_id": "candidate:a",
+                        "artifact_digest": "a".repeat(64),
+                        "baseline_digest": "b".repeat(64),
+                        "required_evidence": ["c".repeat(64)],
+                        "replayable": true,
+                        "deterministic": true,
+                        "safety_reviewed": true,
+                        "policy_allow": true,
+                        "resource_cost": 1,
+                        "affected_surface": "adapter:research-contract",
+                        "boundary": boundary
+                    }],
+                    "evidence_order": ["c".repeat(64)],
+                    "replay_identity": "d".repeat(64),
+                    "budget": 2,
+                    "max_concurrency": 1,
+                    "policy_allow": true,
+                    "protected_closure": true,
+                    "signed_approval": true,
+                    "raw_data_local": true,
+                    "boundary": boundary
+                }
+            }),
+        ));
+        assert_eq!(response.status, 200);
+        let body: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(
+            body["feature_id"],
+            bioprism_adapter::BOUNDED_EVOLUTION_FEATURE_ID
+        );
+        assert_eq!(body["tool"], "adapter_bounded_evolution");
+        assert_eq!(body["ok"], true);
     }
 
     #[test]

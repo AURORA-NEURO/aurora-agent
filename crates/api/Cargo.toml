@@ -15,6 +15,7 @@ name = "bioprism-api"
 path = "src/main.rs"
 
 [dependencies]
+bioprism-adapter = { workspace = true }
 bioprism-devplat = { workspace = true }
 bioprism-factory = { workspace = true }
 bioprism-ids = { workspace = true }
