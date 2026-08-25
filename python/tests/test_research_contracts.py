@@ -62,6 +62,7 @@ from prism_sdk.research_contracts import ORACLE_INGESTION_CONTROL_FEATURE_ID, OR
 from prism_sdk.research_contracts import STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID, STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION, StewardshipReleaseWorkbenchReceipt
 from prism_sdk.research_contracts import API_ANALYSIS_ASSURANCE_FEATURE_ID, API_ANALYSIS_ASSURANCE_CONTRACT_VERSION, ApiAnalysisAssuranceReceipt
 from prism_sdk.research_contracts import STORE_EVIDENCE_OPERATIONS_FEATURE_ID, STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION, StoreEvidenceOperationsReceipt
+from prism_sdk.research_contracts import POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID, POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION, PolicyInteroperabilityControlReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2005,4 +2006,35 @@ def test_store_evidence_operations_preserves_checkpoint_and_negative_evidence():
     receipt.validate()
     assert receipt.feature_id == STORE_EVIDENCE_OPERATIONS_FEATURE_ID
     assert receipt.contract_version == STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_policy_interoperability_control_preserves_schema_migration_gate():
+    receipt = PolicyInteroperabilityControlReceipt(
+        request_id="request:interop",
+        workflow_id="workflow:interop",
+        federation_id="federation:commons",
+        disposition="partial",
+        offer_order=("offer:a", "offer:b"),
+        accepted_order=("offer:a",),
+        blocked_order=("offer:b",),
+        unknown_order=(),
+        capability_order=("capability:offer:a",),
+        schema_order=("research-capability/2",),
+        input_order=("a" * 64,),
+        output_order=("b" * 64,),
+        provenance_order=("c" * 64,),
+        evidence_order=("d" * 64,),
+        migration_order=("e" * 64,),
+        replay_identity="f" * 64,
+        benchmark_digest="0" * 64,
+        omissions=("offer:offer:b:schema-migration-required",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("block:policy-interoperability-release:request:interop", "exchange:permitted-capability-summary:request:interop"),
+        integration_artifact={"content_hash": "1" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID
+    assert receipt.contract_version == POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

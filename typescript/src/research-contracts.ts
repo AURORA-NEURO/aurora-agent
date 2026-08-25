@@ -177,6 +177,8 @@ export const API_ANALYSIS_ASSURANCE_FEATURE_ID = "AFA-api-P13-F28" as const;
 export const API_ANALYSIS_ASSURANCE_CONTRACT_VERSION = "api-federated-analysis-assurance/1.0" as const;
 export const STORE_EVIDENCE_OPERATIONS_FEATURE_ID = "AFA-store-P01-F31" as const;
 export const STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION = "store-prospective-evidence-federated-control-plane/1.0" as const;
+export const POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID = "AFA-policy-P22-F32" as const;
+export const POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION = "policy-federated-interoperability-control-plane/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3104,6 +3106,49 @@ export function validateStoreEvidenceOperationsReceipt(receipt: StoreEvidenceOpe
 }
 
 export function storeEvidenceOperationsReceiptDigest(receipt: StoreEvidenceOperationsReceipt): string { validateStoreEvidenceOperationsReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface PolicyInteroperabilityControlReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  federation_id: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  offer_order: string[];
+  accepted_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  capability_order: string[];
+  schema_order: string[];
+  input_order: string[];
+  output_order: string[];
+  provenance_order: string[];
+  evidence_order: string[];
+  migration_order: string[];
+  replay_identity: string;
+  benchmark_digest: string;
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  integration_artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validatePolicyInteroperabilityControlReceipt(receipt: PolicyInteroperabilityControlReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== POLICY_INTEROPERABILITY_CONTROL_FEATURE_ID || receipt.contract_version !== POLICY_INTEROPERABILITY_CONTROL_CONTRACT_VERSION) throw new Error("policy interoperability control schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.federation_id.trim() || !receipt.offer_order.length || !receipt.effect_receipts.length) throw new Error("policy interoperability identity, offers, locality, or effects are incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("policy interoperability disposition is unknown");
+  for (const values of [receipt.offer_order, receipt.accepted_order, receipt.blocked_order, receipt.unknown_order, receipt.capability_order, receipt.schema_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("policy interoperability ordering is invalid");
+  if ([...receipt.accepted_order, ...receipt.blocked_order, ...receipt.unknown_order].some((offer) => !receipt.offer_order.includes(offer))) throw new Error("policy interoperability state is not covered by offer order");
+  for (const values of [receipt.input_order, receipt.output_order, receipt.provenance_order, receipt.evidence_order, receipt.migration_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("policy interoperability digest ordering is invalid");
+  for (const value of [...receipt.input_order, ...receipt.output_order, ...receipt.provenance_order, ...receipt.evidence_order, ...receipt.migration_order, receipt.replay_identity, receipt.benchmark_digest, receipt.integration_artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("policy interoperability digest is invalid");
+  if (!receipt.effect_receipts.some((effect) => effect.startsWith("exchange:permitted-capability-summary:") || effect.startsWith("block:policy-interoperability-release:"))) throw new Error("policy interoperability effect is not exchange or fail-closed block");
+}
+
+export function policyInteroperabilityControlReceiptDigest(receipt: PolicyInteroperabilityControlReceipt): string { validatePolicyInteroperabilityControlReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

@@ -64,6 +64,7 @@ pub mod consent;
 pub mod decision;
 pub mod error;
 pub mod flow;
+pub mod interoperability_control;
 pub mod label;
 pub mod lattice;
 pub mod protocol_assurance;
@@ -86,6 +87,13 @@ pub use decision::{Admission, Decision, ExecutionMode, Obligation, Refusal};
 pub use error::PolicyError;
 pub use flow::{
     check_flow, derive, DeclassificationReceipt, DeclassificationRegistry, DeclassificationRule,
+};
+pub use interoperability_control::{
+    interoperability_control_manifest, negotiate_interoperability, ExternalCapabilityOffer,
+    IntegrationDisposition, InteroperabilityControlError, InteroperabilityControlReceipt,
+    InteroperabilityControlRequest, OfferEvidenceState,
+    CONTRACT_VERSION as INTEROPERABILITY_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as INTEROPERABILITY_CONTROL_FEATURE_ID,
 };
 pub use label::{Classification, ExportPolicy, PolicyLabel, Retention};
 pub use lattice::{
