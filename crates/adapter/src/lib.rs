@@ -91,6 +91,7 @@ pub mod fact;
 pub mod ingestion;
 pub mod ingestion_gateway;
 pub mod instrument_mesh;
+pub mod interpretation_assurance;
 pub mod inventory;
 pub mod knowledge_workflow;
 pub mod location;
@@ -156,6 +157,12 @@ pub use instrument_mesh::{
     integrate_instrument_mesh, InstrumentActionRequest, InstrumentCapability,
     InstrumentEffectReceipt, InstrumentMeshDecision, InstrumentMeshError, InstrumentMeshReceipt,
     CONTRACT_VERSION as INSTRUMENT_MESH_CONTRACT_VERSION, FEATURE_ID as INSTRUMENT_MESH_FEATURE_ID,
+};
+pub use interpretation_assurance::{
+    assure_interpretation, EvidenceBackedResult, InterpretationAssuranceError,
+    InterpretationAssuranceReceipt, InterpretationClaim, InterpretationVerdict,
+    CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
 };
 pub use inventory::{InventoryAdapter, InventoryProfile};
 pub use knowledge_workflow::{

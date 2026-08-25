@@ -16,6 +16,10 @@ use bioprism_adapter::{
     ContextCompilationRequest, CONTEXT_COMPILATION_FEATURE_ID,
 };
 use bioprism_adapter::{
+    assure_interpretation, EvidenceBackedResult, InterpretationAssuranceReceipt,
+    INTERPRETATION_ASSURANCE_FEATURE_ID,
+};
+use bioprism_adapter::{
     compile_evidence_synthesis, EvidenceSynthesisRequest, RetrievalSynthesisReceipt,
     RETRIEVAL_SYNTHESIS_FEATURE_ID,
 };
@@ -198,6 +202,7 @@ pub const PROTOCOL_SIMULATION_TOOL: &str = "adapter_protocol_simulation";
 pub const INSTRUMENT_MESH_TOOL: &str = "adapter_instrument_mesh";
 pub const EXECUTION_CONTROL_TOOL: &str = "adapter_execution_control";
 pub const ANALYSIS_PORTFOLIO_TOOL: &str = "adapter_analysis_portfolio";
+pub const INTERPRETATION_ASSURANCE_TOOL: &str = "adapter_interpretation_assurance";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1069,6 +1074,26 @@ pub fn validate_analysis_portfolio_json(value: &Value) -> Result<AnalysisPortfol
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ANALYSIS_PORTFOLIO_FEATURE_ID {
         return Err("analysis portfolio feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_interpretation_json(value: &Value) -> Result<Value, String> {
+    let request: EvidenceBackedResult = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid interpretation assurance request: {error}"))?;
+    let receipt = assure_interpretation(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize interpretation assurance receipt: {error}"))
+}
+
+pub fn validate_interpretation_assurance_json(
+    value: &Value,
+) -> Result<InterpretationAssuranceReceipt, String> {
+    let receipt: InterpretationAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid interpretation assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != INTERPRETATION_ASSURANCE_FEATURE_ID {
+        return Err("interpretation assurance feature id mismatch".into());
     }
     Ok(receipt)
 }

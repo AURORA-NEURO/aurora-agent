@@ -18,6 +18,7 @@ from prism_sdk.research_contracts import PROTOCOL_SIMULATION_FEATURE_ID, PROTOCO
 from prism_sdk.research_contracts import INSTRUMENT_MESH_FEATURE_ID, INSTRUMENT_MESH_CONTRACT_VERSION, InstrumentMeshReceipt
 from prism_sdk.research_contracts import EXECUTION_CONTROL_FEATURE_ID, EXECUTION_CONTROL_CONTRACT_VERSION, ComputationalExecutionReceipt
 from prism_sdk.research_contracts import ANALYSIS_PORTFOLIO_FEATURE_ID, ANALYSIS_PORTFOLIO_CONTRACT_VERSION, AnalysisPortfolioReceipt
+from prism_sdk.research_contracts import INTERPRETATION_ASSURANCE_FEATURE_ID, INTERPRETATION_ASSURANCE_CONTRACT_VERSION, InterpretationAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -999,4 +1000,23 @@ def test_analysis_portfolio_preserves_negative_evidence_and_conditionality():
     receipt.validate()
     assert receipt.feature_id == ANALYSIS_PORTFOLIO_FEATURE_ID
     assert receipt.contract_version == ANALYSIS_PORTFOLIO_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_interpretation_assurance_preserves_omitted_modality_and_negative_evidence():
+    receipt = InterpretationAssuranceReceipt(
+        result_id="result:interpretation",
+        verdict="conditional",
+        claim_order=("claim:a",),
+        covered_modalities=("imaging",),
+        omitted_modalities=("omics",),
+        uncertainty=("claim:a: measurement uncertainty remains",),
+        negative_evidence=("claim:a: null replicate is absent",),
+        semantic_loss=(),
+        reasons=("required modality coverage is incomplete",),
+        artifact={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == INTERPRETATION_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == INTERPRETATION_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

@@ -95,6 +95,8 @@ EXECUTION_CONTROL_FEATURE_ID = "AFA-adapter-P12-F31"
 EXECUTION_CONTROL_CONTRACT_VERSION = "computational-execution-control-plane/1.0"
 ANALYSIS_PORTFOLIO_FEATURE_ID = "AFA-adapter-P13-F01"
 ANALYSIS_PORTFOLIO_CONTRACT_VERSION = "local-analysis-model-portfolio/1.0"
+INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P14-F27"
+INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "interpretation-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2451,3 +2453,39 @@ class AnalysisPortfolioReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "question_id": self.question_id, "estimand": self.estimand, "verdict": self.verdict, "selected_candidate": self.selected_candidate, "candidate_order": list(self.candidate_order), "uncertainty": list(self.uncertainty), "omissions": list(self.omissions), "negative_evidence": list(self.negative_evidence), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class InterpretationAssuranceReceipt:
+    result_id: str
+    verdict: str
+    claim_order: tuple[str, ...]
+    covered_modalities: tuple[str, ...]
+    omitted_modalities: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = INTERPRETATION_ASSURANCE_FEATURE_ID
+    contract_version: str = INTERPRETATION_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != INTERPRETATION_ASSURANCE_FEATURE_ID or self.contract_version != INTERPRETATION_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("interpretation assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.result_id.strip() or not self.claim_order or not self.reasons:
+            raise ResearchContractError("interpretation assurance identity, claims, locality, boundary, or reasons are incomplete")
+        if self.verdict not in {"qualified", "conditional", "blocked"}:
+            raise ResearchContractError("interpretation assurance verdict is unknown")
+        if tuple(sorted(set(self.claim_order))) != self.claim_order:
+            raise ResearchContractError("interpretation assurance claim ordering is invalid")
+        if self.verdict == "qualified" and self.omitted_modalities:
+            raise ResearchContractError("qualified interpretation cannot omit required modalities")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("interpretation assurance artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "result_id": self.result_id, "verdict": self.verdict, "claim_order": list(self.claim_order), "covered_modalities": list(self.covered_modalities), "omitted_modalities": list(self.omitted_modalities), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

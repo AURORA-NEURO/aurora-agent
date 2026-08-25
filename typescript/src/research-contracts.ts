@@ -88,6 +88,8 @@ export const EXECUTION_CONTROL_FEATURE_ID = "AFA-adapter-P12-F31" as const;
 export const EXECUTION_CONTROL_CONTRACT_VERSION = "computational-execution-control-plane/1.0" as const;
 export const ANALYSIS_PORTFOLIO_FEATURE_ID = "AFA-adapter-P13-F01" as const;
 export const ANALYSIS_PORTFOLIO_CONTRACT_VERSION = "local-analysis-model-portfolio/1.0" as const;
+export const INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P14-F27" as const;
+export const INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "interpretation-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1463,6 +1465,35 @@ export function validateAnalysisPortfolioReceipt(receipt: AnalysisPortfolioRecei
 }
 
 export function analysisPortfolioReceiptDigest(receipt: AnalysisPortfolioReceipt): string { validateAnalysisPortfolioReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface InterpretationAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  result_id: string;
+  verdict: "qualified" | "conditional" | "blocked";
+  claim_order: string[];
+  covered_modalities: string[];
+  omitted_modalities: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateInterpretationAssuranceReceipt(receipt: InterpretationAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== INTERPRETATION_ASSURANCE_FEATURE_ID || receipt.contract_version !== INTERPRETATION_ASSURANCE_CONTRACT_VERSION) throw new Error("interpretation assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.result_id.trim() || !receipt.claim_order.length || !receipt.reasons.length) throw new Error("interpretation assurance identity, claims, locality, boundary, or reasons are incomplete");
+  if (!new Set(["qualified", "conditional", "blocked"]).has(receipt.verdict)) throw new Error("interpretation assurance verdict is unknown");
+  if (JSON.stringify([...new Set(receipt.claim_order)].sort()) !== JSON.stringify(receipt.claim_order)) throw new Error("interpretation assurance claim ordering is invalid");
+  if (receipt.verdict === "qualified" && receipt.omitted_modalities.length) throw new Error("qualified interpretation cannot omit required modalities");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("interpretation assurance artifact digest is invalid");
+}
+
+export function interpretationAssuranceReceiptDigest(receipt: InterpretationAssuranceReceipt): string { validateInterpretationAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
