@@ -60,6 +60,7 @@ pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
 pub mod throughput_research_workbench;
+pub mod throughput_retrieval_synthesis;
 pub mod throughput_safety_assurance;
 
 pub use evidence_contract_model::{
@@ -263,6 +264,12 @@ pub use throughput_research_workbench::{
     ThroughputWorkbenchError, ThroughputWorkbenchReceipt, ThroughputWorkbenchRequest,
     CONTRACT_VERSION as THROUGHPUT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis::{
+    synthesize_throughput_retrieval, throughput_retrieval_synthesis_manifest,
+    ThroughputEvidenceSynthesis, ThroughputRetrievalError, ThroughputRetrievalQuery,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_SYNTHESIS_FEATURE_ID,
 };
 pub use throughput_safety_assurance::{
     throughput_safety_assurance_manifest, verify_throughput_safety, ThroughputAssuranceError,

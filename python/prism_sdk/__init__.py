@@ -112,6 +112,8 @@ from .research_contracts import (
     EvidenceSurveillanceReceipt,
     RETRIEVAL_SYNTHESIS_FEATURE_ID,
     RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+    THROUGHPUT_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+    THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
     RetrievalSynthesisReceipt,
     ADAPTER_CONTEXT_COMPILATION_FEATURE_ID,
     ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION,
@@ -355,6 +357,7 @@ from .brain_throughput_operations import BrainThroughputOperationsReceipt
 from .brain_federated_operations import BrainFederatedOperationsReceipt
 from .brain_retrieval_synthesis import BrainEvidenceSynthesis
 from .brain_multimodal_retrieval import BrainMultimodalEvidenceSynthesis
+from .brain_throughput_retrieval import BrainThroughputEvidenceSynthesis
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
