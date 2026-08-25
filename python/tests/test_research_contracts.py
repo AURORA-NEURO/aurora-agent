@@ -50,6 +50,7 @@ from prism_sdk.research_contracts import ANALYSIS_CONTROL_FEATURE_ID, ANALYSIS_C
 from prism_sdk.research_contracts import CONTEXT_ASSURANCE_FEATURE_ID, CONTEXT_ASSURANCE_CONTRACT_VERSION, ContextAssuranceReceipt
 from prism_sdk.research_contracts import EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID, EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION, BioworldsEvaluationAssuranceReceipt
 from prism_sdk.research_contracts import QUALITY_WORKBENCH_BIOLANG_FEATURE_ID, QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION, BiolangQualityWorkbenchReceipt
+from prism_sdk.research_contracts import RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID, RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION, BiolangRetrievalAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1733,4 +1734,23 @@ def test_biolang_quality_workbench_preserves_quarantine_and_local_manifest_effec
     receipt.validate()
     assert receipt.feature_id == QUALITY_WORKBENCH_BIOLANG_FEATURE_ID
     assert receipt.contract_version == QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_biolang_retrieval_assurance_preserves_missing_modality_and_negative_evidence():
+    receipt = BiolangRetrievalAssuranceReceipt(
+        request_id="retrieval:assurance",
+        workflow_id="workflow:synthesis",
+        query_id="query:multimodal",
+        disposition="conditional",
+        summary={"summary_id": "retrieval-assurance-summary:retrieval:assurance", "disposition": "conditional", "candidate_order": ("evidence:imaging", "evidence:omics"), "ranked_order": ("evidence:imaging", "evidence:omics"), "selected_order": ("evidence:imaging",), "blocked_order": (), "unknown_order": ("evidence:omics",), "study_order": ("study:a",), "modality_order": ("imaging", "omics"), "artifact_order": ("a" * 64,), "provenance_order": ("b" * 64,), "selected_count": 1, "blocked_count": 0, "unknown_count": 1, "omissions": ("modality:omics:required-but-not-admitted",), "uncertainty": ("evidence:evidence:omics:state-unknown-not-admitted",), "negative_evidence": ("evidence:evidence:imaging:negative-result-retained",), "replay_identity": "c" * 64, "summary_digest": "d" * 64, "boundary": PRECLINICAL_BOUNDARY},
+        checks=("artifact and provenance digests are required before synthesis admission",),
+        omissions=("modality:omics:required-but-not-admitted",),
+        uncertainty=("evidence:evidence:omics:state-unknown-not-admitted",),
+        negative_evidence=("evidence:evidence:imaging:negative-result-retained",),
+        effect_receipts=("block:unsafe-release", "evaluate:retrieval-assurance:evidence:imaging"),
+    )
+    receipt.validate()
+    assert receipt.feature_id == RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID
+    assert receipt.contract_version == RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

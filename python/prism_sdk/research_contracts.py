@@ -171,6 +171,8 @@ EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID = "AFA-bioworlds-P23-F28"
 EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION = "bioworlds-federated-evaluation-observability-assurance/1.0"
 QUALITY_WORKBENCH_BIOLANG_FEATURE_ID = "AFA-biolang-P07-F19"
 QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION = "biolang-prospective-quality-workbench/1.0"
+RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID = "AFA-biolang-P02-F26"
+RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION = "biolang-multimodal-retrieval-synthesis-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3910,3 +3912,57 @@ class BiolangQualityWorkbenchReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "study_id": self.study_id, "disposition": self.disposition, "summary": dict(self.summary), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class BiolangRetrievalAssuranceReceipt:
+    """Cross-language validator for multimodal retrieval-and-synthesis assurance receipts."""
+
+    request_id: str
+    workflow_id: str
+    query_id: str
+    disposition: str
+    summary: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID
+    contract_version: str = RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID or self.contract_version != RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION:
+            raise ResearchContractError("biolang retrieval assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.query_id.strip() or not self.checks or not self.effect_receipts or self.summary.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("biolang retrieval assurance identity, summary, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"passed", "conditional", "unknown", "blocked"}:
+            raise ResearchContractError("biolang retrieval assurance disposition is unknown")
+        selected = tuple(self.summary.get("selected_order", ()))
+        blocked = tuple(self.summary.get("blocked_order", ()))
+        unknown = tuple(self.summary.get("unknown_order", ()))
+        unresolved = tuple(self.summary.get("omissions", ())) + tuple(self.summary.get("uncertainty", ())) + tuple(self.summary.get("negative_evidence", ()))
+        if not selected and not blocked and not unknown and not unresolved:
+            raise ResearchContractError("biolang retrieval assurance must retain a selected or unresolved summary")
+        ranked_order = tuple(self.summary.get("ranked_order", ()))
+        if len(ranked_order) != len(set(ranked_order)):
+            raise ResearchContractError("biolang retrieval assurance ranked order contains duplicates")
+        for values in (tuple(self.summary.get("candidate_order", ())), selected, blocked, unknown, tuple(self.summary.get("study_order", ())), tuple(self.summary.get("modality_order", ())), tuple(self.summary.get("omissions", ())), tuple(self.summary.get("uncertainty", ())), tuple(self.summary.get("negative_evidence", ())), self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("biolang retrieval assurance ordering is invalid")
+        for value in tuple(self.summary.get("artifact_order", ())) + tuple(self.summary.get("provenance_order", ())) + (self.summary.get("replay_identity"), self.summary.get("summary_digest")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("biolang retrieval assurance digest is invalid")
+        if not isinstance(self.summary.get("summary_id"), str) or not self.summary["summary_id"].strip():
+            raise ResearchContractError("biolang retrieval assurance summary identity is incomplete")
+        if any(not effect.startswith("evaluate:retrieval-assurance:") and effect != "block:unsafe-release" for effect in self.effect_receipts):
+            raise ResearchContractError("biolang retrieval assurance effect is outside the evaluation or unsafe-release boundary")
+        for field, order_name in (("selected_count", "selected_order"), ("blocked_count", "blocked_order"), ("unknown_count", "unknown_order")):
+            if not isinstance(self.summary.get(field), int) or self.summary[field] < 0 or self.summary[field] != len(self.summary.get(order_name, ())):
+                raise ResearchContractError("biolang retrieval assurance summary count is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "query_id": self.query_id, "disposition": self.disposition, "summary": dict(self.summary), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

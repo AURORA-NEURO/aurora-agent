@@ -153,6 +153,8 @@ export const EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID = "AFA-bioworlds-P23-F28"
 export const EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION = "bioworlds-federated-evaluation-observability-assurance/1.0" as const;
 export const QUALITY_WORKBENCH_BIOLANG_FEATURE_ID = "AFA-biolang-P07-F19" as const;
 export const QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION = "biolang-prospective-quality-workbench/1.0" as const;
+export const RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID = "AFA-biolang-P02-F26" as const;
+export const RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION = "biolang-multimodal-retrieval-synthesis-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2602,6 +2604,44 @@ export function validateBiolangQualityWorkbenchReceipt(receipt: BiolangQualityWo
 }
 
 export function biolangQualityWorkbenchReceiptDigest(receipt: BiolangQualityWorkbenchReceipt): string { validateBiolangQualityWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BiolangRetrievalAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  query_id: string;
+  disposition: "passed" | "conditional" | "unknown" | "blocked";
+  summary: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateBiolangRetrievalAssuranceReceipt(receipt: BiolangRetrievalAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID || receipt.contract_version !== RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION) throw new Error("biolang retrieval assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.query_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.summary.boundary !== PRECLINICAL_BOUNDARY) throw new Error("biolang retrieval assurance identity, summary, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["passed", "conditional", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("biolang retrieval assurance disposition is unknown");
+  const selected = Array.isArray(receipt.summary.selected_order) ? receipt.summary.selected_order as string[] : [];
+  const blocked = Array.isArray(receipt.summary.blocked_order) ? receipt.summary.blocked_order as string[] : [];
+  const unknown = Array.isArray(receipt.summary.unknown_order) ? receipt.summary.unknown_order as string[] : [];
+  const unresolved = [...(Array.isArray(receipt.summary.omissions) ? receipt.summary.omissions as string[] : []), ...(Array.isArray(receipt.summary.uncertainty) ? receipt.summary.uncertainty as string[] : []), ...(Array.isArray(receipt.summary.negative_evidence) ? receipt.summary.negative_evidence as string[] : [])];
+  if (!selected.length && !blocked.length && !unknown.length && !unresolved.length) throw new Error("biolang retrieval assurance must retain a selected or unresolved summary");
+  const rankedOrder = Array.isArray(receipt.summary.ranked_order) ? receipt.summary.ranked_order as string[] : [];
+  if (new Set(rankedOrder).size !== rankedOrder.length) throw new Error("biolang retrieval assurance ranked order contains duplicates");
+  for (const values of [Array.isArray(receipt.summary.candidate_order) ? receipt.summary.candidate_order as string[] : [], selected, blocked, unknown, Array.isArray(receipt.summary.study_order) ? receipt.summary.study_order as string[] : [], Array.isArray(receipt.summary.modality_order) ? receipt.summary.modality_order as string[] : [], Array.isArray(receipt.summary.omissions) ? receipt.summary.omissions as string[] : [], Array.isArray(receipt.summary.uncertainty) ? receipt.summary.uncertainty as string[] : [], Array.isArray(receipt.summary.negative_evidence) ? receipt.summary.negative_evidence as string[] : [], receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("biolang retrieval assurance ordering is invalid");
+  for (const value of [...(Array.isArray(receipt.summary.artifact_order) ? receipt.summary.artifact_order : []), ...(Array.isArray(receipt.summary.provenance_order) ? receipt.summary.provenance_order : []), receipt.summary.replay_identity, receipt.summary.summary_digest]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("biolang retrieval assurance digest is invalid");
+  if (typeof receipt.summary.summary_id !== "string" || !receipt.summary.summary_id.trim()) throw new Error("biolang retrieval assurance summary identity is incomplete");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("evaluate:retrieval-assurance:") && effect !== "block:unsafe-release")) throw new Error("biolang retrieval assurance effect is outside the evaluation or unsafe-release boundary");
+  for (const [field, orderName] of [["selected_count", "selected_order"], ["blocked_count", "blocked_order"], ["unknown_count", "unknown_order"]]) if (typeof receipt.summary[field] !== "number" || !Number.isInteger(receipt.summary[field]) || (receipt.summary[field] as number) < 0 || receipt.summary[field] !== (Array.isArray(receipt.summary[orderName]) ? (receipt.summary[orderName] as unknown[]).length : 0)) throw new Error("biolang retrieval assurance summary count is invalid");
+}
+
+export function biolangRetrievalAssuranceReceiptDigest(receipt: BiolangRetrievalAssuranceReceipt): string { validateBiolangRetrievalAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

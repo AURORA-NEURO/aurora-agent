@@ -86,7 +86,6 @@ import {
   EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION,
   experimentDesignReceiptDigest,
   validateExperimentDesignReceipt,
-  PROTOCOL_SIMULATION_FEATURE_ID,
   PROTOCOL_SIMULATION_CONTRACT_VERSION,
   protocolSimulationReceiptDigest,
   validateProtocolSimulationReceipt,
@@ -230,6 +229,10 @@ import {
   QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION,
   biolangQualityWorkbenchReceiptDigest,
   validateBiolangQualityWorkbenchReceipt,
+  RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID,
+  RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION,
+  biolangRetrievalAssuranceReceiptDigest,
+  validateBiolangRetrievalAssuranceReceipt,
   RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
   RESOURCE_DISCOVERY_CONTRACT_VERSION,
   resourceDiscoveryContractReceiptDigest,
@@ -310,7 +313,6 @@ import {
   KNOWLEDGE_WORKFLOW_CONTRACT_VERSION,
   knowledgeWorkflowReceiptDigest,
   validateKnowledgeWorkflowReceipt,
-  RESOURCE_WORKBENCH_FEATURE_ID,
   RESOURCE_WORKBENCH_CONTRACT_VERSION,
   resourceWorkbenchReceiptDigest,
   validateResourceWorkbenchReceipt,
@@ -1136,3 +1138,5 @@ test("context assurance preserves stale fact and signed digest exchange", () => 
 test("bioworlds evaluation assurance retains null and negative outcomes", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: EVALUATION_ASSURANCE_BIOWORLDS_FEATURE_ID, contract_version: EVALUATION_ASSURANCE_BIOWORLDS_CONTRACT_VERSION, request_id: "evaluation:assurance", workflow_id: "workflow:evaluation", capability_id: "capability:mechanism", benchmark_id: "benchmark:organoid", disposition: "conditional", summary: { summary_id: "evaluation-summary:evaluation:assurance", disposition: "conditional", observation_order: ["observation:a", "observation:b"], admitted_order: ["observation:a"], blocked_order: ["observation:b"], metric_order: ["metric:effect"], site_order: ["site:a"], baseline_order: ["a".repeat(64)], artifact_order: ["b".repeat(64)], provenance_order: ["c".repeat(64)], positive_count: 0, null_count: 1, negative_count: 1, inconclusive_count: 0, omissions: [], uncertainty: ["site-floor:1-of-2-independent-sites"], negative_evidence: ["observation:observation:a:outcome-null-retained"], replay_identity: "d".repeat(64), summary_digest: "e".repeat(64), boundary: PRECLINICAL_BOUNDARY }, checks: ["site floor, comparability, baseline, policy, federation, approval, locality, and budget gates are explicit"], omissions: [], uncertainty: ["site-floor:1-of-2-independent-sites"], negative_evidence: ["observation:observation:a:outcome-null-retained"], effect_receipts: ["exchange:evaluation-manifest-digest-only:observation:a", "exchange:evaluation-manifest-digest-only:observation:b"], raw_data_local: true, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateBioworldsEvaluationAssuranceReceipt(receipt)); assert.equal(bioworldsEvaluationAssuranceReceiptDigest(receipt), bioworldsEvaluationAssuranceReceiptDigest(receipt)); });
 
 test("biolang quality workbench preserves quarantine and local manifest effects", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: QUALITY_WORKBENCH_BIOLANG_FEATURE_ID, contract_version: QUALITY_WORKBENCH_BIOLANG_CONTRACT_VERSION, request_id: "quality:workbench", workflow_id: "workflow:quality", study_id: "study:organoid", disposition: "conditional", summary: { summary_id: "quality-summary:quality:workbench", disposition: "conditional", observation_order: ["observation:a", "observation:b"], qualified_order: ["observation:b"], warning_order: [], quarantined_order: ["observation:a"], unknown_order: [], batch_order: ["batch:a"], sample_order: ["sample:observation:a", "sample:observation:b"], metric_order: ["metric:signal"], artifact_order: ["a".repeat(64)], provenance_order: ["b".repeat(64)], passed_count: 1, warning_count: 0, quarantined_count: 1, unknown_count: 0, omissions: ["observation:observation:a:required-threshold-failed"], uncertainty: [], negative_evidence: ["observation:observation:a:contradicted-quality-evidence"], replay_identity: "c".repeat(64), summary_digest: "d".repeat(64), boundary: PRECLINICAL_BOUNDARY }, checks: ["quality, baseline, policy, protected closure, approval, locality, budget, and release-fraction gates are explicit"], omissions: ["observation:observation:a:required-threshold-failed"], uncertainty: [], negative_evidence: ["observation:observation:a:contradicted-quality-evidence"], effect_receipts: ["write:local-quality-manifest:batch:a"], raw_data_local: true, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateBiolangQualityWorkbenchReceipt(receipt)); assert.equal(biolangQualityWorkbenchReceiptDigest(receipt), biolangQualityWorkbenchReceiptDigest(receipt)); });
+
+test("biolang retrieval assurance preserves missing modality and negative evidence", () => { const receipt = { schema_version: "aurora-research-contract/1.0", feature_id: RETRIEVAL_ASSURANCE_BIOLANG_FEATURE_ID, contract_version: RETRIEVAL_ASSURANCE_BIOLANG_CONTRACT_VERSION, request_id: "retrieval:assurance", workflow_id: "workflow:synthesis", query_id: "query:multimodal", disposition: "conditional", summary: { summary_id: "retrieval-assurance-summary:retrieval:assurance", disposition: "conditional", candidate_order: ["evidence:imaging", "evidence:omics"], ranked_order: ["evidence:imaging", "evidence:omics"], selected_order: ["evidence:imaging"], blocked_order: [], unknown_order: ["evidence:omics"], study_order: ["study:a"], modality_order: ["imaging", "omics"], artifact_order: ["a".repeat(64)], provenance_order: ["b".repeat(64)], selected_count: 1, blocked_count: 0, unknown_count: 1, omissions: ["modality:omics:required-but-not-admitted"], uncertainty: ["evidence:evidence:omics:state-unknown-not-admitted"], negative_evidence: ["evidence:evidence:imaging:negative-result-retained"], replay_identity: "c".repeat(64), summary_digest: "d".repeat(64), boundary: PRECLINICAL_BOUNDARY }, checks: ["artifact and provenance digests are required before synthesis admission"], omissions: ["modality:omics:required-but-not-admitted"], uncertainty: ["evidence:evidence:omics:state-unknown-not-admitted"], negative_evidence: ["evidence:evidence:imaging:negative-result-retained"], effect_receipts: ["block:unsafe-release", "evaluate:retrieval-assurance:evidence:imaging"], raw_data_local: true, boundary: PRECLINICAL_BOUNDARY }; assert.doesNotThrow(() => validateBiolangRetrievalAssuranceReceipt(receipt)); assert.equal(biolangRetrievalAssuranceReceiptDigest(receipt), biolangRetrievalAssuranceReceiptDigest(receipt)); });
