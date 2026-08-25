@@ -16,8 +16,10 @@ use bioprism_adapter::{
     RETRIEVAL_SYNTHESIS_FEATURE_ID,
 };
 use bioprism_adapter::{
-    discover_resources as discover_adapter_resources, ResourceCandidate, ResourceNeed,
-    ResourceWorkbenchReceipt, RESOURCE_WORKBENCH_FEATURE_ID,
+    discover_resources as discover_adapter_resources,
+    ResourceCandidate as AdapterResourceCandidate, ResourceNeed as AdapterResourceNeed,
+    ResourceWorkbenchReceipt,
+    RESOURCE_WORKBENCH_FEATURE_ID as ADAPTER_RESOURCE_WORKBENCH_FEATURE_ID,
 };
 use bioprism_adapter::{
     evaluate_quality_drift, harmonize_multimodal, HarmonizedResearchObject,
@@ -62,8 +64,10 @@ use bioprism_fiber::{
 };
 use bioprism_fiber::{
     assure_federated_retrieval, discover_resources, FederatedRetrievalAssuranceReceipt,
-    FederatedRetrievalAssuranceRequest, QualifiedResourceSet, ResourceCandidate, ResourceNeed,
-    FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID, RESOURCE_WORKBENCH_FEATURE_ID,
+    FederatedRetrievalAssuranceRequest, QualifiedResourceSet,
+    ResourceCandidate as FiberResourceCandidate, ResourceNeed as FiberResourceNeed,
+    FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID,
+    RESOURCE_WORKBENCH_FEATURE_ID as FIBER_RESOURCE_WORKBENCH_FEATURE_ID,
 };
 use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
 use bioprism_governance::{
@@ -442,14 +446,14 @@ pub fn validate_workflow_batch_receipt_json(value: &Value) -> Result<WorkflowBat
 }
 
 pub fn discover_resources_json(value: &Value) -> Result<Value, String> {
-    let need: ResourceNeed = serde_json::from_value(
+    let need: FiberResourceNeed = serde_json::from_value(
         value
             .get("need")
             .cloned()
             .ok_or("need is required and must be a serialized ResourceNeed")?,
     )
     .map_err(|error| format!("invalid resource need: {error}"))?;
-    let candidates: Vec<ResourceCandidate> = serde_json::from_value(
+    let candidates: Vec<FiberResourceCandidate> = serde_json::from_value(
         value
             .get("candidates")
             .cloned()
@@ -465,7 +469,7 @@ pub fn validate_qualified_resource_set_json(value: &Value) -> Result<QualifiedRe
     let receipt: QualifiedResourceSet = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid qualified resource set: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != RESOURCE_WORKBENCH_FEATURE_ID {
+    if receipt.feature_id != FIBER_RESOURCE_WORKBENCH_FEATURE_ID {
         return Err("resource workbench feature id mismatch".into());
     }
     Ok(receipt)
@@ -870,10 +874,10 @@ pub fn discover_adapter_resources_json(value: &Value) -> Result<Value, String> {
         .get("request_id")
         .and_then(Value::as_str)
         .ok_or("request_id is required")?;
-    let need: ResourceNeed =
+    let need: AdapterResourceNeed =
         serde_json::from_value(value.get("need").cloned().ok_or("need is required")?)
             .map_err(|error| format!("invalid adapter resource need: {error}"))?;
-    let candidates: Vec<ResourceCandidate> = serde_json::from_value(
+    let candidates: Vec<AdapterResourceCandidate> = serde_json::from_value(
         value
             .get("candidates")
             .cloned()
@@ -892,7 +896,7 @@ pub fn validate_adapter_resource_workbench_json(
     let receipt: ResourceWorkbenchReceipt = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid adapter resource receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != RESOURCE_WORKBENCH_FEATURE_ID {
+    if receipt.feature_id != ADAPTER_RESOURCE_WORKBENCH_FEATURE_ID {
         return Err("adapter resource workbench feature id mismatch".into());
     }
     Ok(receipt)
