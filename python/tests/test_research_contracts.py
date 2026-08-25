@@ -90,6 +90,7 @@ from prism_sdk.brain_federated_workflow import BrainFederatedEvidenceWorkflowFab
 from prism_sdk.brain_evidence_workbench import BrainEvidenceResearchWorkbenchReceipt
 from prism_sdk.brain_multimodal_workbench import BrainMultimodalResearchWorkbenchReceipt
 from prism_sdk.brain_throughput_workbench import BrainThroughputResearchWorkbenchReceipt
+from prism_sdk.brain_federated_workbench import BrainFederatedResearchWorkbenchReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2820,6 +2821,15 @@ def test_brain_throughput_workbench_keeps_capacity_visible():
         negative_evidence=(),
         effect_receipts=("view:local-throughput-artifacts:workspace:throughput",),
         artifact={"content_hash": "e" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_federated_workbench_keeps_denial_visible():
+    receipt = BrainFederatedResearchWorkbenchReceipt(
+        request_id="request:federated-workbench", workspace_id="workspace:federated", federation_id="federation:commons", institution_id="institution:a", purpose="benchmarking", endpoint="https://hub.example/research", disposition="blocked",
+        view_order=("view:aggregate-comparison", "view:exchange-lineage", "view:institution-coverage"), panel_order=("panel:aggregate", "panel:institutions", "panel:lineage"), action_receipts=("action:render-aggregate-comparison", "action:render-exchange-lineage", "action:render-institution-coverage"), candidate_order=("evidence:a",), admitted_order=(), blocked_order=("evidence:a",), unknown_order=(), aggregate_order=(), evidence_digest="a" * 64, envelope_digest="b" * 64, workbench_digest="c" * 64, replay_identity="d" * 64, budget_units=8, omissions=("federation:permitted-artifact-missing",), uncertainty=(), negative_evidence=("request:signer-invalid",), effect_receipts=("view:local-federated-artifacts:workspace:federated",), artifact={"content_hash": "e" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()
