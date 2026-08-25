@@ -344,6 +344,7 @@ from .brain_federated_workbench import BrainFederatedResearchWorkbenchReceipt
 from .brain_evidence_protocol import BrainEvidenceProtocolReceipt
 from .brain_multimodal_protocol import BrainMultimodalProtocolReceipt
 from .brain_throughput_protocol import BrainThroughputProtocolReceipt
+from .brain_federated_protocol import BrainFederatedProtocolReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
