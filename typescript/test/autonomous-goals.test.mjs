@@ -479,6 +479,7 @@ test("goal agent runtime bridges the real facade across every domain without ret
   assert.equal(serialized.includes("private child task"), false);
   assert.equal(serialized.includes("private_runtime_handle"), false);
   assert.equal(runtime.metadata().domain_count, domains.length);
+  assert.equal(runtime.metadata().execution_surface, "autonomous_agent_facade");
   assert.equal(ledger.verifyIntegrity().ok, true);
 });
 

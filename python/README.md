@@ -200,12 +200,32 @@ custom learner, `AutonomousGoalBanditLearner` updates domain admission prioritie
 UCB-style value state. Custom learners can return only validated scheduling signals and a learning
 state digest. Goal records receive evaluator/learning digests through an optimistic revision fence;
 raw evidence, evaluator values, tasks, prompts, credentials, and live results stay transient.
-`AutonomousGoalAgentRuntime` connects this loop to the real `AutonomousTaskOrchestrator`. A
-caller-owned task resolver rehydrates each goal's text only after admission, and a run-options
-factory supplies transient model candidates, opaque credential handles, approval callbacks,
-memory, tools, and policy at execution time. All twelve domains, including `cross_domain`, use
-the same direct routing, prompt, provider, evaluator, and learning boundaries; no resolver or
-provider value is copied into goal or loop metadata.
+`AutonomousGoalAgentRuntime` connects this loop to the real autonomous facade. Prefer
+`agent.goal_agent_runtime(...)` or `agent.run_goal_control_loop(...)`: Python now binds the
+worker to the complete `AutonomousAgent`, just like the TypeScript runtime, so each claimed goal
+uses the same credential-session, model-inventory, prompt, routing, provider, connector/tool,
+evaluator, and learning boundaries as a direct run. A caller-owned task resolver rehydrates each
+goal's text only after admission, and a run-options factory supplies transient model candidates,
+opaque credential handles, approval callbacks, memory, tools, and policy at execution time. All
+twelve domains, including `cross_domain`, use the same facade path; no resolver or provider value
+is copied into goal or loop metadata.
+
+```python
+result = agent.run_goal_control_loop(
+    ledger,
+    task_resolver=lambda goal, _row: protected_queue.read(goal.goal_id),
+    run_options_factory=lambda _goal, _row: {
+        "credentials": session,
+        "model_candidates": agent.models(enabled_only=True),
+        "approve_provider_call": True,
+    },
+    evaluator=evaluate_goal_cycle,
+    schedule_options={"max_selected": 12, "max_concurrent": 4},
+)
+```
+
+The callbacks and their values remain process-local; the ledger and control-loop checkpoint
+retain only digests, statuses, counts, and value-only bandit state.
 For long-running loops, pass a stable `run_id` and a `checkpoint(snapshot)` callback. The sealed
 checkpoint records contiguous cycle summaries, aggregate counters, evaluator digests, learned
 signals, and the built-in bandit's value-only arm state; it never records task text, prompts,

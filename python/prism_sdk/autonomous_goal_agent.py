@@ -81,6 +81,7 @@ class AutonomousGoalAgentRuntime:
         orchestrator: AutonomousTaskOrchestrator,
         ledger: AutonomousGoalLedger,
         *,
+        agent: Any | None = None,
         task_resolver: GoalAgentTaskResolver,
         run_options_factory: GoalAgentRunOptionsFactory | None = None,
         evaluator: GoalLoopEvaluator | None = None,
@@ -90,6 +91,11 @@ class AutonomousGoalAgentRuntime:
     ) -> None:
         if not isinstance(orchestrator, AutonomousTaskOrchestrator):
             _fail("orchestrator must be an AutonomousTaskOrchestrator")
+        if agent is not None:
+            if not callable(getattr(agent, "run", None)) or not callable(getattr(agent, "run_cross_domain", None)):
+                _fail("agent must expose callable run and run_cross_domain methods")
+            if getattr(agent, "orchestrator", None) is not orchestrator:
+                _fail("agent must be bound to the supplied orchestrator")
         if not isinstance(ledger, AutonomousGoalLedger):
             _fail("ledger must be an AutonomousGoalLedger")
         if not callable(task_resolver):
@@ -101,6 +107,7 @@ class AutonomousGoalAgentRuntime:
         if not isinstance(batch_id_prefix, str) or not batch_id_prefix.strip() or "\x00" in batch_id_prefix or len(batch_id_prefix.encode("utf-8")) > 128:
             _fail("batch_id_prefix is outside its bounded contract")
         self.orchestrator = orchestrator
+        self.agent = agent
         self.ledger = ledger
         self.task_resolver = task_resolver
         self.run_options_factory = run_options_factory
@@ -142,7 +149,11 @@ class AutonomousGoalAgentRuntime:
         options = self._run_options(request.goal, request.schedule_row)
         if request.goal.domain == "cross_domain":
             subtasks = options.pop("subtasks")
+            if self.agent is not None:
+                return self.agent.run_cross_domain(task=request.task, subtasks=subtasks, **options)
             return self.orchestrator.run_cross_domain(task=request.task, subtasks=subtasks, **options)
+        if self.agent is not None:
+            return self.agent.run(task=request.task, domain=request.goal.domain, **options)
         return self.orchestrator.run(task=request.task, domain=request.goal.domain, **options)
 
     def metadata(self) -> dict[str, Any]:
@@ -151,6 +162,7 @@ class AutonomousGoalAgentRuntime:
             "batch_id_prefix": self.batch_id_prefix,
             "domain_count": len(AUTONOMOUS_DOMAINS),
             "domains": list(AUTONOMOUS_DOMAINS),
+            "execution_surface": "autonomous_agent_facade" if self.agent is not None else "autonomous_task_orchestrator",
             "retention": GOAL_AGENT_RUNTIME_RETENTION,
             "secret_material": "never_returned",
         }

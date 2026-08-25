@@ -117,7 +117,7 @@ export class AutonomousGoalAgentRuntime {
   }
 
   metadata(): Record<string, unknown> {
-    return { schema: AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA, batch_id_prefix: this.batch_id_prefix, domain_count: AUTONOMOUS_DOMAIN_NAMES.length, domains: [...AUTONOMOUS_DOMAIN_NAMES], retention: AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION, secret_material: "never_returned" };
+    return { schema: AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA, batch_id_prefix: this.batch_id_prefix, domain_count: AUTONOMOUS_DOMAIN_NAMES.length, domains: [...AUTONOMOUS_DOMAIN_NAMES], execution_surface: "autonomous_agent_facade", retention: AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION, secret_material: "never_returned" };
   }
 
   run(options: { schedule_options?: Record<string, unknown>; options_factory?: AutonomousGoalControlLoopOptionsFactory; max_cycles?: number; max_total_runs?: number } = {}): Promise<AutonomousGoalControlLoopResult> {

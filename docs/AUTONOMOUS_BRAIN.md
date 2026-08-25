@@ -5668,15 +5668,27 @@ non-contiguous cycles, invalid bandit arms, oversized signals, and stale writers
 Python and TypeScript use the same schema, retention posture, canonical JSON, and generation chain
 so a checkpoint can be handed across runtimes without copying private execution state.
 
-`AutonomousGoalAgentRuntime` is the production composition bridge for long-horizon work. It binds
-the goal worker to the real `AutonomousTaskOrchestrator`: an application-owned task resolver
-rehydrates text after admission, and an execution-options factory can supply model candidates,
-opaque credential handles, memory, policy approvals, tool callbacks, and provider observers only
-at the execution boundary. Single-domain goals enter the same routing, prompt, model-selection,
-provider, and learning path as direct runs; `cross_domain` goals enter the bounded specialist/fan-in
-path. Neither callback, its values, nor provider output enters the goal, schedule, worker, control,
-or evaluator projections. This makes the loop usable as an actual agent service while retaining
-the caller's authority over keys and effect approvals.
+`AutonomousGoalAgentRuntime` is the production composition bridge for long-horizon work. Prefer
+`agent.goal_agent_runtime(...)` or `agent.run_goal_control_loop(...)`: Python binds the goal
+worker to the complete `AutonomousAgent` facade, matching the TypeScript runtime. An
+application-owned task resolver rehydrates text after admission, and an execution-options factory
+can supply model candidates, opaque credential handles, memory, policy approvals, tool callbacks,
+and provider observers only at the execution boundary. Single-domain goals enter the same
+routing, prompt, model-selection, provider, connector/tool, and learning path as direct runs;
+`cross_domain` goals enter the bounded specialist/fan-in path. Neither callback, its values, nor
+provider output enters the goal, schedule, worker, control, or evaluator projections. This makes
+the loop usable as an actual agent service while retaining the caller's authority over keys and
+effect approvals.
+
+```python
+result = agent.run_goal_control_loop(
+    ledger,
+    task_resolver=resolve_protected_task,
+    run_options_factory=build_transient_run_options,
+    evaluator=evaluate_goal_cycle,
+    schedule_options={"max_selected": 12, "max_concurrent": 4},
+)
+```
 
 ## Resumable learning jobs
 

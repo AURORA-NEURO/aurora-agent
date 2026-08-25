@@ -14251,6 +14251,79 @@ class AutonomousAgent:
             pack_registry=pack_registry,
         )
 
+    def goal_agent_runtime(
+        self,
+        ledger: AutonomousGoalLedger,
+        *,
+        task_resolver: Callable[[Any, Any], str],
+        run_options_factory: Callable[[Any, Any], Mapping[str, Any]] | None = None,
+        evaluator: Any | None = None,
+        learner: Any | None = None,
+        journal: Any | None = None,
+        batch_id_prefix: str = "autonomous-goal-agent",
+    ) -> Any:
+        """Create the long-horizon goal bridge bound to this complete agent facade.
+
+        The goal scheduler remains metadata-only, while each claimed goal is executed through
+        this agent's normal session-aware routing surface.  That means model inventory, opaque
+        credential handles, prompt/plan construction, provider approval, connector/tool policy,
+        and online learning remain the same boundaries as a direct ``run`` call.  The task and
+        run-options callbacks are invoked only at execution time and are never persisted by the
+        goal ledger.
+        """
+
+        from .autonomous_goal_agent import AutonomousGoalAgentRuntime
+
+        try:
+            return AutonomousGoalAgentRuntime(
+                self.orchestrator,
+                ledger,
+                agent=self,
+                task_resolver=task_resolver,
+                run_options_factory=run_options_factory,
+                evaluator=evaluator,
+                learner=learner,
+                journal=journal,
+                batch_id_prefix=batch_id_prefix,
+            )
+        except (ArgumentError, BrainRunError):
+            raise
+        except Exception as error:
+            raise BrainRunError("goal agent runtime could not be created") from error
+
+    def run_goal_control_loop(
+        self,
+        ledger: AutonomousGoalLedger,
+        *,
+        task_resolver: Callable[[Any, Any], str],
+        run_options_factory: Callable[[Any, Any], Mapping[str, Any]] | None = None,
+        evaluator: Any | None = None,
+        learner: Any | None = None,
+        journal: Any | None = None,
+        batch_id_prefix: str = "autonomous-goal-agent",
+        schedule_options: Mapping[str, Any] | None = None,
+        options_factory: Callable[[Any], Mapping[str, Any]] | None = None,
+        max_cycles: int = 128,
+        max_total_runs: int = 8_192,
+    ) -> Any:
+        """Run bounded long-horizon goals through the facade-backed autonomous control loop."""
+
+        runtime = self.goal_agent_runtime(
+            ledger,
+            task_resolver=task_resolver,
+            run_options_factory=run_options_factory,
+            evaluator=evaluator,
+            learner=learner,
+            journal=journal,
+            batch_id_prefix=batch_id_prefix,
+        )
+        return runtime.run(
+            schedule_options=schedule_options,
+            options_factory=options_factory,
+            max_cycles=max_cycles,
+            max_total_runs=max_total_runs,
+        )
+
     def register_model(
         self,
         candidate: ModelCandidate | Mapping[str, Any],

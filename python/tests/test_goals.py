@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from prism_sdk.autonomy import AUTONOMOUS_DOMAINS, AutonomousTaskOrchestrator
+from prism_sdk.autonomy import AUTONOMOUS_DOMAINS, AutonomousAgent, AutonomousTaskOrchestrator
+from prism_sdk.llm_runtime import LLMRuntime
 from prism_sdk.goals import (
     AutonomousGoalConflict,
     AutonomousGoalError,
@@ -597,6 +598,72 @@ def test_goal_agent_runtime_bridges_model_facade_across_every_domain_without_ret
     assert "private child task" not in serialized
     assert "private_runtime_handle" not in serialized
     assert runtime.metadata()["domain_count"] == len(AUTONOMOUS_DOMAINS)
+    assert ledger.verify_integrity()["ok"] is True
+
+
+def test_autonomous_agent_exposes_facade_backed_goal_control_across_every_domain() -> None:
+    agent = AutonomousAgent(None, LLMRuntime())
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def run_single(**kwargs: object):
+        calls.append(("single", kwargs))
+        return SimpleNamespace(status="completed")
+
+    def run_cross(**kwargs: object):
+        calls.append(("cross", kwargs))
+        return SimpleNamespace(status="completed")
+
+    agent.run = run_single  # type: ignore[method-assign]
+    agent.run_cross_domain = run_cross  # type: ignore[method-assign]
+    ledger = AutonomousGoalLedger(clock=lambda: 700, max_goals=len(AUTONOMOUS_DOMAINS))
+    for domain in AUTONOMOUS_DOMAINS:
+        ledger.create(
+            goal_id=f"facade-{domain}",
+            task_digest=_digest(f"private facade task {domain}"),
+            domain=domain,
+            now_ns=0,
+        )
+
+    def run_options(goal, _row):
+        options: dict[str, object] = {"credentials": {}, "model_candidates": ()}
+        if goal.domain == "cross_domain":
+            options["subtasks"] = ({"domain": "coding", "task": "private child"},)
+        return options
+
+    result = agent.run_goal_control_loop(
+        ledger,
+        task_resolver=lambda goal, _row: f"private facade task {goal.domain}",
+        run_options_factory=run_options,
+        evaluator=lambda cycle: [
+            {
+                "goal_id": run.goal_id,
+                "evaluator_id": "facade-evaluator",
+                "evaluator_version": "1",
+                "reward": 0.9,
+                "passed": True,
+            }
+            for run in cycle.batch.runs
+        ],
+        schedule_options={
+            "now_ns": 700,
+            "max_selected": len(AUTONOMOUS_DOMAINS),
+            "max_concurrent": len(AUTONOMOUS_DOMAINS),
+            "required_domains": list(AUTONOMOUS_DOMAINS),
+        },
+    )
+
+    assert result.stop_reason == "all_terminal"
+    assert result.evaluation_count == len(AUTONOMOUS_DOMAINS)
+    assert len(calls) == len(AUTONOMOUS_DOMAINS)
+    assert {kind for kind, _ in calls} == {"single", "cross"}
+    assert all(record.status == "completed" for record in ledger.list(limit=len(AUTONOMOUS_DOMAINS)))
+    assert agent.goal_agent_runtime(
+        ledger,
+        task_resolver=lambda goal, _row: f"private facade task {goal.domain}",
+    ).metadata()["execution_surface"] == "autonomous_agent_facade"
+    serialized = json.dumps(result.to_dict(), sort_keys=True)
+    assert "private facade task" not in serialized
+    assert "private child" not in serialized
     assert ledger.verify_integrity()["ok"] is True
 
 
