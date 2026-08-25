@@ -79,6 +79,7 @@
 //! ```
 
 pub mod adapter;
+pub mod adversarial_recovery;
 pub mod analysis_portfolio;
 pub mod conformance;
 pub mod context_assurance;
@@ -126,6 +127,12 @@ pub mod source;
 pub mod tabular;
 
 pub use adapter::{Adapter, AdapterManifest, ConformanceLevel};
+pub use adversarial_recovery::{
+    recover_adversarial_events, AdversarialRecoveryError, AdversarialRecoveryReceipt,
+    AdversarialRecoveryRequest, RecoveryDisposition, RecoveryEvent,
+    CONTRACT_VERSION as ADVERSARIAL_RECOVERY_CONTRACT_VERSION,
+    FEATURE_ID as ADVERSARIAL_RECOVERY_FEATURE_ID,
+};
 pub use analysis_portfolio::{
     qualify_analysis_portfolio, AnalysisCandidate, AnalysisPortfolioError,
     AnalysisPortfolioReceipt, AnalysisPortfolioRequest, AnalysisPortfolioVerdict, AnalysisQuestion,

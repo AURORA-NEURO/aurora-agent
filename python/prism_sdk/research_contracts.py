@@ -127,6 +127,8 @@ ADAPTER_SEMANTIC_PARITY_FEATURE_ID = "AFA-adapter-P28-F06"
 ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION = "adapter-semantic-parity/1.0"
 ADAPTER_SCALE_FRONTIER_FEATURE_ID = "AFA-adapter-P29-F15"
 ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION = "adapter-scale-frontier/1.0"
+ADVERSARIAL_RECOVERY_FEATURE_ID = "AFA-adapter-P30-F24"
+ADVERSARIAL_RECOVERY_CONTRACT_VERSION = "adapter-adversarial-recovery/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3133,3 +3135,47 @@ class ScaleFrontierReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "scenario_order": list(self.scenario_order), "admissible_order": list(self.admissible_order), "blocked_order": list(self.blocked_order), "frontier_order": list(self.frontier_order), "max_admitted_concurrency": self.max_admitted_concurrency, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class AdversarialRecoveryReceipt:
+    request_id: str
+    workflow_id: str
+    disposition: str
+    event_order: tuple[str, ...]
+    recovered_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    replay_order: tuple[str, ...]
+    checkpoint_order: tuple[str, ...]
+    recovery_digest: str | None
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = ADVERSARIAL_RECOVERY_FEATURE_ID
+    contract_version: str = ADVERSARIAL_RECOVERY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != ADVERSARIAL_RECOVERY_FEATURE_ID or self.contract_version != ADVERSARIAL_RECOVERY_CONTRACT_VERSION:
+            raise ResearchContractError("adversarial recovery schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.event_order or not self.checks or not self.effect_receipts:
+            raise ResearchContractError("adversarial recovery identity, events, checks, effects, locality, or boundary are incomplete")
+        if self.disposition not in {"recovered", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("adversarial recovery disposition is unknown")
+        for values in (self.event_order, self.recovered_order, self.blocked_order, self.replay_order, self.checkpoint_order, self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("adversarial recovery ordering is invalid")
+        if self.recovery_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", self.recovery_digest):
+            raise ResearchContractError("adversarial recovery digest is invalid")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in self.checkpoint_order):
+            raise ResearchContractError("adversarial recovery checkpoint digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("adversarial recovery receipt digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "event_order": list(self.event_order), "recovered_order": list(self.recovered_order), "blocked_order": list(self.blocked_order), "replay_order": list(self.replay_order), "checkpoint_order": list(self.checkpoint_order), "recovery_digest": self.recovery_digest, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

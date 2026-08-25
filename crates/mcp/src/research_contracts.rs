@@ -110,6 +110,10 @@ use bioprism_adapter::{
     ANALYSIS_PORTFOLIO_FEATURE_ID,
 };
 use bioprism_adapter::{
+    recover_adversarial_events, AdversarialRecoveryError, AdversarialRecoveryReceipt,
+    AdversarialRecoveryRequest, ADVERSARIAL_RECOVERY_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_evidence_surveillance, EvidenceFeedRequest, EvidenceSurveillanceReceipt,
     EVIDENCE_SURVEILLANCE_FEATURE_ID,
 };
@@ -277,6 +281,7 @@ pub const LIMITATION_CLOSURE_TOOL: &str = "adapter_limitation_closure";
 pub const DEPENDENCY_COMPOSITION_TOOL: &str = "adapter_dependency_composition";
 pub const ADAPTER_SEMANTIC_PARITY_TOOL: &str = "adapter_semantic_parity";
 pub const ADAPTER_SCALE_FRONTIER_TOOL: &str = "adapter_scale_frontier";
+pub const ADVERSARIAL_RECOVERY_TOOL: &str = "adapter_adversarial_recovery";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1477,6 +1482,28 @@ pub fn validate_adapter_scale_frontier_json(value: &Value) -> Result<ScaleFronti
         .map_err(|error: ScaleFrontierError| error.to_string())?;
     if receipt.feature_id != ADAPTER_SCALE_FRONTIER_FEATURE_ID {
         return Err("adapter scale frontier feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn recover_adversarial_events_json(value: &Value) -> Result<Value, String> {
+    let request: AdversarialRecoveryRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adversarial recovery request: {error}"))?;
+    let receipt = recover_adversarial_events(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize adversarial recovery receipt: {error}"))
+}
+
+pub fn validate_adversarial_recovery_json(
+    value: &Value,
+) -> Result<AdversarialRecoveryReceipt, String> {
+    let receipt: AdversarialRecoveryReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adversarial recovery receipt: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: AdversarialRecoveryError| error.to_string())?;
+    if receipt.feature_id != ADVERSARIAL_RECOVERY_FEATURE_ID {
+        return Err("adversarial recovery feature id mismatch".into());
     }
     Ok(receipt)
 }

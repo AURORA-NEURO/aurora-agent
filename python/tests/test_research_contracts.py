@@ -34,6 +34,7 @@ from prism_sdk.research_contracts import LIMITATION_CLOSURE_FEATURE_ID, LIMITATI
 from prism_sdk.research_contracts import DEPENDENCY_COMPOSITION_FEATURE_ID, DEPENDENCY_COMPOSITION_CONTRACT_VERSION, AdapterCompositionReceipt
 from prism_sdk.research_contracts import ADAPTER_SEMANTIC_PARITY_FEATURE_ID, ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION, AdapterSemanticParityReceipt
 from prism_sdk.research_contracts import ADAPTER_SCALE_FRONTIER_FEATURE_ID, ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION, ScaleFrontierReceipt
+from prism_sdk.research_contracts import ADVERSARIAL_RECOVERY_FEATURE_ID, ADVERSARIAL_RECOVERY_CONTRACT_VERSION, AdversarialRecoveryReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1377,4 +1378,28 @@ def test_adapter_scale_frontier_preserves_blocked_budget_cells():
     receipt.validate()
     assert receipt.feature_id == ADAPTER_SCALE_FRONTIER_FEATURE_ID
     assert receipt.contract_version == ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_adversarial_recovery_preserves_blocked_events_and_checkpoints():
+    receipt = AdversarialRecoveryReceipt(
+        request_id="recovery:adapter",
+        workflow_id="workflow:federated",
+        disposition="partial",
+        event_order=("event:a", "event:b"),
+        recovered_order=("event:a",),
+        blocked_order=("event:b",),
+        replay_order=("event:a", "event:b"),
+        checkpoint_order=("a" * 64, "b" * 64),
+        recovery_digest=None,
+        checks=("adversarial event kinds fail closed without remote effects",),
+        omissions=("event:event:b:non-recoverable",),
+        uncertainty=(),
+        negative_evidence=("event:event:b:adversarial-kind-poisoned_artifact",),
+        effect_receipts=("exchange:permitted-recovery-checkpoints-and-digests-only",),
+        artifact={"content_hash": "c" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == ADVERSARIAL_RECOVERY_FEATURE_ID
+    assert receipt.contract_version == ADVERSARIAL_RECOVERY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
