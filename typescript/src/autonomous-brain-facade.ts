@@ -67,6 +67,11 @@ import {
   type AutonomousDomainAuditOptions,
   type AutonomousDomainAuditReport,
 } from "./autonomous-domain-audit.js";
+import {
+  auditAutonomousBrainLaunchPreflight,
+  type AutonomousLaunchPreflightOptions,
+  type AutonomousLaunchPreflightReport,
+} from "./autonomous-launch-preflight.js";
 
 /**
  * The application-facing composition boundary for the autonomous brain.
@@ -1102,6 +1107,15 @@ export class AutonomousBrainFacade {
    */
   async domainAudit(options: AutonomousDomainAuditOptions = {}): Promise<AutonomousDomainAuditReport> {
     return auditAutonomousDomainContracts(options);
+  }
+
+  /**
+   * Compose every provider-free launch gate into one digest-bound, review-only handoff.
+   * The projection covers all twelve domains and cannot authorize provider, source, tool,
+   * credential, learner, queue, or effect dispatch.
+   */
+  async launchPreflight(options: AutonomousLaunchPreflightOptions = {}): Promise<AutonomousLaunchPreflightReport> {
+    return auditAutonomousBrainLaunchPreflight(this, options);
   }
 
   /** Project a portfolio-wide admission image before provider/tool/source dispatch. */

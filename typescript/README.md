@@ -261,6 +261,31 @@ context identity; provider transport success is never converted into evaluator r
 is digest-addressed under `bioprism-autonomous-agent-readiness/0.1`, contains no task text or
 provider payload, and can be rendered directly by a setup or operations screen.
 
+### Unified all-domain launch preflight
+
+`AutonomousBrainFacade.launchPreflight()` composes the structural domain audit, keyless model and
+provider readiness, and deployment-owned capability gates into one digest-bound handoff. It emits
+one `blocked`, `partial`, or `ready_for_review` row for each of the twelve domains, source-report
+digests, bounded remediation, and an explicit zero-dispatch ledger. Caller-owned tool and evidence
+inventories can be supplied to move the contract gate from `unassessed` to a reviewed state:
+
+```typescript
+const preflight = await brain.launchPreflight({
+  availableToolNames: reviewedToolNames,
+  availableEvidence: callerEvidenceIds,
+  deploymentCapabilities: {
+    persistence: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+    approval_authority: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+  },
+});
+validateAutonomousLaunchPreflightReport(preflight);
+```
+
+This is a review artifact rather than an authorization oracle: it never resolves a key, invokes a
+provider or source, executes a tool, mutates learning, or creates effect authority. `ready_for_review`
+means only that the represented local gates are complete; live evidence truth, approval, scheduling,
+and execution remain separate caller-owned boundaries.
+
 ### Keyless capability activation and restart-safe tool admission
 
 Readiness is descriptive; activation is the explicit lifecycle that turns a reviewed catalogue

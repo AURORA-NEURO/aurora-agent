@@ -1695,6 +1695,21 @@ export type {
   AutonomousDomainAuditOptions,
 } from "./autonomous-domain-audit.js";
 export {
+  AUTONOMOUS_LAUNCH_PREFLIGHT_SCHEMA,
+  AUTONOMOUS_LAUNCH_PREFLIGHT_DOMAIN_SCHEMA,
+  MAX_AUTONOMOUS_LAUNCH_PREFLIGHT_BYTES,
+  MAX_AUTONOMOUS_LAUNCH_PREFLIGHT_ACTIONS,
+  auditAutonomousLaunchPreflight,
+  auditAutonomousBrainLaunchPreflight,
+  validateAutonomousLaunchPreflightReport,
+} from "./autonomous-launch-preflight.js";
+export type {
+  AutonomousLaunchPreflightState,
+  AutonomousLaunchPreflightOptions,
+  AutonomousLaunchPreflightDomain,
+  AutonomousLaunchPreflightReport,
+} from "./autonomous-launch-preflight.js";
+export {
   AUTONOMOUS_BRAIN_JOB_SCHEMA,
   AUTONOMOUS_BRAIN_JOB_EVENT_SCHEMA,
   AUTONOMOUS_BRAIN_JOB_SNAPSHOT_SCHEMA,

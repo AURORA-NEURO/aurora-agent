@@ -2034,6 +2034,13 @@ runtime gates are incomplete, and `ready_for_review` only when all local preflig
 This state is intentionally not an authorization decision: provider credentials, evidence truth,
 approval, effects, and durable scheduling remain separate caller-owned boundaries.
 
+The TypeScript `AutonomousBrainFacade.launchPreflight()` exposes the same composition at the
+application facade. It joins `domainAudit()`, `readiness()`, and the protected provider setup plan
+with deployment-owned capability projections, preserving the same twelve per-domain states,
+source digests, redacted next actions, and zero-dispatch ledger. It is validated by
+`validateAutonomousLaunchPreflightReport()` and does not initialize a provider, resolve a key, or
+authorize a tool, source, learner, queue, or effect.
+
 ### Live model inventory synchronization
 
 `readiness()` intentionally does not contact providers. When an application wants to refresh the

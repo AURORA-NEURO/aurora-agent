@@ -1615,3 +1615,8 @@ counts, bounded remediation, and an explicit zero-dispatch ledger. The default p
 blocked or partial until caller-owned inventories and deployment gates are supplied; a
 `ready_for_review` row still does not grant provider, source, tool, effect, credential, or learner
 authority.
+
+TypeScript now closes the corresponding facade gap with `AutonomousBrainFacade.launchPreflight()`.
+It composes the existing domain audit, keyless readiness projection, and deployment audit for all
+twelve domains, validates the aggregate digest and zero-dispatch posture, and refuses secret-shaped
+capability metadata before any provider/source/tool boundary.
