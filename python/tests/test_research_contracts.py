@@ -89,6 +89,7 @@ from prism_sdk.brain_high_throughput_workflow import BrainHighThroughputEvidence
 from prism_sdk.brain_federated_workflow import BrainFederatedEvidenceWorkflowFabricReceipt
 from prism_sdk.brain_evidence_workbench import BrainEvidenceResearchWorkbenchReceipt
 from prism_sdk.brain_multimodal_workbench import BrainMultimodalResearchWorkbenchReceipt
+from prism_sdk.brain_throughput_workbench import BrainThroughputResearchWorkbenchReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2788,6 +2789,36 @@ def test_brain_multimodal_workbench_keeps_modality_coverage_explicit():
         uncertainty=(),
         negative_evidence=(),
         effect_receipts=("view:local-multimodal-artifacts:workspace:multimodal",),
+        artifact={"content_hash": "e" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_throughput_workbench_keeps_capacity_visible():
+    receipt = BrainThroughputResearchWorkbenchReceipt(
+        request_id="request:throughput-workbench",
+        workspace_id="workspace:throughput",
+        batch_id="batch:001",
+        partition="partition:imaging",
+        disposition="partial",
+        view_order=("view:capacity-frontier", "view:checkpoint-replay", "view:queue-monitor"),
+        panel_order=("panel:capacity", "panel:replay"),
+        action_receipts=("action:render-capacity-frontier", "action:render-checkpoint-replay", "action:render-queue-monitor"),
+        candidate_order=("evidence:a", "evidence:b"),
+        admitted_order=("evidence:a",),
+        blocked_order=("evidence:b",),
+        unknown_order=(),
+        checkpoint_seq=2,
+        queue_digest="a" * 64,
+        evidence_digest="b" * 64,
+        workbench_digest="c" * 64,
+        replay_identity="d" * 64,
+        budget_units=8,
+        omissions=("evidence:evidence:b:batch-capacity-exceeded",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("view:local-throughput-artifacts:workspace:throughput",),
         artifact={"content_hash": "e" * 64},
     )
     receipt.validate()

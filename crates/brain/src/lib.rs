@@ -45,6 +45,7 @@ pub mod multimodal_evidence_surveillance;
 pub mod multimodal_evidence_workflow_fabric;
 pub mod multimodal_research_workbench;
 pub mod throughput_contract_model;
+pub mod throughput_research_workbench;
 
 pub use evidence_contract_model::{
     evidence_contract_model_manifest, model_evidence_contract, ContractCompatibility,
@@ -154,6 +155,12 @@ pub use throughput_contract_model::{
     ThroughputContractModelError, ThroughputContractModelReceipt, ThroughputContractModelRequest,
     CONTRACT_VERSION as THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_research_workbench::{
+    compile_throughput_research_workbench, throughput_research_workbench_manifest,
+    ThroughputWorkbenchError, ThroughputWorkbenchReceipt, ThroughputWorkbenchRequest,
+    CONTRACT_VERSION as THROUGHPUT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 
 pub const BRAIN_SCHEMA_VERSION: &str = "bioprism-autonomous-brain/0.1";
