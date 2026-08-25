@@ -179,6 +179,7 @@ pub mod design;
 pub mod error;
 pub mod estimand;
 pub mod evaluator;
+pub mod federation_release;
 pub mod grounding;
 pub mod mesh;
 pub mod metamorphic;
@@ -190,7 +191,7 @@ pub mod trajectory;
 pub mod waiver;
 pub mod worldline;
 
-pub use acquisition::{Action, AcquisitionKind, Obligation, ReferencePolicy, Regret, Trace};
+pub use acquisition::{AcquisitionKind, Action, Obligation, ReferencePolicy, Regret, Trace};
 pub use boundary::{Assessment, Channel, Effect, Flow, FlowVerdict, Policy};
 pub use burden::{BranchLedger, Draw, DrawOutcome, Ledger, Resource, ResourceClass};
 pub use design::{Arm, Contrast, FactorialDesign};
@@ -203,6 +204,14 @@ pub use estimand::{
     ClaimKind, Corroboration, Estimand, Evidentiary, Finding, Identification, IdentificationCheck,
 };
 pub use evaluator::{Diagnostic, EvaluatorRun, Health, Panel, TaskOutcome};
+pub use federation_release::{
+    federation_gateway_manifest, prepare_federation_release, FederationGatewayError,
+    FederationGatewayReceipt, FederationGatewayRequest, GatewayDisposition,
+    RunState as FederationRunState, SignedResearchObject as FederationSignedResearchObject,
+    ValidatedResearchRun as FederationValidatedResearchRun,
+    CONTRACT_VERSION as FEDERATION_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATION_GATEWAY_FEATURE_ID,
+};
 pub use grounding::{ClaimState, EdgeKind, Evidence, Grounding, LocatorStatus, SupportEdge};
 pub use mesh::{
     Census, Disagreement, EvaluatorDecl, EvaluatorKind, EvaluatorVerdict, Mesh, Witness,

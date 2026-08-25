@@ -301,6 +301,11 @@ from .api_release import (
     API_RELEASE_ASSURANCE_CONTRACT_VERSION,
     ApiReleaseAssuranceReceipt,
 )
+from .bioevalx_federation import (
+    BIOEVALX_FEDERATION_GATEWAY_FEATURE_ID,
+    BIOEVALX_FEDERATION_GATEWAY_CONTRACT_VERSION,
+    BioevalxFederationGatewayReceipt,
+)
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

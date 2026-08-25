@@ -67,6 +67,7 @@ from prism_sdk.research_contracts import SAFETY_MECHANISM_WORKFLOW_FEATURE_ID, S
 from prism_sdk.hubapi_interpretation import HUBAPI_INTERPRETATION_ASSURANCE_FEATURE_ID, HUBAPI_INTERPRETATION_ASSURANCE_CONTRACT_VERSION, HubapiMultimodalInterpretationAssuranceReceipt
 from prism_sdk.biolang_publication import BIOLANG_PUBLICATION_COPILOT_FEATURE_ID, BIOLANG_PUBLICATION_COPILOT_CONTRACT_VERSION, BiolangPublicationCopilotReceipt
 from prism_sdk.api_release import API_RELEASE_ASSURANCE_FEATURE_ID, API_RELEASE_ASSURANCE_CONTRACT_VERSION, ApiReleaseAssuranceReceipt
+from prism_sdk.bioevalx_federation import BIOEVALX_FEDERATION_GATEWAY_FEATURE_ID, BIOEVALX_FEDERATION_GATEWAY_CONTRACT_VERSION, BioevalxFederationGatewayReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2171,4 +2172,37 @@ def test_api_release_assurance_preserves_benchmark_and_unsafe_release_gate():
     receipt.validate()
     assert receipt.feature_id == API_RELEASE_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == API_RELEASE_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_bioevalx_federation_gateway_preserves_endpoint_and_protocol_gate():
+    receipt = BioevalxFederationGatewayReceipt(
+        request_id="request:federation",
+        workflow_id="workflow:publish",
+        federation_id="federation:commons",
+        endpoint="https://hub.example/research",
+        protocol="mcp/2025-06-18",
+        disposition="partial",
+        candidate_order=("release:a", "release:b"),
+        admitted_order=("release:a",),
+        blocked_order=("release:b",),
+        unknown_order=("release:b",),
+        release_order=("release:a",),
+        artifact_order=("artifact:a",),
+        evidence_order=("evidence:a",),
+        provenance_order=("a" * 64,),
+        replay_order=("b" * 64,),
+        benchmark_order=("c" * 64,),
+        omissions=("request:protocol-not-pinned",),
+        uncertainty=("release:release:b:state-unknown-not-admitted",),
+        negative_evidence=(),
+        replay_identity="d" * 64,
+        benchmark_digest="e" * 64,
+        effect_receipts=("exchange:permitted-artifacts:request:federation",),
+        objects=({"run_id": "run:a", "release_id": "release:a", "artifact_ids": ["artifact:a"], "evidence_receipt_ids": ["evidence:a"], "endpoint": "https://hub.example/research", "protocol": "mcp/2025-06-18", "raw_data_local": True, "boundary": PRECLINICAL_BOUNDARY},),
+        federation_artifact={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == BIOEVALX_FEDERATION_GATEWAY_FEATURE_ID
+    assert receipt.contract_version == BIOEVALX_FEDERATION_GATEWAY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
