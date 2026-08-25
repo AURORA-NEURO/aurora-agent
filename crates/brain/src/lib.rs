@@ -34,6 +34,7 @@ pub mod federated_contract_model;
 pub mod federated_evidence_surveillance;
 pub mod high_throughput_evidence_surveillance;
 pub mod multimodal_contract_model;
+pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
 pub mod throughput_contract_model;
 
@@ -79,6 +80,12 @@ pub use multimodal_contract_model::{
     MultimodalEvidenceContractRequest,
     CONTRACT_VERSION as MULTIMODAL_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use multimodal_evidence_copilot::{
+    compile_multimodal_evidence_copilot, multimodal_evidence_research_copilot_manifest,
+    MultimodalCopilotError, MultimodalCopilotReceipt, MultimodalCopilotRequest,
+    CONTRACT_VERSION as MULTIMODAL_EVIDENCE_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_EVIDENCE_COPILOT_FEATURE_ID,
 };
 pub use multimodal_evidence_surveillance::{
     multimodal_evidence_surveillance_manifest, surveil_multimodal_evidence,

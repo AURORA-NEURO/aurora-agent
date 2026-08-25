@@ -80,6 +80,7 @@ from prism_sdk.brain_multimodal_contract import BrainMultimodalContractModelRece
 from prism_sdk.brain_throughput_contract import BrainThroughputContractModelReceipt
 from prism_sdk.brain_federated_contract import BrainFederatedContractModelReceipt
 from prism_sdk.brain_evidence_copilot import BrainEvidenceResearchCopilotReceipt
+from prism_sdk.brain_multimodal_copilot import BrainMultimodalEvidenceResearchCopilotReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2561,6 +2562,36 @@ def test_brain_evidence_copilot_keeps_blocked_action_explicit():
         negative_evidence=("copilot:inspect-local-evidence-not-allowed",),
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "d" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_multimodal_copilot_keeps_tool_denial_explicit():
+    receipt = BrainMultimodalEvidenceResearchCopilotReceipt(
+        request_id="request:multimodal-copilot",
+        operator_id="operator:researcher",
+        study_order=("study:a", "study:b"),
+        scope="organoid:neural",
+        disposition="blocked",
+        plan_order=("plan:inspect-multimodal:evidence:a",),
+        action_order=("action:inspect-multimodal:evidence:a",),
+        tool_order=("tool:multimodal-evidence",),
+        candidate_order=("evidence:a",),
+        qualified_order=("evidence:a",),
+        blocked_order=(),
+        unknown_order=(),
+        modality_order=("imaging",),
+        evidence_receipt_digest="a" * 64,
+        plan_digest="b" * 64,
+        approval_reference="c" * 64,
+        replay_identity="d" * 64,
+        budget_units=1,
+        omissions=(),
+        uncertainty=(),
+        negative_evidence=("copilot:inspect-local-multimodal-evidence-not-allowed",),
+        effect_receipts=("block:unsafe-release",),
+        artifact={"content_hash": "e" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()
