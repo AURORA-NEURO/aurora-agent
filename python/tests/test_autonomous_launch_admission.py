@@ -7,6 +7,7 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_DOMAIN_NAMES,
     AutonomousAgent,
+    BrainRunError,
     CredentialStore,
     LLMRuntime,
     ModelCatalogue,
@@ -161,4 +162,19 @@ def test_launch_admission_gate_blocks_before_execution_and_checks_route_coverage
             launch_admission=held,
             credentials={},
             approve_provider_call=False,
+        )
+
+    with pytest.raises(ArgumentError, match="does not approve requested domains"):
+        agent.run_auto_with_launch_admission(
+            task="analyze a biomedical research result",
+            launch_admission=coding,
+            credentials={},
+            approve_provider_call=False,
+        )
+    with pytest.raises(BrainRunError, match="requires provider-free routing"):
+        agent.run_auto_with_launch_admission(
+            task="write a small function",
+            launch_admission=coding,
+            credentials={},
+            semantic_routing=True,
         )

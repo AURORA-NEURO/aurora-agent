@@ -1008,6 +1008,7 @@ export class AutonomousBrainFacade {
     admission: AutonomousLaunchAdmissionReport,
     options: AutonomousBrainExecuteOptions = {},
   ): Promise<AutonomousBrainExecution> {
+    if (options.semanticRouting === true || (isObject(options.semanticRouting) && options.semanticRouting.enabled === true) || options.run?.semanticRouting === true || (isObject(options.run?.semanticRouting) && options.run.semanticRouting.enabled === true)) throw new ArgumentError("launch-admitted execution requires provider-free routing; admit semantic routing separately before enabling it");
     const prepared = await this.prepare(input, selectBrainSemanticRouting(options.semanticRouting, options.run?.semanticRouting), options.run, options.approveProviderCall);
     authorizeAutonomousLaunchDomains(admission, prepared.route.selected_domains);
     return this.executePrepared(prepared, options);
@@ -1056,6 +1057,7 @@ export class AutonomousBrainFacade {
     admission: AutonomousLaunchAdmissionReport,
     options: AutonomousBrainCycleOptions = {},
   ): Promise<AutonomousBrainCycleExecution> {
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted cycle requires provider-free routing; admit semantic routing separately before enabling it");
     const prepared = await this.prepare(input, options.semanticRouting, options.cycle, options.approveProviderCall);
     authorizeAutonomousLaunchDomains(admission, prepared.route.selected_domains);
     return this.executeCyclePrepared(prepared, options);
@@ -1105,6 +1107,7 @@ export class AutonomousBrainFacade {
     admission: AutonomousLaunchAdmissionReport,
     options: AutonomousBrainAdaptiveCycleOptions,
   ): Promise<AutonomousBrainAdaptiveCycleExecution> {
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted adaptive cycle requires provider-free routing; admit semantic routing separately before enabling it");
     const prepared = await this.prepare(input, options.semanticRouting, options.adaptive, options.approveProviderCall);
     authorizeAutonomousLaunchDomains(admission, prepared.route.selected_domains);
     return this.executeAdaptiveCyclePrepared(prepared, options);

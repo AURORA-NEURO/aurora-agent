@@ -19176,6 +19176,60 @@ class AutonomousAgent:
             **kwargs,
         )
 
+    def run_auto_with_launch_admission(
+        self,
+        *,
+        task: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        **kwargs: Any,
+    ) -> AutonomousAutoResult:
+        """Route automatically, enforce admission, then enter the ordinary automatic runtime.
+
+        The first route compilation is provider-free and is the route whose selected domains are
+        checked.  Provider-assisted semantic routing is intentionally rejected here because its
+        classifier call would occur before a final domain-scoped admission; callers can admit that
+        separate boundary explicitly through the semantic-routing APIs.
+        """
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        semantic_routing = kwargs.get("semantic_routing", False)
+        if not isinstance(semantic_routing, bool):
+            raise BrainRunError("semantic_routing must be a boolean")
+        if semantic_routing:
+            raise BrainRunError(
+                "launch-admitted automatic execution requires provider-free routing; "
+                "admit semantic routing separately before enabling it"
+            )
+        route_options = {
+            key: kwargs[key]
+            for key in (
+                "hints",
+                "min_confidence",
+                "min_margin",
+                "max_domains",
+                "allow_cross_domain",
+                "context",
+                "constraints",
+                "desired_outputs",
+                "capability",
+                "risk_class",
+                "max_steps",
+                "require_json",
+                "structured_domain_response",
+                "response_schema",
+                "execution_mode",
+                "max_input_tokens",
+                "required_model_capabilities",
+                "memory_episodes",
+            )
+            if key in kwargs
+        }
+        blueprint = self.prepare_auto(task=task, **route_options)
+        authorize_autonomous_launch_domains(launch_admission, blueprint.route.selected_domains)
+        return self.run_auto(task=task, credentials=credentials, **kwargs)
+
     def run_learning(
         self,
         *,

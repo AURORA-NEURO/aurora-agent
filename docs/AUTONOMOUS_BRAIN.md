@@ -2054,6 +2054,8 @@ and `executeAdaptiveCycleWithLaunchAdmission`; Python exposes
 the admission after provider-free route planning and before connector or provider dispatch, and
 requires every final route domain to be explicitly approved. Provider, source, tool, learner,
 queue, and effect approvals remain independent.
+Admission-aware automatic execution uses provider-free routing; provider-assisted semantic routing
+must be reviewed as a separate classifier boundary before it can be combined with a launch record.
 
 ### Live model inventory synchronization
 

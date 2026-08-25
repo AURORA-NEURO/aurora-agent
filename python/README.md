@@ -826,6 +826,9 @@ For an execution-bound check, use `authorize_autonomous_launch_domains(...)` or 
 `run_with_launch_admission(...)` and `run_cross_domain_with_launch_admission(...)`. They enforce
 approval before credential resolution/orchestration and still require the ordinary provider,
 tool, learner, and effect approvals.
+`run_auto_with_launch_admission(...)` provides the same gate for automatic single/cross-domain
+routing and refuses provider-assisted semantic routing until that classifier boundary is separately
+reviewed.
 
 `AutonomousBrainControlPlaneMonitor` and `AsyncAutonomousBrainControlPlaneMonitor` provide the
 operator-side lifecycle for jobs returned by `BrainControlClient`. They fan out bounded status

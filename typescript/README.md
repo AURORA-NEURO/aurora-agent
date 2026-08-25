@@ -298,6 +298,8 @@ For execution-bound enforcement, use `executeWithLaunchAdmission(...)`,
 methods validate the record after provider-free route planning and before connector/provider
 dispatch, requiring every final route domain to be approved while preserving the independent
 provider, tool, learner, and effect controls.
+Admission-aware execution intentionally requires provider-free routing; provider-assisted semantic
+routing must be admitted as a separate classifier boundary first.
 
 ### Keyless capability activation and restart-safe tool admission
 

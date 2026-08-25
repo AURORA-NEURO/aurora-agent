@@ -1627,3 +1627,12 @@ to the exact preflight digest, retain all twelve domain admission states, requir
 authorization digest for approval, and never turn the record into provider, source, tool, learner,
 credential, queue, or effect authority. Deployment-owned schedulers still decide whether and how
 to bind that review record to execution.
+
+Launch admission is now executable at the high-level boundary as well. TypeScript direct,
+decision-cycle, and adaptive-cycle facade entrypoints validate the admission after provider-free
+route planning and before connector/provider dispatch; Python direct and cross-domain wrappers do
+the same, and `run_auto_with_launch_admission` covers automatic single/cross-domain routing. The
+automatic paths reject provider-assisted semantic routing until that classifier boundary is
+separately reviewed, preventing a provider call from occurring before a domain-scoped launch
+decision. Provider, source, tool, learner, queue, credential, and effect authority remain
+independent deployment controls.
