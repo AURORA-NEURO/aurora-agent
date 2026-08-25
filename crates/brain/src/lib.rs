@@ -67,6 +67,7 @@ pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
 pub mod throughput_research_workbench;
 pub mod throughput_retrieval_contract_model;
+pub mod throughput_retrieval_copilot;
 pub mod throughput_retrieval_synthesis;
 pub mod throughput_safety_assurance;
 
@@ -317,6 +318,13 @@ pub use throughput_retrieval_contract_model::{
     ThroughputRetrievalContractRequest,
     CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_RETRIEVAL_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_retrieval_copilot::{
+    compile_throughput_retrieval_copilot, throughput_retrieval_copilot_manifest,
+    ThroughputRetrievalCopilotError, ThroughputRetrievalCopilotReceipt,
+    ThroughputRetrievalCopilotRequest,
+    CONTRACT_VERSION as THROUGHPUT_RETRIEVAL_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_RETRIEVAL_COPILOT_FEATURE_ID,
 };
 pub use throughput_retrieval_synthesis::{
     synthesize_throughput_retrieval, throughput_retrieval_synthesis_manifest,
