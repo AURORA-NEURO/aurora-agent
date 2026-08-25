@@ -806,6 +806,19 @@ def _sequence(name: str, value: Any, *, maximum: int = MAX_AUTONOMY_LIST_ITEMS) 
     return tuple(result)
 
 
+def _cross_domain_subtask_domains_for_launch_admission(
+    subtasks: Sequence[Mapping[str, Any]],
+) -> tuple[str, ...]:
+    """Extract and validate specialist domains before execution setup begins."""
+
+    requested_domains: list[str] = []
+    for index, subtask in enumerate(subtasks):
+        if not isinstance(subtask, Mapping) or not isinstance(subtask.get("domain"), str):
+            raise BrainRunError(f"cross-domain launch admission subtask {index} has no valid domain")
+        requested_domains.append(subtask["domain"])
+    return tuple(requested_domains)
+
+
 def _safe_json(name: str, value: Any, *, maximum: int = MAX_AUTONOMY_CONTEXT_BYTES) -> Any:
     try:
         BrainLearningLedger._assert_safe(value)
@@ -16475,6 +16488,43 @@ class AutonomousAgent:
             **kwargs,
         )
 
+    def run_capability_with_launch_admission(
+        self,
+        *,
+        task: str,
+        domain: str,
+        capability: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        approve_capability: bool = False,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Run a reviewed capability only after its domain is launch-admitted.
+
+        The admission check deliberately precedes capability-plan compilation, credential
+        resolution, and provider/tool setup.  This makes the capability facade safe to call
+        from a host process that has not yet collected credentials or opened external tool
+        transports.
+        """
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (domain,))
+        return self.run_capability(
+            task=task,
+            domain=domain,
+            capability=capability,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            approve_capability=approve_capability,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def execution_plans(
         self,
         domains: Sequence[str] | None = None,
@@ -21362,6 +21412,36 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_cross_domain_learning_with_launch_admission(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainLearningResult:
+        """Run adaptive fan-out/fan-in only after every specialist domain is admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        requested_domains = _cross_domain_subtask_domains_for_launch_admission(subtasks)
+        authorize_autonomous_launch_domains(launch_admission, requested_domains)
+        return self.run_cross_domain_learning(
+            task=task,
+            subtasks=subtasks,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_cross_domain_with_launch_admission(
         self,
         *,
@@ -21378,11 +21458,7 @@ class AutonomousAgent:
 
         from .autonomous_launch_admission import authorize_autonomous_launch_domains
 
-        requested_domains: list[str] = []
-        for index, subtask in enumerate(subtasks):
-            if not isinstance(subtask, Mapping) or not isinstance(subtask.get("domain"), str):
-                raise BrainRunError(f"cross-domain launch admission subtask {index} has no valid domain")
-            requested_domains.append(subtask["domain"])
+        requested_domains = _cross_domain_subtask_domains_for_launch_admission(subtasks)
         authorize_autonomous_launch_domains(launch_admission, requested_domains)
         return self.run_cross_domain(
             task=task,
@@ -21444,6 +21520,36 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_cross_domain_trajectory_learning_with_launch_admission(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainTrajectoryLearningResult:
+        """Run trajectory learning only after every specialist domain is admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        requested_domains = _cross_domain_subtask_domains_for_launch_admission(subtasks)
+        authorize_autonomous_launch_domains(launch_admission, requested_domains)
+        return self.run_cross_domain_trajectory_learning(
+            task=task,
+            subtasks=subtasks,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_cross_domain_replan_learning(
         self,
         *,
@@ -21494,6 +21600,36 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_cross_domain_replan_learning_with_launch_admission(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainReplanResult:
+        """Run bounded cross-domain replanning only after every domain is admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        requested_domains = _cross_domain_subtask_domains_for_launch_admission(subtasks)
+        authorize_autonomous_launch_domains(launch_admission, requested_domains)
+        return self.run_cross_domain_replan_learning(
+            task=task,
+            subtasks=subtasks,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_workflow(
         self,
         *,
@@ -21530,6 +21666,31 @@ class AutonomousAgent:
             raise
         self._finish_execution(execution_controller, result=result)
         return result
+
+    def run_workflow_with_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousWorkflowRun:
+        """Run a reviewed workflow only after its blueprint domain is admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (blueprint.spec.domain,))
+        return self.run_workflow(
+            blueprint=blueprint,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
 
     def run_workflow_with_trace(
         self,
@@ -21581,6 +21742,31 @@ class AutonomousAgent:
             raise
         return AutonomousTracedRunResult(result=result, trace=session.summary())
 
+    def run_workflow_with_trace_and_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousTracedRunResult:
+        """Trace a workflow only after its blueprint domain is launch-admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (blueprint.spec.domain,))
+        return self.run_workflow_with_trace(
+            blueprint=blueprint,
+            credentials=credentials,
+            trace_store=trace_store,
+            run_id=run_id,
+            model_candidates=model_candidates,
+            **kwargs,
+        )
+
     def run_workflow_learning(
         self,
         *,
@@ -21619,6 +21805,33 @@ class AutonomousAgent:
             raise
         self._finish_execution(execution_controller, result=result)
         return result
+
+    def run_workflow_learning_with_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousWorkflowLearningResult:
+        """Run workflow learning only after its blueprint domain is launch-admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (blueprint.spec.domain,))
+        return self.run_workflow_learning(
+            blueprint=blueprint,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
 
     def run_workflow_cycle(
         self,
@@ -21664,6 +21877,33 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_workflow_cycle_with_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> "AutonomousWorkflowCycleResult":
+        """Run a workflow recovery cycle only after its domain is launch-admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (blueprint.spec.domain,))
+        return self.run_workflow_cycle(
+            blueprint=blueprint,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_workflow_trajectory_learning(
         self,
         *,
@@ -21702,6 +21942,33 @@ class AutonomousAgent:
             raise
         self._finish_execution(execution_controller, result=result)
         return result
+
+    def run_workflow_trajectory_learning_with_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousWorkflowTrajectoryLearningResult:
+        """Run workflow trajectory learning only after its domain is launch-admitted."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (blueprint.spec.domain,))
+        return self.run_workflow_trajectory_learning(
+            blueprint=blueprint,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            bandit_state=bandit_state,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
 
     def run_cross_domain(
         self,

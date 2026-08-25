@@ -9,6 +9,7 @@ from prism_sdk import (
     AutonomousAgent,
     BrainRunError,
     CredentialStore,
+    InMemoryAutonomousRunTraceStore,
     LLMRuntime,
     ModelCatalogue,
     authorize_autonomous_launch_domains,
@@ -215,6 +216,59 @@ def test_launch_admission_covers_explicit_cross_domain_and_resumable_batches_bef
             launch_admission=held,
             credentials={},
         )
+
+
+def test_launch_admission_covers_capability_workflow_and_learning_facades_before_credentials() -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    held = agent.launch_admission(preflight, decision="hold")
+    blueprint = agent.prepare(task="review the implementation", domain="coding")
+    common = {
+        "blueprint": blueprint,
+        "launch_admission": held,
+        "credentials": {},
+    }
+
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_capability_with_launch_admission(
+            task="review the implementation",
+            domain="coding",
+            capability="implement",
+            launch_admission=held,
+            credentials={},
+        )
+
+    for method_name in (
+        "run_workflow_with_launch_admission",
+        "run_workflow_learning_with_launch_admission",
+        "run_workflow_cycle_with_launch_admission",
+        "run_workflow_trajectory_learning_with_launch_admission",
+    ):
+        with pytest.raises(ArgumentError, match="not approved"):
+            getattr(agent, method_name)(**common)
+
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_workflow_with_trace_and_launch_admission(
+            **common,
+            trace_store=InMemoryAutonomousRunTraceStore(),
+        )
+
+    subtasks = [
+        {"id": "coding", "task": "review the implementation", "domain": "coding"},
+        {"id": "data", "task": "check the measurements", "domain": "data"},
+    ]
+    for method_name in (
+        "run_cross_domain_learning_with_launch_admission",
+        "run_cross_domain_trajectory_learning_with_launch_admission",
+        "run_cross_domain_replan_learning_with_launch_admission",
+    ):
+        with pytest.raises(ArgumentError, match="not approved"):
+            getattr(agent, method_name)(
+                task="coordinate the review",
+                subtasks=subtasks,
+                launch_admission=held,
+                credentials={},
+            )
 
 
 def test_launch_admission_rejects_semantic_routing_in_automatic_batches_before_dispatch() -> None:

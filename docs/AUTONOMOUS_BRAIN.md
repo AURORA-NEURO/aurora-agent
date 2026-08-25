@@ -310,6 +310,20 @@ digest, and approved-domain metadata, never the approval reason, task text, key,
 provider value. Automatic admission intentionally rejects `--semantic-routing` because a provider
 classifier must be reviewed as its own boundary before its route can be admitted.
 
+The same process boundary is available for every high-level Python facade. Use
+`run_capability_with_launch_admission(...)` for focused capability dispatch,
+`run_workflow_with_launch_admission(...)` and
+`run_workflow_with_trace_and_launch_admission(...)` for staged execution, and the
+`run_workflow_learning_with_launch_admission(...)`,
+`run_workflow_cycle_with_launch_admission(...)`, and
+`run_workflow_trajectory_learning_with_launch_admission(...)` variants for adaptive workflow
+execution. Cross-domain execution has matching admission wrappers for ordinary fan-out, online
+learning, delayed trajectory learning, and bounded replanning. Each wrapper validates the
+blueprint or complete specialist-domain set before compiling capability plans, resolving
+credentials, restoring execution state, or constructing provider/tool work. Admission is an
+additional process gate; it never replaces provider, capability, tool, learner, or effect
+approval.
+
 Model inventory can also be discovered from a registered provider. Discovery is bounded and
 approval-gated because it is a provider call; the runtime immediately projects each row into a
 `ProviderModelDescriptor` and discards the provider response. The CLI returns only model ids,

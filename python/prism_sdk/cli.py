@@ -2793,12 +2793,21 @@ def _run(
                 if args.capability is not None:
                     capability_options = dict(common)
                     capability_options.pop("capability", None)
-                    result = agent.run_capability(
-                        **capability_options,
-                        domain=args.domain,
-                        capability=args.capability,
-                        approve_capability=args.approve_capability,
-                    )
+                    if launch_admission is None:
+                        result = agent.run_capability(
+                            **capability_options,
+                            domain=args.domain,
+                            capability=args.capability,
+                            approve_capability=args.approve_capability,
+                        )
+                    else:
+                        result = agent.run_capability_with_launch_admission(
+                            **capability_options,
+                            domain=args.domain,
+                            capability=args.capability,
+                            approve_capability=args.approve_capability,
+                            launch_admission=launch_admission,
+                        )
                 else:
                     if launch_admission is None:
                         result = agent.run(**common, domain=args.domain)

@@ -826,6 +826,12 @@ For an execution-bound check, use `authorize_autonomous_launch_domains(...)` or 
 `run_with_launch_admission(...)` and `run_cross_domain_with_launch_admission(...)`. They enforce
 approval before credential resolution/orchestration and still require the ordinary provider,
 tool, learner, and effect approvals.
+The focused and workflow facades expose the same ordering through
+`run_capability_with_launch_admission(...)`,
+`run_workflow_with_launch_admission(...)`,
+`run_workflow_with_trace_and_launch_admission(...)`, and their learning/cycle/trajectory
+variants. Cross-domain learning and replanning variants validate every specialist domain before
+they enter the shared credential or execution controller.
 `run_auto_with_launch_admission(...)` provides the same gate for automatic single/cross-domain
 routing and refuses provider-assisted semantic routing until that classifier boundary is separately
 reviewed.
