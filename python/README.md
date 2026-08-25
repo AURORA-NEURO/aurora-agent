@@ -822,6 +822,11 @@ cannot become approved through this method, and the admission record still does 
 source, tool, queue, learner, credential, or effect authority; the deployment-owned executor must
 bind it to its own authorization and dispatch policy.
 
+For an execution-bound check, use `authorize_autonomous_launch_domains(...)` or the facade methods
+`run_with_launch_admission(...)` and `run_cross_domain_with_launch_admission(...)`. They enforce
+approval before credential resolution/orchestration and still require the ordinary provider,
+tool, learner, and effect approvals.
+
 `AutonomousBrainControlPlaneMonitor` and `AsyncAutonomousBrainControlPlaneMonitor` provide the
 operator-side lifecycle for jobs returned by `BrainControlClient`. They fan out bounded status
 reads across the twelve domains, validate hash-chained event cursors, issue explicit approval

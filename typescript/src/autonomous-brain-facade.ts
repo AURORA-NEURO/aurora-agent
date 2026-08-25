@@ -73,6 +73,7 @@ import {
   type AutonomousLaunchPreflightReport,
 } from "./autonomous-launch-preflight.js";
 import {
+  authorizeAutonomousLaunchDomains,
   createAutonomousLaunchAdmission,
   type AutonomousLaunchAdmissionOptions,
   type AutonomousLaunchAdmissionReport,
@@ -998,6 +999,21 @@ export class AutonomousBrainFacade {
   }
 
   /**
+   * Execute only when a caller-owned admission explicitly covers the final reviewed route.
+   * Planning remains provider-free; the admission check is the last facade decision before
+   * connector and provider dispatch.  Provider/effect approval is still independently required.
+   */
+  async executeWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainExecuteOptions = {},
+  ): Promise<AutonomousBrainExecution> {
+    const prepared = await this.prepare(input, selectBrainSemanticRouting(options.semanticRouting, options.run?.semanticRouting), options.run, options.approveProviderCall);
+    authorizeAutonomousLaunchDomains(admission, prepared.route.selected_domains);
+    return this.executePrepared(prepared, options);
+  }
+
+  /**
    * Execute the complete reviewed brain boundary while retaining a caller-owned trace of plan,
    * connector, provider, and terminal transitions. The trace never receives transient values.
    */
@@ -1031,6 +1047,17 @@ export class AutonomousBrainFacade {
   /** Execute the closed-loop route -> invoke -> evaluate -> learn cycle behind the same plan boundary. */
   async executeCycle(input: AutonomousBrainRequest, options: AutonomousBrainCycleOptions = {}): Promise<AutonomousBrainCycleExecution> {
     const prepared = await this.prepare(input, options.semanticRouting, options.cycle, options.approveProviderCall);
+    return this.executeCyclePrepared(prepared, options);
+  }
+
+  /** Run the closed-loop cycle only when the reviewed route is covered by launch admission. */
+  async executeCycleWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainCycleOptions = {},
+  ): Promise<AutonomousBrainCycleExecution> {
+    const prepared = await this.prepare(input, options.semanticRouting, options.cycle, options.approveProviderCall);
+    authorizeAutonomousLaunchDomains(admission, prepared.route.selected_domains);
     return this.executeCyclePrepared(prepared, options);
   }
 
@@ -1069,6 +1096,17 @@ export class AutonomousBrainFacade {
    */
   async executeAdaptiveCycle(input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleOptions): Promise<AutonomousBrainAdaptiveCycleExecution> {
     const prepared = await this.prepare(input, options.semanticRouting, options.adaptive, options.approveProviderCall);
+    return this.executeAdaptiveCyclePrepared(prepared, options);
+  }
+
+  /** Run the bounded evaluator/replan loop only when every reviewed route domain is admitted. */
+  async executeAdaptiveCycleWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAdaptiveCycleOptions,
+  ): Promise<AutonomousBrainAdaptiveCycleExecution> {
+    const prepared = await this.prepare(input, options.semanticRouting, options.adaptive, options.approveProviderCall);
+    authorizeAutonomousLaunchDomains(admission, prepared.route.selected_domains);
     return this.executeAdaptiveCyclePrepared(prepared, options);
   }
 

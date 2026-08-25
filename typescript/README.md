@@ -293,6 +293,12 @@ selected domain is still blocked or partial. Validate it with `validateAutonomou
 before binding it to a deployment-owned scheduler; the record remains separate from provider,
 source, tool, credential, learner, queue, and effect authority.
 
+For execution-bound enforcement, use `executeWithLaunchAdmission(...)`,
+`executeCycleWithLaunchAdmission(...)`, or `executeAdaptiveCycleWithLaunchAdmission(...)`. These
+methods validate the record after provider-free route planning and before connector/provider
+dispatch, requiring every final route domain to be approved while preserving the independent
+provider, tool, learner, and effect controls.
+
 ### Keyless capability activation and restart-safe tool admission
 
 Readiness is descriptive; activation is the explicit lifecycle that turns a reviewed catalogue

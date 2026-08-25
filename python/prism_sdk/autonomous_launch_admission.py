@@ -326,6 +326,45 @@ def validate_autonomous_launch_admission(value: Mapping[str, Any]) -> dict[str, 
     return report
 
 
+def authorize_autonomous_launch_domains(
+    value: Mapping[str, Any],
+    requested_domains: Sequence[str],
+) -> dict[str, Any]:
+    """Enforce an approved launch record immediately before execution dispatch.
+
+    This is deliberately narrower than provider or effect approval.  It verifies the admission
+    record's own digest, requires an ``approved`` record, and proves that every requested built-in
+    domain is one of the explicitly approved rows.  Callers must still pass the normal provider,
+    source, tool, learner, and effect approvals to the downstream execution APIs.
+    """
+
+    report = validate_autonomous_launch_admission(value)
+    if report["status"] != "approved":
+        raise ArgumentError("launch admission is not approved for execution")
+    if isinstance(requested_domains, (str, bytes)) or not isinstance(requested_domains, Sequence):
+        raise ArgumentError("launch admission requested_domains must be a sequence")
+    normalized = []
+    for index, domain in enumerate(requested_domains):
+        normalized_domain = _text(f"launch admission requested_domains[{index}]", domain, 128)
+        if normalized_domain not in AUTONOMOUS_DOMAIN_NAMES:
+            raise ArgumentError("launch admission requested_domains contains an unsupported domain")
+        if normalized_domain not in normalized:
+            normalized.append(normalized_domain)
+    if not normalized:
+        raise ArgumentError("launch admission requires at least one requested domain")
+    approved = {
+        row["domain"]
+        for row in report["domains"]
+        if row["admission_state"] == "approved"
+    }
+    missing = sorted(set(normalized) - approved)
+    if missing:
+        raise ArgumentError(
+            "launch admission does not approve requested domains: " + ", ".join(missing)
+        )
+    return report
+
+
 __all__ = [
     "AUTONOMOUS_LAUNCH_ADMISSION_SCHEMA",
     "AUTONOMOUS_LAUNCH_ADMISSION_DOMAIN_SCHEMA",
@@ -333,4 +372,5 @@ __all__ = [
     "MAX_AUTONOMOUS_LAUNCH_ADMISSION_ACTIONS",
     "create_autonomous_launch_admission",
     "validate_autonomous_launch_admission",
+    "authorize_autonomous_launch_domains",
 ]

@@ -2048,6 +2048,13 @@ digest for approval, and hashes any review reason instead of retaining it. Parti
 cannot be promoted by the SDK. This is a restart-safe review handoff, not a replacement for the
 deployment's authorization service or execution boundary.
 
+The TypeScript facade exposes `executeWithLaunchAdmission`, `executeCycleWithLaunchAdmission`,
+and `executeAdaptiveCycleWithLaunchAdmission`; Python exposes
+`run_with_launch_admission` and `run_cross_domain_with_launch_admission`. Each gate validates
+the admission after provider-free route planning and before connector or provider dispatch, and
+requires every final route domain to be explicitly approved. Provider, source, tool, learner,
+queue, and effect approvals remain independent.
+
 ### Live model inventory synchronization
 
 `readiness()` intentionally does not contact providers. When an application wants to refresh the

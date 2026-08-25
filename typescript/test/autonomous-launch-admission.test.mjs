@@ -95,3 +95,23 @@ test("launch admission refuses missing authority, tampering, and secret-shaped f
   assert.throws(() => validateAutonomousLaunchAdmission(tampered), /secret-shaped/);
   fixture.session.close();
 });
+
+test("launch admission gates facade execution before dispatch and checks route coverage", async () => {
+  const fixture = await readyBrain();
+  try {
+    const coding = fixture.brain.admitLaunchPreflight(fixture.preflight, { decision: "approve", approvedDomains: ["coding"], authorizationDigest: "d".repeat(64) });
+    const review = await fixture.brain.executeWithLaunchAdmission({ task: "write a small function", domain: "coding" }, coding, { approveProviderCall: false });
+    assert.equal(review.status, "approval_required");
+    await assert.rejects(
+      () => fixture.brain.executeWithLaunchAdmission({ task: "write a small function", domain: "biomedical" }, coding, { approveProviderCall: false }),
+      /does not approve requested domains/,
+    );
+    const held = fixture.brain.admitLaunchPreflight(fixture.preflight, { decision: "hold" });
+    await assert.rejects(
+      () => fixture.brain.executeWithLaunchAdmission({ task: "write a small function", domain: "coding" }, held, { approveProviderCall: false }),
+      /not approved/,
+    );
+  } finally {
+    fixture.session.close();
+  }
+});

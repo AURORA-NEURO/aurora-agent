@@ -1714,6 +1714,7 @@ export {
   AUTONOMOUS_LAUNCH_ADMISSION_DOMAIN_SCHEMA,
   MAX_AUTONOMOUS_LAUNCH_ADMISSION_BYTES,
   MAX_AUTONOMOUS_LAUNCH_ADMISSION_ACTIONS,
+  authorizeAutonomousLaunchDomains,
   createAutonomousLaunchAdmission,
   validateAutonomousLaunchAdmission,
 } from "./autonomous-launch-admission.js";

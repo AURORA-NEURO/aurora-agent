@@ -10,6 +10,7 @@ from prism_sdk import (
     CredentialStore,
     LLMRuntime,
     ModelCatalogue,
+    authorize_autonomous_launch_domains,
     create_autonomous_launch_admission,
     openai_provider,
     validate_autonomous_launch_admission,
@@ -137,3 +138,27 @@ def test_launch_admission_rejects_missing_authority_and_tampering() -> None:
     tampered["api_key"] = "must-not-cross"
     with pytest.raises(ArgumentError, match="secret-shaped"):
         validate_autonomous_launch_admission(tampered)
+
+
+def test_launch_admission_gate_blocks_before_execution_and_checks_route_coverage() -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    coding = agent.launch_admission(
+        preflight,
+        decision="approve",
+        approved_domains=("coding",),
+        authorization_digest="d" * 64,
+    )
+    authorize_autonomous_launch_domains(coding, ("coding",))
+    with pytest.raises(ArgumentError, match="does not approve requested domains"):
+        authorize_autonomous_launch_domains(coding, ("biomedical",))
+
+    held = agent.launch_admission(preflight, decision="hold")
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_with_launch_admission(
+            task="write a small function",
+            domain="coding",
+            launch_admission=held,
+            credentials={},
+            approve_provider_call=False,
+        )

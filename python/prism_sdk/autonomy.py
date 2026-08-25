@@ -19144,6 +19144,38 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_with_launch_admission(
+        self,
+        *,
+        task: str,
+        domain: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Run one domain only when a caller-owned launch admission covers it.
+
+        The admission check happens before credential resolution and orchestration.  It is an
+        additional launch gate, not a replacement for provider, tool, learner, or effect approval
+        supplied through ``kwargs``.
+        """
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, (domain,))
+        return self.run(
+            task=task,
+            domain=domain,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     def run_learning(
         self,
         *,
@@ -20954,6 +20986,38 @@ class AutonomousAgent:
             raise
         self._finish_execution(execution_controller, result=result)
         return result
+
+    def run_cross_domain_with_launch_admission(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousCrossDomainResult:
+        """Run a fan-out/fan-in task only when admission covers every specialist domain."""
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        requested_domains: list[str] = []
+        for index, subtask in enumerate(subtasks):
+            if not isinstance(subtask, Mapping) or not isinstance(subtask.get("domain"), str):
+                raise BrainRunError(f"cross-domain launch admission subtask {index} has no valid domain")
+            requested_domains.append(subtask["domain"])
+        authorize_autonomous_launch_domains(launch_admission, requested_domains)
+        return self.run_cross_domain(
+            task=task,
+            subtasks=subtasks,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
 
     def run_cross_domain_trajectory_learning(
         self,

@@ -259,3 +259,23 @@ export function validateAutonomousLaunchAdmission(value: unknown): AutonomousLau
   strings("launch admission next_actions", value.next_actions, MAX_AUTONOMOUS_LAUNCH_ADMISSION_ACTIONS);
   return clone(value as unknown as AutonomousLaunchAdmissionReport);
 }
+
+/** Enforce an approved launch record immediately before execution dispatch. */
+export function authorizeAutonomousLaunchDomains(
+  value: unknown,
+  requestedDomains: readonly typeof AUTONOMOUS_DOMAIN_NAMES[number][],
+): AutonomousLaunchAdmissionReport {
+  const report = validateAutonomousLaunchAdmission(value);
+  if (report.status !== "approved") throw new ArgumentError("launch admission is not approved for execution");
+  if (!Array.isArray(requestedDomains) || requestedDomains.length < 1 || requestedDomains.length > AUTONOMOUS_DOMAIN_NAMES.length) throw new ArgumentError("launch admission requestedDomains must contain one to twelve domains");
+  const unique = new Set<string>();
+  for (const [index, domain] of requestedDomains.entries()) {
+    if (typeof domain !== "string" || !AUTONOMOUS_DOMAIN_NAMES.includes(domain as typeof AUTONOMOUS_DOMAIN_NAMES[number])) throw new ArgumentError(`launch admission requestedDomains[${index}] contains an unsupported domain`);
+    unique.add(domain);
+  }
+  if (unique.size !== requestedDomains.length) throw new ArgumentError("launch admission requestedDomains must be unique");
+  const approved = new Set<typeof AUTONOMOUS_DOMAIN_NAMES[number]>(report.domains.filter((row) => row.admission_state === "approved").map((row) => row.domain));
+  const missing = [...unique].filter((domain) => !approved.has(domain as typeof AUTONOMOUS_DOMAIN_NAMES[number])).sort();
+  if (missing.length) throw new ArgumentError(`launch admission does not approve requested domains: ${missing.join(", ")}`);
+  return report;
+}

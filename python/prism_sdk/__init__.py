@@ -285,6 +285,7 @@ from .autonomous_launch_admission import (
     AUTONOMOUS_LAUNCH_ADMISSION_DOMAIN_SCHEMA,
     MAX_AUTONOMOUS_LAUNCH_ADMISSION_BYTES,
     MAX_AUTONOMOUS_LAUNCH_ADMISSION_ACTIONS,
+    authorize_autonomous_launch_domains,
     create_autonomous_launch_admission,
     validate_autonomous_launch_admission,
 )
@@ -4058,6 +4059,7 @@ __all__ = [
     "AUTONOMOUS_LAUNCH_ADMISSION_DOMAIN_SCHEMA",
     "MAX_AUTONOMOUS_LAUNCH_ADMISSION_BYTES",
     "MAX_AUTONOMOUS_LAUNCH_ADMISSION_ACTIONS",
+    "authorize_autonomous_launch_domains",
     "create_autonomous_launch_admission",
     "validate_autonomous_launch_admission",
     "BRAIN_EVALUATOR_REPLAY_SCHEMA",
