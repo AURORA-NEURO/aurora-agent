@@ -852,6 +852,18 @@ The focused and workflow facades expose the same ordering through
 `run_workflow_with_trace_and_launch_admission(...)`, and their learning/cycle/trajectory
 variants. Cross-domain learning and replanning variants validate every specialist domain before
 they enter the shared credential or execution controller.
+The same process gate is available for direct learning, traced runs, evidence-backed and
+resumable evidence execution, connector workflows/missions, and reviewed capability dispatch:
+`run_learning_with_launch_admission(...)`,
+`run_with_trace_and_launch_admission(...)`,
+`run_cross_domain_with_trace_and_launch_admission(...)`, the
+`run_with_*_evidence_with_launch_admission(...)` and
+`run_resumable_*_evidence_with_launch_admission(...)` variants,
+`run_connector_workflow_with_launch_admission(...)`,
+`run_connector_mission_with_launch_admission(...)`, and
+`execute_capability_with_launch_admission(...)`/`execute_capability_batch_with_launch_admission(...)`.
+They authorize before trace, evidence, connector, tool, learner, credential, or provider setup;
+omitted evidence domains are conservatively treated as the complete twelve-domain scope.
 `run_auto_with_launch_admission(...)` provides the same gate for automatic single/cross-domain
 routing and refuses provider-assisted semantic routing until that classifier boundary is separately
 reviewed.

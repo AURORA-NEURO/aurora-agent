@@ -819,6 +819,45 @@ def _cross_domain_subtask_domains_for_launch_admission(
     return tuple(requested_domains)
 
 
+def _authorize_launch_admission_domains(
+    launch_admission: Mapping[str, Any],
+    requested_domains: Sequence[str],
+) -> dict[str, Any]:
+    """Use one lazy process-boundary gate for every autonomous execution surface."""
+
+    from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+    return authorize_autonomous_launch_domains(launch_admission, requested_domains)
+
+
+def _launch_admission_domains(domains: Sequence[str] | None) -> Sequence[str]:
+    """Resolve an omitted evidence scope conservatively to the complete reviewed domain set."""
+
+    return AUTONOMOUS_DOMAINS if domains is None else domains
+
+
+def _capability_request_domains_for_launch_admission(request: Mapping[str, Any]) -> tuple[str, ...]:
+    if not isinstance(request, Mapping):
+        raise BrainRunError("capability launch admission request must be a mapping")
+    context = request.get("workflow_context")
+    if not isinstance(context, Mapping) or not isinstance(context.get("domain"), str):
+        raise BrainRunError("capability launch admission request has no valid workflow domain")
+    return (context["domain"],)
+
+
+def _mission_domains_for_launch_admission(mission: Any) -> tuple[str, ...]:
+    raw_steps = mission.get("steps") if isinstance(mission, Mapping) else getattr(mission, "steps", None)
+    if not isinstance(raw_steps, Sequence) or isinstance(raw_steps, (str, bytes, bytearray)):
+        raise BrainRunError("mission launch admission requires a sequence of domain-labelled steps")
+    domains: list[str] = []
+    for index, step in enumerate(raw_steps):
+        domain = step.get("domain") if isinstance(step, Mapping) else getattr(step, "domain", None)
+        if not isinstance(domain, str):
+            raise BrainRunError(f"mission launch admission step {index} has no valid domain")
+        domains.append(domain)
+    return tuple(domains)
+
+
 def _safe_json(name: str, value: Any, *, maximum: int = MAX_AUTONOMY_CONTEXT_BYTES) -> Any:
     try:
         BrainLearningLedger._assert_safe(value)
@@ -15145,6 +15184,20 @@ class AutonomousAgent:
             run_options=run_options,
         )
 
+    def run_with_reviewed_evidence_with_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Acquire reviewed evidence only after its complete domain scope is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _launch_admission_domains(kwargs.get("domains")),
+        )
+        return self.run_with_reviewed_evidence(**kwargs)
+
     def run_with_llm_evidence(
         self,
         *,
@@ -15183,6 +15236,20 @@ class AutonomousAgent:
             projector=selected_projector,
             **kwargs,
         )
+
+    def run_with_llm_evidence_with_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run adapter-backed evidence acquisition only after its domain scope is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _launch_admission_domains(kwargs.get("domains")),
+        )
+        return self.run_with_llm_evidence(**kwargs)
 
     def run_with_domain_evidence_catalogue(
         self,
@@ -15241,6 +15308,20 @@ class AutonomousAgent:
             run_options=run_options,
         )
 
+    def run_with_domain_evidence_catalogue_with_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run catalogue-backed evidence workflows only after their domain scope is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _launch_admission_domains(kwargs.get("domains")),
+        )
+        return self.run_with_domain_evidence_catalogue(**kwargs)
+
     def run_resumable_evidence_backed(self, **kwargs: Any) -> Any:
         """Run or resume reviewed evidence-backed work through a caller checkpoint sink.
 
@@ -15252,6 +15333,20 @@ class AutonomousAgent:
         from .autonomous_evidence_backed_resumable import run_autonomous_evidence_backed_resumable
 
         return run_autonomous_evidence_backed_resumable(self, **kwargs)
+
+    def run_resumable_evidence_backed_with_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run or resume evidence-backed work only after its complete scope is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _launch_admission_domains(kwargs.get("domains")),
+        )
+        return self.run_resumable_evidence_backed(**kwargs)
 
     def run_resumable_llm_evidence(
         self,
@@ -15282,6 +15377,20 @@ class AutonomousAgent:
             projector=selected_projector,
             **kwargs,
         )
+
+    def run_resumable_llm_evidence_with_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run or resume adapter-backed evidence only after its domain scope is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _launch_admission_domains(kwargs.get("domains")),
+        )
+        return self.run_resumable_llm_evidence(**kwargs)
 
     def evidence_backed_controller(self, job_id: str, persistence: Any) -> Any:
         """Create a serialized, optionally CAS-fenced evidence-backed restart controller."""
@@ -15501,6 +15610,19 @@ class AutonomousAgent:
         except Exception as error:
             raise BrainRunError("connector workflow execution failed") from error
 
+    def run_connector_workflow_with_launch_admission(
+        self,
+        *,
+        blueprint: AutonomousTaskBlueprint,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run a connector workflow only after the blueprint domain passes launch admission."""
+
+        domain = getattr(getattr(blueprint, "spec", None), "domain", None)
+        _authorize_launch_admission_domains(launch_admission, (domain,))
+        return self.run_connector_workflow(blueprint=blueprint, **kwargs)
+
     def run_connector_mission(
         self,
         *,
@@ -15551,6 +15673,21 @@ class AutonomousAgent:
             raise
         except Exception as error:
             raise BrainRunError("connector mission execution failed") from error
+
+    def run_connector_mission_with_launch_admission(
+        self,
+        *,
+        mission: Any,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Run a connector mission only after every domain-labelled step is admitted."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _mission_domains_for_launch_admission(mission),
+        )
+        return self.run_connector_mission(mission=mission, **kwargs)
 
     def connector_selection_plan(
         self,
@@ -16851,6 +16988,24 @@ class AutonomousAgent:
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("capability execution request was rejected") from error
 
+    def execute_capability_with_launch_admission(
+        self,
+        request: Mapping[str, Any],
+        *,
+        launch_admission: Mapping[str, Any],
+        project_observations: Callable[[Any, Mapping[str, Any]], Sequence[Mapping[str, Any]]] | None = None,
+    ) -> AutonomousCapabilityExecutionResult:
+        """Execute one capability only after its workflow domain passes launch admission."""
+
+        _authorize_launch_admission_domains(
+            launch_admission,
+            _capability_request_domains_for_launch_admission(request),
+        )
+        return self.execute_capability(
+            request,
+            project_observations=project_observations,
+        )
+
     def execute_capability_batch(
         self,
         requests: Sequence[Mapping[str, Any]],
@@ -16872,6 +17027,26 @@ class AutonomousAgent:
             )
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("capability batch was rejected") from error
+
+    def execute_capability_batch_with_launch_admission(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        launch_admission: Mapping[str, Any],
+        project_observations: Callable[[Any, Mapping[str, Any]], Sequence[Mapping[str, Any]]] | None = None,
+        max_parallelism: int = 1,
+    ) -> tuple[AutonomousCapabilityExecutionResult, ...]:
+        """Execute a capability batch only after every request domain is admitted."""
+
+        requested_domains: list[str] = []
+        for request in requests:
+            requested_domains.extend(_capability_request_domains_for_launch_admission(request))
+        _authorize_launch_admission_domains(launch_admission, tuple(requested_domains))
+        return self.execute_capability_batch(
+            requests,
+            project_observations=project_observations,
+            max_parallelism=max_parallelism,
+        )
 
     def restore_capability_journal(self) -> dict[str, Any]:
         """Rehydrate committed capability replay identities from the configured journal."""
@@ -19408,6 +19583,36 @@ class AutonomousAgent:
             **options,
         )
 
+    def run_learning_with_launch_admission(
+        self,
+        *,
+        task: str,
+        domain: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Run learning only after the requested domain passes the launch gate.
+
+        Learning changes policy state and therefore uses the same process-boundary admission as
+        ordinary execution.  The check is deliberately before the learner, credential resolver,
+        provider router, and execution controller are constructed.
+        """
+
+        _authorize_launch_admission_domains(launch_admission, (domain,))
+        return self.run_learning(
+            task=task,
+            domain=domain,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            execution_id=execution_id,
+            resume_execution=resume_execution,
+            **kwargs,
+        )
+
     @staticmethod
     def _trace_brain_results(result: Any) -> tuple[BrainRunResult, ...]:
         """Extract only brain envelopes needed to project provider metadata."""
@@ -19531,6 +19736,18 @@ class AutonomousAgent:
             raise
         return AutonomousTracedRunResult(result=result, trace=session.summary())
 
+    def run_with_trace_and_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> AutonomousTracedRunResult:
+        """Run a traced task only when its domain was approved at the launch boundary."""
+
+        domain = kwargs.get("domain")
+        _authorize_launch_admission_domains(launch_admission, (domain,))
+        return self.run_with_trace(**kwargs)
+
     def run_cross_domain_with_trace(
         self,
         *,
@@ -19595,6 +19812,18 @@ class AutonomousAgent:
             session.fail(failure_class=type(error).__name__, failure_code="execution_error")
             raise
         return AutonomousTracedRunResult(result=result, trace=session.summary())
+
+    def run_cross_domain_with_trace_and_launch_admission(
+        self,
+        *,
+        launch_admission: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> AutonomousTracedRunResult:
+        """Run one traced cross-domain fan-out only after every specialist is admitted."""
+
+        requested_domains = _cross_domain_subtask_domains_for_launch_admission(kwargs.get("subtasks", ()))
+        _authorize_launch_admission_domains(launch_admission, requested_domains)
+        return self.run_cross_domain_with_trace(**kwargs)
 
     @staticmethod
     def _batch_controls(max_parallelism: int, stop_on_error: bool) -> tuple[int, bool]:

@@ -324,6 +324,24 @@ credentials, restoring execution state, or constructing provider/tool work. Admi
 additional process gate; it never replaces provider, capability, tool, learner, or effect
 approval.
 
+The same ordering now covers the remaining execution surfaces: use
+`run_learning_with_launch_admission(...)` for direct online learning,
+`run_with_trace_and_launch_admission(...)` and
+`run_cross_domain_with_trace_and_launch_admission(...)` for metadata-only traced runs, and the
+`run_with_reviewed_evidence_with_launch_admission(...)`,
+`run_with_llm_evidence_with_launch_admission(...)`,
+`run_with_domain_evidence_catalogue_with_launch_admission(...)`,
+`run_resumable_evidence_backed_with_launch_admission(...)`, and
+`run_resumable_llm_evidence_with_launch_admission(...)` variants for evidence acquisition and
+restart. Connector workflow/mission dispatch uses
+`run_connector_workflow_with_launch_admission(...)` and
+`run_connector_mission_with_launch_admission(...)`; low-level reviewed tool execution uses
+`execute_capability_with_launch_admission(...)` and
+`execute_capability_batch_with_launch_admission(...)`. These checks happen before trace-store,
+evidence-adapter, connector-runtime, capability-runtime, learner, or credential setup. An
+omitted evidence scope is conservatively treated as all twelve domains, while missions and
+capability batches must explicitly expose every domain they intend to execute.
+
 Model inventory can also be discovered from a registered provider. Discovery is bounded and
 approval-gated because it is a provider call; the runtime immediately projects each row into a
 `ProviderModelDescriptor` and discards the provider response. The CLI returns only model ids,

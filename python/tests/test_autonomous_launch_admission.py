@@ -271,6 +271,97 @@ def test_launch_admission_covers_capability_workflow_and_learning_facades_before
             )
 
 
+def test_launch_admission_covers_trace_evidence_connector_and_capability_dispatch() -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    held = agent.launch_admission(preflight, decision="hold")
+    blueprint = agent.prepare(task="review the implementation", domain="coding")
+
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_learning_with_launch_admission(
+            task="learn from the implementation review",
+            domain="coding",
+            launch_admission=held,
+            credentials={},
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_with_trace_and_launch_admission(
+            task="trace the implementation review",
+            domain="coding",
+            launch_admission=held,
+            credentials={},
+            trace_store=InMemoryAutonomousRunTraceStore(),
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_cross_domain_with_trace_and_launch_admission(
+            task="trace the multidisciplinary review",
+            subtasks=(
+                {"id": "coding", "task": "inspect code", "domain": "coding"},
+                {"id": "data", "task": "inspect measurements", "domain": "data"},
+            ),
+            launch_admission=held,
+            credentials={},
+            trace_store=InMemoryAutonomousRunTraceStore(),
+        )
+
+    evidence_kwargs = {
+        "task": "review accepted evidence",
+        "requests": (),
+        "credentials": {},
+    }
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_with_reviewed_evidence_with_launch_admission(
+            launch_admission=held,
+            acquirer=None,
+            **evidence_kwargs,
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_with_llm_evidence_with_launch_admission(
+            launch_admission=held,
+            adapter=object(),
+            **evidence_kwargs,
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_with_domain_evidence_catalogue_with_launch_admission(
+            launch_admission=held,
+            task="review catalogue evidence",
+            catalogue=None,
+            credentials={},
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_resumable_evidence_backed_with_launch_admission(launch_admission=held)
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_resumable_llm_evidence_with_launch_admission(
+            launch_admission=held,
+            task="resume evidence review",
+            requests=(),
+            adapter=object(),
+        )
+
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_connector_workflow_with_launch_admission(
+            blueprint=blueprint,
+            launch_admission=held,
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_connector_mission_with_launch_admission(
+            mission={"steps": ({"domain": "coding"},)},
+            launch_admission=held,
+        )
+
+    capability_request = {"workflow_context": {"domain": "coding"}}
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.execute_capability_with_launch_admission(
+            capability_request,
+            launch_admission=held,
+        )
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.execute_capability_batch_with_launch_admission(
+            (capability_request, {"workflow_context": {"domain": "data"}}),
+            launch_admission=held,
+        )
+
+
 def test_launch_admission_rejects_semantic_routing_in_automatic_batches_before_dispatch() -> None:
     agent = _agent()
     preflight = _complete_preflight(agent)
