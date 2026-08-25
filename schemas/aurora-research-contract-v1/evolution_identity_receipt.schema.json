@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/evolution-identity-receipt.schema.json",
+  "title": "AURORA Evolution Identity Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "workflow_id", "candidate_id", "generation", "parent_digest", "baseline_digest", "artifact_digest", "replay_identity", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "ids-bounded-evolution/1.0"},
+    "feature_id": {"const": "AFA-ids-P32-F31"},
+    "workflow_id": {"type": "string", "minLength": 1},
+    "candidate_id": {"type": "string", "minLength": 1},
+    "generation": {"type": "integer", "minimum": 1},
+    "parent_digest": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9a-f]{64}$"}]},
+    "baseline_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "replay_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  }
+}

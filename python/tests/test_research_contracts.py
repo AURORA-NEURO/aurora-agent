@@ -37,6 +37,7 @@ from prism_sdk.research_contracts import ADAPTER_SCALE_FRONTIER_FEATURE_ID, ADAP
 from prism_sdk.research_contracts import ADVERSARIAL_RECOVERY_FEATURE_ID, ADVERSARIAL_RECOVERY_CONTRACT_VERSION, AdversarialRecoveryReceipt
 from prism_sdk.research_contracts import FEDERATED_COMMONS_FEATURE_ID, FEDERATED_COMMONS_CONTRACT_VERSION, FederatedCommonsReceipt
 from prism_sdk.research_contracts import BOUNDED_EVOLUTION_FEATURE_ID, BOUNDED_EVOLUTION_CONTRACT_VERSION, BoundedEvolutionReceipt
+from prism_sdk.research_contracts import EVOLUTION_IDENTITY_FEATURE_ID, EVOLUTION_IDENTITY_CONTRACT_VERSION, EvolutionIdentityReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1456,4 +1457,20 @@ def test_bounded_evolution_preserves_budget_and_replay_gates():
     receipt.validate()
     assert receipt.feature_id == BOUNDED_EVOLUTION_FEATURE_ID
     assert receipt.contract_version == BOUNDED_EVOLUTION_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_evolution_identity_preserves_generation_lineage_and_digest():
+    receipt = EvolutionIdentityReceipt(
+        workflow_id="workflow:high-throughput",
+        candidate_id="candidate:a",
+        generation=2,
+        parent_digest="a" * 64,
+        baseline_digest="b" * 64,
+        artifact_digest="c" * 64,
+        replay_identity="d" * 64,
+    )
+    receipt.validate()
+    assert receipt.feature_id == EVOLUTION_IDENTITY_FEATURE_ID
+    assert receipt.contract_version == EVOLUTION_IDENTITY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

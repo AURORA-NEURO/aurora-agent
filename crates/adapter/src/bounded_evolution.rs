@@ -8,7 +8,7 @@
 use bioprism_foundation::{
     TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
-use bioprism_ids::ContentHash;
+use bioprism_ids::{ContentHash, EvolutionIdentity};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -372,6 +372,16 @@ fn validate_request(request: &BoundedEvolutionRequest) -> Result<(), BoundedEvol
                 candidate.candidate_id
             )));
         }
+        EvolutionIdentity::new(
+            request.workflow_id.clone(),
+            candidate.candidate_id.clone(),
+            1,
+            None,
+            candidate.baseline_digest.clone(),
+            candidate.artifact_digest.clone(),
+            request.replay_identity.clone(),
+        )
+        .map_err(|error| BoundedEvolutionError::Invalid(error.to_string()))?;
     }
     Ok(())
 }

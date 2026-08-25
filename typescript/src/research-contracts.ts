@@ -126,6 +126,8 @@ export const FEDERATED_COMMONS_FEATURE_ID = "AFA-adapter-P31-F22" as const;
 export const FEDERATED_COMMONS_CONTRACT_VERSION = "adapter-federated-commons/1.0" as const;
 export const BOUNDED_EVOLUTION_FEATURE_ID = "AFA-adapter-P32-F23" as const;
 export const BOUNDED_EVOLUTION_CONTRACT_VERSION = "adapter-bounded-evolution/1.0" as const;
+export const EVOLUTION_IDENTITY_FEATURE_ID = "AFA-ids-P32-F31" as const;
+export const EVOLUTION_IDENTITY_CONTRACT_VERSION = "ids-bounded-evolution/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2133,6 +2135,30 @@ export function validateBoundedEvolutionReceipt(receipt: BoundedEvolutionReceipt
 }
 
 export function boundedEvolutionReceiptDigest(receipt: BoundedEvolutionReceipt): string { validateBoundedEvolutionReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface EvolutionIdentityReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  workflow_id: string;
+  candidate_id: string;
+  generation: number;
+  parent_digest: string | null;
+  baseline_digest: string;
+  artifact_digest: string;
+  replay_identity: string;
+  boundary: string;
+}
+
+export function validateEvolutionIdentityReceipt(receipt: EvolutionIdentityReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EVOLUTION_IDENTITY_FEATURE_ID || receipt.contract_version !== EVOLUTION_IDENTITY_CONTRACT_VERSION) throw new Error("evolution identity schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.workflow_id.trim() || !receipt.candidate_id.trim() || !Number.isInteger(receipt.generation) || receipt.generation <= 0 || (receipt.generation > 1 && receipt.parent_digest === null)) throw new Error("evolution identity, generation, parent lineage, or boundary is incomplete");
+  if ([receipt.workflow_id, receipt.candidate_id].some((value) => /[\u0000-\u001f]/.test(value))) throw new Error("evolution identity contains a control character");
+  if ([receipt.workflow_id, receipt.candidate_id].join(":").toLowerCase().match(/clinical|diagnosis|treatment|triage|enrollment/)) throw new Error("clinical decision surfaces are outside the research identity boundary");
+  for (const value of [receipt.parent_digest, receipt.baseline_digest, receipt.artifact_digest, receipt.replay_identity]) if (value !== null && !/^[0-9a-f]{64}$/.test(value)) throw new Error("evolution identity digest is invalid");
+}
+
+export function evolutionIdentityReceiptDigest(receipt: EvolutionIdentityReceipt): string { validateEvolutionIdentityReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

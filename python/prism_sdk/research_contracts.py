@@ -133,6 +133,8 @@ FEDERATED_COMMONS_FEATURE_ID = "AFA-adapter-P31-F22"
 FEDERATED_COMMONS_CONTRACT_VERSION = "adapter-federated-commons/1.0"
 BOUNDED_EVOLUTION_FEATURE_ID = "AFA-adapter-P32-F23"
 BOUNDED_EVOLUTION_CONTRACT_VERSION = "adapter-bounded-evolution/1.0"
+EVOLUTION_IDENTITY_FEATURE_ID = "AFA-ids-P32-F31"
+EVOLUTION_IDENTITY_CONTRACT_VERSION = "ids-bounded-evolution/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3272,3 +3274,35 @@ class BoundedEvolutionReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "objective_id": self.objective_id, "disposition": self.disposition, "candidate_order": list(self.candidate_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "evidence_order": list(self.evidence_order), "replay_order": list(self.replay_order), "budget": self.budget, "budget_remaining": self.budget_remaining, "max_concurrency": self.max_concurrency, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class EvolutionIdentityReceipt:
+    workflow_id: str
+    candidate_id: str
+    generation: int
+    parent_digest: str | None
+    baseline_digest: str
+    artifact_digest: str
+    replay_identity: str
+    feature_id: str = EVOLUTION_IDENTITY_FEATURE_ID
+    contract_version: str = EVOLUTION_IDENTITY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != EVOLUTION_IDENTITY_FEATURE_ID or self.contract_version != EVOLUTION_IDENTITY_CONTRACT_VERSION:
+            raise ResearchContractError("evolution identity schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.workflow_id.strip() or not self.candidate_id.strip() or self.generation <= 0 or (self.generation > 1 and self.parent_digest is None):
+            raise ResearchContractError("evolution identity, generation, parent lineage, or boundary is incomplete")
+        if any(character.isspace() and character in "\r\n\t" for character in self.workflow_id + self.candidate_id):
+            raise ResearchContractError("evolution identity contains a control character")
+        joined = f"{self.workflow_id}:{self.candidate_id}".lower()
+        if any(term in joined for term in ("clinical", "diagnosis", "treatment", "triage", "enrollment")):
+            raise ResearchContractError("clinical decision surfaces are outside the research identity boundary")
+        digests = (self.parent_digest, self.baseline_digest, self.artifact_digest, self.replay_identity)
+        if any(value is not None and not re.fullmatch(r"[0-9a-f]{64}", value) for value in digests):
+            raise ResearchContractError("evolution identity digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "workflow_id": self.workflow_id, "candidate_id": self.candidate_id, "generation": self.generation, "parent_digest": self.parent_digest, "baseline_digest": self.baseline_digest, "artifact_digest": self.artifact_digest, "replay_identity": self.replay_identity, "boundary": self.boundary})
