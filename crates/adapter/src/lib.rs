@@ -83,6 +83,7 @@ pub mod analysis_portfolio;
 pub mod conformance;
 pub mod context_assurance;
 pub mod csv;
+pub mod determinism_gateway;
 pub mod error;
 pub mod evidence_surveillance;
 pub mod execution_control;
@@ -127,6 +128,12 @@ pub use context_assurance::{
     FEATURE_ID as CONTEXT_COMPILATION_FEATURE_ID,
 };
 pub use csv::Table;
+pub use determinism_gateway::{
+    negotiate_capability, CanonicalCapabilityOutput, DeterminismGatewayError,
+    DeterminismGatewayVerdict, TypedCapabilityInput,
+    CONTRACT_VERSION as DETERMINISM_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as DETERMINISM_GATEWAY_FEATURE_ID,
+};
 pub use error::{AdapterError, CsvError};
 pub use evidence_surveillance::{
     run_evidence_surveillance, EffectReceipt, EvidenceFeedItem, EvidenceFeedRequest,

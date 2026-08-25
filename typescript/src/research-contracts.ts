@@ -94,6 +94,8 @@ export const REPLICATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P15-F28" as const;
 export const REPLICATION_ASSURANCE_CONTRACT_VERSION = "federated-replication-assurance/1.0" as const;
 export const RELEASE_ASSURANCE_FEATURE_ID = "AFA-adapter-P16-F26" as const;
 export const RELEASE_ASSURANCE_CONTRACT_VERSION = "multimodal-research-release-assurance/1.0" as const;
+export const DETERMINISM_GATEWAY_FEATURE_ID = "AFA-adapter-P17-F24" as const;
+export const DETERMINISM_GATEWAY_CONTRACT_VERSION = "typed-determinism-gateway/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1567,6 +1569,37 @@ export function validateReleaseAssuranceReceipt(receipt: ReleaseAssuranceReceipt
 }
 
 export function releaseAssuranceReceiptDigest(receipt: ReleaseAssuranceReceipt): string { validateReleaseAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface DeterminismGatewayReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  capability_id: string;
+  endpoint_id: string;
+  negotiated_version: string;
+  verdict: "accepted" | "migrated" | "approval_required" | "incompatible" | "blocked";
+  canonical_field_order: string[];
+  canonical_input_digest: string;
+  omissions: string[];
+  uncertainty: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  effect_receipt: string;
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateDeterminismGatewayReceipt(receipt: DeterminismGatewayReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== DETERMINISM_GATEWAY_FEATURE_ID || receipt.contract_version !== DETERMINISM_GATEWAY_CONTRACT_VERSION) throw new Error("typed determinism schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.capability_id.trim() || !receipt.endpoint_id.trim() || !receipt.canonical_field_order.length || !receipt.reasons.length || !receipt.effect_receipt.trim()) throw new Error("typed determinism identity, fields, locality, boundary, reasons, or effects are incomplete");
+  if (!new Set(["accepted", "migrated", "approval_required", "incompatible", "blocked"]).has(receipt.verdict)) throw new Error("typed determinism verdict is unknown");
+  if (JSON.stringify([...new Set(receipt.canonical_field_order)].sort()) !== JSON.stringify(receipt.canonical_field_order)) throw new Error("typed determinism field order is invalid");
+  if (!/^[0-9a-f]{64}$/.test(receipt.canonical_input_digest)) throw new Error("typed determinism input digest is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("typed determinism artifact digest is invalid");
+}
+
+export function determinismGatewayReceiptDigest(receipt: DeterminismGatewayReceipt): string { validateDeterminismGatewayReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

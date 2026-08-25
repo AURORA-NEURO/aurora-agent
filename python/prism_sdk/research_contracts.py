@@ -101,6 +101,8 @@ REPLICATION_ASSURANCE_FEATURE_ID = "AFA-adapter-P15-F28"
 REPLICATION_ASSURANCE_CONTRACT_VERSION = "federated-replication-assurance/1.0"
 RELEASE_ASSURANCE_FEATURE_ID = "AFA-adapter-P16-F26"
 RELEASE_ASSURANCE_CONTRACT_VERSION = "multimodal-research-release-assurance/1.0"
+DETERMINISM_GATEWAY_FEATURE_ID = "AFA-adapter-P17-F24"
+DETERMINISM_GATEWAY_CONTRACT_VERSION = "typed-determinism-gateway/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2578,3 +2580,41 @@ class ReleaseAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "run_id": self.run_id, "release_id": self.release_id, "verdict": self.verdict, "study_order": list(self.study_order), "modality_order": list(self.modality_order), "artifact_order": list(self.artifact_order), "evidence_receipt_order": list(self.evidence_receipt_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "policy_decision": self.policy_decision, "effect_receipt": self.effect_receipt, "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class DeterminismGatewayReceipt:
+    capability_id: str
+    endpoint_id: str
+    negotiated_version: str
+    verdict: str
+    canonical_field_order: tuple[str, ...]
+    canonical_input_digest: str
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    effect_receipt: str
+    artifact: Mapping[str, Any]
+    feature_id: str = DETERMINISM_GATEWAY_FEATURE_ID
+    contract_version: str = DETERMINISM_GATEWAY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != DETERMINISM_GATEWAY_FEATURE_ID or self.contract_version != DETERMINISM_GATEWAY_CONTRACT_VERSION:
+            raise ResearchContractError("typed determinism schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.capability_id.strip() or not self.endpoint_id.strip() or not self.canonical_field_order or not self.reasons or not self.effect_receipt.strip():
+            raise ResearchContractError("typed determinism identity, fields, locality, boundary, reasons, or effects are incomplete")
+        if self.verdict not in {"accepted", "migrated", "approval_required", "incompatible", "blocked"}:
+            raise ResearchContractError("typed determinism verdict is unknown")
+        if tuple(sorted(set(self.canonical_field_order))) != self.canonical_field_order:
+            raise ResearchContractError("typed determinism field order is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.canonical_input_digest):
+            raise ResearchContractError("typed determinism input digest is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("typed determinism artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "capability_id": self.capability_id, "endpoint_id": self.endpoint_id, "negotiated_version": self.negotiated_version, "verdict": self.verdict, "canonical_field_order": list(self.canonical_field_order), "canonical_input_digest": self.canonical_input_digest, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "effect_receipt": self.effect_receipt, "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

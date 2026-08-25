@@ -21,6 +21,7 @@ from prism_sdk.research_contracts import ANALYSIS_PORTFOLIO_FEATURE_ID, ANALYSIS
 from prism_sdk.research_contracts import INTERPRETATION_ASSURANCE_FEATURE_ID, INTERPRETATION_ASSURANCE_CONTRACT_VERSION, InterpretationAssuranceReceipt
 from prism_sdk.research_contracts import REPLICATION_ASSURANCE_FEATURE_ID, REPLICATION_ASSURANCE_CONTRACT_VERSION, ReplicationAssuranceReceipt
 from prism_sdk.research_contracts import RELEASE_ASSURANCE_FEATURE_ID, RELEASE_ASSURANCE_CONTRACT_VERSION, ReleaseAssuranceReceipt
+from prism_sdk.research_contracts import DETERMINISM_GATEWAY_FEATURE_ID, DETERMINISM_GATEWAY_CONTRACT_VERSION, DeterminismGatewayReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1069,4 +1070,25 @@ def test_release_assurance_preserves_multimodal_omissions_and_effect_boundary():
     receipt.validate()
     assert receipt.feature_id == RELEASE_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == RELEASE_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_determinism_gateway_preserves_migration_and_canonical_digest():
+    receipt = DeterminismGatewayReceipt(
+        capability_id="capability:qc",
+        endpoint_id="endpoint:site-a",
+        negotiated_version="1.0.0",
+        verdict="migrated",
+        canonical_field_order=("algorithm", "schema", "threshold"),
+        canonical_input_digest="d" * 64,
+        omissions=("legacy fields remain unknown",),
+        uncertainty=("migration cannot infer omitted semantics",),
+        semantic_loss=({"field": "legacy_fields", "severity": "unknown"},),
+        reasons=("compatible migration retained unknown fields",),
+        effect_receipt="exchange:permitted-artifacts",
+        artifact={"content_hash": "e" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == DETERMINISM_GATEWAY_FEATURE_ID
+    assert receipt.contract_version == DETERMINISM_GATEWAY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

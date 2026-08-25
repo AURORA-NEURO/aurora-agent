@@ -55,6 +55,10 @@ use bioprism_adapter::{
     InstrumentMeshReceipt, INSTRUMENT_MESH_FEATURE_ID,
 };
 use bioprism_adapter::{
+    negotiate_capability, CanonicalCapabilityOutput, TypedCapabilityInput,
+    DETERMINISM_GATEWAY_FEATURE_ID,
+};
+use bioprism_adapter::{
     operate_mechanism_control_plane, MechanismControlPlaneReceipt, MechanismControlPlaneRequest,
     MECHANISM_CONTROL_PLANE_FEATURE_ID,
 };
@@ -213,6 +217,7 @@ pub const ANALYSIS_PORTFOLIO_TOOL: &str = "adapter_analysis_portfolio";
 pub const INTERPRETATION_ASSURANCE_TOOL: &str = "adapter_interpretation_assurance";
 pub const REPLICATION_ASSURANCE_TOOL: &str = "adapter_replication_assurance";
 pub const RELEASE_ASSURANCE_TOOL: &str = "adapter_release_assurance";
+pub const DETERMINISM_GATEWAY_TOOL: &str = "adapter_determinism_gateway";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1142,6 +1147,24 @@ pub fn validate_release_assurance_json(value: &Value) -> Result<ReleaseAssurance
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != RELEASE_ASSURANCE_FEATURE_ID {
         return Err("release assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn negotiate_determinism_json(value: &Value) -> Result<Value, String> {
+    let request: TypedCapabilityInput = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid typed determinism request: {error}"))?;
+    let receipt = negotiate_capability(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize canonical capability output: {error}"))
+}
+
+pub fn validate_determinism_json(value: &Value) -> Result<CanonicalCapabilityOutput, String> {
+    let receipt: CanonicalCapabilityOutput = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid canonical capability output: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != DETERMINISM_GATEWAY_FEATURE_ID {
+        return Err("typed determinism feature id mismatch".into());
     }
     Ok(receipt)
 }
