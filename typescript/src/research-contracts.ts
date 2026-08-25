@@ -175,6 +175,8 @@ export const STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID = "AFA-stewardship-P16-F20
 export const STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION = "stewardship-federated-release-workbench/1.0" as const;
 export const API_ANALYSIS_ASSURANCE_FEATURE_ID = "AFA-api-P13-F28" as const;
 export const API_ANALYSIS_ASSURANCE_CONTRACT_VERSION = "api-federated-analysis-assurance/1.0" as const;
+export const STORE_EVIDENCE_OPERATIONS_FEATURE_ID = "AFA-store-P01-F31" as const;
+export const STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION = "store-prospective-evidence-federated-control-plane/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3062,6 +3064,46 @@ export function validateApiAnalysisAssuranceReceipt(receipt: ApiAnalysisAssuranc
 }
 
 export function apiAnalysisAssuranceReceiptDigest(receipt: ApiAnalysisAssuranceReceipt): string { validateApiAnalysisAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface StoreEvidenceOperationsReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  feed_id: string;
+  workflow_id: string;
+  federation_id: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  alert_order: string[];
+  qualified_order: string[];
+  blocked_order: string[];
+  unknown_order: string[];
+  source_order: string[];
+  provenance_order: string[];
+  evidence_order: string[];
+  checkpoint_id: string;
+  replay_identity: string;
+  telemetry_digest: string;
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  federation_manifest: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateStoreEvidenceOperationsReceipt(receipt: StoreEvidenceOperationsReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== STORE_EVIDENCE_OPERATIONS_FEATURE_ID || receipt.contract_version !== STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION) throw new Error("store evidence operations schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.feed_id.trim() || !receipt.workflow_id.trim() || !receipt.federation_id.trim() || !receipt.checkpoint_id.trim() || !receipt.alert_order.length || !receipt.effect_receipts.length) throw new Error("store evidence operations identity, alerts, locality, checkpoint, or effects are incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("store evidence operations disposition is unknown");
+  for (const values of [receipt.alert_order, receipt.qualified_order, receipt.blocked_order, receipt.unknown_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts, receipt.source_order, receipt.provenance_order, receipt.evidence_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("store evidence operations ordering is invalid");
+  if ([...receipt.qualified_order, ...receipt.blocked_order, ...receipt.unknown_order].some((alert) => !receipt.alert_order.includes(alert))) throw new Error("store evidence operations state is not covered by alert order");
+  for (const value of [...receipt.source_order, ...receipt.provenance_order, ...receipt.evidence_order, receipt.replay_identity, receipt.telemetry_digest, receipt.federation_manifest.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("store evidence operations digest is invalid");
+  if (!receipt.effect_receipts.some((effect) => effect.startsWith("checkpoint:evidence-operations:") || effect.startsWith("exchange:permitted-evidence-summary:") || effect.startsWith("block:evidence-operations-release:"))) throw new Error("store evidence operations effect is not checkpoint, exchange, or fail-closed block");
+}
+
+export function storeEvidenceOperationsReceiptDigest(receipt: StoreEvidenceOperationsReceipt): string { validateStoreEvidenceOperationsReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

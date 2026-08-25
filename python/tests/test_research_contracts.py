@@ -61,6 +61,7 @@ from prism_sdk.research_contracts import GOVERNANCE_INTERPRETATION_ASSURANCE_FEA
 from prism_sdk.research_contracts import ORACLE_INGESTION_CONTROL_FEATURE_ID, ORACLE_INGESTION_CONTROL_CONTRACT_VERSION, OracleIngestionControlReceipt
 from prism_sdk.research_contracts import STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID, STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION, StewardshipReleaseWorkbenchReceipt
 from prism_sdk.research_contracts import API_ANALYSIS_ASSURANCE_FEATURE_ID, API_ANALYSIS_ASSURANCE_CONTRACT_VERSION, ApiAnalysisAssuranceReceipt
+from prism_sdk.research_contracts import STORE_EVIDENCE_OPERATIONS_FEATURE_ID, STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION, StoreEvidenceOperationsReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1975,4 +1976,33 @@ def test_api_analysis_assurance_preserves_influence_gap_and_fail_closed_effect()
     receipt.validate()
     assert receipt.feature_id == API_ANALYSIS_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == API_ANALYSIS_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_store_evidence_operations_preserves_checkpoint_and_negative_evidence():
+    receipt = StoreEvidenceOperationsReceipt(
+        request_id="request:evidence-ops",
+        feed_id="feed:surveillance",
+        workflow_id="workflow:evidence",
+        federation_id="federation:commons",
+        disposition="partial",
+        alert_order=("alert:a", "alert:b"),
+        qualified_order=("alert:a",),
+        blocked_order=(),
+        unknown_order=("alert:b",),
+        source_order=("a" * 64,),
+        provenance_order=("b" * 64,),
+        evidence_order=("c" * 64,),
+        checkpoint_id="checkpoint:17",
+        replay_identity="d" * 64,
+        telemetry_digest="e" * 64,
+        omissions=("alert:alert:b:required-digest-missing",),
+        uncertainty=("alert:alert:b:state-unknown-not-qualified",),
+        negative_evidence=("alert:alert:a:negative-result-retained",),
+        effect_receipts=("checkpoint:evidence-operations:checkpoint:17", "exchange:permitted-evidence-summary:request:evidence-ops"),
+        federation_manifest={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == STORE_EVIDENCE_OPERATIONS_FEATURE_ID
+    assert receipt.contract_version == STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

@@ -193,6 +193,8 @@ STEWARDSHIP_RELEASE_WORKBENCH_FEATURE_ID = "AFA-stewardship-P16-F20"
 STEWARDSHIP_RELEASE_WORKBENCH_CONTRACT_VERSION = "stewardship-federated-release-workbench/1.0"
 API_ANALYSIS_ASSURANCE_FEATURE_ID = "AFA-api-P13-F28"
 API_ANALYSIS_ASSURANCE_CONTRACT_VERSION = "api-federated-analysis-assurance/1.0"
+STORE_EVIDENCE_OPERATIONS_FEATURE_ID = "AFA-store-P01-F31"
+STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION = "store-prospective-evidence-federated-control-plane/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -4526,3 +4528,55 @@ class ApiAnalysisAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "question_id": self.question_id, "disposition": self.disposition, "result_id": self.result_id, "estimand": self.estimand, "candidate_order": list(self.candidate_order), "admitted_order": list(self.admitted_order), "blocked_order": list(self.blocked_order), "selected_candidate": self.selected_candidate, "class_order": list(self.class_order), "result_order": list(self.result_order), "model_order": list(self.model_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "replay_identity": self.replay_identity, "benchmark_digest": self.benchmark_digest, "evidence_receipt_digest": self.evidence_receipt_digest, "artifact": dict(self.artifact), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class StoreEvidenceOperationsReceipt:
+    """Cross-language validator for prospective evidence-stream operations."""
+
+    request_id: str
+    feed_id: str
+    workflow_id: str
+    federation_id: str
+    disposition: str
+    alert_order: tuple[str, ...]
+    qualified_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    unknown_order: tuple[str, ...]
+    source_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    evidence_order: tuple[str, ...]
+    checkpoint_id: str
+    replay_identity: str
+    telemetry_digest: str
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    federation_manifest: Mapping[str, Any]
+    feature_id: str = STORE_EVIDENCE_OPERATIONS_FEATURE_ID
+    contract_version: str = STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != STORE_EVIDENCE_OPERATIONS_FEATURE_ID or self.contract_version != STORE_EVIDENCE_OPERATIONS_CONTRACT_VERSION:
+            raise ResearchContractError("store evidence operations schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.feed_id.strip() or not self.workflow_id.strip() or not self.federation_id.strip() or not self.checkpoint_id.strip() or not self.alert_order or not self.effect_receipts:
+            raise ResearchContractError("store evidence operations identity, alerts, locality, checkpoint, or effects are incomplete")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("store evidence operations disposition is unknown")
+        for values in (self.alert_order, self.qualified_order, self.blocked_order, self.unknown_order, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts, self.source_order, self.provenance_order, self.evidence_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("store evidence operations ordering is invalid")
+        if any(alert not in self.alert_order for alert in (*self.qualified_order, *self.blocked_order, *self.unknown_order)):
+            raise ResearchContractError("store evidence operations state is not covered by alert order")
+        for value in (*self.source_order, *self.provenance_order, *self.evidence_order, self.replay_identity, self.telemetry_digest, self.federation_manifest.get("content_hash")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("store evidence operations digest is invalid")
+        if not any(effect.startswith("checkpoint:evidence-operations:") or effect.startswith("exchange:permitted-evidence-summary:") or effect.startswith("block:evidence-operations-release:") for effect in self.effect_receipts):
+            raise ResearchContractError("store evidence operations effect is not checkpoint, exchange, or fail-closed block")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "feed_id": self.feed_id, "workflow_id": self.workflow_id, "federation_id": self.federation_id, "disposition": self.disposition, "alert_order": list(self.alert_order), "qualified_order": list(self.qualified_order), "blocked_order": list(self.blocked_order), "unknown_order": list(self.unknown_order), "source_order": list(self.source_order), "provenance_order": list(self.provenance_order), "evidence_order": list(self.evidence_order), "checkpoint_id": self.checkpoint_id, "replay_identity": self.replay_identity, "telemetry_digest": self.telemetry_digest, "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "federation_manifest": dict(self.federation_manifest), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
