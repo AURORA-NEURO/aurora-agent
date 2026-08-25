@@ -86,6 +86,8 @@ export const INSTRUMENT_MESH_FEATURE_ID = "AFA-adapter-P11-F04" as const;
 export const INSTRUMENT_MESH_CONTRACT_VERSION = "federated-laboratory-integration/1.0" as const;
 export const EXECUTION_CONTROL_FEATURE_ID = "AFA-adapter-P12-F31" as const;
 export const EXECUTION_CONTROL_CONTRACT_VERSION = "computational-execution-control-plane/1.0" as const;
+export const ANALYSIS_PORTFOLIO_FEATURE_ID = "AFA-adapter-P13-F01" as const;
+export const ANALYSIS_PORTFOLIO_CONTRACT_VERSION = "local-analysis-model-portfolio/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1431,6 +1433,36 @@ export function validateComputationalExecutionReceipt(receipt: ComputationalExec
 }
 
 export function computationalExecutionReceiptDigest(receipt: ComputationalExecutionReceipt): string { validateComputationalExecutionReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface AnalysisPortfolioReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  question_id: string;
+  estimand: string;
+  verdict: "qualified" | "conditional" | "blocked";
+  selected_candidate: string | null;
+  candidate_order: string[];
+  uncertainty: string[];
+  omissions: string[];
+  negative_evidence: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateAnalysisPortfolioReceipt(receipt: AnalysisPortfolioReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ANALYSIS_PORTFOLIO_FEATURE_ID || receipt.contract_version !== ANALYSIS_PORTFOLIO_CONTRACT_VERSION) throw new Error("analysis portfolio schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.question_id.trim() || !receipt.estimand.trim() || !receipt.candidate_order.length || !receipt.reasons.length) throw new Error("analysis portfolio identity, candidates, locality, boundary, or reasons are incomplete");
+  if (!new Set(["qualified", "conditional", "blocked"]).has(receipt.verdict)) throw new Error("analysis portfolio verdict is unknown");
+  if (JSON.stringify([...new Set(receipt.candidate_order)].sort()) !== JSON.stringify(receipt.candidate_order)) throw new Error("analysis portfolio candidate ordering is invalid");
+  if (receipt.verdict === "qualified" && !receipt.selected_candidate) throw new Error("qualified analysis portfolio needs a selected candidate");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("analysis portfolio artifact digest is invalid");
+}
+
+export function analysisPortfolioReceiptDigest(receipt: AnalysisPortfolioReceipt): string { validateAnalysisPortfolioReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

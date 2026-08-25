@@ -93,6 +93,8 @@ INSTRUMENT_MESH_FEATURE_ID = "AFA-adapter-P11-F04"
 INSTRUMENT_MESH_CONTRACT_VERSION = "federated-laboratory-integration/1.0"
 EXECUTION_CONTROL_FEATURE_ID = "AFA-adapter-P12-F31"
 EXECUTION_CONTROL_CONTRACT_VERSION = "computational-execution-control-plane/1.0"
+ANALYSIS_PORTFOLIO_FEATURE_ID = "AFA-adapter-P13-F01"
+ANALYSIS_PORTFOLIO_CONTRACT_VERSION = "local-analysis-model-portfolio/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2412,3 +2414,40 @@ class ComputationalExecutionReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "run_id": self.run_id, "decision": self.decision, "ordered_nodes": list(self.ordered_nodes), "admitted_nodes": list(self.admitted_nodes), "run": dict(self.run), "run_digest": self.run_digest, "authorized_effects": [dict(item) for item in self.authorized_effects], "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "effects_executed": self.effects_executed, "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class AnalysisPortfolioReceipt:
+    question_id: str
+    estimand: str
+    verdict: str
+    selected_candidate: str | None
+    candidate_order: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    omissions: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = ANALYSIS_PORTFOLIO_FEATURE_ID
+    contract_version: str = ANALYSIS_PORTFOLIO_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != ANALYSIS_PORTFOLIO_FEATURE_ID or self.contract_version != ANALYSIS_PORTFOLIO_CONTRACT_VERSION:
+            raise ResearchContractError("analysis portfolio schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.question_id.strip() or not self.estimand.strip() or not self.candidate_order or not self.reasons:
+            raise ResearchContractError("analysis portfolio identity, candidates, locality, boundary, or reasons are incomplete")
+        if self.verdict not in {"qualified", "conditional", "blocked"}:
+            raise ResearchContractError("analysis portfolio verdict is unknown")
+        if tuple(sorted(set(self.candidate_order))) != self.candidate_order:
+            raise ResearchContractError("analysis portfolio candidate order is invalid")
+        if self.verdict == "qualified" and not self.selected_candidate:
+            raise ResearchContractError("qualified analysis portfolio needs a selected candidate")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("analysis portfolio artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "question_id": self.question_id, "estimand": self.estimand, "verdict": self.verdict, "selected_candidate": self.selected_candidate, "candidate_order": list(self.candidate_order), "uncertainty": list(self.uncertainty), "omissions": list(self.omissions), "negative_evidence": list(self.negative_evidence), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

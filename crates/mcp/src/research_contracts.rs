@@ -47,6 +47,10 @@ use bioprism_adapter::{
     MECHANISM_CONTROL_PLANE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    qualify_analysis_portfolio, AnalysisPortfolioReceipt, AnalysisPortfolioRequest,
+    ANALYSIS_PORTFOLIO_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_evidence_surveillance, EvidenceFeedRequest, EvidenceSurveillanceReceipt,
     EVIDENCE_SURVEILLANCE_FEATURE_ID,
 };
@@ -193,6 +197,7 @@ pub const EXPERIMENT_DESIGN_CONTROL_TOOL: &str = "adapter_experiment_design_cont
 pub const PROTOCOL_SIMULATION_TOOL: &str = "adapter_protocol_simulation";
 pub const INSTRUMENT_MESH_TOOL: &str = "adapter_instrument_mesh";
 pub const EXECUTION_CONTROL_TOOL: &str = "adapter_execution_control";
+pub const ANALYSIS_PORTFOLIO_TOOL: &str = "adapter_analysis_portfolio";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1046,6 +1051,24 @@ pub fn validate_computational_execution_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != EXECUTION_CONTROL_FEATURE_ID {
         return Err("computational execution feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn qualify_analysis_portfolio_json(value: &Value) -> Result<Value, String> {
+    let request: AnalysisPortfolioRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid analysis portfolio request: {error}"))?;
+    let receipt = qualify_analysis_portfolio(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize analysis portfolio receipt: {error}"))
+}
+
+pub fn validate_analysis_portfolio_json(value: &Value) -> Result<AnalysisPortfolioReceipt, String> {
+    let receipt: AnalysisPortfolioReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid analysis portfolio receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ANALYSIS_PORTFOLIO_FEATURE_ID {
+        return Err("analysis portfolio feature id mismatch".into());
     }
     Ok(receipt)
 }

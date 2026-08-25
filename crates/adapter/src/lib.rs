@@ -79,6 +79,7 @@
 //! ```
 
 pub mod adapter;
+pub mod analysis_portfolio;
 pub mod conformance;
 pub mod context_assurance;
 pub mod csv;
@@ -109,6 +110,12 @@ pub mod source;
 pub mod tabular;
 
 pub use adapter::{Adapter, AdapterManifest, ConformanceLevel};
+pub use analysis_portfolio::{
+    qualify_analysis_portfolio, AnalysisCandidate, AnalysisPortfolioError,
+    AnalysisPortfolioReceipt, AnalysisPortfolioRequest, AnalysisPortfolioVerdict, AnalysisQuestion,
+    IdentificationStatus, CONTRACT_VERSION as ANALYSIS_PORTFOLIO_CONTRACT_VERSION,
+    FEATURE_ID as ANALYSIS_PORTFOLIO_FEATURE_ID,
+};
 pub use conformance::{certify, Check, CheckOutcome, ConformanceReport, Status};
 pub use context_assurance::{
     assure_context_compilation, ContextCompilationDisposition, ContextCompilationError,

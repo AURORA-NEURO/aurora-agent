@@ -17,6 +17,7 @@ from prism_sdk.research_contracts import EXPERIMENT_DESIGN_CONTROL_FEATURE_ID, E
 from prism_sdk.research_contracts import PROTOCOL_SIMULATION_FEATURE_ID, PROTOCOL_SIMULATION_CONTRACT_VERSION, ProtocolSimulationReceipt
 from prism_sdk.research_contracts import INSTRUMENT_MESH_FEATURE_ID, INSTRUMENT_MESH_CONTRACT_VERSION, InstrumentMeshReceipt
 from prism_sdk.research_contracts import EXECUTION_CONTROL_FEATURE_ID, EXECUTION_CONTROL_CONTRACT_VERSION, ComputationalExecutionReceipt
+from prism_sdk.research_contracts import ANALYSIS_PORTFOLIO_FEATURE_ID, ANALYSIS_PORTFOLIO_CONTRACT_VERSION, AnalysisPortfolioReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -978,4 +979,24 @@ def test_computational_execution_admission_keeps_run_planned():
     receipt.validate()
     assert receipt.feature_id == EXECUTION_CONTROL_FEATURE_ID
     assert receipt.contract_version == EXECUTION_CONTROL_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_analysis_portfolio_preserves_negative_evidence_and_conditionality():
+    receipt = AnalysisPortfolioReceipt(
+        question_id="question:effect",
+        estimand="average treatment effect in organoid model",
+        verdict="conditional",
+        selected_candidate="candidate:a",
+        candidate_order=("candidate:a", "candidate:b"),
+        uncertainty=("candidate:a: interval is wide",),
+        omissions=("missing independent site",),
+        negative_evidence=("candidate:b: null replication not available",),
+        semantic_loss=(),
+        reasons=("protected omissions prevent unconditional analytical qualification",),
+        artifact={"content_hash": "e" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == ANALYSIS_PORTFOLIO_FEATURE_ID
+    assert receipt.contract_version == ANALYSIS_PORTFOLIO_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
