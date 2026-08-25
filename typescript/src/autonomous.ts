@@ -257,6 +257,9 @@ export const MAX_AUTONOMOUS_EVIDENCE_BACKED_RESULT_BYTES = 512_000;
 export const AUTONOMOUS_DOMAIN_TOOL_SCHEMA = "bioprism-typescript-autonomous-domain-tool/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA = "bioprism-typescript-autonomous-domain-tool-registry/0.1" as const;
 export const AUTONOMOUS_WORKFLOW_STAGE_CONTRACT_SCHEMA = "bioprism-typescript-autonomous-workflow-stage-contract/0.1" as const;
+/** Cross-SDK stage execution packet schema; intentionally matches the Python façade. */
+export const AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA = "bioprism-python-autonomous-workflow-stage-plan/0.1" as const;
+export const AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA = "bioprism-python-autonomous-capability-contract/0.1" as const;
 export const AUTONOMOUS_DOMAIN_TOOL_PLAN_SCHEMA = "bioprism-typescript-autonomous-domain-tool-plan/0.1" as const;
 export const AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-typescript-autonomous-capability-plan/0.1" as const;
 export const AUTONOMOUS_LEARNING_SCHEMA = "bioprism-typescript-autonomous-online-learning/0.1" as const;
@@ -398,6 +401,12 @@ export interface AutonomousWorkflowToolContext extends JsonObject {
   workflow_id: string;
   workflow_digest: string;
   stage_id: string;
+  /** Optional digest-bound stage packet supplied by workflow executors. */
+  stage_plan_digest?: string;
+  /** Exact reviewed stage contract digest; live dispatch rejects stale values. */
+  stage_contract_digest?: string;
+  /** Tool portfolio selected by the stage packet; omission means legacy domain admission. */
+  selected_tool_names?: string[];
 }
 
 export interface AutonomousWorkflow extends JsonObject {
@@ -433,6 +442,7 @@ export interface AutonomousDomainToolExecutionReceipt extends JsonObject {
   workflow_digest: string | null;
   stage_id: string | null;
   stage_contract_digest: string | null;
+  stage_plan_digest?: string | null;
   required_evidence_outputs: string[];
   evidence_status: "tool_execution_only";
   does_not_claim: string[];
@@ -736,12 +746,64 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   task_decision: AutonomousTaskDecision;
   /** Provider-free capability selection used to shape this blueprint; never execution authority. */
   capability_route: AutonomousCapabilityRoute;
+  /** Digest-bound stage packets used by workflow dispatch and evaluator/checkpoint identity. */
+  stage_execution_plans: AutonomousWorkflowStageExecutionPlan[];
   prompt: AutonomousPromptResult;
   plan: AutonomousPlan;
   /** Present only when the caller explicitly enables the reviewed structured domain response. */
   response_contract?: AutonomousDomainResponseContract;
   execution: "not_started";
   credential_posture: "caller_supplied_opaque_handle_not_returned";
+}
+
+export interface AutonomousCapabilityContract extends JsonObject {
+  schema: typeof AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA;
+  domain: AutonomousDomainName;
+  capability: string;
+  stage_ids: string[];
+  tool_capabilities: string[];
+  required_model_capabilities: string[];
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  read_only: boolean;
+  approval_required: boolean;
+  review_triggers: string[];
+  fallback_policy: "provider_only_or_blocked" | "provider_only";
+  contract_digest: string;
+  adapter_posture: "exact_capability_aliases_only";
+  credential_posture: "caller_supplied_opaque_handles";
+  authority_posture: "metadata_only; no_provider_or_effect_authority";
+}
+
+/**
+ * Exact runtime handoff for one reviewed workflow stage. This is metadata only: it narrows
+ * provider-visible tools and binds evidence/capability identities, but never authorizes a
+ * provider call, credential use, tool effect, or external-world claim.
+ */
+export interface AutonomousWorkflowStageExecutionPlan extends JsonObject {
+  schema: typeof AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA;
+  domain: AutonomousDomainName;
+  workflow_id: string;
+  workflow_digest: string;
+  stage_id: string;
+  stage_objective: string;
+  required_capabilities: string[];
+  tool_capabilities: string[];
+  capability_contracts: AutonomousCapabilityContract[];
+  required_model_capabilities: string[];
+  evidence_outputs: string[];
+  evaluator_signals: string[];
+  active_tool_names: string[];
+  selected_tool_names: string[];
+  withheld_tool_names: string[];
+  approval_required: boolean;
+  read_only: boolean;
+  execution_posture: "approval_gated" | "tool_backed" | "provider_only_or_blocked";
+  source_plan_digest: string | null;
+  stage_plan_digest: string;
+  capability_contract_digests: string[];
+  credential_posture: "caller_supplied_opaque_handles; no_keys_or_handles";
+  authority_posture: "metadata_only; stage_plan_does_not_grant_authority";
 }
 
 export interface AutonomousCrossDomainSubtask {
@@ -2990,7 +3052,7 @@ async function buildTaskBlueprint(
     task_family: selectionContext.task_family ?? null,
   };
   const learningContextDigest = await digestCanonicalJsonText(JSON.stringify(learningContext));
-  return {
+  const baseBlueprint = {
     schema: "bioprism-python-autonomous-task/0.1",
     task_digest: taskDigest,
     route_digest: options.routeDigest,
@@ -3011,7 +3073,12 @@ async function buildTaskBlueprint(
     ...(responseContract ? { response_contract: responseContract } : {}),
     execution: "not_started",
     credential_posture: "caller_supplied_opaque_handle_not_returned",
-  };
+  } as Omit<AutonomousTaskBlueprint, "stage_execution_plans">;
+  const stageExecutionPlans = await Promise.all(profile.workflow.stages.map((stage) => compileAutonomousWorkflowStageExecutionPlan(baseBlueprint as AutonomousTaskBlueprint, stage, {
+    activeToolNames,
+    selectedToolNames,
+  })));
+  return { ...baseBlueprint, stage_execution_plans: stageExecutionPlans } as AutonomousTaskBlueprint;
 }
 
 function assertAutonomousTaskDecisionAllowsProvider(
@@ -3704,6 +3771,114 @@ export async function autonomousWorkflowStageContractDigest(workflow: Autonomous
   return digestJson(workflowStageContractDescriptor(workflow, stage));
 }
 
+/** Build the reviewed capability/evidence graph used by stage execution packets. */
+async function buildAutonomousCapabilityContracts(
+  profile: AutonomousDomainProfile,
+  pack: AutonomousDomainPack,
+): Promise<AutonomousCapabilityContract[]> {
+  const orderedCapabilities = [...new Set([
+    ...profile.capabilities,
+    ...profile.workflow.stages.flatMap((stage) => stage.required_capabilities),
+  ])];
+  const contracts = await Promise.all(orderedCapabilities.map(async (capability) => {
+    const stages = profile.workflow.stages.filter((stage) => stage.required_capabilities.includes(capability));
+    const aliases = WORKFLOW_CAPABILITY_ALIASES[profile.domain][capability] ?? [];
+    const evidenceOutputs = [...new Set(stages.flatMap((stage) => stage.evidence_outputs))];
+    const evaluatorSignals = [...new Set([
+      ...stages.flatMap((stage) => stage.evaluator_signals),
+      ...profile.workflow.evaluator_signals,
+    ])];
+    const descriptor = {
+      schema: AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA,
+      domain: profile.domain,
+      capability,
+      stage_ids: stages.map((stage) => stage.id),
+      tool_capabilities: [...new Set([capability, ...aliases])],
+      required_model_capabilities: [...pack.model_capabilities],
+      evidence_outputs: evidenceOutputs.length ? evidenceOutputs : [`${capability}_result`],
+      evaluator_signals: evaluatorSignals,
+      read_only: stages.length === 0 || stages.every((stage) => stage.read_only),
+      approval_required: stages.some((stage) => stage.approval_required),
+      review_triggers: [...pack.review_triggers],
+      fallback_policy: stages.length ? "provider_only_or_blocked" as const : "provider_only" as const,
+    };
+    return {
+      ...descriptor,
+      contract_digest: await digestJson(descriptor),
+      adapter_posture: "exact_capability_aliases_only" as const,
+      credential_posture: "caller_supplied_opaque_handles" as const,
+      authority_posture: "metadata_only; no_provider_or_effect_authority" as const,
+    };
+  }));
+  if (contracts.length > 128) throw new ArgumentError("autonomous capability contract catalogue exceeds its bound");
+  return contracts;
+}
+
+/**
+ * Compile the exact stage packet used to narrow live tools and bind stage evidence. The
+ * packet deliberately contains no task text, arguments, provider output, credentials, or
+ * effect authorization, and its schema is shared with the Python façade for replay parity.
+ */
+export async function compileAutonomousWorkflowStageExecutionPlan(
+  blueprint: AutonomousTaskBlueprint,
+  stage: AutonomousWorkflowStage,
+  options: {
+    activeToolNames?: readonly string[];
+    selectedToolNames?: readonly string[];
+    withheldToolNames?: readonly string[];
+  } = {},
+): Promise<AutonomousWorkflowStageExecutionPlan> {
+  if (!isObject(blueprint) || blueprint.schema !== "bioprism-python-autonomous-task/0.1") throw new ArgumentError("stage execution plan requires an AutonomousTaskBlueprint");
+  if (!isObject(stage)) throw new ArgumentError("stage execution plan requires an AutonomousWorkflowStage");
+  const reviewedStage = blueprint.workflow.stages.find((candidate) => candidate.id === stage.id);
+  if (!reviewedStage) throw new ArgumentError("stage execution plan stage is outside the prepared workflow");
+  if (reviewedStage !== stage && await digestJson(reviewedStage) !== await digestJson(stage)) throw new ArgumentError("stage execution plan stage does not match the prepared workflow");
+  const activeToolNames = [...new Set((options.activeToolNames ?? blueprint.plan.allowed_tools.filter((name) => name !== "provider.invoke")).map((name) => boundedIdentifier("stage execution plan active tool", name)))].sort();
+  const selectedToolNames = [...new Set((options.selectedToolNames ?? activeToolNames).map((name) => boundedIdentifier("stage execution plan selected tool", name)))];
+  const withheldToolNames = [...new Set((options.withheldToolNames ?? blueprint.domain_profile.tool_profile.bindings.map((binding) => binding.name).filter((name) => !activeToolNames.includes(name))).map((name) => boundedIdentifier("stage execution plan withheld tool", name)))].sort();
+  if (activeToolNames.length > 512 || selectedToolNames.length > 512 || withheldToolNames.length > 512) throw new ArgumentError("stage execution plan tool names exceed their bound");
+  if (selectedToolNames.some((name) => !activeToolNames.includes(name))) throw new ArgumentError("stage execution plan selected tools must be active");
+  if (withheldToolNames.some((name) => activeToolNames.includes(name))) throw new ArgumentError("stage execution plan withheld tools must not be active");
+  const contracts = await buildAutonomousCapabilityContracts(blueprint.domain_profile, blueprint.domain_pack);
+  const stageContracts = contracts.filter((contract) => reviewedStage.required_capabilities.includes(contract.capability));
+  if (stageContracts.length !== new Set(reviewedStage.required_capabilities).size) throw new ArgumentError("stage execution plan has an unresolved capability contract");
+  const supportedBindings = blueprint.domain_profile.tool_profile.bindings.filter((binding) => autonomousDomainToolBindingSupportsStage(blueprint.domain_profile, reviewedStage, binding));
+  const selected = new Set(selectedToolNames);
+  const selectedForStage = supportedBindings.filter((binding) => selected.has(binding.name)).map((binding) => binding.name).sort();
+  const descriptor = {
+    schema: AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA,
+    domain: blueprint.domain_profile.domain,
+    workflow_id: blueprint.workflow.workflow_id,
+    workflow_digest: blueprint.workflow.workflow_digest,
+    stage_id: reviewedStage.id,
+    stage_objective: reviewedStage.objective,
+    required_capabilities: [...reviewedStage.required_capabilities],
+    tool_capabilities: [...new Set(stageContracts.flatMap((contract) => contract.tool_capabilities))],
+    capability_contracts: stageContracts,
+    required_model_capabilities: [...blueprint.required_capabilities],
+    evidence_outputs: [...reviewedStage.evidence_outputs],
+    evaluator_signals: [...reviewedStage.evaluator_signals],
+    active_tool_names: activeToolNames,
+    selected_tool_names: selectedForStage,
+    withheld_tool_names: withheldToolNames,
+    approval_required: reviewedStage.approval_required,
+    read_only: reviewedStage.read_only,
+    execution_posture: reviewedStage.approval_required
+      ? "approval_gated" as const
+      : selectedForStage.length
+        ? "tool_backed" as const
+        : "provider_only_or_blocked" as const,
+    source_plan_digest: blueprint.plan.plan_digest,
+  };
+  return {
+    ...descriptor,
+    stage_plan_digest: await digestJson(descriptor),
+    capability_contract_digests: stageContracts.map((contract) => contract.contract_digest),
+    credential_posture: "caller_supplied_opaque_handles; no_keys_or_handles",
+    authority_posture: "metadata_only; stage_plan_does_not_grant_authority",
+  };
+}
+
 function taskRelevanceTokens(task: string): string[] {
   return [...new Set(normalizeRouteText(task).split(" ").filter((token) => token.length >= 3))].slice(0, 128);
 }
@@ -4033,6 +4208,7 @@ export class AutonomousDomainToolRegistry {
     if (!stage) throw new ProviderRuntimeError(`autonomous tool stage ${context.stage_id} is not in the reviewed workflow`);
     const binding = this.binding(name, [context.domain]);
     if (!binding) throw new ProviderRuntimeError(`tool ${name} is not approved for the selected autonomous domain`);
+    if (context.selected_tool_names !== undefined && !context.selected_tool_names.includes(name)) throw new ProviderRuntimeError(`tool ${name} is outside the selected stage execution portfolio`);
     if (!bindingSupportsStage(workflowProfile, stage, binding)) throw new ProviderRuntimeError(`tool ${name} does not satisfy workflow stage ${stage.id}`);
     if (stage.read_only && !binding.read_only) throw new ProviderRuntimeError(`effectful tool ${name} is not permitted by read-only workflow stage ${stage.id}`);
     if (!stage.approval_required && binding.approval_required) throw new ProviderRuntimeError(`tool ${name} requires approval not declared by workflow stage ${stage.id}`);
@@ -4055,13 +4231,31 @@ function assertSafeToolArguments(value: unknown, depth = 0): void {
 
 function normalizeWorkflowToolContext(value: unknown): AutonomousWorkflowToolContext {
   if (!isObject(value)) throw new ProviderRuntimeError("autonomous workflow tool context is malformed");
-  if (Object.keys(value).some((key) => !["domain", "workflow_id", "workflow_digest", "stage_id"].includes(key))) throw new ProviderRuntimeError("autonomous workflow tool context contains unsupported fields");
+  if (Object.keys(value).some((key) => !["domain", "workflow_id", "workflow_digest", "stage_id", "stage_plan_digest", "stage_contract_digest", "selected_tool_names"].includes(key))) throw new ProviderRuntimeError("autonomous workflow tool context contains unsupported fields");
   if (!AUTONOMOUS_DOMAIN_NAMES.includes(value.domain as AutonomousDomainName)) throw new ProviderRuntimeError("autonomous workflow tool context domain is unsupported");
   const workflowId = boundedIdentifier("autonomous workflow tool context workflow_id", value.workflow_id);
   const workflowDigest = value.workflow_digest;
   if (typeof workflowDigest !== "string" || !/^[0-9a-f]{64}$/.test(workflowDigest)) throw new ProviderRuntimeError("autonomous workflow tool context workflow_digest is malformed");
   const stageId = boundedIdentifier("autonomous workflow tool context stage_id", value.stage_id);
-  return { domain: value.domain as AutonomousDomainName, workflow_id: workflowId, workflow_digest: workflowDigest, stage_id: stageId };
+  const stagePlanDigest = value.stage_plan_digest === undefined ? undefined : boundedDigest("autonomous workflow tool context stage_plan_digest", value.stage_plan_digest);
+  const stageContractDigest = value.stage_contract_digest === undefined ? undefined : boundedDigest("autonomous workflow tool context stage_contract_digest", value.stage_contract_digest);
+  const selectedToolNames = value.selected_tool_names === undefined
+    ? undefined
+    : (() => {
+      if (!Array.isArray(value.selected_tool_names) || value.selected_tool_names.length > 512) throw new ProviderRuntimeError("autonomous workflow tool context selected_tool_names exceed their bound");
+      const names = value.selected_tool_names.map((name, index) => boundedIdentifier(`autonomous workflow tool context selected_tool_names[${index}]`, name));
+      if (new Set(names).size !== names.length) throw new ProviderRuntimeError("autonomous workflow tool context selected_tool_names contain duplicates");
+      return names;
+    })();
+  return {
+    domain: value.domain as AutonomousDomainName,
+    workflow_id: workflowId,
+    workflow_digest: workflowDigest,
+    stage_id: stageId,
+    ...(stagePlanDigest === undefined ? {} : { stage_plan_digest: stagePlanDigest }),
+    ...(stageContractDigest === undefined ? {} : { stage_contract_digest: stageContractDigest }),
+    ...(selectedToolNames === undefined ? {} : { selected_tool_names: selectedToolNames }),
+  };
 }
 
 /** Execute only exact live tools, with schema preflight and approval for every effectful row. */
@@ -4101,6 +4295,7 @@ export class AutonomousDomainToolRuntime {
         workflow_digest: workflowContext?.workflow_digest ?? null,
         stage_id: workflowContext?.stage_id ?? null,
         stage_contract_digest: stageContractDigest,
+        ...(workflowContext?.stage_plan_digest === undefined ? {} : { stage_plan_digest: workflowContext.stage_plan_digest }),
         required_evidence_outputs: [...requiredEvidenceOutputs],
         evidence_status: "tool_execution_only",
         does_not_claim: ["tool dispatch is not proof that the domain task succeeded", "a result digest is not a claim about external-world truth", "stage evidence outputs still require evaluator review"],
@@ -4118,6 +4313,7 @@ export class AutonomousDomainToolRuntime {
           requiredEvidenceOutputs = [...stagePlanned.stage.evidence_outputs];
           stageApprovalRequired = stagePlanned.stage.approval_required;
           stageContractDigest = await autonomousWorkflowStageContractDigest(stagePlanned.workflow, stagePlanned.stage.id);
+          if (workflowContext.stage_contract_digest !== undefined && workflowContext.stage_contract_digest !== stageContractDigest) throw new ProviderRuntimeError("autonomous workflow stage contract is stale or does not match the reviewed workflow");
         } else {
           planned = this.registry.callPlan(call.name, call.arguments, options.domains);
         }

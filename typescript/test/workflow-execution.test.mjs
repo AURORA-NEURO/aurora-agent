@@ -788,6 +788,11 @@ test("workflow executor runs every built-in single-domain workflow through the s
     assert.equal(result.execution_receipt.next_action, "complete", profile.domain);
     assert.equal(result.execution_receipt.completed_stage_ids.length, profile.workflow.stages.length, profile.domain);
     assert.equal(result.execution_receipt.incomplete_stage_ids.length, 0, profile.domain);
+    assert.deepEqual(
+      result.execution_receipt.stage_plan_digests,
+      Object.fromEntries(result.blueprint.stage_execution_plans.map((stagePlan) => [stagePlan.stage_id, stagePlan.stage_plan_digest])),
+      `${profile.domain} stage execution packet identity`,
+    );
     assert.equal(result.execution_receipt.progress, 1, profile.domain);
     assert.equal(result.execution_receipt.safe_to_continue, false, profile.domain);
     assert.equal(Object.hasOwn(result.execution_receipt, "response"), false, profile.domain);

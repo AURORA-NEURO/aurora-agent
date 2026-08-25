@@ -10,6 +10,13 @@ are excluded from the coverage denominator — they specify no behaviour.
 A module leaves this list when a crate cites it, which is the same weak criterion coverage
 uses. This file tracks *attention*, not completeness.
 
+The TypeScript workflow path now reaches stage-contract parity with Python through
+`AutonomousWorkflowStageExecutionPlan`: every blueprint carries digest-bound capability,
+evidence, evaluator, and selected-tool metadata; staged dispatch rejects stale contracts and
+unselected tools; and checkpoint/receipt projections retain the stage-plan digest. The remaining
+deployment work is intentionally caller-owned: durable multi-host storage, provider/source
+availability, evaluator authority, credential provisioning, and effect reconciliation.
+
 The TypeScript autonomous facade now also has a digest-bound workflow portfolio compiler and
 bounded executor. It composes explicit per-domain blueprints into a dependency-checked portfolio,
 replays the non-executing compiler to detect task/request/workflow/plan drift after restart, and

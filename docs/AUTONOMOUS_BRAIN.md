@@ -200,6 +200,24 @@ application owns authentication, TLS, CSRF protection, tenancy, rate limits, and
 permissions. The SDK owns the sensitive part after intake—non-echo collection helpers, bounded
 in-memory lifetime, opaque handles, provider matching, expiry/revocation, and redacted readiness.
 
+### Digest-bound stage execution packets
+
+Every TypeScript task blueprint now includes one
+`bioprism-python-autonomous-workflow-stage-plan/0.1` packet per reviewed workflow stage, matching
+the Python `AutonomousWorkflowStageExecutionPlan` contract. A packet records only the reviewed
+stage capabilities, evidence outputs, evaluator signals, capability-contract digests, active and
+withheld tool names, selected tool order, approval/read-only posture, and the source plan digest.
+It contains no task text, prompt, provider payload, tool arguments, credential, or effect authority.
+
+`AutonomousWorkflowExecutor` forwards the packet digest, exact stage-contract digest, and selected
+tool set into live dispatch. The adapter runtime rejects stale stage contracts and tool calls
+outside the packet's selected portfolio before invoking the caller's executor. Checkpoints,
+stage outcomes, tool receipts, and execution receipts retain the stage-plan digest so restart,
+replay, evaluator review, and operator dashboards can identify exactly which reviewed capability
+surface was attempted. Direct `AutonomousAgent.run()` remains domain-admitted unless a caller
+supplies a reviewed workflow context; staged execution is the path that enables exact stage
+portfolio narrowing.
+
 ### Keyless provider conformance
 
 Deployments can run `runProviderProtocolConformance()` as a deterministic preflight before accepting
