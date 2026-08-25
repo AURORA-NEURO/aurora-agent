@@ -335,6 +335,7 @@ from .brain_high_throughput_copilot import BrainHighThroughputEvidenceResearchCo
 from .brain_federated_copilot import BrainFederatedEvidenceResearchCopilotReceipt
 from .brain_evidence_workflow import BrainEvidenceWorkflowFabricReceipt
 from .brain_multimodal_workflow import BrainMultimodalEvidenceWorkflowFabricReceipt
+from .brain_high_throughput_workflow import BrainHighThroughputEvidenceWorkflowFabricReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

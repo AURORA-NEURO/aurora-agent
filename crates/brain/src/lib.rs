@@ -36,6 +36,7 @@ pub mod federated_evidence_copilot;
 pub mod federated_evidence_surveillance;
 pub mod high_throughput_evidence_copilot;
 pub mod high_throughput_evidence_surveillance;
+pub mod high_throughput_evidence_workflow_fabric;
 pub mod multimodal_contract_model;
 pub mod multimodal_evidence_copilot;
 pub mod multimodal_evidence_surveillance;
@@ -95,6 +96,12 @@ pub use high_throughput_evidence_surveillance::{
     HighThroughputDisposition, HighThroughputEvidenceError, HighThroughputEvidenceFeedRequest,
     HighThroughputEvidenceReceipt, CONTRACT_VERSION as HIGH_THROUGHPUT_EVIDENCE_CONTRACT_VERSION,
     FEATURE_ID as HIGH_THROUGHPUT_EVIDENCE_FEATURE_ID,
+};
+pub use high_throughput_evidence_workflow_fabric::{
+    compile_high_throughput_evidence_workflow, high_throughput_evidence_workflow_fabric_manifest,
+    HighThroughputWorkflowError, HighThroughputWorkflowReceipt, HighThroughputWorkflowRequest,
+    CONTRACT_VERSION as HIGH_THROUGHPUT_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as HIGH_THROUGHPUT_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use multimodal_contract_model::{
     model_multimodal_evidence_contract, multimodal_contract_model_manifest, ModalitySchemaBinding,

@@ -85,6 +85,7 @@ from prism_sdk.brain_high_throughput_copilot import BrainHighThroughputEvidenceR
 from prism_sdk.brain_federated_copilot import BrainFederatedEvidenceResearchCopilotReceipt
 from prism_sdk.brain_evidence_workflow import BrainEvidenceWorkflowFabricReceipt
 from prism_sdk.brain_multimodal_workflow import BrainMultimodalEvidenceWorkflowFabricReceipt
+from prism_sdk.brain_high_throughput_workflow import BrainHighThroughputEvidenceWorkflowFabricReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2685,6 +2686,15 @@ def test_brain_multimodal_workflow_keeps_modality_compensation_explicit():
         request_id="request:multimodal-workflow", workflow_id="workflow:multimodal", scope="organoid:neural", study_order=("study:a", "study:b"), modality_order=("imaging", "transcriptomics"), disposition="partial",
         stage_order=("stage:checkpoint", "stage:compare-modalities", "stage:surveil-evidence", "stage:validate-input"),
         plan_order=("plan:publish-qualified-multimodal-artifact", "plan:stage:checkpoint", "plan:stage:compare-modalities", "plan:stage:surveil-evidence", "plan:stage:validate-input"), completed_order=("stage:checkpoint", "stage:compare-modalities", "stage:surveil-evidence", "stage:validate-input"), blocked_order=(), compensation_order=("compensate:research-work:retain-incomplete-modalities",), candidate_order=("evidence:a",), qualified_order=("evidence:a",), unknown_order=(), evidence_receipt_digest="a" * 64, checkpoint_digest="b" * 64, workflow_digest="c" * 64, comparability_digest="d" * 64, approval_reference="e" * 64, replay_identity="f" * 64, budget_units=8, omissions=("modality:transcriptomics:required-coverage-missing",), uncertainty=(), negative_evidence=(), effect_receipts=("compensate:research-work:workflow:multimodal",), artifact={"content_hash": "1" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_high_throughput_workflow_keeps_capacity_compensation_explicit():
+    receipt = BrainHighThroughputEvidenceWorkflowFabricReceipt(
+        request_id="request:throughput-workflow", workflow_id="workflow:throughput", batch_id="batch:001", partition="partition:imaging", disposition="partial",
+        stage_order=("stage:admit-batch", "stage:checkpoint", "stage:persist-queue", "stage:validate-input"), plan_order=("plan:publish-admitted-batch", "plan:stage:admit-batch", "plan:stage:checkpoint", "plan:stage:persist-queue", "plan:stage:validate-input"), completed_order=("stage:admit-batch", "stage:checkpoint", "stage:persist-queue", "stage:validate-input"), blocked_order=("evidence:b",), compensation_order=("compensate:research-work:capacity-overflow",), candidate_order=("evidence:a", "evidence:b"), admitted_order=("evidence:a",), unknown_order=(), checkpoint_seq=2, queue_digest="a" * 64, checkpoint_digest="b" * 64, workflow_digest="c" * 64, approval_reference="d" * 64, replay_identity="e" * 64, budget_units=8, omissions=("workflow:capacity-overflow-requires-compensation",), uncertainty=(), negative_evidence=(), effect_receipts=("compensate:research-work:workflow:throughput",), artifact={"content_hash": "f" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()
