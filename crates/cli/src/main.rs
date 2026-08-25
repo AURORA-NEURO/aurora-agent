@@ -478,6 +478,19 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             dry_run,
         } => research_run(request, out_dir, *dry_run),
         Command::ResearchVerify { dossier } => research_verify(dossier),
+        Command::FigureList { input } => figure_list(input),
+        Command::FigureRender {
+            input,
+            out_dir,
+            kind,
+            pointer,
+            dry_run,
+        } => figure_render(input, out_dir, *kind, pointer.as_deref(), *dry_run),
+        Command::FigureBatch {
+            input_dir,
+            out_dir,
+            dry_run,
+        } => figure_batch(input_dir, out_dir, *dry_run),
     }
 }
 
@@ -1828,19 +1841,29 @@ fn autopilot_run(
     let mut dispatcher = |mission: &Value| -> Result<Value, String> {
         server.execute_agent_mission_with_cancellation(mission, &cancellation)
     };
-    let outcome = drive_instantiation(&grant, &instantiation, &mut dispatcher).map_err(|error| {
-        CliError::from_autopilot(error).about(instantiation_path.display().to_string())
-    })?;
+    let outcome =
+        drive_instantiation(&grant, &instantiation, &mut dispatcher).map_err(|error| {
+            CliError::from_autopilot(error).about(instantiation_path.display().to_string())
+        })?;
     let succeeded = outcome.final_status == FinalStatus::Succeeded;
     let report = outcome.report;
     let artifact = report_out
         .map(|path| io::write_artifact(path, &report, false))
         .transpose()?;
-    let final_status = report["final_status"].as_str().unwrap_or("unknown").to_string();
+    let final_status = report["final_status"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
     let attempts_used = report["totals"]["attempts_used"].as_u64().unwrap_or(0);
     let max_attempts = report["totals"]["max_attempts"].as_u64().unwrap_or(0);
-    let report_sha256 = report["report_sha256"].as_str().unwrap_or("<missing>").to_string();
-    let base_mission_id = report["base_mission_id"].as_str().unwrap_or("unknown").to_string();
+    let report_sha256 = report["report_sha256"]
+        .as_str()
+        .unwrap_or("<missing>")
+        .to_string();
+    let base_mission_id = report["base_mission_id"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
     let document = json!({
         "ok": succeeded,
         "workflow": "autopilot_run",
@@ -1905,11 +1928,19 @@ fn autopilot_verify(report_path: &Path) -> CliResult<Outcome> {
          {}\n  required limitations present: {}\n  final status known: {}\n\nNext: bioprism \
          autopilot verify --report {}\n",
         if valid { "verified" } else { "FAILED" },
-        verification["claimed_report_sha256"].as_str().unwrap_or("<missing>"),
-        verification["recomputed_report_sha256"].as_str().unwrap_or("<missing>"),
+        verification["claimed_report_sha256"]
+            .as_str()
+            .unwrap_or("<missing>"),
+        verification["recomputed_report_sha256"]
+            .as_str()
+            .unwrap_or("<missing>"),
         verification["digest_match"].as_bool().unwrap_or(false),
-        verification["limitations_present"].as_bool().unwrap_or(false),
-        verification["final_status_known"].as_bool().unwrap_or(false),
+        verification["limitations_present"]
+            .as_bool()
+            .unwrap_or(false),
+        verification["final_status_known"]
+            .as_bool()
+            .unwrap_or(false),
         report_path.display(),
     );
     Ok(Outcome::ok(verification, human).failing_if(!valid))
@@ -2033,8 +2064,9 @@ fn research_run(request_path: &Path, out_dir: &Path, dry_run: bool) -> CliResult
         return Ok(Outcome::ok(document, human));
     }
 
-    let dossier = run_research(&request)
-        .map_err(|error| CliError::from_research(error).about(request_path.display().to_string()))?;
+    let dossier = run_research(&request).map_err(|error| {
+        CliError::from_research(error).about(request_path.display().to_string())
+    })?;
     let rendered = render_report(&dossier).map_err(CliError::from_research)?;
 
     let dossier_path = out_dir.join("dossier.json");
@@ -2045,10 +2077,17 @@ fn research_run(request_path: &Path, out_dir: &Path, dry_run: bool) -> CliResult
         io::write_text_artifact(&report_path, &rendered.report_md, false)?,
     ];
     for (filename, svg) in &rendered.figures {
-        artifacts.push(io::write_text_artifact(&figures_dir.join(filename), svg, false)?);
+        artifacts.push(io::write_text_artifact(
+            &figures_dir.join(filename),
+            svg,
+            false,
+        )?);
     }
 
-    let dossier_sha256 = dossier["dossier_sha256"].as_str().unwrap_or("<missing>").to_string();
+    let dossier_sha256 = dossier["dossier_sha256"]
+        .as_str()
+        .unwrap_or("<missing>")
+        .to_string();
     let steps_completed = dossier["steps"].as_array().map(Vec::len).unwrap_or(0);
     let findings = dossier["findings"].as_array().cloned().unwrap_or_default();
     let negative_findings = findings
@@ -2127,15 +2166,488 @@ fn research_verify(dossier_path: &Path) -> CliResult<Outcome> {
          {}\n  request digest match: {}\n  required limitations present: {}\n  step outcomes \
          known: {}\n  findings supported by carried artifacts: {}\n\n{next}",
         if valid { "verified" } else { "FAILED" },
-        verification["claimed_dossier_sha256"].as_str().unwrap_or("<missing>"),
-        verification["recomputed_dossier_sha256"].as_str().unwrap_or("<missing>"),
+        verification["claimed_dossier_sha256"]
+            .as_str()
+            .unwrap_or("<missing>"),
+        verification["recomputed_dossier_sha256"]
+            .as_str()
+            .unwrap_or("<missing>"),
         verification["digest_match"].as_bool().unwrap_or(false),
-        verification["request_digest_match"].as_bool().unwrap_or(false),
-        verification["limitations_present"].as_bool().unwrap_or(false),
+        verification["request_digest_match"]
+            .as_bool()
+            .unwrap_or(false),
+        verification["limitations_present"]
+            .as_bool()
+            .unwrap_or(false),
         verification["outcomes_known"].as_bool().unwrap_or(false),
-        verification["findings_supported"].as_bool().unwrap_or(false),
+        verification["findings_supported"]
+            .as_bool()
+            .unwrap_or(false),
     );
     Ok(Outcome::ok(verification, human).failing_if(!valid))
+}
+
+/// The comma-joined figure registry, quantified over rather than restated, so a figure added to
+/// `bioprism-figures` appears in every diagnostic here without an edit.
+fn figure_kind_registry() -> String {
+    bioprism_figures::FigureKind::ALL
+        .iter()
+        .map(|kind| kind.slug())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The pointer as a caller reads it. `figure list` prints `(root)` for the empty pointer, because
+/// an empty column reads as a missing value rather than as "the document itself".
+fn pointer_display(pointer: &str) -> &str {
+    if pointer.is_empty() {
+        "(root)"
+    } else {
+        pointer
+    }
+}
+
+fn detect_figures(document: &Value, path: &Path) -> CliResult<Vec<bioprism_figures::Detected>> {
+    bioprism_figures::detect(document)
+        .map_err(|error| CliError::from_figure(error).about(path.display().to_string()))
+}
+
+/// One figure held in memory before anything is written.
+struct PendingFigure {
+    filename: String,
+    svg: String,
+    kind: bioprism_figures::FigureKind,
+    pointer: String,
+    source_sha256: String,
+}
+
+/// Render a selection of detected regions, writing nothing.
+///
+/// Every figure is rendered before any file is opened, so a document whose fifth artifact is
+/// refused leaves no directory holding its first four. A half-written figure directory looks
+/// exactly like a complete one, and the operator has no way to tell which figure is missing.
+fn render_selection(
+    document: &Value,
+    selection: &[&bioprism_figures::Detected],
+    path: &Path,
+) -> CliResult<Vec<PendingFigure>> {
+    let mut pending = Vec::with_capacity(selection.len());
+    for item in selection {
+        let svg = bioprism_figures::render_detected(document, item)
+            .map_err(|error| CliError::from_figure(error).about(path.display().to_string()))?;
+        let source = document.pointer(&item.pointer).ok_or_else(|| {
+            CliError::internal(format!(
+                "detection reported the pointer {:?}, which does not resolve in the document it \
+                 was detected in",
+                item.pointer
+            ))
+        })?;
+        let source_sha256 = bioprism_ids::ContentHash::of_value(source)
+            .map_err(|error| {
+                CliError::invalid(error.to_string()).about(path.display().to_string())
+            })?
+            .to_string();
+        pending.push(PendingFigure {
+            filename: item.suggested_filename.clone(),
+            svg,
+            kind: item.kind,
+            pointer: item.pointer.clone(),
+            source_sha256,
+        });
+    }
+    Ok(pending)
+}
+
+fn figure_list(input_path: &Path) -> CliResult<Outcome> {
+    let document = io::read_json(input_path)?;
+    let detected = detect_figures(&document, input_path)?;
+
+    let rows: Vec<Value> = detected
+        .iter()
+        .map(|item| {
+            json!({
+                "kind": item.kind.slug(),
+                "artifact": item.artifact.slug(),
+                "pointer": item.pointer,
+                "suggested_filename": item.suggested_filename,
+            })
+        })
+        .collect();
+    let document_out = json!({
+        "ok": true,
+        "input": input_path.display().to_string(),
+        "drawable": rows.len(),
+        "figures": rows,
+        "recognised_kinds": bioprism_figures::FigureKind::ALL
+            .iter()
+            .map(|kind| kind.slug())
+            .collect::<Vec<_>>(),
+    });
+
+    if detected.is_empty() {
+        let human = format!(
+            "{} — nothing drawable\n\nThis document carries no artifact this builder draws. \
+             Recognition is structural — required\nkey sets and declared schema strings — so \
+             renaming the file cannot change the answer.\nDrawable figures: {}\n\nNext: bioprism \
+             figure list --input <a comparison, certificate, sweep table, autopilot\nreport or \
+             research dossier>\n",
+            input_path.display(),
+            figure_kind_registry(),
+        );
+        return Ok(Outcome::ok(document_out, human));
+    }
+
+    let pointer_width = detected
+        .iter()
+        .map(|item| pointer_display(&item.pointer).chars().count())
+        .max()
+        .unwrap_or(0)
+        .max("pointer".len());
+    let mut human = format!(
+        "{} — {} drawable region(s)\n\n",
+        input_path.display(),
+        detected.len()
+    );
+    human.push_str(&format!(
+        "  {:<19}  {:<pointer_width$}  {}\n",
+        "figure", "pointer", "suggested filename"
+    ));
+    for item in &detected {
+        human.push_str(&format!(
+            "  {:<19}  {:<pointer_width$}  {}\n",
+            item.kind.slug(),
+            pointer_display(&item.pointer),
+            item.suggested_filename
+        ));
+    }
+    human.push_str(&format!(
+        "\nNothing was written. Each figure's footer will carry the canonical digest of the \
+         value at\nits pointer: that hex identifies the artifact, it does not attest that the \
+         artifact is\ncorrect.\n\nNext: bioprism figure render --input {} --out-dir figures\n",
+        input_path.display()
+    ));
+    Ok(Outcome::ok(document_out, human))
+}
+
+fn figure_render(
+    input_path: &Path,
+    out_dir: &Path,
+    kind: Option<bioprism_figures::FigureKind>,
+    pointer: Option<&str>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let document = io::read_json(input_path)?;
+    let detected = detect_figures(&document, input_path)?;
+    let selection: Vec<&bioprism_figures::Detected> = detected
+        .iter()
+        .filter(|item| kind.is_none_or(|wanted| item.kind == wanted))
+        .filter(|item| pointer.is_none_or(|wanted| item.pointer == wanted))
+        .collect();
+
+    let filtered = kind.is_some() || pointer.is_some();
+    if selection.is_empty() {
+        let reason = if detected.is_empty() {
+            "the document carries no artifact this builder draws".to_string()
+        } else {
+            format!(
+                "the document carries {} drawable region(s), and --kind/--pointer selected none \
+                 of them",
+                detected.len()
+            )
+        };
+        let document_out = json!({
+            "ok": false,
+            "input": input_path.display().to_string(),
+            "drawable": detected.len(),
+            "selected": 0,
+            "written": 0,
+            "dry_run": dry_run,
+            "reason": reason,
+            "figures": Vec::<Value>::new(),
+        });
+        let human = format!(
+            "figure render: nothing to draw\n  input: {}\n  drawable regions: {}\n  selected: \
+             0\n  {reason}\n\nThis is a verdict about the input, not a failure of the command: \
+             nothing was written and\nnothing here needs fixing. Drawable figures: {}\n\nNext: \
+             bioprism figure list --input {}\n",
+            input_path.display(),
+            detected.len(),
+            figure_kind_registry(),
+            input_path.display(),
+        );
+        return Ok(Outcome::ok(document_out, human).under(ExitCode::AssertionFailed));
+    }
+
+    let pending = render_selection(&document, &selection, input_path)?;
+    let mut artifacts = Vec::with_capacity(pending.len());
+    for figure in &pending {
+        artifacts.push((
+            figure,
+            io::write_text_artifact(&out_dir.join(&figure.filename), &figure.svg, dry_run)?,
+        ));
+    }
+
+    let document_out = json!({
+        "ok": true,
+        "input": input_path.display().to_string(),
+        "out_dir": out_dir.display().to_string(),
+        "drawable": detected.len(),
+        "selected": pending.len(),
+        "dry_run": dry_run,
+        "written": artifacts.iter().filter(|(_, written)| written.written).count(),
+        "figures": artifacts
+            .iter()
+            .map(|(figure, written)| json!({
+                "kind": figure.kind.slug(),
+                "pointer": figure.pointer,
+                "filename": figure.filename,
+                "path": written.path.display().to_string(),
+                "bytes": written.bytes,
+                "written": written.written,
+                "source_sha256": figure.source_sha256,
+            }))
+            .collect::<Vec<Value>>(),
+    });
+
+    let mut human = format!(
+        "figure render: {}\n  input: {}\n  drawable regions: {}{}\n",
+        if dry_run {
+            "planned (no writes)"
+        } else {
+            "completed"
+        },
+        input_path.display(),
+        detected.len(),
+        if filtered {
+            format!("\n  selected by filter: {}", pending.len())
+        } else {
+            String::new()
+        },
+    );
+    for (figure, written) in &artifacts {
+        human.push_str(&format!(
+            "  {} {} ({} bytes) — {} of {}, source sha256 {}\n",
+            if written.written {
+                "wrote"
+            } else {
+                "would write"
+            },
+            written.path.display(),
+            written.bytes,
+            figure.kind.slug(),
+            pointer_display(&figure.pointer),
+            figure.source_sha256,
+        ));
+    }
+    human.push_str(&format!(
+        "\nEach source sha256 is the canonical digest of the exact value drawn; it identifies \
+         the\nartifact and does not attest that the artifact is correct.\n\nNext: bioprism \
+         figure render --input {} --out-dir {}\n",
+        input_path.display(),
+        out_dir.display(),
+    ));
+    Ok(Outcome::ok(document_out, human))
+}
+
+/// Why one batch input produced no figures.
+///
+/// Carried into the manifest verbatim. A batch that dropped its skips would report a directory as
+/// fully drawn when part of it was never read, which is the one thing the manifest exists to stop.
+struct SkippedInput {
+    input: String,
+    reason: String,
+}
+
+/// The `*.json` files directly inside a directory, in sorted order.
+///
+/// Non-recursive by decision, not by omission: a recursive walk would descend into the `figures/`
+/// directory a previous run wrote and into store indexes, and an operator who wanted one
+/// directory drawn would have no way to say "not that one".
+fn figure_batch_inputs(input_dir: &Path) -> CliResult<Vec<std::path::PathBuf>> {
+    let mut inputs = Vec::new();
+    for entry in std::fs::read_dir(input_dir).map_err(|error| CliError::io(input_dir, error))? {
+        let entry = entry.map_err(|error| CliError::io(input_dir, error))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+        inputs.push(path);
+    }
+    inputs.sort();
+    Ok(inputs)
+}
+
+/// The subdirectory one input's figures are written into.
+///
+/// Per-input rather than flat, because two documents in one directory can carry the same artifact
+/// — the same world compiled twice — and their suggested filenames would then collide across
+/// inputs, silently overwriting one figure with another. Uniqueness within a document is the
+/// detector's job; uniqueness across documents is this.
+fn figure_batch_out_dir(out_dir: &Path, input: &Path) -> std::path::PathBuf {
+    let stem = input
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("input");
+    out_dir.join(stem)
+}
+
+fn figure_batch(input_dir: &Path, out_dir: &Path, dry_run: bool) -> CliResult<Outcome> {
+    let inputs = figure_batch_inputs(input_dir)?;
+    let mut figures: Vec<Value> = Vec::new();
+    let mut skipped: Vec<SkippedInput> = Vec::new();
+    let mut written_artifacts: Vec<io::WrittenArtifact> = Vec::new();
+
+    for input in &inputs {
+        let label = input.display().to_string();
+        let text = match std::fs::read_to_string(input) {
+            Ok(text) => text,
+            Err(error) => {
+                skipped.push(SkippedInput {
+                    input: label,
+                    reason: format!("could not be read: {error}"),
+                });
+                continue;
+            }
+        };
+        let document: Value = match serde_json::from_str(&text) {
+            Ok(document) => document,
+            Err(error) => {
+                skipped.push(SkippedInput {
+                    input: label,
+                    reason: format!("not valid JSON: {error}"),
+                });
+                continue;
+            }
+        };
+        let detected = match bioprism_figures::detect(&document) {
+            Ok(detected) => detected,
+            Err(error) => {
+                skipped.push(SkippedInput {
+                    input: label,
+                    reason: error.to_string(),
+                });
+                continue;
+            }
+        };
+        if detected.is_empty() {
+            skipped.push(SkippedInput {
+                input: label,
+                reason: "no artifact this builder draws".to_string(),
+            });
+            continue;
+        }
+        let selection: Vec<&bioprism_figures::Detected> = detected.iter().collect();
+        let pending = match render_selection(&document, &selection, input) {
+            Ok(pending) => pending,
+            Err(error) => {
+                skipped.push(SkippedInput {
+                    input: label,
+                    reason: error.message,
+                });
+                continue;
+            }
+        };
+        let target = figure_batch_out_dir(out_dir, input);
+        for figure in &pending {
+            let written =
+                io::write_text_artifact(&target.join(&figure.filename), &figure.svg, dry_run)?;
+            figures.push(json!({
+                "input": label,
+                "kind": figure.kind.slug(),
+                "pointer": figure.pointer,
+                "filename": written.path.display().to_string(),
+                "source_sha256": figure.source_sha256,
+            }));
+            written_artifacts.push(written);
+        }
+    }
+
+    let manifest = json!({
+        "inputs": inputs
+            .iter()
+            .map(|input| input.display().to_string())
+            .collect::<Vec<String>>(),
+        "figures": figures,
+        "skipped": skipped
+            .iter()
+            .map(|entry| json!({ "input": entry.input, "reason": entry.reason }))
+            .collect::<Vec<Value>>(),
+    });
+    let manifest_path = out_dir.join("manifest.json");
+    let manifest_artifact = io::write_artifact(&manifest_path, &manifest, dry_run)?;
+
+    let drew_something = !figures.is_empty();
+    let document_out = json!({
+        "ok": drew_something,
+        "input_dir": input_dir.display().to_string(),
+        "out_dir": out_dir.display().to_string(),
+        "recursive": false,
+        "dry_run": dry_run,
+        "inputs_total": inputs.len(),
+        "figures_total": figures.len(),
+        "skipped_total": skipped.len(),
+        "manifest": manifest_path.display().to_string(),
+        "manifest_written": manifest_artifact.written,
+        "manifest_document": manifest,
+    });
+
+    let mut human = format!(
+        "figure batch: {}\n  input directory: {} (non-recursive)\n  inputs considered: {}\n  \
+         figures: {}\n  skipped: {}\n",
+        if dry_run {
+            "planned (no writes)"
+        } else {
+            "completed"
+        },
+        input_dir.display(),
+        inputs.len(),
+        figures.len(),
+        skipped.len(),
+    );
+    for entry in &skipped {
+        human.push_str(&format!("  skipped {} — {}\n", entry.input, entry.reason));
+    }
+    for written in &written_artifacts {
+        human.push_str(&format!(
+            "  {} {} ({} bytes)\n",
+            if written.written {
+                "wrote"
+            } else {
+                "would write"
+            },
+            written.path.display(),
+            written.bytes
+        ));
+    }
+    human.push_str(&format!(
+        "  {} {} ({} bytes)\n",
+        if manifest_artifact.written {
+            "wrote"
+        } else {
+            "would write"
+        },
+        manifest_artifact.path.display(),
+        manifest_artifact.bytes
+    ));
+    if !drew_something {
+        human.push_str(
+            "\nNothing in this directory was drawable. The manifest still names every input and \
+             why\neach was skipped, because that is the answer.\n",
+        );
+    }
+    let follow_up = figures
+        .first()
+        .and_then(|figure| figure["input"].as_str())
+        .map(str::to_string)
+        .or_else(|| inputs.first().map(|input| input.display().to_string()))
+        .unwrap_or_else(|| input_dir.join("<artifact>.json").display().to_string());
+    human.push_str(&format!(
+        "\nNext: bioprism figure list --input {follow_up}\n"
+    ));
+    Ok(Outcome::ok(document_out, human).failing_if(!drew_something))
 }
 
 fn evidence_bundle_verify(bundle_path: &Path) -> CliResult<Outcome> {
@@ -2328,7 +2840,10 @@ fn world_validate(world_path: &Path, dimensions_path: Option<&Path>) -> CliResul
         warnings
     );
     if let Some(path) = dimensions_path {
-        human.push_str(&format!("  scope dimensions classified by {}\n", path.display()));
+        human.push_str(&format!(
+            "  scope dimensions classified by {}\n",
+            path.display()
+        ));
     }
     for diagnostic in &report.diagnostics {
         let label = match diagnostic.severity {
@@ -2679,11 +3194,7 @@ fn domain_block(pack: &DomainPack, advisories: &[String]) -> Value {
 
 /// The human-mode rendering of the same block.
 fn render_domain(pack: &DomainPack, advisories: &[String]) -> String {
-    let mut text = format!(
-        "domain {} (oracle {})\n",
-        pack.name(),
-        pack.oracle().kind()
-    );
+    let mut text = format!("domain {} (oracle {})\n", pack.name(), pack.oracle().kind());
     for advisory in advisories {
         text.push_str(&format!("  advisory: {advisory}\n"));
     }
@@ -2698,7 +3209,11 @@ fn context_compile(options: &CompileOptions) -> CliResult<Outcome> {
         Profile::Extended => CertificateProfile::Extended,
     };
 
-    let pack = options.domain.as_deref().map(load_domain_pack).transpose()?;
+    let pack = options
+        .domain
+        .as_deref()
+        .map(load_domain_pack)
+        .transpose()?;
     let out = match &pack {
         Some(pack) => compile_with_oracle(world.as_ref(), &query, pack.oracle()),
         None => compile(world.as_ref(), &query),
@@ -3359,7 +3874,9 @@ fn read_declarations(path: &Path) -> CliResult<PlanOptions> {
     let blame = |message: String| CliError::invalid(message).about(path.display().to_string());
 
     let map = document.as_object().ok_or_else(|| {
-        blame(format!("a {DECLARATIONS_SCHEMA_VERSION} document is an object"))
+        blame(format!(
+            "a {DECLARATIONS_SCHEMA_VERSION} document is an object"
+        ))
     })?;
     let declared = [
         "schema_version",
@@ -3405,9 +3922,9 @@ fn read_declarations(path: &Path) -> CliResult<PlanOptions> {
                 } else {
                     &["name", "statement", "predicate"]
                 };
-                let entry = entry.as_object().ok_or_else(|| {
-                    blame(format!("every entry in {field:?} is an object"))
-                })?;
+                let entry = entry
+                    .as_object()
+                    .ok_or_else(|| blame(format!("every entry in {field:?} is an object")))?;
                 if let Some(unknown) = entry.keys().find(|key| !fields.contains(&key.as_str())) {
                     return Err(blame(format!(
                         "undeclared field {unknown:?} on an entry in {field:?}; the declared \
@@ -3427,7 +3944,9 @@ fn read_declarations(path: &Path) -> CliResult<PlanOptions> {
                     blame(format!("an entry in {field:?} declares no \"predicate\""))
                 })?)
                 .map_err(|error| {
-                    blame(format!("an entry in {field:?} carries no predicate: {error}"))
+                    blame(format!(
+                        "an entry in {field:?} carries no predicate: {error}"
+                    ))
                 })?;
                 let item = DeclaredItem::new(text("name")?, text("statement")?, predicate);
                 Ok(if with_rationale {
@@ -3524,11 +4043,7 @@ fn project_plan(options: &ProjectPlanOptions) -> CliResult<Outcome> {
         project_assemble(&options.root, issues, options.decision_time.as_deref())?;
 
     let query_document = assembled.issue_queries.get(&options.issue).ok_or_else(|| {
-        let declared_ids: Vec<&str> = assembled
-            .issue_queries
-            .keys()
-            .map(String::as_str)
-            .collect();
+        let declared_ids: Vec<&str> = assembled.issue_queries.keys().map(String::as_str).collect();
         CliError::invalid(format!(
             "no issue {:?} is declared in {}; it declares {}",
             options.issue,
@@ -3546,9 +4061,8 @@ fn project_plan(options: &ProjectPlanOptions) -> CliResult<Outcome> {
         .map_err(|error| CliError::internal(error.to_string()))?;
     let pack = DomainPack::from_json(&assembled.pack)
         .map_err(|error| CliError::internal(error.to_string()))?;
-    let query = Query::from_json(query_document.clone()).map_err(|error| {
-        CliError::internal(format!("issue {:?} query: {error}", options.issue))
-    })?;
+    let query = Query::from_json(query_document.clone())
+        .map_err(|error| CliError::internal(format!("issue {:?} query: {error}", options.issue)))?;
     let compiled =
         compile_with_oracle(&world, &query, pack.oracle()).map_err(CliError::from_compile)?;
 
@@ -3726,11 +4240,7 @@ fn project_verify(
             if !missing_region_facts.is_empty() {
                 text.push_str(&format!(
                     "  the plan binds {} that the verified world no longer carries: {}\n",
-                    counted(
-                        missing_region_facts.len(),
-                        "region fact",
-                        "region facts"
-                    ),
+                    counted(missing_region_facts.len(), "region fact", "region facts"),
                     missing_region_facts.join(", ")
                 ));
             }
@@ -4075,8 +4585,8 @@ mod tests {
             .join("\n");
         let parsed: Value = serde_json::from_str(&stripped)
             .expect("the commented template minus its comment lines must be valid JSON");
-        let typed = autopilot_template_document()
-            .expect("the typed template document must serialize");
+        let typed =
+            autopilot_template_document().expect("the typed template document must serialize");
         assert_eq!(
             parsed, typed,
             "the human-mode commented template and the --json template document have drifted"

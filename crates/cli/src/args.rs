@@ -5,6 +5,7 @@
 //! all three exactly specified and keeps the binary dependency-free.
 
 use crate::exit::{CliError, CliResult, ExitCode, Retryability};
+use bioprism_figures::FigureKind;
 use std::fmt::Write;
 use std::path::PathBuf;
 
@@ -239,6 +240,37 @@ COMMANDS
                     Recompute a research dossier's digest and check its structural contract
                     (request digest, required limitations, step outcomes, finding support).
                     Exit 1 if the dossier does not verify.
+
+  figure list       --input <path>
+                    Report what is drawable in a JSON artifact and where, without writing
+                    anything. Recognition is structural — required key sets and declared schema
+                    strings, never the filename — so the answer does not change when a file is
+                    renamed. A document holding nothing this builder draws is reported as such
+                    and still exits 0: listing succeeded, and an empty list is the answer.
+  figure render     --input <path> [--out-dir <dir>] [--kind <kind>] [--pointer <json-pointer>]
+                    [--dry-run]
+                    Render every drawable region of one document to SVG, or just the ones
+                    --kind and --pointer select. Each figure's footer carries the canonical
+                    digest of the exact value it was drawn from: that hex identifies the
+                    artifact, it does not attest that the artifact is correct. --out-dir
+                    defaults to ./figures. --dry-run reports what would be written and writes
+                    nothing. Exit 1 when the selection is empty — the document holds nothing
+                    drawable, or --kind/--pointer matched none of what it holds. That is a
+                    verdict about the input, not a failure of this command. Exit 3 for a
+                    document that is not readable JSON or that no figure can be drawn from,
+                    and exit 5 when a figure cannot be written.
+  figure batch      --input-dir <dir> [--out-dir <dir>] [--dry-run]
+                    Render every drawable region of every *.json file directly inside a
+                    directory (non-recursive: subdirectories are not walked) and write a
+                    manifest.json naming every figure produced and every input skipped, with
+                    the reason. A skip never moves the exit code by itself: the code follows
+                    whether any figure was produced at all. Figures land in
+                    --out-dir/<input file stem>/, so two inputs cannot overwrite each other's
+                    output. Exit 1 when nothing in the directory was drawable — the manifest is
+                    still written, because it is the answer.
+
+  figure kinds: baseline-panel, selection-ratio, omission-accounting, sweep-grid,
+                mutation-diversity, autopilot-drive.
 
 GLOBAL OPTIONS
   --json            Emit exactly one JSON document on stdout and nothing else.
@@ -504,7 +536,30 @@ pub enum Command {
     ResearchVerify {
         dossier: PathBuf,
     },
+    FigureList {
+        input: PathBuf,
+    },
+    FigureRender {
+        input: PathBuf,
+        out_dir: PathBuf,
+        kind: Option<FigureKind>,
+        pointer: Option<String>,
+        dry_run: bool,
+    },
+    FigureBatch {
+        input_dir: PathBuf,
+        out_dir: PathBuf,
+        dry_run: bool,
+    },
 }
+
+/// Where `figure render` and `figure batch` write when the caller names no directory.
+///
+/// A default rather than a required flag because the overwhelmingly common invocation is "draw
+/// this file", and `research run` already writes its SVGs into a `figures/` directory beside the
+/// dossier — a caller who has seen one layout should not have to learn a second. Stated in
+/// `--help` rather than left to be discovered by finding the files.
+const DEFAULT_FIGURE_OUT_DIR: &str = "figures";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct GenerateOptions {
@@ -988,11 +1043,73 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
         ("research", "verify") => Command::ResearchVerify {
             dossier: options.take_path("--dossier")?,
         },
+        ("figure", "list") => Command::FigureList {
+            input: options.take_path("--input")?,
+        },
+        ("figure", "render") => Command::FigureRender {
+            input: options.take_path("--input")?,
+            out_dir: take_figure_out_dir(&mut options),
+            kind: take_figure_kind(&mut options)?,
+            pointer: take_figure_pointer(&mut options)?,
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("figure", "batch") => Command::FigureBatch {
+            input_dir: options.take_path("--input-dir")?,
+            out_dir: take_figure_out_dir(&mut options),
+            dry_run: options.take_switch("--dry-run"),
+        },
         _ => return Err(usage(format!("unknown command {group:?} {subcommand:?}"))),
     };
 
     options.reject_leftovers()?;
     Ok(Parsed::Run(Invocation { json, command }))
+}
+
+fn take_figure_out_dir(options: &mut Options) -> PathBuf {
+    options
+        .take_optional_path("--out-dir")
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_FIGURE_OUT_DIR))
+}
+
+/// Takes `--kind`, refusing any name outside `bioprism-figures`' own registry.
+///
+/// Validated here rather than after the document is read, because an unrecognised kind is a
+/// mistyped flag and not a defect in the artifact: accepted and matched later, it would surface
+/// as "nothing drawable selected" (exit 1) and send the caller to inspect a file that is fine.
+/// The registry is quantified over rather than restated, so a figure added to the crate becomes
+/// typeable here without an edit.
+fn take_figure_kind(options: &mut Options) -> CliResult<Option<FigureKind>> {
+    match options.take_optional("--kind") {
+        None => Ok(None),
+        Some(text) => match FigureKind::from_slug(&text) {
+            Some(kind) => Ok(Some(kind)),
+            None => Err(usage(format!(
+                "--kind must be one of {}, got {text:?}",
+                FigureKind::ALL
+                    .iter()
+                    .map(|kind| kind.slug())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+        },
+    }
+}
+
+/// Takes `--pointer`, refusing anything that is not an RFC 6901 JSON pointer.
+///
+/// `--pointer report` names nothing under RFC 6901, and a pointer that names nothing selects no
+/// figure — which the command would otherwise report as "the document holds nothing at that
+/// pointer" when the real fault is the missing leading slash. The empty string is accepted and
+/// means the document root, exactly as `figure list` prints it.
+fn take_figure_pointer(options: &mut Options) -> CliResult<Option<String>> {
+    match options.take_optional("--pointer") {
+        None => Ok(None),
+        Some(text) if text.is_empty() || text.starts_with('/') => Ok(Some(text)),
+        Some(text) => Err(usage(format!(
+            "--pointer must be an RFC 6901 JSON pointer: either empty for the document root, or \
+             beginning with `/`; got {text:?}"
+        ))),
+    }
 }
 
 /// Takes `--decision-time`, refusing anything the workspace's own RFC 3339 parser refuses.
@@ -1005,9 +1122,8 @@ fn take_decision_time(options: &mut Options) -> CliResult<Option<String>> {
     match options.take_optional("--decision-time") {
         None => Ok(None),
         Some(text) => {
-            bioprism_scope::Timestamp::parse(&text).map_err(|error| {
-                usage(format!("--decision-time must be RFC 3339: {error}"))
-            })?;
+            bioprism_scope::Timestamp::parse(&text)
+                .map_err(|error| usage(format!("--decision-time must be RFC 3339: {error}")))?;
             Ok(Some(text))
         }
     }
@@ -1085,7 +1201,7 @@ impl Options {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, Command, Parsed};
+    use super::{parse, Command, FigureKind, Parsed};
     use std::path::PathBuf;
 
     #[test]
@@ -1122,7 +1238,9 @@ mod tests {
             "compare's help must state the refusal rather than imply support"
         );
         assert!(text.contains("world validate    --world <path> [--dimensions <path>]"));
-        assert!(text.contains("world sweep       [--distractors <n,n,...>] [--seed <n>] [--markdown]"));
+        assert!(
+            text.contains("world sweep       [--distractors <n,n,...>] [--seed <n>] [--markdown]")
+        );
     }
 
     #[test]
@@ -1220,7 +1338,14 @@ mod tests {
     fn project_plan_requires_the_issue_it_plans_for_rather_than_defaulting_to_none() {
         let error = parse(
             [
-                "project", "plan", "--root", "tree", "--issues", "issues.json", "--out", "plan.json",
+                "project",
+                "plan",
+                "--root",
+                "tree",
+                "--issues",
+                "issues.json",
+                "--out",
+                "plan.json",
             ]
             .into_iter()
             .map(String::from),
@@ -1235,7 +1360,14 @@ mod tests {
 
         let without_issues = parse(
             [
-                "project", "plan", "--root", "tree", "--issue", "ISSUE-1", "--out", "plan.json",
+                "project",
+                "plan",
+                "--root",
+                "tree",
+                "--issue",
+                "ISSUE-1",
+                "--out",
+                "plan.json",
             ]
             .into_iter()
             .map(String::from),
@@ -1348,7 +1480,13 @@ mod tests {
     fn context_compare_refuses_a_domain_pack_with_the_reason_in_the_message() {
         let error = parse(
             [
-                "context", "compare", "--world", "w.json", "--query", "q.json", "--domain",
+                "context",
+                "compare",
+                "--world",
+                "w.json",
+                "--query",
+                "q.json",
+                "--domain",
                 "pack.json",
             ]
             .into_iter()
@@ -1950,8 +2088,12 @@ mod tests {
 
     #[test]
     fn autopilot_grant_template_takes_no_options_and_verify_takes_a_report_path() {
-        let template = parse(["autopilot", "grant-template"].into_iter().map(String::from))
-            .expect("parse autopilot grant-template");
+        let template = parse(
+            ["autopilot", "grant-template"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse autopilot grant-template");
         assert_eq!(
             template,
             Parsed::Run(super::Invocation {
@@ -2177,5 +2319,214 @@ mod tests {
             text.contains("exits 0 even when every finding is negative"),
             "help must state that a negative finding is a completed run, not a failure"
         );
+    }
+
+    #[test]
+    fn figure_render_defaults_its_output_directory_rather_than_demanding_one() {
+        let parsed = parse(
+            ["figure", "render", "--input", "dossier.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse figure render");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::FigureRender {
+                    input: PathBuf::from("dossier.json"),
+                    out_dir: PathBuf::from("figures"),
+                    kind: None,
+                    pointer: None,
+                    dry_run: false,
+                },
+            }),
+            "the default is `figures/`, the layout `research run` already writes"
+        );
+    }
+
+    #[test]
+    fn figure_render_carries_its_kind_pointer_and_dry_run_through_the_parser() {
+        let parsed = parse(
+            [
+                "--json",
+                "figure",
+                "render",
+                "--input",
+                "dossier.json",
+                "--out-dir",
+                "out",
+                "--kind",
+                "sweep-grid",
+                "--pointer",
+                "/steps/10/outputs/0/artifact",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse a filtered figure render");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: true,
+                command: Command::FigureRender {
+                    input: PathBuf::from("dossier.json"),
+                    out_dir: PathBuf::from("out"),
+                    kind: Some(FigureKind::SweepGrid),
+                    pointer: Some("/steps/10/outputs/0/artifact".to_string()),
+                    dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_kind_outside_the_figure_registry_is_refused_at_parse_time_naming_the_registry() {
+        let error = parse(
+            [
+                "figure",
+                "render",
+                "--input",
+                "x.json",
+                "--kind",
+                "pie-chart",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("an unknown figure name is a mistyped flag, not a defect in the document");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        for slug in FigureKind::ALL.iter().map(|kind| kind.slug()) {
+            assert!(
+                error.message.contains(slug),
+                "the refusal must name the whole registry, and is missing {slug}: {}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn a_pointer_without_a_leading_slash_is_refused_but_the_empty_root_pointer_is_accepted() {
+        let error = parse(
+            [
+                "figure",
+                "render",
+                "--input",
+                "x.json",
+                "--pointer",
+                "report",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect_err("`report` names nothing under RFC 6901 and must not be silently accepted");
+        assert_eq!(error.code, crate::exit::ExitCode::Usage);
+        assert!(error.message.contains("RFC 6901"), "{}", error.message);
+
+        let root = parse(
+            ["figure", "render", "--input", "x.json", "--pointer="]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("the empty pointer is the document root and is a legitimate selection");
+        assert_eq!(
+            root,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::FigureRender {
+                    input: PathBuf::from("x.json"),
+                    out_dir: PathBuf::from("figures"),
+                    kind: None,
+                    pointer: Some(String::new()),
+                    dry_run: false,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn figure_list_takes_only_an_input_and_batch_takes_an_input_directory() {
+        let listed = parse(
+            ["figure", "list", "--input", "cert.json"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect("parse figure list");
+        assert_eq!(
+            listed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::FigureList {
+                    input: PathBuf::from("cert.json"),
+                },
+            })
+        );
+        parse(
+            ["figure", "list", "--input", "cert.json", "--out-dir", "out"]
+                .into_iter()
+                .map(String::from),
+        )
+        .expect_err("`figure list` writes nothing, so an output directory is meaningless");
+
+        let batched = parse(
+            [
+                "figure",
+                "batch",
+                "--input-dir",
+                "artifacts",
+                "--out-dir",
+                "out",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse figure batch");
+        assert_eq!(
+            batched,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::FigureBatch {
+                    input_dir: PathBuf::from("artifacts"),
+                    out_dir: PathBuf::from("out"),
+                    dry_run: true,
+                },
+            })
+        );
+        let missing = parse(["figure", "batch"].into_iter().map(String::from))
+            .expect_err("a batch without a directory has nothing to walk");
+        assert!(
+            missing.message.contains("--input-dir"),
+            "{}",
+            missing.message
+        );
+    }
+
+    #[test]
+    fn help_documents_the_figure_group_and_what_its_digests_do_not_prove() {
+        let text = super::help();
+        assert!(text.contains("figure list       --input <path>"));
+        assert!(text.contains("figure render     --input <path>"));
+        assert!(text.contains("figure batch      --input-dir <dir>"));
+        assert!(
+            text.contains("it does not attest that the artifact is correct"),
+            "help must say what the footer digest does not prove"
+        );
+        assert!(
+            text.contains("That is a\n                    verdict about the input"),
+            "help must state that an empty selection is a verdict rather than a failure"
+        );
+        assert!(
+            text.contains("non-recursive: subdirectories are not walked"),
+            "help must state the walk's boundary rather than leave it to be discovered"
+        );
+        for slug in FigureKind::ALL.iter().map(|kind| kind.slug()) {
+            assert!(
+                text.contains(slug),
+                "help must list every figure a caller can name with --kind, and is missing \
+                 {slug}"
+            );
+        }
     }
 }

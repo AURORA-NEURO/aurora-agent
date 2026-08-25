@@ -525,6 +525,37 @@ impl CliError {
         }
     }
 
+    /// Routes a figure-builder refusal to the code carrying its 40.36 class.
+    ///
+    /// Every variant lands on `invalid_input`, and that is a decision rather than an omission.
+    /// The figure commands render a document the operator names on the command line: a field the
+    /// figure draws that the document does not carry, a field of the wrong type, an empty
+    /// collection, and a document that contradicts itself are all defects in that file, and
+    /// re-sending the identical command cannot succeed until it is edited. `Canonicalisation` is
+    /// here for the same reason and not on [`CliError::internal`], which is where the research
+    /// runner sends it: there, the value failing to canonicalise was produced in-process from
+    /// committed fixtures, so the operator supplied nothing that could be edited; here the value
+    /// came out of their own file, and a number JSON parsed but canonical bytes cannot represent
+    /// is a defect in that file.
+    ///
+    /// What the shared code costs is real and worth stating: a script branching on the status
+    /// alone cannot tell a missing field from an internal contradiction. Both are terminal and
+    /// both are fixed by editing the document, so the 40.36 retry decision survives; the
+    /// distinction lives in the message, which is where the caller has to look anyway to know
+    /// *which* field. Written against the error type rather than at each call site so a new
+    /// variant fails to compile until somebody decides which code it belongs under.
+    pub fn from_figure(error: bioprism_figures::FigureError) -> Self {
+        use bioprism_figures::FigureError;
+        let code = match &error {
+            FigureError::MissingField { .. }
+            | FigureError::WrongType { .. }
+            | FigureError::EmptyCollection { .. }
+            | FigureError::Inconsistent { .. }
+            | FigureError::Canonicalisation { .. } => ExitCode::InvalidInput,
+        };
+        CliError::new(code, error.to_string())
+    }
+
     /// Routes an autonomy-grant refusal to `invalid_input`.
     ///
     /// Every [`GrantError`] names a field of the grant document that must change — an empty
@@ -702,9 +733,10 @@ mod tests {
         });
         assert_eq!(refused.code, ExitCode::PolicyDenied);
 
-        let malformed_instantiation = CliError::from_autopilot(AutopilotError::InvalidInstantiation {
-            reason: "workflow must be domain_workflow_instantiate".into(),
-        });
+        let malformed_instantiation =
+            CliError::from_autopilot(AutopilotError::InvalidInstantiation {
+                reason: "workflow must be domain_workflow_instantiate".into(),
+            });
         assert_eq!(malformed_instantiation.code, ExitCode::InvalidInput);
 
         let malformed_grant = CliError::from_grant(GrantError::NoTools);

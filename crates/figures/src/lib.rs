@@ -34,6 +34,18 @@
 //! not change it, and it will match the digest any other workspace component computes for the
 //! same value.
 //!
+//! # Finding those shapes in the documents users actually keep
+//!
+//! The six renderers each take one exact shape. [`detect`] is the layer that finds those shapes
+//! inside what is on disk: a bare artifact, a `--json` envelope, or a research dossier carrying
+//! many artifacts inline. It classifies **structurally** — required key sets and declared schema
+//! strings, never filenames — and reports every drawable region it finds, each with the JSON
+//! pointer the renderer should be handed. A document it does not recognise yields an empty vector
+//! rather than an error: a world, a query and a compile trace are all perfectly good documents
+//! that no figure here draws, and calling that a failure would tell an operator their file is
+//! broken when it is merely not a figure's input. Two artifact shapes matching one pointer is
+//! [`FigureError::Inconsistent`]; see [`detect`]'s module documentation for why.
+//!
 //! # Rendering rules the tests hold this crate to
 //!
 //! * A refused row is drawn as a refused *state*, never as a zero-length bar; absent keys on
@@ -64,10 +76,21 @@
 //!   artifact always looks the same; a figure is a rendering of the artifact, not a canvas. The
 //!   two dimensions that do follow the input — figure height, and the sweep grid's width — are
 //!   computed from what was drawn, never from a caller-supplied knob.
-//! * **No I/O.** Callers parse the artifact and write the SVG; this crate touches no filesystem.
+//! * **No I/O.** Callers parse the artifact and write the SVG; this crate touches no filesystem,
+//!   [`detect`] included — it classifies a parsed `Value` and never opens a path.
 //! * **No text shaping.** Labels are truncated and wrapped by character count, not measured with
 //!   font metrics; layout constants leave slack instead.
+//! * **No recursive search for artifacts.** [`detect`]'s scan is bounded to the document root,
+//!   the root's own members when the root is a `--json` envelope, and a dossier's recorded
+//!   artifacts. An unbounded walk would start finding "artifacts" in fields that merely resemble
+//!   them, and a figure of a coincidence is worse than no figure.
+//! * **No verification of a claimed digest.** The footer hex and
+//!   [`RenderedFigure::source_sha256`] are recomputed from the value being drawn; a
+//!   `certificate_sha256` or `report_sha256` the document carries is never checked against them
+//!   here. `context verify`, `autopilot verify` and `research verify` are the surfaces that do
+//!   that, and a figure must not be mistaken for one.
 
+mod detect;
 mod diversity;
 mod drive;
 mod error;
@@ -78,6 +101,10 @@ mod panel;
 mod selection;
 mod svg;
 
+pub use detect::{
+    classify, detect, render_all, render_detected, ArtifactKind, Detected, FigureKind,
+    RenderedFigure,
+};
 pub use diversity::mutation_diversity;
 pub use drive::autopilot_drive;
 pub use error::FigureError;
