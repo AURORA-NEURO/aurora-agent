@@ -36,6 +36,7 @@ pub mod federated_contract_model;
 pub mod federated_evidence_copilot;
 pub mod federated_evidence_surveillance;
 pub mod federated_evidence_workflow_fabric;
+pub mod federated_research_workbench;
 pub mod high_throughput_evidence_copilot;
 pub mod high_throughput_evidence_surveillance;
 pub mod high_throughput_evidence_workflow_fabric;
@@ -100,6 +101,12 @@ pub use federated_evidence_workflow_fabric::{
     FederatedWorkflowError, FederatedWorkflowReceipt, FederatedWorkflowRequest,
     CONTRACT_VERSION as FEDERATED_EVIDENCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_EVIDENCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use federated_research_workbench::{
+    compile_federated_research_workbench, federated_research_workbench_manifest,
+    FederatedWorkbenchError, FederatedWorkbenchReceipt, FederatedWorkbenchRequest,
+    CONTRACT_VERSION as FEDERATED_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 pub use high_throughput_evidence_copilot::{
     compile_high_throughput_evidence_copilot, high_throughput_evidence_research_copilot_manifest,
