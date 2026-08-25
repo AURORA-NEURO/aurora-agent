@@ -4473,6 +4473,23 @@ streaming and every continuation turn in a tool loop are accounted separately. A
 therefore becomes durable failover evidence without retaining the prompt, response, tool
 arguments, credential handle, or upstream error body.
 
+The TypeScript high-level result also exposes this audit seam directly. A completed
+`AutonomousRuntime.invoke()`, `invokeToolLoop()`, or `AutonomousAgent.run()` result carries an
+ordered `provider_invocations` array using
+`bioprism-typescript-autonomous-provider-invocation/0.1`. Each receipt contains only bounded
+provider/model labels, invocation kind, zero-based selection attempt and tool turn, outcome/status,
+token counts, estimated and observed cost units, latency, status/failure metadata, selection and
+outcome digests, and an optional request-id digest. If a retryable failure causes a new selection,
+`provider_failover` contains the bounded attempt projection, fallback count, strategy label, and
+aggregate digest; it is `null` for a direct selection. Cross-domain high-level wrappers aggregate
+child and synthesis receipts while child results remain the authoritative per-domain records.
+
+This is transport and accounting evidence, not correctness evidence. Task text, prompts, response
+text, tool calls or arguments, credentials, authorization headers, and raw provider errors never
+enter the receipt. A receipt proves how a provider attempt was classified, not that the answer was
+valid, scientifically sound, rewarded, or externally effective; those judgments remain caller-owned
+evaluator and effect-reconciliation responsibilities.
+
 ### TypeScript mission execution as a durable dependency runtime
 
 The TypeScript SDK now has a local mission executor for applications that need an explicit

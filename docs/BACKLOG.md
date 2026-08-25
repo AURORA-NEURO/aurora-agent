@@ -1749,3 +1749,13 @@ task intent, model-selection context, learning identity, and compiled workflow-s
 The open deployment work is to bind these reviewed child contracts to caller-owned tool/source
 catalogues, evaluator evidence, and approval records; the deterministic route remains neither
 provider authority nor effect authority.
+
+TypeScript now exposes provider invocation and failover receipts on autonomous execution results,
+matching the existing Python provider-audit seam. The records are ordered, digest-bound,
+metadata-only projections of provider/model attempts, turns, token and cost counters, latency,
+failure classification, request-id digests, and bounded failover strategy; direct runs, tool loops,
+all twelve built-in domains, and cross-domain child aggregation are covered by tests. This closes
+the SDK result-observability gap without treating transport success as task correctness. Remaining
+deployment work is to connect these receipts to caller-owned evaluator settlement, durable trace
+stores, provider cost ledgers, and operator policy surfaces; credentials, raw payloads, reward, and
+effect authority remain explicitly outside the SDK receipt boundary.

@@ -200,6 +200,11 @@ test("traced autonomous execution spans all domains and cross-domain fan-out wit
     assert.equal(execution.trace.status, "completed", domain);
     assert.equal(execution.trace.domains.includes(domain), true, domain);
     assert.equal(execution.trace.provider_invocations, 1, domain);
+    assert.equal(execution.result.provider_invocations.length, 1, domain);
+    assert.equal(execution.result.provider_invocations[0].provider, "trace-offline", domain);
+    assert.equal(execution.result.provider_failover, null, domain);
+    assert.equal(execution.result.provider_invocations[0].secret_material, "never_returned", domain);
+    assert.doesNotMatch(JSON.stringify(execution.result.provider_invocations), /bounded offline result|api[_ -]?key/i, domain);
     assert.ok(execution.trace.route_digest);
     assert.ok(execution.trace.plan_digest);
     const phases = store.events({ run_id: `run-${domain}` }).map((event) => event.phase);

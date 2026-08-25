@@ -165,6 +165,8 @@ import {
   autonomousSelectionConfidence,
   type AutonomousModelCandidateDefaults,
   type ProviderModelDiscovery,
+  type AutonomousProviderFailoverProjection,
+  type AutonomousProviderInvocationReceipt,
 } from "./llm.js";
 import {
   buildAutonomousDomainResponseContract,
@@ -989,6 +991,10 @@ export interface AutonomousRunResult {
   plan_refinement_digest: string | null;
   selection: AutonomousSelectionDecision | null;
   response: ProviderResponse | null;
+  /** Metadata-only transport receipts for the provider turns used by this run. */
+  provider_invocations?: AutonomousProviderInvocationReceipt[];
+  /** Metadata-only failover projection; null when the selected provider completed directly. */
+  provider_failover?: AutonomousProviderFailoverProjection | null;
   /** Digest-only identity for an explicitly selected versioned prompt; rendered messages remain transient. */
   prompt?: AutonomousRunPromptProjection | null;
   /** Deterministic value-only response composition signal; never task truth or effect evidence. */
@@ -7258,6 +7264,11 @@ export class AutonomousAgent {
         plan_refinement_digest: cross.plan_refinement_digest,
         selection: cross.synthesis?.selection ?? null,
         response: cross.synthesis?.response ?? null,
+        provider_invocations: [
+          ...cross.child_runs.flatMap((child) => child.result.provider_invocations ?? []),
+          ...(cross.synthesis?.provider_invocations ?? []),
+        ],
+        provider_failover: cross.synthesis?.provider_failover ?? null,
         prompt: cross.synthesis?.prompt ?? null,
         response_evaluation: cross.synthesis?.response_evaluation ?? null,
         tool_loop: cross.synthesis?.tool_loop ?? null,
@@ -7398,13 +7409,13 @@ export class AutonomousAgent {
       const responseEvaluation = options.structuredDomainResponse === true && loop.loop.finalResponse
         ? evaluateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract)
         : null;
-      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, provider_invocations: loop.provider_invocations, provider_failover: loop.provider_failover, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
     const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined });
     const responseEvaluation = options.structuredDomainResponse === true
       ? evaluateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract)
       : null;
-    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, provider_invocations: result.provider_invocations, provider_failover: result.provider_failover, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
   }
 
   /** Execute routed specialist children with bounded fan-out, then hand local outputs to synthesis. */

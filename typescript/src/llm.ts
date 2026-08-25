@@ -534,6 +534,161 @@ export interface ProviderInvocationObserver {
   after?(metadata: ProviderInvocationMetadata, outcome: ProviderInvocationOutcome): void | Promise<void>;
 }
 
+/**
+ * Stable, value-only evidence for one provider invocation made by the autonomous runtime.
+ *
+ * This intentionally mirrors the Python SDK receipt contract while keeping the schema
+ * language-qualified. It records transport facts useful for replay, cost accounting, health
+ * learning, and evaluator settlement; prompts, provider payloads, credentials, and response
+ * text never cross this boundary.
+ */
+export const AUTONOMOUS_PROVIDER_INVOCATION_SCHEMA = "bioprism-typescript-autonomous-provider-invocation/0.1" as const;
+export const AUTONOMOUS_PROVIDER_FAILOVER_SCHEMA = "bioprism-typescript-autonomous-provider-failover/0.1" as const;
+
+export interface AutonomousProviderInvocationReceipt extends JsonObject {
+  schema: typeof AUTONOMOUS_PROVIDER_INVOCATION_SCHEMA;
+  execution_id: string | null;
+  provider: string;
+  model: string;
+  kind: string;
+  /** Zero-based autonomous selection attempt; a retry/failover increments this value. */
+  attempt: number;
+  /** Zero-based provider turn; tool loops can produce several turns per selection attempt. */
+  turn: number;
+  status: ProviderInvocationOutcome["status"];
+  outcome: "success" | "failure";
+  input_tokens: number;
+  output_tokens: number;
+  estimated_cost_units: number;
+  actual_cost_units: number;
+  latency_ms: number;
+  selection_digest: string;
+  outcome_digest: string;
+  request_id_digest: string | null;
+  failure_class: ProviderFailureClass | null;
+  status_code: number | null;
+  retention: "metadata_only_no_provider_payloads_or_credentials";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousProviderFailoverAttempt extends JsonObject {
+  attempt: number;
+  provider: string;
+  model: string;
+  status: ProviderInvocationOutcome["status"];
+  outcome: "success" | "failure";
+  reason: ProviderFailureClass | null;
+  status_code: number | null;
+  selection_digest: string;
+  outcome_digest: string;
+}
+
+export interface AutonomousProviderFailoverProjection extends JsonObject {
+  schema: typeof AUTONOMOUS_PROVIDER_FAILOVER_SCHEMA;
+  strategy: "deterministic_model_selector_with_provider_health_gating";
+  attempts: AutonomousProviderFailoverAttempt[];
+  fallback_count: number;
+  failover_digest: string;
+  retention: "metadata_only";
+  secret_material: "never_returned";
+}
+
+interface AutonomousProviderInvocationSample {
+  executionId: string | null;
+  metadata: ProviderInvocationMetadata;
+  outcome: ProviderInvocationOutcome;
+  attempt: number;
+  turn: number;
+  selectionDigest: string;
+  estimatedCostUnits: number;
+  costPerMillionTokens: number;
+}
+
+function boundedReceiptInteger(value: number): number {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function boundedReceiptMetric(value: number): number {
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+async function autonomousProviderInvocationProjection(
+  samples: readonly AutonomousProviderInvocationSample[],
+): Promise<{ providerInvocations: AutonomousProviderInvocationReceipt[]; providerFailover: AutonomousProviderFailoverProjection | null }> {
+  const providerInvocations: AutonomousProviderInvocationReceipt[] = [];
+  for (const sample of samples) {
+    const inputTokens = boundedReceiptInteger(sample.outcome.inputTokens);
+    const outputTokens = boundedReceiptInteger(sample.outcome.outputTokens);
+    const latencyMs = boundedReceiptMetric(sample.outcome.latencyMs);
+    const estimatedCostUnits = boundedReceiptMetric(sample.estimatedCostUnits);
+    const costPerMillionTokens = boundedReceiptMetric(sample.costPerMillionTokens);
+    const actualCostUnits = boundedReceiptMetric(((inputTokens + outputTokens) / 1_000_000) * costPerMillionTokens);
+    const outcomeDigest = await digestJson({
+      provider: sample.metadata.provider,
+      model: sample.metadata.model,
+      kind: sample.metadata.kind,
+      status: sample.outcome.status,
+      success: sample.outcome.success,
+      latency_ms: latencyMs,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      status_code: sample.outcome.statusCode ?? null,
+      failure_class: sample.outcome.failureClass ?? null,
+      failure_code: sample.outcome.failureCode ?? null,
+      retryable: sample.outcome.retryable ?? false,
+      request_id_present: typeof sample.outcome.requestId === "string" && sample.outcome.requestId.length > 0,
+    });
+    providerInvocations.push({
+      schema: AUTONOMOUS_PROVIDER_INVOCATION_SCHEMA,
+      execution_id: sample.executionId,
+      provider: sample.metadata.provider,
+      model: sample.metadata.model,
+      kind: sample.metadata.kind,
+      attempt: boundedReceiptInteger(sample.attempt),
+      turn: boundedReceiptInteger(sample.turn),
+      status: sample.outcome.status,
+      outcome: sample.outcome.success ? "success" : "failure",
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      estimated_cost_units: estimatedCostUnits,
+      actual_cost_units: actualCostUnits,
+      latency_ms: latencyMs,
+      selection_digest: sample.selectionDigest,
+      outcome_digest: outcomeDigest,
+      request_id_digest: typeof sample.outcome.requestId === "string" && sample.outcome.requestId.length > 0 ? await digestJson(sample.outcome.requestId) : null,
+      failure_class: sample.outcome.failureClass ?? null,
+      status_code: sample.outcome.statusCode ?? null,
+      retention: "metadata_only_no_provider_payloads_or_credentials",
+      secret_material: "never_returned",
+    });
+  }
+  const fallbackCount = providerInvocations.length === 0 ? 0 : Math.max(...providerInvocations.map((receipt) => receipt.attempt));
+  if (fallbackCount === 0) return { providerInvocations, providerFailover: null };
+  const attempts = providerInvocations.map((receipt): AutonomousProviderFailoverAttempt => ({
+    attempt: receipt.attempt,
+    provider: receipt.provider,
+    model: receipt.model,
+    status: receipt.status,
+    outcome: receipt.outcome,
+    reason: receipt.failure_class,
+    status_code: receipt.status_code,
+    selection_digest: receipt.selection_digest,
+    outcome_digest: receipt.outcome_digest,
+  }));
+  return {
+    providerInvocations,
+    providerFailover: {
+      schema: AUTONOMOUS_PROVIDER_FAILOVER_SCHEMA,
+      strategy: "deterministic_model_selector_with_provider_health_gating",
+      attempts,
+      fallback_count: fallbackCount,
+      failover_digest: await digestJson({ strategy: "deterministic_model_selector_with_provider_health_gating", attempts, fallback_count: fallbackCount }),
+      retention: "metadata_only",
+      secret_material: "never_returned",
+    },
+  };
+}
+
 /** A synchronous reservation released only when a provider call fails before dispatch. */
 export type AutonomousCostReservation = () => void;
 
@@ -767,6 +922,10 @@ export interface AutonomousExecutionPlan {
 export interface AutonomousExecutionResult {
   selection: AutonomousSelectionDecision;
   response: ProviderResponse;
+  /** Metadata-only receipt for every provider turn performed by this autonomous invocation. */
+  provider_invocations: AutonomousProviderInvocationReceipt[];
+  /** Present only when bounded provider/model failover was actually used. */
+  provider_failover: AutonomousProviderFailoverProjection | null;
 }
 
 export type AutonomousModelSelector = (request: AutonomousSelectionRequest) => AutonomousSelectionDecision | Promise<AutonomousSelectionDecision>;
@@ -3068,6 +3227,8 @@ export class AutonomousRuntime {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
     const excludedProviders = new Set<string>();
     const excludedModels = new Set<string>();
+    const invocationSamples: AutonomousProviderInvocationSample[] = [];
+    const executionId = options.execution?.state.execution_id ?? null;
     let failovers = 0;
     while (true) {
       const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels], selectionEventCallback: options.selectionEventCallback, attempt: failovers + 1 });
@@ -3077,8 +3238,21 @@ export class AutonomousRuntime {
       const observer: ProviderInvocationObserver = {
         before: options.observer?.before,
         after: async (metadata, outcome) => {
-          await options.observer?.after?.(metadata, outcome);
-          await options.feedback?.(selection, outcome);
+          try {
+            await options.observer?.after?.(metadata, outcome);
+            await options.feedback?.(selection, outcome);
+          } finally {
+            invocationSamples.push({
+              executionId,
+              metadata: { ...metadata },
+              outcome: { ...outcome },
+              attempt: failovers,
+              turn: 0,
+              selectionDigest,
+              estimatedCostUnits,
+              costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
+            });
+          }
         },
       };
       const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === selection.selected_model!.model);
@@ -3086,7 +3260,8 @@ export class AutonomousRuntime {
       const selectionDigest = await digestJson(selection);
       try {
         const response = await this.llm.invoke(provider, { ...plan.request, model: selection.selected_model.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost });
-        return { selection, response };
+        const projection = await autonomousProviderInvocationProjection(invocationSamples);
+        return { selection, response, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover };
       } catch (error) {
         if (!(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
         const modelId = `${provider}/${selection.selected_model.model}`;
@@ -3118,10 +3293,12 @@ export class AutonomousRuntime {
       reserveCost?: AutonomousCostReservationCallback;
       toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
     },
-  ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult }> {
+  ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult; provider_invocations: AutonomousProviderInvocationReceipt[]; provider_failover: AutonomousProviderFailoverProjection | null }> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
     const excludedProviders = new Set<string>();
     const excludedModels = new Set<string>();
+    const invocationSamples: AutonomousProviderInvocationSample[] = [];
+    const executionId = options.execution?.state.execution_id ?? null;
     let failovers = 0;
     let toolActivity = false;
     while (true) {
@@ -3132,13 +3309,28 @@ export class AutonomousRuntime {
       const observer: ProviderInvocationObserver = {
         before: options.observer?.before,
         after: async (metadata, outcome) => {
-          await options.observer?.after?.(metadata, outcome);
-          await options.feedback?.(selection, outcome);
+          try {
+            await options.observer?.after?.(metadata, outcome);
+            await options.feedback?.(selection, outcome);
+          } finally {
+            invocationSamples.push({
+              executionId,
+              metadata: { ...metadata },
+              outcome: { ...outcome },
+              attempt: failovers,
+              turn: invocationTurn,
+              selectionDigest,
+              estimatedCostUnits,
+              costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
+            });
+            invocationTurn += 1;
+          }
         },
       };
       const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === selection.selected_model!.model);
       const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
       const selectionDigest = await digestJson(selection);
+      let invocationTurn = 0;
       const authorizeAndExecute = async (calls: ProviderToolCall[]): Promise<ProviderToolResult[]> => {
         if (calls.length > 0) toolActivity = true;
         return options.authorizeAndExecute(calls);
@@ -3161,7 +3353,8 @@ export class AutonomousRuntime {
           costEstimator: (request) => estimatedProviderCostUnits(selectedCandidate, request),
           toolReadOnly: options.toolReadOnly,
         });
-        return { selection, loop };
+        const projection = await autonomousProviderInvocationProjection(invocationSamples);
+        return { selection, loop, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover };
       } catch (error) {
         // Replaying a loop after any provider-issued tool call could duplicate an effect. A
         // failover is therefore permitted only before the first tool request is observed.

@@ -1085,6 +1085,15 @@ test("autonomous runtime performs bounded provider failover and journals the adm
   }, { execution, selectionEventCallback: (event) => selectionEvents.push(event) });
   assert.equal(result.selection.selected_model.provider, "stable");
   assert.equal(result.response.text, "stable answer");
+  assert.equal(result.provider_invocations.length, 2);
+  assert.deepEqual(result.provider_invocations.map((receipt) => [receipt.attempt, receipt.provider, receipt.status, receipt.outcome]), [
+    [0, "unstable", "provider_refused", "failure"],
+    [1, "stable", "completed", "success"],
+  ]);
+  assert.equal(result.provider_invocations[0].execution_id, "autonomous-failover-1");
+  assert.equal(result.provider_failover.fallback_count, 1);
+  assert.equal(result.provider_failover.attempts.length, 2);
+  assert.doesNotMatch(JSON.stringify({ provider_invocations: result.provider_invocations, provider_failover: result.provider_failover }), /stable answer|\"busy\"|provider body|api[_ -]?key/i);
   assert.equal(calls.length, 2);
   assert.equal(calls[0], "https://unstable.test/v1/chat/completions");
   assert.equal(calls[1], "https://stable.test/v1/chat/completions");

@@ -1418,6 +1418,23 @@ Provider and tool outcome labels are event-level observations; they do not silen
 enclosing execution to terminal `completed` state. Terminal transitions require `complete()` or
 `fail()`.
 
+Successful autonomous results also expose metadata-only provider receipts. `provider_invocations`
+is ordered by provider turn and uses the stable
+`bioprism-typescript-autonomous-provider-invocation/0.1` shape: provider/model/kind, zero-based
+selection attempt and tool turn, status/outcome, token and cost counters, latency, status/failure
+metadata, selection/outcome digests, and an optional request-id digest. `provider_failover` is
+`null` for a direct selection and otherwise contains the bounded attempt projection, fallback
+count, deterministic strategy label, and aggregate digest. These fields are available on direct
+high-level runs and are aggregated into the top-level cross-domain wrapper; specialist child
+results retain their own exact receipts.
+
+The receipt boundary is deliberately one-way and metadata-only. It never serializes task text,
+prompts, response text, tool arguments/results, credentials, headers, or raw provider error bodies.
+It supports health feedback, cost accounting, replay coordination, and evaluator settlement of
+transport facts, but it does not claim that a response is correct or that an external effect
+occurred. The caller still owns evaluator evidence, reward, authorization, credential lifecycle,
+and effect reconciliation.
+
 The controller is an accounting and authorization boundary, not evidence of success: a completed
 provider request remains only a local response, and evaluator reward still requires an explicit
 caller-owned evaluator. Cross-domain children share the supplied controller, so fan-out and
