@@ -145,6 +145,8 @@ export const MECHANISM_CONTROL_FEATURE_ID = "AFA-benchcompiler-P08-F30" as const
 export const MECHANISM_CONTROL_CONTRACT_VERSION = "benchcompiler-federated-mechanism-control/1.0" as const;
 export const EVIDENCE_WORKBENCH_FEATURE_ID = "AFA-bioworlds-P01-F17" as const;
 export const EVIDENCE_WORKBENCH_CONTRACT_VERSION = "bioworlds-local-evidence-workbench/1.0" as const;
+export const ANALYSIS_CONTROL_FEATURE_ID = "AFA-devx-P13-F31" as const;
+export const ANALYSIS_CONTROL_CONTRACT_VERSION = "devx-federated-analysis-control-plane/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2451,6 +2453,42 @@ export function validateEvidenceWorkbenchReceipt(receipt: EvidenceWorkbenchRecei
 }
 
 export function evidenceWorkbenchReceiptDigest(receipt: EvidenceWorkbenchReceipt): string { validateEvidenceWorkbenchReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface AnalysisControlReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  objective_id: string;
+  disposition: "ranked" | "partial" | "unknown" | "blocked";
+  portfolio: Record<string, unknown>;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateAnalysisControlReceipt(receipt: AnalysisControlReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ANALYSIS_CONTROL_FEATURE_ID || receipt.contract_version !== ANALYSIS_CONTROL_CONTRACT_VERSION) throw new Error("analysis control schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.objective_id.trim() || !receipt.checks.length || !receipt.effect_receipts.length || receipt.portfolio.boundary !== PRECLINICAL_BOUNDARY) throw new Error("analysis control identity, portfolio, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["ranked", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("analysis control disposition is unknown");
+  const admitted = Array.isArray(receipt.portfolio.admitted_order) ? receipt.portfolio.admitted_order as string[] : [];
+  const blocked = Array.isArray(receipt.portfolio.blocked_order) ? receipt.portfolio.blocked_order as string[] : [];
+  const unresolved = [...(Array.isArray(receipt.portfolio.omissions) ? receipt.portfolio.omissions as string[] : []), ...(Array.isArray(receipt.portfolio.uncertainty) ? receipt.portfolio.uncertainty as string[] : []), ...(Array.isArray(receipt.portfolio.negative_evidence) ? receipt.portfolio.negative_evidence as string[] : [])];
+  if (!admitted.length && !blocked.length && !unresolved.length) throw new Error("analysis control must retain an admitted or unresolved portfolio");
+  for (const values of [Array.isArray(receipt.portfolio.candidate_order) ? receipt.portfolio.candidate_order as string[] : [], admitted, blocked, Array.isArray(receipt.portfolio.class_order) ? receipt.portfolio.class_order as string[] : [], Array.isArray(receipt.portfolio.omissions) ? receipt.portfolio.omissions as string[] : [], Array.isArray(receipt.portfolio.uncertainty) ? receipt.portfolio.uncertainty as string[] : [], Array.isArray(receipt.portfolio.negative_evidence) ? receipt.portfolio.negative_evidence as string[] : [], receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("analysis control ordering is invalid");
+  const scores = Array.isArray(receipt.portfolio.rank_score_order) ? receipt.portfolio.rank_score_order as number[] : [];
+  if (admitted.length !== scores.length || scores.some((value, index) => index > 0 && scores[index - 1] < value) || new Set(admitted).size !== admitted.length) throw new Error("analysis control ranking is invalid");
+  for (const value of [...(Array.isArray(receipt.portfolio.result_order) ? receipt.portfolio.result_order : []), ...(Array.isArray(receipt.portfolio.model_order) ? receipt.portfolio.model_order : []), ...(Array.isArray(receipt.portfolio.provenance_order) ? receipt.portfolio.provenance_order : []), receipt.portfolio.replay_identity, receipt.portfolio.portfolio_digest]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("analysis control digest is invalid");
+  if (typeof receipt.portfolio.portfolio_id !== "string" || !receipt.portfolio.portfolio_id.trim()) throw new Error("analysis control portfolio identity is incomplete");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:digest-only-analysis-manifest:"))) throw new Error("analysis control effect is not digest-only");
+}
+
+export function analysisControlReceiptDigest(receipt: AnalysisControlReceipt): string { validateAnalysisControlReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

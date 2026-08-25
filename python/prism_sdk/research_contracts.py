@@ -163,6 +163,8 @@ MECHANISM_CONTROL_FEATURE_ID = "AFA-benchcompiler-P08-F30"
 MECHANISM_CONTROL_CONTRACT_VERSION = "benchcompiler-federated-mechanism-control/1.0"
 EVIDENCE_WORKBENCH_FEATURE_ID = "AFA-bioworlds-P01-F17"
 EVIDENCE_WORKBENCH_CONTRACT_VERSION = "bioworlds-local-evidence-workbench/1.0"
+ANALYSIS_CONTROL_FEATURE_ID = "AFA-devx-P13-F31"
+ANALYSIS_CONTROL_CONTRACT_VERSION = "devx-federated-analysis-control-plane/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3702,3 +3704,53 @@ class EvidenceWorkbenchReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "study_id": self.study_id, "disposition": self.disposition, "evidence": dict(self.evidence), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class AnalysisControlReceipt:
+    """Cross-language validator for federated statistical/causal/ML analysis admission."""
+
+    request_id: str
+    workflow_id: str
+    objective_id: str
+    disposition: str
+    portfolio: Mapping[str, Any]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    feature_id: str = ANALYSIS_CONTROL_FEATURE_ID
+    contract_version: str = ANALYSIS_CONTROL_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != ANALYSIS_CONTROL_FEATURE_ID or self.contract_version != ANALYSIS_CONTROL_CONTRACT_VERSION:
+            raise ResearchContractError("analysis control schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.objective_id.strip() or not self.checks or not self.effect_receipts or self.portfolio.get("boundary") != PRECLINICAL_BOUNDARY:
+            raise ResearchContractError("analysis control identity, portfolio, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"ranked", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("analysis control disposition is unknown")
+        admitted = tuple(self.portfolio.get("admitted_order", ()))
+        blocked = tuple(self.portfolio.get("blocked_order", ()))
+        unresolved = tuple(self.portfolio.get("omissions", ())) + tuple(self.portfolio.get("uncertainty", ())) + tuple(self.portfolio.get("negative_evidence", ()))
+        if not admitted and not blocked and not unresolved:
+            raise ResearchContractError("analysis control must retain an admitted or unresolved portfolio")
+        for values in (tuple(self.portfolio.get("candidate_order", ())), admitted, blocked, tuple(self.portfolio.get("class_order", ())), tuple(self.portfolio.get("omissions", ())), tuple(self.portfolio.get("uncertainty", ())), tuple(self.portfolio.get("negative_evidence", ())), self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("analysis control ordering is invalid")
+        scores = tuple(self.portfolio.get("rank_score_order", ()))
+        if len(admitted) != len(scores) or any(left < right for left, right in zip(scores, scores[1:])) or len(set(admitted)) != len(admitted):
+            raise ResearchContractError("analysis control ranking is invalid")
+        for value in tuple(self.portfolio.get("result_order", ())) + tuple(self.portfolio.get("model_order", ())) + tuple(self.portfolio.get("provenance_order", ())) + (self.portfolio.get("replay_identity"), self.portfolio.get("portfolio_digest")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("analysis control digest is invalid")
+        if not isinstance(self.portfolio.get("portfolio_id"), str) or not self.portfolio["portfolio_id"].strip():
+            raise ResearchContractError("analysis control portfolio identity is incomplete")
+        if any(not effect.startswith("exchange:digest-only-analysis-manifest:") for effect in self.effect_receipts):
+            raise ResearchContractError("analysis control effect is not digest-only")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "objective_id": self.objective_id, "disposition": self.disposition, "portfolio": dict(self.portfolio), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

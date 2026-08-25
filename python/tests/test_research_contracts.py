@@ -46,6 +46,7 @@ from prism_sdk.research_contracts import FEDERATED_INGESTION_FEATURE_ID, FEDERAT
 from prism_sdk.research_contracts import QUALITY_ASSURANCE_FEATURE_ID, QUALITY_ASSURANCE_CONTRACT_VERSION, QualityAssuranceReceipt
 from prism_sdk.research_contracts import MECHANISM_CONTROL_FEATURE_ID, MECHANISM_CONTROL_CONTRACT_VERSION, MechanismControlReceipt
 from prism_sdk.research_contracts import EVIDENCE_WORKBENCH_FEATURE_ID, EVIDENCE_WORKBENCH_CONTRACT_VERSION, EvidenceWorkbenchReceipt
+from prism_sdk.research_contracts import ANALYSIS_CONTROL_FEATURE_ID, ANALYSIS_CONTROL_CONTRACT_VERSION, AnalysisControlReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1652,4 +1653,23 @@ def test_evidence_workbench_preserves_stale_alert_and_view_only_effects():
     receipt.validate()
     assert receipt.feature_id == EVIDENCE_WORKBENCH_FEATURE_ID
     assert receipt.contract_version == EVIDENCE_WORKBENCH_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_analysis_control_preserves_ranked_digest_only_portfolio():
+    receipt = AnalysisControlReceipt(
+        request_id="analysis:control",
+        workflow_id="workflow:analysis",
+        objective_id="objective:organoid",
+        disposition="partial",
+        portfolio={"portfolio_id": "analysis-portfolio:analysis:control", "disposition": "partial", "candidate_order": ("candidate:a", "candidate:b"), "admitted_order": ("candidate:a",), "blocked_order": ("candidate:b",), "rank_score_order": (90,), "class_order": ("causal",), "result_order": ("a" * 64,), "model_order": ("b" * 64,), "provenance_order": ("c" * 64,), "replay_identity": "d" * 64, "portfolio_digest": "e" * 64, "omissions": ("candidate:candidate:b:cross-study-comparability-missing",), "uncertainty": (), "negative_evidence": (), "boundary": PRECLINICAL_BOUNDARY},
+        checks=("comparability, policy, federation, locality, approval, and budget gates are explicit",),
+        omissions=("candidate:candidate:b:cross-study-comparability-missing",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("exchange:digest-only-analysis-manifest:candidate:a",),
+    )
+    receipt.validate()
+    assert receipt.feature_id == ANALYSIS_CONTROL_FEATURE_ID
+    assert receipt.contract_version == ANALYSIS_CONTROL_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

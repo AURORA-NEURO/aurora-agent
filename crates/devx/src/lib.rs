@@ -139,6 +139,7 @@
 //!   checks structural fields; that ceiling is why its prose rules are warnings and not errors.
 
 pub mod catalogue;
+pub mod analysis_control;
 pub mod debugger;
 pub mod devloop;
 pub mod diagnostic;
@@ -149,6 +150,14 @@ pub mod lint;
 pub mod taxonomy;
 
 pub use catalogue::{catalogue, from_manifest_error, from_negotiation_error, lookup};
+pub use analysis_control::{
+    operate_analysis_control, AnalysisCandidate, AnalysisControlError, AnalysisControlReceipt,
+    AnalysisDisposition, AnalysisPortfolio, AnalysisRequest, AnalysisState,
+    CONTRACT_VERSION as ANALYSIS_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as ANALYSIS_CONTROL_FEATURE_ID,
+    PRECLINICAL_BOUNDARY as ANALYSIS_CONTROL_PRECLINICAL_BOUNDARY,
+    SCHEMA_VERSION as ANALYSIS_CONTROL_SCHEMA_VERSION,
+};
 pub use debugger::{
     debugger_surface, ActionAvailability, DevAction, Pane, PaneAvailability, PaneModel,
     SurfaceReport,

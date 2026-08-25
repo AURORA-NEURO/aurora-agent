@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/analysis_control_receipt.schema.json",
+  "title": "AURORA Federated Statistical Causal ML Analysis Control Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "request_id", "workflow_id", "objective_id", "disposition", "portfolio", "checks", "omissions", "uncertainty", "negative_evidence", "effect_receipts", "raw_data_local", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "devx-federated-analysis-control-plane/1.0"},
+    "feature_id": {"const": "AFA-devx-P13-F31"},
+    "request_id": {"type": "string", "minLength": 1},
+    "workflow_id": {"type": "string", "minLength": 1},
+    "objective_id": {"type": "string", "minLength": 1},
+    "disposition": {"enum": ["ranked", "partial", "unknown", "blocked"]},
+    "portfolio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["portfolio_id", "disposition", "candidate_order", "admitted_order", "blocked_order", "rank_score_order", "class_order", "result_order", "model_order", "provenance_order", "replay_identity", "portfolio_digest", "omissions", "uncertainty", "negative_evidence", "boundary"],
+      "properties": {
+        "portfolio_id": {"type": "string", "minLength": 1},
+        "disposition": {"enum": ["ranked", "partial", "unknown", "blocked"]},
+        "candidate_order": {"type": "array", "items": {"type": "string"}},
+        "admitted_order": {"type": "array", "items": {"type": "string"}},
+        "blocked_order": {"type": "array", "items": {"type": "string"}},
+        "rank_score_order": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
+        "class_order": {"type": "array", "items": {"type": "string"}},
+        "result_order": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+        "model_order": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+        "provenance_order": {"type": "array", "items": {"$ref": "#/$defs/digest"}},
+        "replay_identity": {"$ref": "#/$defs/digest"},
+        "portfolio_digest": {"$ref": "#/$defs/digest"},
+        "omissions": {"type": "array", "items": {"type": "string"}},
+        "uncertainty": {"type": "array", "items": {"type": "string"}},
+        "negative_evidence": {"type": "array", "items": {"type": "string"}},
+        "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+      }
+    },
+    "checks": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "omissions": {"type": "array", "items": {"type": "string"}},
+    "uncertainty": {"type": "array", "items": {"type": "string"}},
+    "negative_evidence": {"type": "array", "items": {"type": "string"}},
+    "effect_receipts": {"type": "array", "items": {"type": "string", "pattern": "^exchange:digest-only-analysis-manifest:"}, "minItems": 1},
+    "raw_data_local": {"const": true},
+    "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}
