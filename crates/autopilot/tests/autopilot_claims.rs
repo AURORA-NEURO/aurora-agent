@@ -1843,3 +1843,401 @@ mod persistence {
         }
     }
 }
+
+/// Claims about a *whole drive's* receipt chain, and about the difference one grant knob makes
+/// on one fixed instantiation.
+///
+/// The claims elsewhere in this file read a single planner decision or a two-attempt drive. These
+/// read every attempt of a drive that runs to its budget, and read the two drives a single
+/// `retry_unknown` flip produces from byte-identical inputs — the axes a one-shot test is blind
+/// to. Each digest is recomputed here from the artifact the report names it for, so a digest
+/// taken over the wrong value fails rather than merely disagreeing with itself.
+mod receipt_chain_depth {
+    use super::*;
+
+    /// Four steps whose recorded outcomes reproduce what the in-process executor actually
+    /// produces for a mission with one failing step: the failure classifies `unknown` (a tool
+    /// error envelope declaring no 40.36 decision), its dependent is blocked, and so is the
+    /// independent sibling — the executor aborts the remainder of the mission once a required
+    /// step fails, so "blocked" covers more than "my prerequisite failed".
+    fn four_step_mission() -> Value {
+        mission_of(
+            vec![
+                step("a", "tool_a", &[], json!({}), json!([])),
+                step("b", "tool_b", &["a"], json!({}), json!([])),
+                step("c", "tool_c", &["b"], json!({}), json!([])),
+                step("d", "tool_a", &["a"], json!({}), json!([])),
+            ],
+            Some(binding_for(&["a", "b", "c", "d"])),
+        )
+    }
+
+    fn instantiation_of(mission: Value) -> Value {
+        json!({
+            "ok": true,
+            "workflow": "domain_workflow_instantiate",
+            "mission": mission,
+        })
+    }
+
+    fn unknown_failure_results(mission: &Value) -> Vec<MissionStepResult> {
+        let dispatched: Vec<String> = mission["steps"]
+            .as_array()
+            .expect("steps array")
+            .iter()
+            .map(|step| step["id"].as_str().expect("step id").to_string())
+            .collect();
+        dispatched
+            .iter()
+            .map(|id| match id.as_str() {
+                "a" => ok_result("a", "tool_a", Some(&json!({ "value": 7 }))),
+                "b" => refused_tool("b", "tool_b", "the named document is not present"),
+                "c" => blocked_result("c", "tool_c"),
+                other => blocked_result(other, "tool_a"),
+            })
+            .collect()
+    }
+
+    /// The reconciliation the mission boundary attaches to an attempt whose evidence plan was not
+    /// satisfied: present and digested, but neither complete nor integrity-valid. Attaching it is
+    /// what makes the attempt's `reconciliation_scope` meaningful — the scope of a record that
+    /// does not exist is `null`, which says nothing about what a repair may claim.
+    fn failed_reconciliation() -> Value {
+        json!({
+            "present": true,
+            "reconciliation_digest": "b".repeat(64),
+            "completion": { "status": "failed" },
+            "integrity": { "valid": false },
+        })
+    }
+
+    /// Drive the four-step mission under `grant`, recording every mission document dispatched.
+    fn drive_with_one_unknown_failure(grant: &AutonomyGrant) -> (Value, FinalStatus, Vec<Value>) {
+        let mut dispatched: Vec<Value> = Vec::new();
+        let outcome = {
+            let mut dispatcher = |mission: &Value| -> Result<Value, String> {
+                dispatched.push(mission.clone());
+                let results = unknown_failure_results(mission);
+                let mut report = report_for(mission, results, None);
+                report["workflow_reconciliation"] = failed_reconciliation();
+                Ok(report)
+            };
+            drive_instantiation(
+                grant,
+                &instantiation_of(four_step_mission()),
+                &mut dispatcher,
+            )
+            .expect("the drive completes")
+        };
+        (outcome.report, outcome.final_status, dispatched)
+    }
+
+    fn grant_with_unknown_retries(retry_unknown: bool, max_attempts: usize) -> AutonomyGrant {
+        grant_of(json!({
+            "allowed_tools": ["tool_a", "tool_b", "tool_c"],
+            "max_attempts": max_attempts,
+            "retry": {
+                "retry_retryable_as_is": true,
+                "retry_retryable_after_change": false,
+                "retry_unknown": retry_unknown,
+            },
+        }))
+    }
+
+    #[test]
+    fn the_report_grant_digest_recomputes_from_the_grant_document_the_report_embeds() {
+        let grant = grant_with_unknown_retries(true, 3);
+        let (report, ..) = drive_with_one_unknown_failure(&grant);
+        let embedded = report
+            .get("grant")
+            .expect("the report carries the grant it was driven under");
+        assert_eq!(
+            ContentHash::of_value(embedded).unwrap().to_string(),
+            report["grant_digest"].as_str().expect("grant digest"),
+            "the grant digest must recompute from the grant document the report carries, or a \
+             reader cannot check which authority the drive ran under"
+        );
+        assert_eq!(
+            report["grant_digest"],
+            json!(grant.digest().unwrap()),
+            "the report's grant digest must be the digest of the grant the caller supplied"
+        );
+    }
+
+    #[test]
+    fn every_attempt_mission_digest_recomputes_from_the_mission_that_attempt_dispatched() {
+        let grant = grant_with_unknown_retries(true, 4);
+        let (report, _, dispatched) = drive_with_one_unknown_failure(&grant);
+        let attempts = report["attempts"].as_array().expect("attempts array");
+        assert_eq!(
+            attempts.len(),
+            dispatched.len(),
+            "the report must carry one row per dispatch actually performed"
+        );
+        assert!(
+            attempts.len() >= 2,
+            "this claim is only meaningful once a repair has been dispatched"
+        );
+        for (index, attempt) in attempts.iter().enumerate() {
+            assert_eq!(
+                attempt["mission_digest"],
+                json!(ContentHash::of_value(&dispatched[index])
+                    .unwrap()
+                    .to_string()),
+                "attempt {}'s mission digest must recompute from the mission it dispatched",
+                index + 1
+            );
+            let step_ids: Vec<Value> = dispatched[index]["steps"]
+                .as_array()
+                .expect("steps array")
+                .iter()
+                .map(|step| step["id"].clone())
+                .collect();
+            assert_eq!(
+                attempt["dispatched_step_ids"],
+                Value::Array(step_ids),
+                "attempt {}'s recorded step ids must be the ids of the mission it dispatched",
+                index + 1
+            );
+            assert!(
+                attempt["report_digest"].as_str().is_some_and(|digest| {
+                    digest.len() == 64 && ContentHash::parse(digest).is_ok()
+                }),
+                "a delivered attempt must carry a well-formed report digest"
+            );
+        }
+        assert_eq!(
+            report["base_mission_digest"],
+            json!(ContentHash::of_value(&four_step_mission())
+                .unwrap()
+                .to_string()),
+            "the base mission digest must recompute from the instantiation's own mission, \
+             unmodified by the grant's policy overwrite"
+        );
+    }
+
+    #[test]
+    fn the_previewed_first_mission_is_byte_identical_to_the_mission_attempt_one_dispatches() {
+        let grant = grant_with_unknown_retries(false, 3);
+        let preview = match preview_first_action(&grant, four_step_mission()).unwrap() {
+            NextAction::DispatchFull { mission, .. } => mission,
+            other => panic!("a no-dispatch preview must plan a full dispatch, got {other:?}"),
+        };
+        let (report, _, dispatched) = drive_with_one_unknown_failure(&grant);
+        assert_eq!(
+            dispatched[0], preview,
+            "a preview that showed a different mission than the drive sends would be a preview \
+             of nothing"
+        );
+        assert_eq!(
+            report["attempts"][0]["mission_digest"],
+            json!(ContentHash::of_value(&preview).unwrap().to_string()),
+            "the digest attempt 1 records must be the digest of the previewable mission"
+        );
+    }
+
+    #[test]
+    fn retry_unknown_changes_only_the_documented_difference_on_one_failing_instantiation() {
+        let (refusing, refusing_status, refusing_dispatches) =
+            drive_with_one_unknown_failure(&grant_with_unknown_retries(false, 3));
+        let (retrying, retrying_status, retrying_dispatches) =
+            drive_with_one_unknown_failure(&grant_with_unknown_retries(true, 3));
+
+        assert_eq!(refusing_status, FinalStatus::Exhausted);
+        assert_eq!(retrying_status, FinalStatus::Exhausted);
+
+        assert_eq!(
+            refusing_dispatches.len(),
+            1,
+            "an undeclared failure is not re-dispatched without explicit authority"
+        );
+        assert_eq!(
+            refusing["accounting"]["reason"],
+            json!("unresolved_steps_not_retryable"),
+            "the refusing drive must stop because the grant authorises no repair, not because \
+             it ran out of budget"
+        );
+        let excluded = refusing["accounting"]["unresolved_steps"]
+            .as_array()
+            .expect("unresolved rows")
+            .iter()
+            .find(|row| row["step_id"] == json!("b"))
+            .expect("the failing step is accounted for");
+        assert_eq!(
+            excluded["exclusion"],
+            json!("retry of class `unknown` is not authorised by the grant"),
+            "the exclusion must name the class the grant declined, not merely report a stop"
+        );
+
+        assert_eq!(
+            retrying_dispatches.len(),
+            3,
+            "authorising unknown retries spends the whole budget on a failure that persists"
+        );
+        assert_eq!(
+            retrying["accounting"]["reason"],
+            json!("attempt_budget_exhausted"),
+            "the retrying drive must stop on the budget, which is the documented difference"
+        );
+
+        assert_eq!(
+            refusing["grant"]["retry"]["retry_unknown"],
+            json!(false),
+            "the two reports must differ in the flag under test"
+        );
+        assert_eq!(retrying["grant"]["retry"]["retry_unknown"], json!(true));
+        for field in ["base_mission_id", "base_mission_digest"] {
+            assert_eq!(
+                refusing[field], retrying[field],
+                "{field} must be identical: only the grant differed between these drives"
+            );
+        }
+        assert_eq!(
+            refusing["attempts"][0]["mission_digest"], retrying["attempts"][0]["mission_digest"],
+            "attempt 1 dispatches the same mission under both grants: retry authority is read \
+             only after a failure is recorded"
+        );
+    }
+
+    #[test]
+    fn no_repair_in_a_budget_exhausting_drive_ever_re_dispatches_a_succeeded_step() {
+        let grant = grant_with_unknown_retries(true, 5);
+        let (report, status, dispatched) = drive_with_one_unknown_failure(&grant);
+        assert_eq!(status, FinalStatus::Exhausted);
+        assert_eq!(
+            report["totals"]["attempts_used"],
+            json!(5),
+            "a persistent failure must consume exactly the authorised budget"
+        );
+
+        let mut succeeded: Vec<String> = Vec::new();
+        for (index, attempt) in report["attempts"]
+            .as_array()
+            .expect("attempts array")
+            .iter()
+            .enumerate()
+        {
+            let redispatched: Vec<String> = attempt["dispatched_step_ids"]
+                .as_array()
+                .expect("dispatched ids")
+                .iter()
+                .map(|id| id.as_str().expect("step id").to_string())
+                .collect();
+            if attempt["kind"] == json!("repair") {
+                for step_id in &succeeded {
+                    assert!(
+                        !redispatched.contains(step_id),
+                        "repair attempt {} re-dispatched `{step_id}`, which had already \
+                         succeeded; re-running a succeeded step re-runs its side effects",
+                        index + 1
+                    );
+                }
+                assert_eq!(
+                    redispatched,
+                    vec!["b".to_string(), "c".to_string(), "d".to_string()],
+                    "a repair must carry exactly the unresolved steps: the failure, its \
+                     dependent, and the sibling the executor never dispatched"
+                );
+                assert_eq!(
+                    attempt["reconciliation_scope"],
+                    json!("repair_subset"),
+                    "a repair's reconciliation may only claim the subset it re-dispatched"
+                );
+            } else {
+                assert_eq!(
+                    attempt["reconciliation_scope"],
+                    json!("full_plan"),
+                    "a full dispatch's reconciliation covers the whole plan"
+                );
+            }
+            assert_eq!(
+                attempt["reconciliation_status"],
+                json!({ "completion": "failed", "integrity_valid": false }),
+                "attempt {}'s reconciliation status must be the one the boundary recorded, not \
+                 a repaired reading of it",
+                index + 1
+            );
+            for step_id in &redispatched {
+                let classified = attempt["classification_table"]
+                    .as_array()
+                    .expect("classification table")
+                    .iter()
+                    .any(|row| row["step_id"] == json!(step_id));
+                assert!(
+                    classified,
+                    "attempt {} dispatched `{step_id}` without classifying it",
+                    index + 1
+                );
+            }
+            assert_eq!(
+                attempt["classification_table"]
+                    .as_array()
+                    .expect("classification table")
+                    .len(),
+                redispatched.len(),
+                "attempt {}'s classification table must cover its dispatch exactly",
+                index + 1
+            );
+            for row in attempt["classification_table"]
+                .as_array()
+                .expect("classification table")
+            {
+                if row["class"] == json!("succeeded") {
+                    succeeded.push(row["step_id"].as_str().expect("step id").to_string());
+                }
+            }
+        }
+        assert!(
+            succeeded.contains(&"a".to_string()),
+            "the fixture must actually produce a succeeded step, or this claim is vacuous"
+        );
+        assert!(
+            !succeeded.contains(&"b".to_string()),
+            "the fixture must keep its failure failing across every attempt, or the budget \
+             would never be reached"
+        );
+
+        let repairs = dispatched
+            .iter()
+            .filter(|mission| mission["steps"].as_array().expect("steps").len() == 3)
+            .count();
+        assert_eq!(
+            repairs, 4,
+            "every attempt after the first must be a three-step repair"
+        );
+        let verification = verify_autopilot_report(&report).unwrap();
+        assert_eq!(verification["valid"], json!(true), "{verification}");
+    }
+
+    #[test]
+    fn a_repair_mission_narrows_its_evidence_plan_to_the_steps_it_re_dispatches() {
+        let grant = grant_with_unknown_retries(true, 2);
+        let (report, _, dispatched) = drive_with_one_unknown_failure(&grant);
+        let repair = &dispatched[1];
+        let plan_steps: Vec<&str> = repair["workflow_binding"]["evidence_plan"]["steps"]
+            .as_array()
+            .expect("the repair keeps an evidence plan")
+            .iter()
+            .map(|entry| entry["step_id"].as_str().expect("step id"))
+            .collect();
+        assert_eq!(
+            plan_steps,
+            vec!["b", "c", "d"],
+            "a repair's evidence plan must cover exactly the steps it re-dispatches, so its \
+             reconciliation is honestly scoped"
+        );
+        assert_eq!(
+            repair["workflow_binding"]["evidence_plan_digest"],
+            json!(
+                ContentHash::of_value(&repair["workflow_binding"]["evidence_plan"])
+                    .unwrap()
+                    .to_string()
+            ),
+            "the narrowed plan's digest must recompute from the narrowed plan"
+        );
+        assert_eq!(
+            report["attempts"][1]["mission_digest"],
+            json!(ContentHash::of_value(repair).unwrap().to_string())
+        );
+    }
+}
