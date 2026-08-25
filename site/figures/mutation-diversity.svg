@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 243.00" role="img" aria-label="Effective diversity">
+<defs><pattern id="hatch-accent" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#d97036" stroke-width="2.4"/></pattern><pattern id="hatch-muted" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#8a8a8a" stroke-width="2.4"/></pattern></defs>
+<text x="16.00" y="26.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1a1a1a">Effective diversity</text>
+<text x="16.00" y="46.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" fill="#8a8a8a">independent (parent, mutation family, oracle signature) classes are the honest denominator</text>
+<g transform="translate(0,60)">
+<text x="16.00" y="12.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8a8a8a">Equivalence classes are counted as distinct (parent, mutation family, oracle signature) triples. This measures</text>
+<text x="16.00" y="25.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8a8a8a">independent diagnostic information, not difficulty or realism, and makes no claim about correlation beyond those three</text>
+<text x="16.00" y="38.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10" fill="#8a8a8a">axes.</text>
+<text x="16.00" y="75.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">instances</text>
+<rect x="170.00" y="63.00" width="400.00" height="16.00" fill="#8a8a8a"/>
+<text x="578.00" y="75.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">8</text>
+<text x="16.00" y="103.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" fill="#1a1a1a">equivalence classes</text>
+<rect x="170.00" y="91.00" width="400.00" height="16.00" fill="#d97036"/>
+<text x="578.00" y="103.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#1a1a1a">8</text>
+<text x="16.00" y="129.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1a1a1a">inflation ×1.00 — instance count is not benchmark count</text>
+<text x="16.00" y="147.00" font-family="system-ui, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="10.5" fill="#8a8a8a">1 audited parent(s) · 8 mutation famil(ies) · 5 oracle signature(s)</text>
+</g>
+<text x="16.00" y="231.00" font-family="ui-monospace, Consolas, 'Courier New', monospace" font-size="10" fill="#8a8a8a">source sha256: 459cada5fd43bcd69e9cbd88a79de040140dd15f1bb0fa72000fad8d0c06a4fb</text>
+</svg>

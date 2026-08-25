@@ -31,7 +31,8 @@
     { "@type": "Question", "name": "What is the license?", "acceptedAnswer": { "@type": "Answer", "text": "Apache-2.0. The repository AURORA-NEURO/aurora-agent is public on GitHub." } },
     { "@type": "Question", "name": "Is this a medical device or clinical tool?", "acceptedAnswer": { "@type": "Answer", "text": "No. It is research and developer infrastructure: it does not diagnose an individual, recommend treatment, triage care, enroll participants, or claim medical-device functionality." } },
     { "@type": "Question", "name": "How do I know the implementation is correct?", "acceptedAnswer": { "@type": "Answer", "text": "Byte-level parity is enforced by test across three implementations — the CPython reference, the eager Rust path, and the Rust indexed store — which agree on the certificate digest c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4 for the reference compilation." } },
-    { "@type": "Question", "name": "Can AURORA Agent run workflows autonomously?", "acceptedAnswer": { "@type": "Answer", "text": "Yes — under an explicit grant. bioprism autopilot drives an instantiated workflow's mission autonomously under an AutonomyGrant, the only source of authority: there is no default grant. The driver dispatches the mission in-process, classifies every failed step by its declared retry class (terminal, retryable-after-change, retryable-as-is, or unknown), and re-dispatches only what the grant authorises as a repair subset with rematerialised bindings — terminal and cancelled steps are never re-dispatched, and unknown failures are never retried unless the grant explicitly opts in. Success is never inferred: it requires full step coverage, a succeeded mission report, and (by default) a complete workflow reconciliation with valid integrity. Every drive emits a digest-sealed autopilot report chaining the grant digest, every mission and report digest, and every reconciliation digest; bioprism autopilot verify recomputes it and detects a single tampered byte. It deliberately does no scheduling or recurrence, exposes no MCP tool for the driver itself, cannot resume across processes, and has no wall-clock deadlines." } }
+    { "@type": "Question", "name": "Can AURORA Agent run workflows autonomously?", "acceptedAnswer": { "@type": "Answer", "text": "Yes — under an explicit grant. bioprism autopilot drives an instantiated workflow's mission autonomously under an AutonomyGrant, the only source of authority: there is no default grant. The driver dispatches the mission in-process, classifies every failed step by its declared retry class (terminal, retryable-after-change, retryable-as-is, or unknown), and re-dispatches only what the grant authorises as a repair subset with rematerialised bindings — terminal and cancelled steps are never re-dispatched, and unknown failures are never retried unless the grant explicitly opts in. Success is never inferred: it requires full step coverage, a succeeded mission report, and (by default) a complete workflow reconciliation with valid integrity. Every drive emits a digest-sealed autopilot report chaining the grant digest, every mission and report digest, and every reconciliation digest; bioprism autopilot verify recomputes it and detects a single tampered byte. It deliberately does no scheduling or recurrence, exposes no MCP tool for the driver itself, cannot resume across processes, and has no wall-clock deadlines." } },
+    { "@type": "Question", "name": "Can it run its own experiments?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, over synthetic decision worlds only. bioprism research template | run | verify executes a fixed protocol — generate, compile and certify, equal-engineering baseline panel, structural sweep, metamorphic mutation, minimize — and writes a digest-sealed dossier plus a rendered report and figures. Findings are derived by fixed public rules, are locked to level observation (no stronger level is representable in the type system), and each cites the sha256 of the artifact supporting it; research verify recomputes the digest and catches a one-byte tamper. The committed worked example runs 12 steps in about four seconds and produces nine findings, seven of them negative: FIBER is tied by directed-walk-full at every declared distractor level, both admissible at 11 facts, and is not separated in 36 of 36 sweep cells. The limits are the point: measurement over synthetic worlds only, no biology, no literature or prior-work coverage, no external-world claims, oracle review remains a human gate, the sweep deliberately does not vary decision-defining knobs, and negative findings are first-class results." } }
   ]
 }
 </script>
@@ -48,6 +49,7 @@
       <a href="./">Overview</a>
       <a href="install.html">Install</a>
       <a href="benchmarks.html">Benchmarks</a>
+      <a href="research.html">Research</a>
       <a href="explore.html">Explorer</a>
       <a href="docs.html">Docs</a>
       <a href="faq.html" aria-current="page">FAQ</a>
@@ -185,6 +187,25 @@
       for the driver itself, cannot resume across processes, and has no wall-clock deadlines. Full
       reference:
       <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/AUTOPILOT.md">docs/AUTOPILOT.md</a>.</p>
+    </div>
+
+    <div class="faq-item" id="autonomous-research">
+      <h2>Can it run its own experiments?</h2>
+      <p>Yes — over synthetic decision worlds only.
+      <code>bioprism research template | run | verify</code> executes a fixed protocol (generate,
+      compile and certify, equal-engineering baseline panel, structural sweep, metamorphic mutation,
+      minimize) and writes a digest-sealed dossier plus a rendered report and figures. Findings are
+      derived by fixed public rules, locked to level <code>observation</code> — no stronger level is
+      representable in the type system — and each cites the sha256 of the artifact supporting it;
+      <code>research verify</code> recomputes the digest and catches a one-byte tamper. The committed
+      worked example runs 12 steps in about four seconds and produces nine findings,
+      <strong>seven of them negative</strong>: FIBER is tied by <code>directed-walk-full</code> at
+      every declared distractor level, both admissible at 11 facts, and is not separated in 36 of 36
+      sweep cells. The limits are the point: measurement over synthetic worlds only, no biology, no
+      literature or prior-work coverage, no external-world claims, oracle review remains a human
+      gate, the sweep deliberately does not vary decision-defining knobs, and negative findings are
+      first-class results. See <a href="research.html">the research page</a> and
+      <a href="https://github.com/AURORA-NEURO/aurora-agent/blob/main/docs/RESEARCH.md">docs/RESEARCH.md</a>.</p>
     </div>
 
     <div class="boundary">Research and developer infrastructure: it does not diagnose an individual,

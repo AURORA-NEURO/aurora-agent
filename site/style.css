@@ -220,6 +220,25 @@ footer.site a:hover { color: var(--accent); }
   nav.site-nav { margin-left: 0; }
 }
 
+/* Research figures (research.html) */
+
+figure.research-figure { margin: 1.6rem 0; }
+figure.research-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+}
+figure.research-figure figcaption {
+  margin: 0.45rem 0 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+figure.research-figure figcaption code { color: var(--text); }
+
 /* Certificate Explorer (explore.html) */
 
 .explorer-step { margin: 2.6rem 0; }
