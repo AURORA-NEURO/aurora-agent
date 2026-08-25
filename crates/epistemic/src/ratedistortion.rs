@@ -110,35 +110,78 @@ pub fn evaluate_context(
     criterion: DistortionCriterion,
     compatibility_floor: f64,
 ) -> Result<ContextEvaluation, EpistemicError> {
-    prior.check_against(problem)?;
-    pool.check_against(problem)?;
-
-    let full = pool.full_posterior(prior)?;
-    let reference_action = problem.bayes_action(&full);
-    let compressed = pool.posterior(prior, subset)?;
-    let compatible = full.support_above(compatibility_floor);
-
-    let (action, distortion) = match criterion {
-        DistortionCriterion::BayesRegret => {
-            let action = problem.bayes_action(&compressed);
-            (action, problem.regret(&full, action))
-        }
-        DistortionCriterion::MinimaxRegret => {
-            let compressed_compatible = compressed.support_above(compatibility_floor);
-            let action = problem
-                .minimax_action(&compressed_compatible)
-                .unwrap_or_else(|| problem.bayes_action(&compressed));
-            (action, problem.minimax_regret(&compatible, action))
-        }
-    };
+    let full = FullEvidence::resolve(problem, prior, pool, compatibility_floor)?;
+    let (action, distortion) =
+        decide_and_measure(problem, prior, pool, subset, criterion, compatibility_floor, &full)?;
 
     Ok(ContextEvaluation {
         retained: subset.iter().copied().collect(),
         rate: pool.rate(subset)?,
         distortion,
         action,
-        reference_action,
-        compatible,
+        reference_action: full.reference_action,
+        compatible: full.compatible,
+    })
+}
+
+/// What every candidate context is measured *against*: the belief, decision and compatible set a
+/// decider holding all the evidence would hold.
+///
+/// None of the three depends on the subset, and the validations that gate them do not either.
+/// [`frontier`] resolves them once rather than `2^n` times; [`evaluate_context`] resolves them for
+/// its single subset. Both then run [`decide_and_measure`], so there is one evaluation body and
+/// the two entry points cannot drift.
+struct FullEvidence {
+    posterior: Belief,
+    reference_action: usize,
+    compatible: Vec<usize>,
+}
+
+impl FullEvidence {
+    fn resolve(
+        problem: &DecisionProblem,
+        prior: &Belief,
+        pool: &EvidencePool,
+        compatibility_floor: f64,
+    ) -> Result<Self, EpistemicError> {
+        prior.check_against(problem)?;
+        pool.check_against(problem)?;
+
+        let posterior = pool.full_posterior(prior)?;
+        let reference_action = problem.bayes_action(&posterior);
+        let compatible = posterior.support_above(compatibility_floor);
+        Ok(FullEvidence {
+            posterior,
+            reference_action,
+            compatible,
+        })
+    }
+}
+
+/// The action a decider holding only `subset` takes, and what that costs against `full`.
+fn decide_and_measure(
+    problem: &DecisionProblem,
+    prior: &Belief,
+    pool: &EvidencePool,
+    subset: &BTreeSet<usize>,
+    criterion: DistortionCriterion,
+    compatibility_floor: f64,
+    full: &FullEvidence,
+) -> Result<(usize, f64), EpistemicError> {
+    let compressed = pool.posterior(prior, subset)?;
+
+    Ok(match criterion {
+        DistortionCriterion::BayesRegret => {
+            let action = problem.bayes_action(&compressed);
+            (action, problem.regret(&full.posterior, action))
+        }
+        DistortionCriterion::MinimaxRegret => {
+            let compressed_compatible = compressed.support_above(compatibility_floor);
+            let action = problem
+                .minimax_action(&compressed_compatible)
+                .unwrap_or_else(|| problem.bayes_action(&compressed));
+            (action, problem.minimax_regret(&full.compatible, action))
+        }
     })
 }
 
@@ -207,53 +250,95 @@ pub fn frontier(
         });
     }
 
-    let mut candidates: Vec<FrontierPoint> = Vec::new();
+    let full = FullEvidence::resolve(problem, prior, pool, compatibility_floor)?;
+    let mut candidates: Vec<FrontierPoint> = Vec::with_capacity(needed as usize);
     for mask in 0..needed {
         let subset: BTreeSet<usize> = (0..n).filter(|i| (mask >> i) & 1 == 1).collect();
-        let evaluation = evaluate_context(
+        let (_, distortion) = decide_and_measure(
             problem,
             prior,
             pool,
             &subset,
             criterion,
             compatibility_floor,
+            &full,
         )?;
         candidates.push(FrontierPoint {
-            rate: evaluation.rate,
-            distortion: evaluation.distortion,
-            retained: evaluation.retained,
+            rate: pool.rate(&subset)?,
+            distortion,
+            retained: subset.into_iter().collect(),
         });
     }
 
-    let mut points: Vec<FrontierPoint> = candidates
-        .iter()
-        .filter(|p| {
-            !candidates.iter().any(|q| {
-                let cheaper_or_equal = q.rate <= p.rate + LOSS_EPSILON;
-                let better_or_equal = q.distortion <= p.distortion + LOSS_EPSILON;
-                let strictly_better =
-                    q.rate < p.rate - LOSS_EPSILON || q.distortion < p.distortion - LOSS_EPSILON;
-                cheaper_or_equal && better_or_equal && strictly_better
-            })
-        })
-        .cloned()
-        .collect();
-    points.sort_by(|a, b| {
+    Ok(Frontier {
+        points: pareto_optimal(candidates),
+        criterion,
+        evaluated: needed as usize,
+    })
+}
+
+/// The Pareto-optimal candidates, ordered by rate then distortion then retained set.
+///
+/// `q` dominates `p` when it costs no more and distorts no more, each within [`LOSS_EPSILON`], and
+/// beats `p` by more than that tolerance on at least one of the two. Domination is tested against
+/// *every* candidate rather than only the survivors, which matters: the tolerance makes the
+/// relation non-transitive, so a chain where each link dominates the one before it but the last
+/// does not dominate the first answers differently under the two readings.
+///
+/// Two monotone sweeps over a sorted list rather than the pairwise scan this replaces. `p` is
+/// dominated exactly when either
+///
+/// - some `q` strictly cheaper than tolerance has distortion within tolerance of `p`'s, or
+/// - some `q` no more expensive than tolerance has distortion strictly below tolerance of `p`'s,
+///
+/// and each of those two candidate sets is a prefix of the rate-sorted list whose boundary only
+/// ever moves forward. [`frontier`] enumerates up to [`MAX_ENUMERATED_SUBSETS`] candidates, where
+/// the pairwise form is four billion comparisons.
+fn pareto_optimal(mut candidates: Vec<FrontierPoint>) -> Vec<FrontierPoint> {
+    candidates.sort_by(|a, b| {
         a.rate
             .total_cmp(&b.rate)
             .then(a.distortion.total_cmp(&b.distortion))
             .then(a.retained.cmp(&b.retained))
     });
+
+    let mut cheaper_than = 0usize;
+    let mut least_distortion_cheaper = f64::INFINITY;
+    let mut no_dearer_than = 0usize;
+    let mut least_distortion_no_dearer = f64::INFINITY;
+    let mut points: Vec<FrontierPoint> = Vec::new();
+
+    for index in 0..candidates.len() {
+        let point = &candidates[index];
+        while cheaper_than < candidates.len()
+            && candidates[cheaper_than].rate < point.rate - LOSS_EPSILON
+        {
+            least_distortion_cheaper =
+                least_distortion_cheaper.min(candidates[cheaper_than].distortion);
+            cheaper_than += 1;
+        }
+        while no_dearer_than < candidates.len()
+            && candidates[no_dearer_than].rate <= point.rate + LOSS_EPSILON
+        {
+            least_distortion_no_dearer =
+                least_distortion_no_dearer.min(candidates[no_dearer_than].distortion);
+            no_dearer_than += 1;
+        }
+
+        let beaten_on_rate =
+            cheaper_than > 0 && least_distortion_cheaper <= point.distortion + LOSS_EPSILON;
+        let beaten_on_distortion =
+            no_dearer_than > 0 && least_distortion_no_dearer < point.distortion - LOSS_EPSILON;
+        if !beaten_on_rate && !beaten_on_distortion {
+            points.push(point.clone());
+        }
+    }
+
     points.dedup_by(|a, b| {
         (a.rate - b.rate).abs() <= LOSS_EPSILON
             && (a.distortion - b.distortion).abs() <= LOSS_EPSILON
     });
-
-    Ok(Frontier {
-        points,
-        criterion,
-        evaluated: needed as usize,
-    })
+    points
 }
 
 /// Whether residual model uncertainty reaches the decision.
@@ -422,5 +507,132 @@ pub fn minimal_sufficient_context(
                 .fold(f64::INFINITY, f64::min),
             tolerance,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rng::SplitMix64;
+
+    /// The pairwise dominance scan [`pareto_optimal`] replaces, transcribed unchanged.
+    ///
+    /// Kept as a test fixture rather than deleted: a sweep is only a valid rewrite of a rule if the
+    /// rule it is a rewrite *of* is still executable and still disagrees when the sweep is wrong.
+    fn pairwise_pareto(candidates: &[FrontierPoint]) -> Vec<FrontierPoint> {
+        let mut points: Vec<FrontierPoint> = candidates
+            .iter()
+            .filter(|p| {
+                !candidates.iter().any(|q| {
+                    let cheaper_or_equal = q.rate <= p.rate + LOSS_EPSILON;
+                    let better_or_equal = q.distortion <= p.distortion + LOSS_EPSILON;
+                    let strictly_better = q.rate < p.rate - LOSS_EPSILON
+                        || q.distortion < p.distortion - LOSS_EPSILON;
+                    cheaper_or_equal && better_or_equal && strictly_better
+                })
+            })
+            .cloned()
+            .collect();
+        points.sort_by(|a, b| {
+            a.rate
+                .total_cmp(&b.rate)
+                .then(a.distortion.total_cmp(&b.distortion))
+                .then(a.retained.cmp(&b.retained))
+        });
+        points.dedup_by(|a, b| {
+            (a.rate - b.rate).abs() <= LOSS_EPSILON
+                && (a.distortion - b.distortion).abs() <= LOSS_EPSILON
+        });
+        points
+    }
+
+    /// Coordinates drawn off a lattice whose spacing straddles [`LOSS_EPSILON`].
+    ///
+    /// Uniform floats would almost never place two candidates within the tolerance of each other,
+    /// so the epsilon branches — the only part of the rule a sweep can plausibly get wrong — would
+    /// never be exercised. Every gap here is one of: zero, half the tolerance, exactly the
+    /// tolerance, twice it, and a gap far larger than it.
+    fn lattice_value(rng: &mut SplitMix64, steps: usize) -> f64 {
+        let base = rng.below(steps) as f64;
+        let offsets = [
+            0.0,
+            LOSS_EPSILON / 2.0,
+            LOSS_EPSILON,
+            LOSS_EPSILON * 2.0,
+            -LOSS_EPSILON / 2.0,
+            -LOSS_EPSILON,
+        ];
+        base + offsets[rng.below(offsets.len())]
+    }
+
+    fn seeded_candidates(rng: &mut SplitMix64, count: usize, steps: usize) -> Vec<FrontierPoint> {
+        (0..count)
+            .map(|index| FrontierPoint {
+                rate: lattice_value(rng, steps),
+                distortion: lattice_value(rng, steps),
+                retained: vec![index],
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_sorted_sweep_keeps_exactly_what_the_pairwise_dominance_scan_keeps() {
+        let mut rng = SplitMix64::new(0x5EED_0FA1_11E5);
+        let mut examined = 0usize;
+        for trial in 0..400 {
+            let count = 1 + rng.below(40);
+            let steps = 1 + rng.below(5);
+            let candidates = seeded_candidates(&mut rng, count, steps);
+
+            let expected = pairwise_pareto(&candidates);
+            let actual = pareto_optimal(candidates.clone());
+
+            assert_eq!(
+                actual, expected,
+                "trial {trial} over {count} candidates on a {steps}-step lattice diverged"
+            );
+            examined += count;
+        }
+        assert!(
+            examined > 4_000,
+            "only {examined} candidates were examined, too few to have hit the tolerance branches"
+        );
+    }
+
+    #[test]
+    fn a_domination_chain_that_the_tolerance_makes_non_transitive_is_resolved_pairwise() {
+        let chain = vec![
+            FrontierPoint {
+                rate: 1.0,
+                distortion: 1.0 + LOSS_EPSILON * 2.0,
+                retained: vec![0],
+            },
+            FrontierPoint {
+                rate: 1.0,
+                distortion: 1.0 + LOSS_EPSILON,
+                retained: vec![1],
+            },
+            FrontierPoint {
+                rate: 1.0,
+                distortion: 1.0,
+                retained: vec![2],
+            },
+        ];
+        assert_eq!(pareto_optimal(chain.clone()), pairwise_pareto(&chain));
+    }
+
+    #[test]
+    fn a_single_candidate_dominates_nothing_including_itself() {
+        let lone = vec![FrontierPoint {
+            rate: 3.0,
+            distortion: 0.25,
+            retained: vec![0, 1],
+        }];
+        assert_eq!(pareto_optimal(lone.clone()), lone);
+    }
+
+    #[test]
+    fn the_empty_candidate_set_yields_an_empty_frontier() {
+        assert!(pareto_optimal(Vec::new()).is_empty());
     }
 }

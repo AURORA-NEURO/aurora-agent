@@ -177,6 +177,108 @@ fn the_frontier_is_monotone_non_increasing_in_rate() {
     }
 }
 
+/// The pairwise dominance scan the frontier used to run, over candidates rebuilt through the
+/// public single-subset entry point. If the two ever disagree, `frontier` is reporting something
+/// other than the minimum distortion at each rate, which is the one claim its type makes.
+fn pairwise_frontier_points(
+    problem: &DecisionProblem,
+    prior: &Belief,
+    pool: &EvidencePool,
+    criterion: DistortionCriterion,
+) -> Vec<(f64, f64, Vec<usize>)> {
+    let n = pool.len();
+    let candidates: Vec<(f64, f64, Vec<usize>)> = (0..1u64 << n)
+        .map(|mask| {
+            let subset: BTreeSet<usize> = (0..n).filter(|i| (mask >> i) & 1 == 1).collect();
+            let evaluation =
+                evaluate_context(problem, prior, pool, &subset, criterion, FLOOR).expect("evaluable");
+            (evaluation.rate, evaluation.distortion, evaluation.retained)
+        })
+        .collect();
+
+    let epsilon = 1e-12;
+    let mut points: Vec<(f64, f64, Vec<usize>)> = candidates
+        .iter()
+        .filter(|p| {
+            !candidates.iter().any(|q| {
+                let cheaper_or_equal = q.0 <= p.0 + epsilon;
+                let better_or_equal = q.1 <= p.1 + epsilon;
+                let strictly_better = q.0 < p.0 - epsilon || q.1 < p.1 - epsilon;
+                cheaper_or_equal && better_or_equal && strictly_better
+            })
+        })
+        .cloned()
+        .collect();
+    points.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+    points.dedup_by(|a, b| (a.0 - b.0).abs() <= epsilon && (a.1 - b.1).abs() <= epsilon);
+    points
+}
+
+#[test]
+fn the_frontier_keeps_exactly_what_a_pairwise_dominance_scan_keeps_across_a_seeded_family() {
+    let mut rng = SplitMix64::new(0xF20E_471E_12F0);
+    let mut instances = 0usize;
+    for items in 1..=8usize {
+        for criterion in [
+            DistortionCriterion::BayesRegret,
+            DistortionCriterion::MinimaxRegret,
+        ] {
+            for _ in 0..6 {
+                let (problem, prior, pool) = seeded_instance(&mut rng, 3, 4, items);
+                let expected = pairwise_frontier_points(&problem, &prior, &pool, criterion);
+                let actual = frontier(&problem, &prior, &pool, criterion, FLOOR)
+                    .expect("enumerable")
+                    .points;
+
+                assert_eq!(
+                    actual.len(),
+                    expected.len(),
+                    "frontier of {items} items under {criterion:?} kept {} points, the pairwise \
+                     scan kept {}",
+                    actual.len(),
+                    expected.len()
+                );
+                for (point, (rate, distortion, retained)) in actual.iter().zip(expected.iter()) {
+                    assert_eq!(point.rate, *rate);
+                    assert_eq!(point.distortion, *distortion);
+                    assert_eq!(point.retained, *retained);
+                }
+                instances += 1;
+            }
+        }
+    }
+    assert_eq!(instances, 96);
+}
+
+/// Item costs that differ by less than the comparison tolerance, so the frontier's epsilon
+/// branches decide the answer rather than the arithmetic.
+#[test]
+fn candidates_whose_rates_differ_by_less_than_the_tolerance_are_resolved_identically() {
+    let problem = two_model_problem();
+    let prior = Belief::uniform(2).expect("uniform");
+    let pool = EvidencePool::new(vec![
+        EvidenceItem::new("a", 1.0, vec![0.9, 0.2]).expect("admissible"),
+        EvidenceItem::new("b", 1.0 + 5e-13, vec![0.3, 0.8]).expect("admissible"),
+        EvidenceItem::new("c", 1.0 - 5e-13, vec![0.5, 0.5]).expect("admissible"),
+        EvidenceItem::new("d", 0.0, vec![0.7, 0.4]).expect("admissible"),
+    ])
+    .expect("unique ids");
+
+    for criterion in [
+        DistortionCriterion::BayesRegret,
+        DistortionCriterion::MinimaxRegret,
+    ] {
+        let expected = pairwise_frontier_points(&problem, &prior, &pool, criterion);
+        let actual = frontier(&problem, &prior, &pool, criterion, FLOOR)
+            .expect("enumerable")
+            .points;
+        assert_eq!(actual.len(), expected.len(), "under {criterion:?}");
+        for (point, (rate, distortion, retained)) in actual.iter().zip(expected.iter()) {
+            assert_eq!((point.rate, point.distortion, &point.retained), (*rate, *distortion, retained));
+        }
+    }
+}
+
 #[test]
 fn the_cheapest_sufficient_context_is_never_more_expensive_than_retaining_everything() {
     let problem = two_model_problem();

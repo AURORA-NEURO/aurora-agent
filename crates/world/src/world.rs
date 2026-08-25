@@ -16,6 +16,7 @@ use crate::json::object;
 use bioprism_ids::{ContentHash, WorldId};
 use serde_json::Value;
 use std::collections::BTreeSet;
+use std::sync::OnceLock;
 
 pub const WORLD_SCHEMA_VERSION: &str = "fiber-world/0.1";
 
@@ -28,6 +29,14 @@ pub struct World {
     pub events: Vec<CausalEvent>,
     index: WorldIndex,
     raw: Value,
+    /// Cached [`World::content_hash`].
+    ///
+    /// [`crate::source::WorldSource::world_digest`] documents the digest as precomputed, because a
+    /// backend that re-read its corpus to answer it would defeat the trait's whole purpose. The
+    /// eager world was the one implementation that did not honour that: it re-canonicalised and
+    /// re-hashed the entire document on every call, and a compile asks for the digest once, so a
+    /// second compile against the same world paid for it again.
+    digest: OnceLock<ContentHash>,
 }
 
 impl World {
@@ -71,6 +80,7 @@ impl World {
             factors,
             events,
             raw,
+            digest: OnceLock::new(),
         };
         world.validate_reference_compat()?;
         Ok(world)
@@ -130,8 +140,17 @@ impl World {
         &self.raw
     }
 
+    /// Hash of the canonical world document.
+    ///
+    /// Memoised, which is sound because the digest is a pure function of `raw` and `raw` is
+    /// immutable after [`World::from_json`] — there is no accessor that hands out a mutable
+    /// reference to it. The first caller pays; every later caller reads the same bytes.
     pub fn content_hash(&self) -> ContentHash {
-        ContentHash::of_value(&self.raw).expect("world was parsed from finite JSON")
+        self.digest
+            .get_or_init(|| {
+                ContentHash::of_value(&self.raw).expect("world was parsed from finite JSON")
+            })
+            .clone()
     }
 
     pub fn fact(&self, id: &str) -> Option<&Fact> {
