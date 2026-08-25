@@ -39,6 +39,7 @@ from prism_sdk.research_contracts import FEDERATED_COMMONS_FEATURE_ID, FEDERATED
 from prism_sdk.research_contracts import BOUNDED_EVOLUTION_FEATURE_ID, BOUNDED_EVOLUTION_CONTRACT_VERSION, BoundedEvolutionReceipt
 from prism_sdk.research_contracts import EVOLUTION_IDENTITY_FEATURE_ID, EVOLUTION_IDENTITY_CONTRACT_VERSION, EvolutionIdentityReceipt
 from prism_sdk.research_contracts import EVOLUTION_ASSURANCE_FEATURE_ID, EVOLUTION_ASSURANCE_CONTRACT_VERSION, EvolutionAssuranceReceipt
+from prism_sdk.research_contracts import INTERPRETATION_PLANE_FEATURE_ID, INTERPRETATION_PLANE_CONTRACT_VERSION, InterpretationPlaneReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1497,4 +1498,28 @@ def test_evolution_assurance_rejects_missing_release_evidence_and_preserves_dige
     receipt.validate()
     assert receipt.feature_id == EVOLUTION_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == EVOLUTION_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_interpretation_plane_preserves_digest_only_federation_boundary():
+    receipt = InterpretationPlaneReceipt(
+        request_id="interpretation:plane",
+        workflow_id="workflow:interpretation",
+        disposition="partial",
+        interpretation_order=("result:a",),
+        blocked_order=("result:b",),
+        replay_identity="a" * 64,
+        budget=10,
+        budget_remaining=8,
+        max_concurrency=2,
+        checks=("digest-only summaries remain local or policy-permitted",),
+        omissions=("result:result:b:protected-omission-or-uncertainty",),
+        uncertainty=(),
+        negative_evidence=("result:result:b:state-unknown-cannot-export",),
+        effect_receipts=("exchange:permitted-summary:result:a", "manage:local-capability:result:a"),
+        artifact={"content_hash": "b" * 64, "media_type": "application/vnd.aurora.ids-interpretation-plane+json", "scope": "ids-interpretation-plane:interpretation:plane"},
+    )
+    receipt.validate()
+    assert receipt.feature_id == INTERPRETATION_PLANE_FEATURE_ID
+    assert receipt.contract_version == INTERPRETATION_PLANE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

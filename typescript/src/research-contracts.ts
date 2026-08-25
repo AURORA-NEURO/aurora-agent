@@ -131,6 +131,8 @@ export const EVOLUTION_IDENTITY_CONTRACT_VERSION = "ids-bounded-evolution/1.0" a
 export const EVOLUTION_ASSURANCE_FEATURE_ID = "AFA-mcp-P32-F27" as const;
 export const EVOLUTION_ASSURANCE_CONTRACT_VERSION = "mcp-bounded-evolution-assurance/1.0" as const;
 export const EVOLUTION_ASSURANCE_REQUIRED_CHECKS = ["adversarial-containment", "canonical-order", "locality", "negative-evidence", "policy-authority", "protected-closure", "release-boundary", "replay-integrity", "signed-approval", "source-receipt"] as const;
+export const INTERPRETATION_PLANE_FEATURE_ID = "AFA-ids-P14-F31" as const;
+export const INTERPRETATION_PLANE_CONTRACT_VERSION = "ids-interpretation-federation/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2195,6 +2197,40 @@ export function validateEvolutionAssuranceReceipt(receipt: EvolutionAssuranceRec
 }
 
 export function evolutionAssuranceReceiptDigest(receipt: EvolutionAssuranceReceipt): string { validateEvolutionAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface InterpretationPlaneReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  disposition: "admitted" | "partial" | "unknown" | "blocked";
+  interpretation_order: string[];
+  blocked_order: string[];
+  replay_identity: string;
+  budget: number;
+  budget_remaining: number;
+  max_concurrency: number;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateInterpretationPlaneReceipt(receipt: InterpretationPlaneReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== INTERPRETATION_PLANE_FEATURE_ID || receipt.contract_version !== INTERPRETATION_PLANE_CONTRACT_VERSION) throw new Error("interpretation plane schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || (!receipt.interpretation_order.length && !receipt.blocked_order.length) || !receipt.checks.length || !receipt.effect_receipts.length || receipt.budget_remaining > receipt.budget || !Number.isInteger(receipt.max_concurrency) || receipt.max_concurrency <= 0) throw new Error("interpretation plane identity, ordering, budget, checks, effects, locality, or boundary is incomplete");
+  if (!new Set(["admitted", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("interpretation plane disposition is unknown");
+  for (const values of [receipt.interpretation_order, receipt.blocked_order, receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("interpretation plane ordering is invalid");
+  if (!/^[0-9a-f]{64}$/.test(receipt.replay_identity)) throw new Error("interpretation plane replay identity is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash) || typeof receipt.artifact.media_type !== "string" || !receipt.artifact.media_type.trim() || typeof receipt.artifact.scope !== "string" || !receipt.artifact.scope.trim()) throw new Error("interpretation plane artifact is invalid");
+}
+
+export function interpretationPlaneReceiptDigest(receipt: InterpretationPlaneReceipt): string { validateInterpretationPlaneReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

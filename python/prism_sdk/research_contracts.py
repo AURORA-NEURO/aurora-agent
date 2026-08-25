@@ -149,6 +149,8 @@ EVOLUTION_ASSURANCE_REQUIRED_CHECKS = (
     "signed-approval",
     "source-receipt",
 )
+INTERPRETATION_PLANE_FEATURE_ID = "AFA-ids-P14-F31"
+INTERPRETATION_PLANE_CONTRACT_VERSION = "ids-interpretation-federation/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3364,3 +3366,49 @@ class EvolutionAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "source_receipt_digest": self.source_receipt_digest, "replay_identity": self.replay_identity, "benchmark_digest": self.benchmark_digest, "verdict": self.verdict, "passed_checks": list(self.passed_checks), "failed_checks": list(self.failed_checks), "missing_checks": list(self.missing_checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class InterpretationPlaneReceipt:
+    """Cross-language validator for digest-only interpretation federation."""
+
+    request_id: str
+    workflow_id: str
+    disposition: str
+    interpretation_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    replay_identity: str
+    budget: int
+    budget_remaining: int
+    max_concurrency: int
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = INTERPRETATION_PLANE_FEATURE_ID
+    contract_version: str = INTERPRETATION_PLANE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != INTERPRETATION_PLANE_FEATURE_ID or self.contract_version != INTERPRETATION_PLANE_CONTRACT_VERSION:
+            raise ResearchContractError("interpretation plane schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or (not self.interpretation_order and not self.blocked_order) or not self.checks or not self.effect_receipts or self.budget_remaining > self.budget or self.max_concurrency <= 0:
+            raise ResearchContractError("interpretation plane identity, ordering, budget, checks, effects, locality, or boundary is incomplete")
+        if self.disposition not in {"admitted", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("interpretation plane disposition is unknown")
+        for values in (self.interpretation_order, self.blocked_order, self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("interpretation plane ordering is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.replay_identity):
+            raise ResearchContractError("interpretation plane replay identity is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("interpretation plane artifact digest is invalid")
+        if not isinstance(self.artifact.get("media_type"), str) or not self.artifact["media_type"].strip() or not isinstance(self.artifact.get("scope"), str) or not self.artifact["scope"].strip():
+            raise ResearchContractError("interpretation plane artifact media type and scope are required")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "interpretation_order": list(self.interpretation_order), "blocked_order": list(self.blocked_order), "replay_identity": self.replay_identity, "budget": self.budget, "budget_remaining": self.budget_remaining, "max_concurrency": self.max_concurrency, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
