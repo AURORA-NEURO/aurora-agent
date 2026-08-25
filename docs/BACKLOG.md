@@ -137,6 +137,16 @@ flush coordinator seams are exported and tested, including stale-writer fencing 
 recovery. Durable encryption, distributed consensus/scheduling, evaluator truth, and external
 authorization remain deployment responsibilities.
 
+Python now also has deployment-readiness parity with the TypeScript façade. The
+`AutonomousDeploymentReadinessAuditor` joins keyless agent readiness with credential-provisioning
+metadata and caller-owned persistence, queue, approval, external-auth, and telemetry assertions.
+It emits digest-bound capability and twelve-domain rows with explicit model, provider, credential,
+tool, evidence, and learning blockers, while refusing secret-shaped input and performing no
+provider, source, tool, queue, credential, or learning mutation. `agent.deployment_readiness()`
+provides the application entrypoint and canonical report validator; deployment initialization,
+encryption, distributed scheduling, external authorization, and source/evaluator authority remain
+deployment responsibilities.
+
 Online learner state now has a first-class TypeScript restart seam. The snapshot validator binds the
 bandit state digest and outer snapshot digest, rejects unsupported or credential-shaped fields, and
 the JSON/CAS/browser adapters provide stale-writer protection for UCB, epsilon-greedy, and Thompson

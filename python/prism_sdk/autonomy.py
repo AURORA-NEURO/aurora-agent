@@ -17588,6 +17588,29 @@ class AutonomousAgent:
             require_calibrated_learning=require_calibrated_learning,
         )
 
+    def deployment_readiness(
+        self,
+        *,
+        policy: Mapping[str, Any] | None = None,
+        capabilities: Mapping[str, Any] | None = None,
+        readiness_options: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Join this agent's keyless readiness with deployment-owned capability gates.
+
+        The auditor is intentionally lazy and provider-free: it returns a review artifact but
+        never resolves credentials, initializes persistence/queues, acquires evidence, or grants
+        authority.  ``readiness_options`` is forwarded to the existing local readiness projection.
+        """
+
+        from .autonomous_deployment_readiness import audit_autonomous_agent_deployment_readiness
+
+        return audit_autonomous_agent_deployment_readiness(
+            self,
+            policy=policy,
+            capabilities=capabilities,
+            readiness_options=readiness_options,
+        )
+
     def domain_evaluator(
         self,
         domain: str,

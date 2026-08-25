@@ -1949,6 +1949,50 @@ read/write and compare-and-swap seams. Restore revalidates every report and the 
 so a worker can rehydrate the same readiness gate without retaining the caller's calibration cases,
 labels, evidence, prompts, provider responses, or credentials.
 
+Python now also exposes `AutonomousDeploymentReadinessAuditor` as the deployment-level join over
+the keyless agent readiness report and `agent.credential_provisioning_plan()`. It emits one
+digest-bound row for every built-in domain and explicit global/domain blockers for model catalogue,
+capability, provider registration, credential, tool, evidence, learning, persistence, queue,
+approval-authority, external-auth, and telemetry requirements. Deployment capabilities are
+caller-owned assertions (`configured`, `operational`, `restart_safe`, and `integrity_fenced`), not
+objects the SDK initializes or tests. The auditor performs no provider, model-discovery, source,
+tool, queue, credential, or learning call; `agent.deployment_readiness()` is therefore safe for
+onboarding and operator review before dispatch:
+
+```python
+report = agent.deployment_readiness(
+    policy={
+        "require_credentials": True,
+        "require_persistence": True,
+        "require_approval_authority": True,
+        "require_learning": True,
+    },
+    capabilities={
+        "persistence": {
+            "configured": True,
+            "operational": True,
+            "restart_safe": True,
+            "integrity_fenced": True,
+            "caller_owned": True,
+        },
+        "approval_authority": {
+            "configured": True,
+            "operational": True,
+            "restart_safe": True,
+            "integrity_fenced": True,
+            "caller_owned": True,
+        },
+    },
+)
+validate_autonomous_deployment_readiness_report(report)
+```
+
+The report has a SHA-256 `readiness_digest`, canonical validation, bounded blockers, and no
+credential values, handles, prompts, responses, tool payloads, or evidence bodies. A `blocked` or
+`partial` result is an actionable review state, not an authorization decision; applications still
+own the final approval, secret manager, queue, persistence, external authentication, telemetry,
+and source/evaluator authority.
+
 ### Live model inventory synchronization
 
 `readiness()` intentionally does not contact providers. When an application wants to refresh the
