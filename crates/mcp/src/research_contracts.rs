@@ -27,6 +27,10 @@ use bioprism_adapter::{
     MULTIMODAL_HARMONIZATION_FEATURE_ID, QUALITY_DRIFT_FEATURE_ID,
 };
 use bioprism_adapter::{
+    evaluate_quality_envelope, QualityEnvelopeReceipt, QualityEnvelopeRequest,
+    QUALITY_ENVELOPE_FEATURE_ID,
+};
+use bioprism_adapter::{
     operate_mechanism_control_plane, MechanismControlPlaneReceipt, MechanismControlPlaneRequest,
     MECHANISM_CONTROL_PLANE_FEATURE_ID,
 };
@@ -168,6 +172,7 @@ pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
 pub const ADAPTER_RESOURCE_WORKBENCH_TOOL: &str = "adapter_resource_workbench";
 pub const INGESTION_GATEWAY_TOOL: &str = "adapter_ingestion_gateway";
+pub const QUALITY_ENVELOPE_TOOL: &str = "adapter_quality_envelope";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -916,6 +921,24 @@ pub fn validate_ingestion_gateway_json(value: &Value) -> Result<IngestionGateway
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != INGESTION_GATEWAY_FEATURE_ID {
         return Err("ingestion gateway feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn evaluate_quality_envelope_json(value: &Value) -> Result<Value, String> {
+    let request: QualityEnvelopeRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid quality envelope request: {error}"))?;
+    let receipt = evaluate_quality_envelope(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize quality envelope receipt: {error}"))
+}
+
+pub fn validate_quality_envelope_json(value: &Value) -> Result<QualityEnvelopeReceipt, String> {
+    let receipt: QualityEnvelopeReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid quality envelope receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != QUALITY_ENVELOPE_FEATURE_ID {
+        return Err("quality envelope feature id mismatch".into());
     }
     Ok(receipt)
 }

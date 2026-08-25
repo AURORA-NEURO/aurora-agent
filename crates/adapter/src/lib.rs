@@ -96,6 +96,7 @@ pub mod multimodal_harmonization;
 pub mod probe;
 pub mod quality_control;
 pub mod quality_drift;
+pub mod quality_envelope;
 pub mod registry;
 pub mod research_ingest;
 pub mod resource_workbench;
@@ -159,6 +160,12 @@ pub use quality_drift::{
     DriftMetricResult, DriftMetricStatus, QualityDriftError, QualityDriftPolicy,
     QualityDriftReceipt, QualityDriftRequest, QualityDriftSummary,
     FEATURE_ID as QUALITY_DRIFT_FEATURE_ID, FEATURE_VERSION as QUALITY_DRIFT_FEATURE_VERSION,
+};
+pub use quality_envelope::{
+    evaluate_quality_envelope, QualityEnvelopeDecision, QualityEnvelopeError,
+    QualityEnvelopeReceipt, QualityEnvelopeRequest, StudyQualityRecord, StudyQualityVerdict,
+    CONTRACT_VERSION as QUALITY_ENVELOPE_CONTRACT_VERSION,
+    FEATURE_ID as QUALITY_ENVELOPE_FEATURE_ID,
 };
 pub use registry::{
     AdapterDescriptor, AdapterExecution, AdapterPlan, AdapterPlanCandidate, AdapterPlanRequest,

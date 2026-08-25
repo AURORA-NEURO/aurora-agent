@@ -82,6 +82,8 @@ RESOURCE_WORKBENCH_FEATURE_ID = "AFA-adapter-P05-F18"
 RESOURCE_WORKBENCH_CONTRACT_VERSION = "multimodal-resource-workbench/1.0"
 INGESTION_GATEWAY_FEATURE_ID = "AFA-adapter-P06-F23"
 INGESTION_GATEWAY_CONTRACT_VERSION = "1.0"
+QUALITY_ENVELOPE_FEATURE_ID = "AFA-adapter-P07-F06"
+QUALITY_ENVELOPE_CONTRACT_VERSION = "multi-study-quality-envelope/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2183,3 +2185,43 @@ class IngestionGatewayReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "request_id": self.request_id, "study_id": self.study_id, "disposition": self.disposition, "harmonized": dict(self.harmonized), "admitted_bundles": list(self.admitted_bundles), "omitted_bundles": list(self.omitted_bundles), "effect_receipts": [dict(item) for item in self.effect_receipts], "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class QualityEnvelopeReceipt:
+    envelope_id: str
+    reference_schema: str
+    comparability_profile: str
+    disposition: str
+    study_order: tuple[str, ...]
+    modality_coverage: Mapping[str, int]
+    verdicts: tuple[Mapping[str, Any], ...]
+    omitted_modalities: tuple[str, ...]
+    comparability_conflicts: tuple[str, ...]
+    semantic_loss: tuple[Mapping[str, Any], ...]
+    reasons: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    contract_version: str = QUALITY_ENVELOPE_CONTRACT_VERSION
+    feature_id: str = QUALITY_ENVELOPE_FEATURE_ID
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != QUALITY_ENVELOPE_FEATURE_ID or self.contract_version != QUALITY_ENVELOPE_CONTRACT_VERSION:
+            raise ResearchContractError("quality envelope schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.envelope_id.strip() or not self.reference_schema.strip() or not self.comparability_profile.strip() or not self.reasons:
+            raise ResearchContractError("quality envelope identity, boundary, profile, or reasons are incomplete")
+        if self.disposition not in {"qualified", "partial", "blocked", "unknown"}:
+            raise ResearchContractError("quality envelope disposition is unknown")
+        if not self.study_order or tuple(sorted(set(self.study_order))) != self.study_order or len(self.verdicts) != len(self.study_order):
+            raise ResearchContractError("quality envelope study ordering is invalid")
+        for study_id, verdict in zip(self.study_order, self.verdicts):
+            if verdict.get("study_id") != study_id or not str(verdict.get("modality", "")).strip() or verdict.get("quality_disposition") not in {"pass", "pass_with_warnings", "blocked", "unknown"} or not isinstance(verdict.get("comparable"), bool) or not verdict.get("reasons"):
+                raise ResearchContractError("quality envelope study verdict linkage is invalid")
+        if any(not str(modality).strip() or not isinstance(count, int) or count < 0 for modality, count in self.modality_coverage.items()):
+            raise ResearchContractError("quality envelope modality coverage is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("quality envelope artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "feature_id": self.feature_id, "contract_version": self.contract_version, "envelope_id": self.envelope_id, "reference_schema": self.reference_schema, "comparability_profile": self.comparability_profile, "disposition": self.disposition, "study_order": list(self.study_order), "modality_coverage": dict(self.modality_coverage), "verdicts": [dict(item) for item in self.verdicts], "omitted_modalities": list(self.omitted_modalities), "comparability_conflicts": list(self.comparability_conflicts), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "artifact": dict(self.artifact), "boundary": self.boundary})

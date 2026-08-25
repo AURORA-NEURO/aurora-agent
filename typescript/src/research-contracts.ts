@@ -76,6 +76,8 @@ export const RESOURCE_WORKBENCH_FEATURE_ID = "AFA-adapter-P05-F18" as const;
 export const RESOURCE_WORKBENCH_CONTRACT_VERSION = "multimodal-resource-workbench/1.0" as const;
 export const INGESTION_GATEWAY_FEATURE_ID = "AFA-adapter-P06-F23" as const;
 export const INGESTION_GATEWAY_CONTRACT_VERSION = "1.0" as const;
+export const QUALITY_ENVELOPE_FEATURE_ID = "AFA-adapter-P07-F06" as const;
+export const QUALITY_ENVELOPE_CONTRACT_VERSION = "multi-study-quality-envelope/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1249,6 +1251,38 @@ export function validateIngestionGatewayReceipt(receipt: IngestionGatewayReceipt
 }
 
 export function ingestionGatewayReceiptDigest(receipt: IngestionGatewayReceipt): string { validateIngestionGatewayReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface QualityEnvelopeReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  envelope_id: string;
+  reference_schema: string;
+  comparability_profile: string;
+  decision: "qualified" | "partial" | "blocked" | "unknown";
+  study_order: string[];
+  modality_coverage: Record<string, number>;
+  verdicts: readonly Record<string, unknown>[];
+  omitted_modalities: string[];
+  comparability_conflicts: string[];
+  semantic_loss: readonly Record<string, unknown>[];
+  reasons: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateQualityEnvelopeReceipt(receipt: QualityEnvelopeReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== QUALITY_ENVELOPE_FEATURE_ID || receipt.contract_version !== QUALITY_ENVELOPE_CONTRACT_VERSION) throw new Error("quality envelope schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.envelope_id.trim() || !receipt.reference_schema.trim() || !receipt.comparability_profile.trim() || !receipt.reasons.length) throw new Error("quality envelope identity, locality, profile, or reasons are incomplete");
+  if (!new Set(["qualified", "partial", "blocked", "unknown"]).has(receipt.decision)) throw new Error("quality envelope decision is unknown");
+  if (!receipt.study_order.length || JSON.stringify([...new Set(receipt.study_order)].sort()) !== JSON.stringify(receipt.study_order) || receipt.verdicts.length !== receipt.study_order.length) throw new Error("quality envelope study ordering is invalid");
+  receipt.verdicts.forEach((verdict, index) => { if (verdict.study_id !== receipt.study_order[index] || typeof verdict.modality !== "string" || !verdict.modality.trim() || !new Set(["pass", "pass_with_warnings", "blocked", "unknown"]).has(verdict.quality_disposition) || typeof verdict.comparable !== "boolean" || !Array.isArray(verdict.reasons) || !verdict.reasons.length) throw new Error("quality envelope study verdict linkage is invalid"); });
+  for (const [modality, count] of Object.entries(receipt.modality_coverage)) if (!modality.trim() || !Number.isInteger(count) || count < 0) throw new Error("quality envelope modality coverage is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("quality envelope artifact digest is invalid");
+}
+
+export function qualityEnvelopeReceiptDigest(receipt: QualityEnvelopeReceipt): string { validateQualityEnvelopeReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

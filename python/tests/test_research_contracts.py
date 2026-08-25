@@ -12,6 +12,7 @@ from prism_sdk.research_contracts import ADAPTER_CONTEXT_COMPILATION_FEATURE_ID,
 from prism_sdk.research_contracts import KNOWLEDGE_WORKFLOW_FEATURE_ID, KNOWLEDGE_WORKFLOW_CONTRACT_VERSION, KnowledgeWorkflowReceipt
 from prism_sdk.research_contracts import RESOURCE_WORKBENCH_FEATURE_ID, RESOURCE_WORKBENCH_CONTRACT_VERSION, ResourceWorkbenchReceipt
 from prism_sdk.research_contracts import INGESTION_GATEWAY_FEATURE_ID, INGESTION_GATEWAY_CONTRACT_VERSION, IngestionGatewayReceipt
+from prism_sdk.research_contracts import QUALITY_ENVELOPE_FEATURE_ID, QUALITY_ENVELOPE_CONTRACT_VERSION, QualityEnvelopeReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -855,4 +856,28 @@ def test_ingestion_gateway_blocks_without_authority_and_preserves_locality():
     receipt.validate()
     assert receipt.feature_id == INGESTION_GATEWAY_FEATURE_ID
     assert receipt.contract_version == INGESTION_GATEWAY_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_quality_envelope_preserves_incompatible_multi_study_profiles():
+    receipt = QualityEnvelopeReceipt(
+        envelope_id="envelope:python",
+        reference_schema="aurora-qc/1",
+        comparability_profile="protocol-v2|instrument-v3",
+        disposition="blocked",
+        study_order=("study:image", "study:rna"),
+        modality_coverage={"imaging": 1, "transcriptomics": 1},
+        verdicts=(
+            {"study_id": "study:image", "modality": "imaging", "quality_disposition": "pass", "comparable": True, "reasons": ["quality gates passed"]},
+            {"study_id": "study:rna", "modality": "transcriptomics", "quality_disposition": "pass", "comparable": True, "reasons": ["quality gates passed"]},
+        ),
+        omitted_modalities=(),
+        comparability_conflicts=("modality imaging has incompatible profiles",),
+        semantic_loss=({"field": "comparability", "reason": "profiles differ", "severity": "decision_relevant"},),
+        reasons=("comparability conflict blocks qualification",),
+        artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == QUALITY_ENVELOPE_FEATURE_ID
+    assert receipt.contract_version == QUALITY_ENVELOPE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
