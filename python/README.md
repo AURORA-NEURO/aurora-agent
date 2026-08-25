@@ -210,6 +210,16 @@ opaque credential handles, approval callbacks, memory, tools, and policy at exec
 twelve domains, including `cross_domain`, use the same facade path; no resolver or provider value
 is copied into goal or loop metadata.
 
+For deployments that already have an operator-approved action record, add an
+`action_handoff_resolver(goal, row, task)` to the runtime (or to
+`run_goal_control_loop`). It may return the verified handoff directly, or
+`{"handoff": handoff, "request": {"domain": ..., "hints": ..., "allow_cross_domain": ...}}`
+when replay needs routing inputs that are not encoded in the handoff. The runtime validates the
+handoff during rehydration and again after the scheduler claim, then calls
+`agent.execute_action_handoff(...)`; a goal cannot silently fall back to the raw run path when
+this resolver is configured. Handoff metadata is transient worker input, while credentials,
+callbacks, provider options, and effect authority remain supplied by `run_options_factory`.
+
 ```python
 result = agent.run_goal_control_loop(
     ledger,

@@ -187,6 +187,8 @@ from .autonomous_goal_agent import (
     GOAL_AGENT_RUNTIME_RETENTION,
     GOAL_AGENT_RUNTIME_SCHEMA,
     AutonomousGoalAgentRuntime,
+    GoalAgentActionHandoffRequest,
+    GoalAgentActionHandoffResolver,
     GoalAgentRunOptionsFactory,
     GoalAgentTaskResolver,
 )
@@ -4080,6 +4082,8 @@ __all__ = [
     "GOAL_AGENT_RUNTIME_RETENTION",
     "GOAL_AGENT_RUNTIME_SCHEMA",
     "AutonomousGoalAgentRuntime",
+    "GoalAgentActionHandoffRequest",
+    "GoalAgentActionHandoffResolver",
     "GoalAgentRunOptionsFactory",
     "GoalAgentTaskResolver",
     "BRAIN_CONTROL_SCHEMA",

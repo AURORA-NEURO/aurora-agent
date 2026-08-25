@@ -12,6 +12,9 @@ import {
   sealAutonomousGoalControlLoopSnapshot,
   validateAutonomousGoalControlLoopSnapshot,
   AutonomousGoalAgentRuntime,
+  AutonomousActionAdmissionController,
+  AutonomousBrainFacade,
+  InMemoryAutonomousActionAdmissionLedger,
   AutonomousGoalWorkerJournal,
   AutonomousGoalWorkerJournalPersistenceCoordinator,
   AutonomousAgent,
@@ -480,6 +483,52 @@ test("goal agent runtime bridges the real facade across every domain without ret
   assert.equal(serialized.includes("private_runtime_handle"), false);
   assert.equal(runtime.metadata().domain_count, domains.length);
   assert.equal(runtime.metadata().execution_surface, "autonomous_agent_facade");
+  assert.equal(ledger.verifyIntegrity().ok, true);
+});
+
+test("goal agent runtime replays caller-owned action handoffs before the run boundary across every domain", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 800 });
+  for (const domain of domains) ledger.create({ goal_id: `handoff-goal-${domain}`, task_digest: goalTaskDigest(`private handoff task ${domain}`), domain, now_ns: 0 });
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached in goal handoff test"); } }));
+  const brain = new AutonomousBrainFacade({ agent });
+  const calls = [];
+  agent.runAuto = async (task, options) => {
+    calls.push({ task, options });
+    return { status: "completed", execution_status: "completed" };
+  };
+  const controller = new AutonomousActionAdmissionController(new InMemoryAutonomousActionAdmissionLedger({ maxRecords: domains.length + 1 }));
+  const runtime = new AutonomousGoalAgentRuntime({
+    agent,
+    brain,
+    ledger,
+    task_resolver: (goal) => `private handoff task ${goal.domain}`,
+    action_handoff_resolver: async (goal, _row, task) => {
+      const input = goal.domain === "cross_domain"
+        ? { task, hints: ["coding", "biomedical"], allow_cross_domain: true }
+        : { task, domain: goal.domain, allow_cross_domain: false };
+      const plan = await brain.actionPlan(input);
+      const actionId = `goal-handoff-${goal.domain}`;
+      controller.submit(actionId, plan, {
+        approvals: Object.fromEntries(plan.required_approvals.map((gate) => [gate, true])),
+        reviewed: true,
+        authorizationDigest: "c".repeat(64),
+      });
+      const handoff = controller.dispatchHandoff(actionId);
+      return goal.domain === "cross_domain" ? { handoff, request: { hints: input.hints, allow_cross_domain: true } } : handoff;
+    },
+    run_options_factory: (goal) => goal.domain === "cross_domain" ? { subtasks: [{ domain: "coding", task: "private child task" }] } : {},
+    evaluator: (cycle) => cycle.batch.runs.map((run) => ({ goal_id: run.goal_id, evaluator_id: "handoff-evaluator", evaluator_version: "1", reward: 1, passed: true })),
+  });
+  const result = await runtime.run({ schedule_options: { now_ns: 800, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains } });
+  assert.equal(result.stop_reason, "all_terminal");
+  assert.equal(calls.length, domains.length);
+  assert.equal(calls.every((call) => call.options.approveProviderCall === true), true);
+  assert.equal(runtime.metadata().execution_surface, "autonomous_goal_action_handoff_facade");
+  assert.equal(runtime.metadata().action_handoff_execution, "verified_handoff_replay_before_run_boundary");
+  assert.equal(JSON.stringify(result.toJSON()).includes("private handoff task"), false);
+  assert.equal(JSON.stringify(result.toJSON()).includes("private child task"), false);
+  assert.deepEqual(new Set(ledger.list({ limit: domains.length }).map((goal) => goal.status)), new Set(["completed"]));
   assert.equal(ledger.verifyIntegrity().ok, true);
 });
 

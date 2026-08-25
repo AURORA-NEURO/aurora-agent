@@ -2920,6 +2920,16 @@ the admitted gate set, and then delegates to the existing autonomous route/model
 boundary. A changed task, domain, plan, admission, or handoff fails before dispatch; credentials,
 provider/source approval, evaluator settlement, tool authority, and effects remain independent.
 
+The long-horizon `AutonomousGoalAgentRuntime` can consume the same boundary through its optional
+`action_handoff_resolver`. The resolver is caller-owned and runs while the protected task is being
+rehydrated; it returns either a handoff or a handoff plus the transient routing request needed to
+replay it. With this option configured, every claimed goal—single-domain, the explicit
+`cross_domain` profile, or a true cross-domain plan—must pass handoff validation and execute through
+`execute_action_handoff` before the provider run boundary. The goal ledger, schedule, control-loop
+checkpoint, and evaluator projection retain no task, prompt, credential, callback, handoff request,
+or provider value. A missing TypeScript brain facade or Python agent facade is rejected at runtime
+construction rather than silently degrading to an unreviewed run.
+
 ### Provider-assisted mission ordering with replay-safe acceptance
 
 Mission execution now has the same planner boundary as workflow and portfolio execution. The
@@ -5891,6 +5901,13 @@ routing, prompt, model-selection, provider, connector/tool, and learning path as
 provider output enters the goal, schedule, worker, control, or evaluator projections. This makes
 the loop usable as an actual agent service while retaining the caller's authority over keys and
 effect approvals.
+
+When a deployment uses an operator review ledger, configure `action_handoff_resolver` alongside the
+task and execution-options factories. The resolver can return a plain verified handoff when the
+goal domain is sufficient, or `{handoff, request}` when a cross-domain replay needs transient
+`hints`, `capability`, `context`, connector, or cross-domain routing fields. This closes the
+review-to-goal seam without making the SDK an authorization service: credentials, evaluator truth,
+source/tool authority, and effects remain caller-owned.
 
 ```python
 result = agent.run_goal_control_loop(

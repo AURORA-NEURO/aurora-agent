@@ -2886,6 +2886,9 @@ export {
   AutonomousGoalAgentRuntime,
 } from "./autonomous-goal-agent.js";
 export type {
+  AutonomousGoalAgentActionHandoffBinding,
+  AutonomousGoalAgentActionHandoffRequest,
+  AutonomousGoalAgentActionHandoffResolver,
   AutonomousGoalAgentRunOptionsFactory,
   AutonomousGoalAgentTaskResolver,
 } from "./autonomous-goal-agent.js";

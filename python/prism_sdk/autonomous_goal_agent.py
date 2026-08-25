@@ -34,6 +34,9 @@ _FORBIDDEN_RUN_OPTION_KEYS = frozenset({"task", "domain"})
 
 GoalAgentTaskResolver = Callable[[AutonomousGoalRecord, AutonomousGoalScheduleRow], str]
 GoalAgentRunOptionsFactory = Callable[[AutonomousGoalRecord, AutonomousGoalScheduleRow], Mapping[str, Any]]
+GoalAgentActionHandoffRequest = Mapping[str, Any]
+GoalAgentActionHandoffResolver = Callable[[AutonomousGoalRecord, AutonomousGoalScheduleRow, str], Mapping[str, Any] | None]
+_ACTION_HANDOFF_REQUEST_KEYS = frozenset({"domain", "capability", "hints", "allow_cross_domain", "context", "connector"})
 
 
 def _fail(message: str) -> None:
@@ -66,6 +69,46 @@ def _subtasks(value: Any) -> tuple[Mapping[str, Any], ...]:
     return tuple(value)
 
 
+def _action_handoff(value: Any, goal: AutonomousGoalRecord) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    handoff_source = value
+    request: dict[str, Any] = {}
+    if isinstance(value, Mapping) and "handoff" in value:
+        handoff_source = value.get("handoff")
+        supplied_request = value.get("request", {})
+        if not isinstance(supplied_request, Mapping):
+            _fail("action handoff request must be a mapping")
+        request = dict(supplied_request)
+    if not isinstance(handoff_source, Mapping):
+        _fail("action handoff must be a mapping")
+    from .autonomous_action_admission_controller import validate_autonomous_action_dispatch_handoff
+
+    try:
+        handoff = validate_autonomous_action_dispatch_handoff(handoff_source)
+    except Exception as error:
+        _fail(f"action handoff validation failed: {error}")
+    unsupported = [key for key in request if not isinstance(key, str) or key not in _ACTION_HANDOFF_REQUEST_KEYS]
+    if unsupported:
+        _fail("action handoff request contains unsupported fields: " + ", ".join(map(str, unsupported)))
+    if goal.domain == "cross_domain":
+        request_domain = request.get("domain")
+        if request_domain is not None and request_domain != "cross_domain":
+            _fail("cross-domain goal action handoffs cannot select a single-domain request")
+        if not handoff["cross_domain"] and "cross_domain" not in handoff["selected_domains"]:
+            _fail("cross-domain goal action handoff is not cross-domain")
+        if request_domain is None and not handoff["cross_domain"]:
+            request["domain"] = "cross_domain"
+    else:
+        if goal.domain not in handoff["selected_domains"]:
+            _fail(f"action handoff does not cover goal domain {goal.domain}")
+        request_domain = request.get("domain")
+        if request_domain is not None and request_domain != goal.domain:
+            _fail(f"action handoff request domain does not match goal {goal.domain}")
+        request["domain"] = goal.domain
+    return {"handoff": handoff, "request": request}
+
+
 class AutonomousGoalAgentRuntime:
     """Run durable goals through ``AutonomousTaskOrchestrator`` with bounded adaptive control.
 
@@ -84,6 +127,7 @@ class AutonomousGoalAgentRuntime:
         agent: Any | None = None,
         task_resolver: GoalAgentTaskResolver,
         run_options_factory: GoalAgentRunOptionsFactory | None = None,
+        action_handoff_resolver: GoalAgentActionHandoffResolver | None = None,
         evaluator: GoalLoopEvaluator | None = None,
         learner: GoalLoopLearner | AutonomousGoalBanditLearner | None = None,
         journal: AutonomousGoalWorkerJournal | None = None,
@@ -102,6 +146,12 @@ class AutonomousGoalAgentRuntime:
             _fail("task_resolver must be callable")
         if run_options_factory is not None and not callable(run_options_factory):
             _fail("run_options_factory must be callable or None")
+        if action_handoff_resolver is not None and not callable(action_handoff_resolver):
+            _fail("action_handoff_resolver must be callable or None")
+        if action_handoff_resolver is not None and agent is None:
+            _fail("action_handoff_resolver requires an agent facade")
+        if action_handoff_resolver is not None and not callable(getattr(agent, "execute_action_handoff", None)):
+            _fail("agent must expose execute_action_handoff when action_handoff_resolver is configured")
         if journal is not None and not isinstance(journal, AutonomousGoalWorkerJournal):
             _fail("journal must be an AutonomousGoalWorkerJournal or None")
         if not isinstance(batch_id_prefix, str) or not batch_id_prefix.strip() or "\x00" in batch_id_prefix or len(batch_id_prefix.encode("utf-8")) > 128:
@@ -111,6 +161,7 @@ class AutonomousGoalAgentRuntime:
         self.ledger = ledger
         self.task_resolver = task_resolver
         self.run_options_factory = run_options_factory
+        self.action_handoff_resolver = action_handoff_resolver
         self.batch_id_prefix = batch_id_prefix.strip()
         self.worker = AutonomousGoalWorker(
             ledger,
@@ -131,10 +182,12 @@ class AutonomousGoalAgentRuntime:
         task = self.task_resolver(goal, row)
         if not isinstance(task, str) or not task.strip() or "\x00" in task or len(task.encode("utf-8")) > 32_000:
             _fail(f"task_resolver returned an invalid task for goal {goal.goal_id}")
+        resolved_handoff = None if self.action_handoff_resolver is None else self.action_handoff_resolver(goal, row, task)
+        binding = _action_handoff(resolved_handoff, goal)
         # Options are intentionally fetched at execution time, not placed in the worker request.
         # This keeps TypeScript/Python behavior aligned for non-cloneable credential/callback
         # objects and prevents them from entering a worker digest.
-        return {"task": task}
+        return {"task": task, "parameters": {} if binding is None else {"action_handoff": binding}}
 
     def _run_options(self, goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow) -> dict[str, Any]:
         supplied = {} if self.run_options_factory is None else self.run_options_factory(goal, row)
@@ -147,6 +200,15 @@ class AutonomousGoalAgentRuntime:
 
     def _execute(self, request: AutonomousGoalExecutionRequest) -> Any:
         options = self._run_options(request.goal, request.schedule_row)
+        binding = _action_handoff(request.parameters.get("action_handoff"), request.goal)
+        if binding is not None:
+            if self.agent is None:
+                _fail("action handoff execution requires an agent facade")
+            replay_request = dict(binding["request"])
+            overlap = sorted(set(replay_request).intersection(options))
+            if overlap:
+                _fail("action handoff request overlaps run options: " + ", ".join(overlap))
+            return self.agent.execute_action_handoff(task=request.task, handoff=binding["handoff"], **replay_request, **options)
         if request.goal.domain == "cross_domain":
             subtasks = options.pop("subtasks")
             if self.agent is not None:
@@ -162,7 +224,8 @@ class AutonomousGoalAgentRuntime:
             "batch_id_prefix": self.batch_id_prefix,
             "domain_count": len(AUTONOMOUS_DOMAINS),
             "domains": list(AUTONOMOUS_DOMAINS),
-            "execution_surface": "autonomous_agent_facade" if self.agent is not None else "autonomous_task_orchestrator",
+            "execution_surface": "autonomous_goal_action_handoff_facade" if self.action_handoff_resolver is not None else ("autonomous_agent_facade" if self.agent is not None else "autonomous_task_orchestrator"),
+            "action_handoff_execution": "verified_handoff_replay_before_run_boundary" if self.action_handoff_resolver is not None else "not_configured",
             "retention": GOAL_AGENT_RUNTIME_RETENTION,
             "secret_material": "never_returned",
         }
@@ -187,6 +250,8 @@ __all__ = [
     "GOAL_AGENT_RUNTIME_RETENTION",
     "GOAL_AGENT_RUNTIME_SCHEMA",
     "AutonomousGoalAgentRuntime",
+    "GoalAgentActionHandoffRequest",
+    "GoalAgentActionHandoffResolver",
     "GoalAgentRunOptionsFactory",
     "GoalAgentTaskResolver",
 ]

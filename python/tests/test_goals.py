@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from prism_sdk.autonomy import AUTONOMOUS_DOMAINS, AutonomousAgent, AutonomousTaskOrchestrator
+from prism_sdk.autonomous_action_admission_controller import AutonomousActionAdmissionController
+from prism_sdk.autonomous_action_admission_persistence import InMemoryAutonomousActionAdmissionLedger
 from prism_sdk.llm_runtime import LLMRuntime
 from prism_sdk.goals import (
     AutonomousGoalConflict,
@@ -598,6 +600,87 @@ def test_goal_agent_runtime_bridges_model_facade_across_every_domain_without_ret
     assert "private child task" not in serialized
     assert "private_runtime_handle" not in serialized
     assert runtime.metadata()["domain_count"] == len(AUTONOMOUS_DOMAINS)
+    assert ledger.verify_integrity()["ok"] is True
+
+
+def test_goal_agent_runtime_replays_caller_owned_action_handoffs_before_run_boundary() -> None:
+    agent = AutonomousAgent(None, LLMRuntime())
+    calls: list[dict[str, object]] = []
+    original_execute_handoff = agent.execute_action_handoff
+
+    def execute_handoff(**kwargs: object):
+        calls.append(dict(kwargs))
+        try:
+            return original_execute_handoff(**kwargs)
+        except Exception as error:
+            calls[-1]["error"] = str(error)
+            raise
+
+    agent.execute_action_handoff = execute_handoff  # type: ignore[method-assign]
+    agent.run_auto = lambda **kwargs: SimpleNamespace(execution_status="completed")  # type: ignore[method-assign]
+    controller = AutonomousActionAdmissionController(
+        InMemoryAutonomousActionAdmissionLedger(max_records=len(AUTONOMOUS_DOMAINS) + 1)
+    )
+    ledger = AutonomousGoalLedger(clock=lambda: 800, max_goals=len(AUTONOMOUS_DOMAINS))
+    for domain in AUTONOMOUS_DOMAINS:
+        ledger.create(
+            goal_id=f"handoff-goal-{domain}",
+            task_digest=_digest(f"private handoff task {domain}"),
+            domain=domain,
+            now_ns=0,
+        )
+
+    def resolve_handoff(goal, _row, task):
+        if goal.domain == "cross_domain":
+            plan = agent.action_plan(task=task, domain="cross_domain", allow_cross_domain=False)
+            request = {"domain": "cross_domain", "allow_cross_domain": False}
+        else:
+            plan = agent.action_plan(task=task, domain=goal.domain, allow_cross_domain=False)
+            request = None
+        action_id = f"goal-handoff-{goal.domain}"
+        controller.submit(
+            action_id,
+            plan,
+            approvals={gate: True for gate in plan["required_approvals"]},
+            reviewed=True,
+            authorization_digest="c" * 64,
+        )
+        handoff = controller.dispatch_handoff(action_id)
+        return {"handoff": handoff, "request": request} if request is not None else handoff
+
+    runtime = AutonomousGoalAgentRuntime(
+        agent.orchestrator,
+        ledger,
+        agent=agent,
+        task_resolver=lambda goal, _row: f"private handoff task {goal.domain}",
+        action_handoff_resolver=resolve_handoff,
+        run_options_factory=lambda goal, _row: {
+            "credentials": {},
+            **({"subtasks": ({"domain": "coding", "task": "private child task"},)} if goal.domain == "cross_domain" else {}),
+        },
+        evaluator=lambda cycle: [
+            {"goal_id": run.goal_id, "evaluator_id": "handoff-evaluator", "evaluator_version": "1", "reward": 1, "passed": True}
+            for run in cycle.batch.runs
+        ],
+    )
+    result = runtime.run(
+        schedule_options={
+            "now_ns": 800,
+            "max_selected": len(AUTONOMOUS_DOMAINS),
+            "max_concurrent": len(AUTONOMOUS_DOMAINS),
+            "required_domains": list(AUTONOMOUS_DOMAINS),
+        }
+    )
+
+    assert result.stop_reason == "all_terminal"
+    assert len(calls) == len(AUTONOMOUS_DOMAINS)
+    assert all(call["credentials"] == {} for call in calls)
+    assert runtime.metadata()["execution_surface"] == "autonomous_goal_action_handoff_facade"
+    assert runtime.metadata()["action_handoff_execution"] == "verified_handoff_replay_before_run_boundary"
+    serialized = json.dumps(result.to_dict(), sort_keys=True)
+    assert "private handoff task" not in serialized
+    assert "private child task" not in serialized
+    assert all(record.status == "completed" for record in ledger.list(limit=len(AUTONOMOUS_DOMAINS)))
     assert ledger.verify_integrity()["ok"] is True
 
 

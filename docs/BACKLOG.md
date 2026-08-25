@@ -1697,3 +1697,13 @@ reproduce the admitted gate set, and delegate to the existing route/model/provid
 all twelve built-in domains plus cross-domain plans. Handoff continuity still does not replace
 credentials, provider/source readiness, evaluator evidence, tool/effect authority, or durable
 deployment authorization.
+
+Long-horizon goals now have the same reviewed execution seam. Both goal-agent runtimes accept a
+caller-owned `action_handoff_resolver`; it can return a plain handoff or a `{handoff, request}`
+binding for transient cross-domain routing inputs. The worker validates the handoff before claim
+and the runtime revalidates it at execution, then invokes the high-level handoff method rather than
+falling back to an unreviewed raw run. The binding is excluded from goal/schedule/control-loop
+projections, while the existing caller-owned credentials, provider/source, evaluator, tool/effect,
+and deployment authorization responsibilities remain explicit. Remaining production work is still
+application wiring: persist protected task/request rehydrators, connect real identity/approval
+stores, and exercise restart/reconciliation behavior against the deployment's durable worker.

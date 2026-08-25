@@ -14331,6 +14331,7 @@ class AutonomousAgent:
         *,
         task_resolver: Callable[[Any, Any], str],
         run_options_factory: Callable[[Any, Any], Mapping[str, Any]] | None = None,
+        action_handoff_resolver: Callable[[Any, Any, str], Mapping[str, Any] | None] | None = None,
         evaluator: Any | None = None,
         learner: Any | None = None,
         journal: Any | None = None,
@@ -14343,7 +14344,9 @@ class AutonomousAgent:
         credential handles, prompt/plan construction, provider approval, connector/tool policy,
         and online learning remain the same boundaries as a direct ``run`` call.  The task and
         run-options callbacks are invoked only at execution time and are never persisted by the
-        goal ledger.
+        goal ledger.  When configured, ``action_handoff_resolver`` supplies a caller-owned,
+        digest-bound operator handoff that is replayed through ``execute_action_handoff`` before
+        the provider run boundary.
         """
 
         from .autonomous_goal_agent import AutonomousGoalAgentRuntime
@@ -14355,6 +14358,7 @@ class AutonomousAgent:
                 agent=self,
                 task_resolver=task_resolver,
                 run_options_factory=run_options_factory,
+                action_handoff_resolver=action_handoff_resolver,
                 evaluator=evaluator,
                 learner=learner,
                 journal=journal,
@@ -14371,6 +14375,7 @@ class AutonomousAgent:
         *,
         task_resolver: Callable[[Any, Any], str],
         run_options_factory: Callable[[Any, Any], Mapping[str, Any]] | None = None,
+        action_handoff_resolver: Callable[[Any, Any, str], Mapping[str, Any] | None] | None = None,
         evaluator: Any | None = None,
         learner: Any | None = None,
         journal: Any | None = None,
@@ -14386,6 +14391,7 @@ class AutonomousAgent:
             ledger,
             task_resolver=task_resolver,
             run_options_factory=run_options_factory,
+            action_handoff_resolver=action_handoff_resolver,
             evaluator=evaluator,
             learner=learner,
             journal=journal,
