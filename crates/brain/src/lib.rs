@@ -40,6 +40,7 @@ pub mod federated_evidence_surveillance;
 pub mod federated_evidence_workflow_fabric;
 pub mod federated_protocol_adapter;
 pub mod federated_research_workbench;
+pub mod federated_safety_assurance;
 pub mod high_throughput_evidence_copilot;
 pub mod high_throughput_evidence_surveillance;
 pub mod high_throughput_evidence_workflow_fabric;
@@ -132,6 +133,12 @@ pub use federated_research_workbench::{
     FederatedWorkbenchError, FederatedWorkbenchReceipt, FederatedWorkbenchRequest,
     CONTRACT_VERSION as FEDERATED_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use federated_safety_assurance::{
+    federated_safety_assurance_manifest, verify_federated_safety, FederatedAssuranceError,
+    FederatedAssuranceReceipt, FederatedAssuranceVerdict,
+    CONTRACT_VERSION as FEDERATED_SAFETY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_SAFETY_ASSURANCE_FEATURE_ID,
 };
 pub use high_throughput_evidence_copilot::{
     compile_high_throughput_evidence_copilot, high_throughput_evidence_research_copilot_manifest,
