@@ -114,6 +114,8 @@ class AutonomousGoalExecutionRequest:
     task: str
     parameters: Mapping[str, Any]
     schedule_digest: str
+    task_digest: str
+    execution_binding_digest: str
 
     def metadata(self) -> dict[str, Any]:
         return {
@@ -243,6 +245,8 @@ class AutonomousGoalWorker:
             row = rows.get(goal_id)
             if goal is None or row is None:
                 _fail(f"schedule admission disappeared for goal {goal_id}")
+            if self.journal is not None:
+                self.journal.assert_no_active(goal_id)
             resolved = self.resolver(goal, row)
             if not isinstance(resolved, Mapping):
                 _fail(f"resolver returned a non-mapping for goal {goal_id}")
@@ -253,12 +257,17 @@ class AutonomousGoalWorker:
             parameters = resolved.get("parameters", {})
             if not isinstance(parameters, Mapping):
                 _fail(f"resolver parameters must be a mapping for goal {goal_id}")
+            if goal_task_digest(task) != goal.task_digest:
+                _fail(f"resolver task digest does not match goal {goal_id}")
+            copied_parameters = dict(parameters)
             prepared[goal_id] = AutonomousGoalExecutionRequest(
                 goal=goal,
                 schedule_row=row,
                 task=task,
-                parameters=dict(parameters),
+                parameters=copied_parameters,
                 schedule_digest=schedule.schedule_digest,
+                task_digest=goal.task_digest,
+                execution_binding_digest=_digest({"parameters": copied_parameters}),
             )
         if self.journal is not None and batch_id is not None:
             for request in prepared.values():
@@ -269,6 +278,8 @@ class AutonomousGoalWorker:
                     attempt=request.goal.attempt,
                     revision=request.goal.revision,
                     schedule_digest=schedule.schedule_digest,
+                    task_digest=request.task_digest,
+                    execution_binding_digest=request.execution_binding_digest,
                 )
         claim = self.scheduler.claim(
             self.ledger,
@@ -283,6 +294,9 @@ class AutonomousGoalWorker:
                     current = self.ledger.get(item.goal_id)
                     if current is None:
                         _fail(f"claimed goal {item.goal_id} disappeared before journaling")
+                    request = prepared.get(item.goal_id)
+                    if request is None:
+                        _fail(f"prepared request for goal {item.goal_id} disappeared before journaling")
                     self.journal.record(
                         batch_id=batch_id,
                         goal_id=item.goal_id,
@@ -291,6 +305,8 @@ class AutonomousGoalWorker:
                         revision=current.revision,
                         schedule_digest=schedule.schedule_digest,
                         claim_digest=claim.claim_digest,
+                        task_digest=request.task_digest,
+                        execution_binding_digest=request.execution_binding_digest,
                     )
             for goal_id in schedule.selected_goal_ids:
                 claim_row = claim_by_id[goal_id]
@@ -308,6 +324,8 @@ class AutonomousGoalWorker:
                             revision=current.revision,
                             schedule_digest=schedule.schedule_digest,
                             claim_digest=claim.claim_digest,
+                            task_digest=request.task_digest,
+                            execution_binding_digest=request.execution_binding_digest,
                         )
                     live_result = self.executor(request)
                     result_status = _status(live_result)
@@ -323,6 +341,8 @@ class AutonomousGoalWorker:
                             schedule_digest=schedule.schedule_digest,
                             claim_digest=claim.claim_digest,
                             outcome_digest=outcome_digest,
+                            task_digest=request.task_digest,
+                            execution_binding_digest=request.execution_binding_digest,
                         )
                     runs.append(
                         AutonomousGoalWorkerRun(
@@ -362,6 +382,8 @@ class AutonomousGoalWorker:
                             claim_digest=claim.claim_digest,
                             outcome_digest=outcome_digest,
                             error_digest=_digest({"error_class": error_class}),
+                            task_digest=request.task_digest,
+                            execution_binding_digest=request.execution_binding_digest,
                         )
                     runs.append(
                         AutonomousGoalWorkerRun(

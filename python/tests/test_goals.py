@@ -137,7 +137,7 @@ def test_goal_worker_rehydrates_and_settles_every_domain_without_persisting_task
     domains = tuple(AUTONOMOUS_DOMAINS)
     ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=len(domains))
     for domain in domains:
-        ledger.create(goal_id=f"worker-{domain}", task_digest=_digest(f"private task {domain}"), domain=domain, now_ns=0)
+        ledger.create(goal_id=f"worker-{domain}", task_digest=_digest(f"private task for {domain}"), domain=domain, now_ns=0)
     observed_tasks: list[str] = []
 
     def resolve(goal, _row):
@@ -199,6 +199,25 @@ def test_goal_worker_converts_executor_failure_into_redacted_retry_state() -> No
     assert ledger.get("failure").next_action_digest == _digest("goal-retry")
 
 
+def test_goal_worker_refuses_task_rehydration_drift_before_claiming_or_dispatching() -> None:
+    ledger = AutonomousGoalLedger(clock=lambda: 100)
+    ledger.create(goal_id="rehydration-drift", task_digest=_digest("immutable task"), domain="coding", now_ns=0)
+    executions = {"count": 0}
+
+    def execute(_request):
+        executions["count"] += 1
+        return {"status": "completed"}
+
+    with pytest.raises(AutonomousGoalError, match="task digest"):
+        AutonomousGoalWorker(
+            ledger,
+            resolver=lambda _goal, _row: {"task": "different task"},
+            executor=execute,
+        ).run(schedule_options={"now_ns": 100, "max_selected": 1, "max_concurrent": 1})
+    assert executions["count"] == 0
+    assert ledger.get("rehydration-drift").status == "ready"
+
+
 def test_goal_worker_journal_reconciles_pre_and_post_dispatch_restarts_without_replay() -> None:
     ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=2)
     ledger.create(goal_id="pre", task_digest=_digest("pre task"), domain="coding", now_ns=0)
@@ -219,6 +238,8 @@ def test_goal_worker_journal_reconciles_pre_and_post_dispatch_restarts_without_r
             revision=current.revision,
             schedule_digest=schedule.schedule_digest,
             claim_digest=claims.claim_digest,
+            task_digest=_digest("pre task" if claim.goal_id == "pre" else "post task"),
+            execution_binding_digest=("a" if claim.goal_id == "pre" else "b") * 64,
         )
     post = ledger.get("post")
     journal.record(
@@ -229,7 +250,13 @@ def test_goal_worker_journal_reconciles_pre_and_post_dispatch_restarts_without_r
         revision=post.revision,
         schedule_digest=schedule.schedule_digest,
         claim_digest=claims.claim_digest,
+        task_digest=_digest("post task"),
+        execution_binding_digest="b" * 64,
     )
+    assert journal.active_for("post") is not None
+    assert journal.active_for("post").execution_binding_digest == "b" * 64
+    with pytest.raises(AutonomousGoalError, match="unreconciled"):
+        journal.assert_no_active("post")
     recovery = journal.recover(ledger, now_ns=200)
     assert {row["goal_id"] for row in recovery["recovered"]} == {"pre", "post"}
     assert ledger.get("pre").status == "paused"

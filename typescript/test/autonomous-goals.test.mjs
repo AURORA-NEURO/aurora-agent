@@ -116,7 +116,7 @@ test("goal scheduler admits cross-domain objectives", () => {
 test("goal worker rehydrates and settles every domain without persisting task values", async () => {
   const domains = [...AUTONOMOUS_DOMAIN_NAMES];
   const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 100 });
-  for (const domain of domains) ledger.create({ goal_id: `worker-${domain}`, task_digest: goalTaskDigest(`private task ${domain}`), domain, now_ns: 0 });
+  for (const domain of domains) ledger.create({ goal_id: `worker-${domain}`, task_digest: goalTaskDigest(`private task for ${domain}`), domain, now_ns: 0 });
   const observedTasks = [];
   const worker = new AutonomousGoalWorker({
     ledger,
@@ -167,6 +167,20 @@ test("goal worker converts executor failure into redacted retry state", async ()
   assert.equal(ledger.get("failure").next_action_digest, goalTaskDigest("goal-retry"));
 });
 
+test("goal worker refuses task rehydration drift before claiming or dispatching", async () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ clock: () => 100 });
+  ledger.create({ goal_id: "rehydration-drift", task_digest: goalTaskDigest("immutable task"), domain: "coding", now_ns: 0 });
+  let executions = 0;
+  const worker = new AutonomousGoalWorker({
+    ledger,
+    resolver: () => ({ task: "different task" }),
+    executor: async () => { executions += 1; return { status: "completed" }; },
+  });
+  await assert.rejects(() => worker.run({ schedule_options: { now_ns: 100, max_selected: 1, max_concurrent: 1 } }), /task digest/);
+  assert.equal(executions, 0);
+  assert.equal(ledger.get("rehydration-drift").status, "ready");
+});
+
 test("goal worker journals the dispatch boundary and reconciles restart uncertainty", async () => {
   const workerLedger = new InMemoryAutonomousGoalLedger({ clock: () => 100 });
   workerLedger.create({ goal_id: "journal-worker", task_digest: goalTaskDigest("private journal task"), domain: "coding", now_ns: 0 });
@@ -178,7 +192,10 @@ test("goal worker journals the dispatch boundary and reconciles restart uncertai
     executor: async () => ({ status: "completed" }),
   });
   await worker.run({ batch_id: "batch-success", schedule_options: { now_ns: 100, max_selected: 1, max_concurrent: 1 } });
-  assert.deepEqual(journal.events({ goal_id: "journal-worker" }).map((event) => event.phase), ["prepared", "claimed", "dispatch_started", "settled"]);
+  const journalEvents = journal.events({ goal_id: "journal-worker" });
+  assert.deepEqual(journalEvents.map((event) => event.phase), ["prepared", "claimed", "dispatch_started", "settled"]);
+  assert.equal(journalEvents[0].task_digest, goalTaskDigest("private journal task"));
+  assert.ok(journalEvents[0].execution_binding_digest);
   assert.equal(JSON.stringify(journal.snapshot()).includes("private journal task"), false);
 
   const recoveryLedger = new InMemoryAutonomousGoalLedger({ clock: () => 200 });
@@ -189,9 +206,11 @@ test("goal worker journals the dispatch boundary and reconciles restart uncertai
   const recoveredJournal = new AutonomousGoalWorkerJournal({ clock: () => 201 });
   const scheduleDigest = goalTaskDigest("schedule");
   const claimDigest = goalTaskDigest("claim");
-  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "pre-dispatch", phase: "claimed", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest });
-  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "post-dispatch", phase: "claimed", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest });
-  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "post-dispatch", phase: "dispatch_started", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest });
+  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "pre-dispatch", phase: "claimed", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest, task_digest: goalTaskDigest("pre task"), execution_binding_digest: "a".repeat(64) });
+  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "post-dispatch", phase: "claimed", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest, task_digest: goalTaskDigest("post task"), execution_binding_digest: "b".repeat(64) });
+  recoveredJournal.record({ batch_id: "batch-restart", goal_id: "post-dispatch", phase: "dispatch_started", attempt: 1, revision: 1, schedule_digest: scheduleDigest, claim_digest: claimDigest, task_digest: goalTaskDigest("post task"), execution_binding_digest: "b".repeat(64) });
+  assert.equal(recoveredJournal.activeFor("post-dispatch").execution_binding_digest, "b".repeat(64));
+  assert.throws(() => recoveredJournal.assertNoActive("post-dispatch"), /unreconciled/);
   const recovery = recoveredJournal.recover(recoveryLedger, { now_ns: 202 });
   assert.deepEqual(recovery.recovered.map((item) => item.goal_status), ["paused", "blocked"]);
   assert.equal(recoveryLedger.get("pre-dispatch").next_action_digest, goalTaskDigest("goal-retry"));

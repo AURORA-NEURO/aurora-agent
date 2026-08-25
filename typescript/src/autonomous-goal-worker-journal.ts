@@ -32,6 +32,10 @@ export interface AutonomousGoalWorkerEvent extends JsonObject {
   claim_digest: string | null;
   outcome_digest: string | null;
   error_digest: string | null;
+  /** Digest of the immutable goal task identity, when emitted by a worker. */
+  task_digest?: string;
+  /** Digest of transient executor parameters; raw bindings are never journaled. */
+  execution_binding_digest?: string;
   created_ns: number;
   previous_digest: string;
   event_digest: string;
@@ -80,9 +84,11 @@ function eventBody(event: Omit<AutonomousGoalWorkerEvent, "event_digest">): Omit
 
 function verifyEvent(raw: unknown): AutonomousGoalWorkerEvent {
   if (!isObject(raw)) fail("event must be an object");
-  const allowed = new Set(["schema", "sequence", "batch_id", "goal_id", "phase", "attempt", "revision", "schedule_digest", "claim_digest", "outcome_digest", "error_digest", "created_ns", "previous_digest", "event_digest", "retention", "secret_material"]);
+  const allowed = new Set(["schema", "sequence", "batch_id", "goal_id", "phase", "attempt", "revision", "schedule_digest", "claim_digest", "outcome_digest", "error_digest", "task_digest", "execution_binding_digest", "created_ns", "previous_digest", "event_digest", "retention", "secret_material"]);
   if (Object.keys(raw).some((key) => !allowed.has(key)) || raw.schema !== AUTONOMOUS_GOAL_WORKER_JOURNAL_EVENT_SCHEMA || raw.retention !== AUTONOMOUS_GOAL_WORKER_JOURNAL_RETENTION || raw.secret_material !== "never_returned") fail("event contains unsupported or unsafe metadata");
   if (typeof raw.phase !== "string" || !ALL_PHASES.has(raw.phase as AutonomousGoalWorkerJournalPhase)) fail("event phase is invalid");
+  const taskDigest = raw.task_digest === undefined ? undefined : digest("event.task_digest", raw.task_digest)!;
+  const executionBindingDigest = raw.execution_binding_digest === undefined ? undefined : digest("event.execution_binding_digest", raw.execution_binding_digest)!;
   const event = {
     schema: AUTONOMOUS_GOAL_WORKER_JOURNAL_EVENT_SCHEMA,
     sequence: integer("event.sequence", raw.sequence, 1, AUTONOMOUS_GOAL_WORKER_JOURNAL_MAX_EVENTS),
@@ -95,6 +101,8 @@ function verifyEvent(raw: unknown): AutonomousGoalWorkerEvent {
     claim_digest: digest("event.claim_digest", raw.claim_digest ?? null, true),
     outcome_digest: digest("event.outcome_digest", raw.outcome_digest ?? null, true),
     error_digest: digest("event.error_digest", raw.error_digest ?? null, true),
+    ...(taskDigest === undefined ? {} : { task_digest: taskDigest }),
+    ...(executionBindingDigest === undefined ? {} : { execution_binding_digest: executionBindingDigest }),
     created_ns: integer("event.created_ns", raw.created_ns),
     previous_digest: typeof raw.previous_digest === "string" ? raw.previous_digest : "",
     retention: AUTONOMOUS_GOAL_WORKER_JOURNAL_RETENTION,
@@ -127,9 +135,11 @@ export class AutonomousGoalWorkerJournal {
     return this.eventsValue.at(-1)?.event_digest ?? "";
   }
 
-  record(input: { batch_id: string; goal_id: string; phase: AutonomousGoalWorkerJournalPhase; attempt: number; revision: number; schedule_digest: string; claim_digest?: string | null; outcome_digest?: string | null; error_digest?: string | null; created_ns?: number }): AutonomousGoalWorkerEvent {
+  record(input: { batch_id: string; goal_id: string; phase: AutonomousGoalWorkerJournalPhase; attempt: number; revision: number; schedule_digest: string; claim_digest?: string | null; outcome_digest?: string | null; error_digest?: string | null; task_digest?: string | null; execution_binding_digest?: string | null; created_ns?: number }): AutonomousGoalWorkerEvent {
     if (this.eventsValue.length >= this.maxEvents) fail("event capacity is exhausted");
     if (!ALL_PHASES.has(input.phase)) fail("event phase is invalid");
+    const taskDigest = input.task_digest === undefined || input.task_digest === null ? undefined : digest("task_digest", input.task_digest)!;
+    const executionBindingDigest = input.execution_binding_digest === undefined || input.execution_binding_digest === null ? undefined : digest("execution_binding_digest", input.execution_binding_digest)!;
     const body = {
       schema: AUTONOMOUS_GOAL_WORKER_JOURNAL_EVENT_SCHEMA,
       sequence: this.eventsValue.length + 1,
@@ -142,6 +152,8 @@ export class AutonomousGoalWorkerJournal {
       claim_digest: digest("claim_digest", input.claim_digest ?? null, true),
       outcome_digest: digest("outcome_digest", input.outcome_digest ?? null, true),
       error_digest: digest("error_digest", input.error_digest ?? null, true),
+      ...(taskDigest === undefined ? {} : { task_digest: taskDigest }),
+      ...(executionBindingDigest === undefined ? {} : { execution_binding_digest: executionBindingDigest }),
       created_ns: integer("created_ns", input.created_ns ?? this.clock()),
       previous_digest: this.head_digest,
       retention: AUTONOMOUS_GOAL_WORKER_JOURNAL_RETENTION,
@@ -162,6 +174,19 @@ export class AutonomousGoalWorkerJournal {
     const latest = new Map<string, AutonomousGoalWorkerEvent>();
     for (const event of this.eventsValue) latest.set(event.goal_id, event);
     return [...latest.values()].filter((event) => ACTIVE_PHASES.has(event.phase)).sort((left, right) => left.sequence - right.sequence).map(clone);
+  }
+
+  /** Return the current unreconciled boundary event for one goal, if any. */
+  activeFor(goalId: string): AutonomousGoalWorkerEvent | undefined {
+    const normalizedGoalId = identifier("goal_id", goalId);
+    const event = this.active().find((candidate) => candidate.goal_id === normalizedGoalId);
+    return event === undefined ? undefined : clone(event);
+  }
+
+  /** Refuse a new worker pass until a prior in-flight boundary has been reconciled. */
+  assertNoActive(goalId: string): void {
+    const event = this.activeFor(goalId);
+    if (event !== undefined) fail(`goal ${goalId} has an unreconciled ${event.phase} event; recover or reconcile the worker journal before retrying`);
   }
 
   snapshot(): AutonomousGoalWorkerJournalSnapshot {
@@ -217,7 +242,7 @@ export class AutonomousGoalWorkerJournal {
       const nextAction = beforeDispatch ? "goal-retry" : "goal-reconciliation-review";
       const outcomeDigest = digestJsonSync({ goal_id: event.goal_id, attempt: event.attempt, result_status: resultStatus });
       const updated = ledger.transition(event.goal_id, target, { expected_revision: current.revision, blockers: [blocker], next_action_digest: goalTaskDigest(nextAction), outcome_digest: outcomeDigest, now_ns: options.now_ns });
-      this.record({ batch_id: event.batch_id, goal_id: event.goal_id, phase: "reconciled", attempt: event.attempt, revision: updated.revision, schedule_digest: event.schedule_digest, claim_digest: event.claim_digest, outcome_digest: outcomeDigest });
+      this.record({ batch_id: event.batch_id, goal_id: event.goal_id, phase: "reconciled", attempt: event.attempt, revision: updated.revision, schedule_digest: event.schedule_digest, claim_digest: event.claim_digest, outcome_digest: outcomeDigest, task_digest: event.task_digest, execution_binding_digest: event.execution_binding_digest });
       recovered.push({ goal_id: event.goal_id, from_phase: event.phase, goal_status: updated.status, outcome_digest: outcomeDigest });
     }
     return { schema: AUTONOMOUS_GOAL_WORKER_JOURNAL_SCHEMA, recovered, recovery_digest: digestJsonSync(recovered), retention: AUTONOMOUS_GOAL_WORKER_JOURNAL_RETENTION, secret_material: "never_returned" };

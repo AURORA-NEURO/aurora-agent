@@ -5827,6 +5827,15 @@ compare-and-swap fencing. This journal complements, rather than replaces, the go
 ledger remains the authoritative objective state, while the journal explains whether an interrupted
 running claim crossed the irreversible execution boundary.
 
+The worker also verifies the transient rehydrated task against the ledger's immutable
+`task_digest` before claim. A wrong tenant lookup, stale protected queue, or resolver drift is
+therefore a pre-dispatch refusal and cannot execute unrelated work. Worker events may carry only
+the task digest and an `execution_binding_digest` for transient parameters such as an admitted
+action handoff; raw task text, handoffs, prompts, credentials, provider values, and executor
+results remain excluded. `activeFor`/`active_for` and `assertNoActive`/`assert_no_active` expose
+the same fail-closed restart fence in both SDKs, so callers must restore and reconcile an active
+boundary before a new worker pass can resolve or dispatch that goal.
+
 The Python `AutonomousGoalLedger` now exposes the same portable restart contract as the other
 state boundaries. `snapshot()` exports the sorted current goal projection plus its complete
 hash-chained lifecycle, and `restore()` validates event order, created/transition lifecycle,

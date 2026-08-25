@@ -32,6 +32,8 @@ export interface AutonomousGoalExecutionRequest {
   task: string;
   parameters: JsonObject;
   schedule_digest: string;
+  task_digest: string;
+  execution_binding_digest: string;
 }
 
 export interface AutonomousGoalWorkerResolution extends JsonObject {
@@ -204,16 +206,20 @@ export class AutonomousGoalWorker {
       const goal = this.ledger.get(goalId);
       const row = rows.get(goalId);
       if (!goal || !row) fail(`schedule admission disappeared for goal ${goalId}`);
+      this.journal?.assertNoActive(goalId);
       const resolved = await this.resolver(goal, row);
       if (!isObject(resolved)) fail(`resolver returned a non-object for goal ${goalId}`);
       const resolvedDomain = resolved.domain ?? goal.domain;
       if (resolvedDomain !== goal.domain) fail(`resolver domain does not match goal ${goalId}`);
       const parameters = resolved.parameters ?? {};
       if (!isObject(parameters)) fail(`resolver parameters must be an object for goal ${goalId}`);
-      prepared.set(goalId, { goal, schedule_row: row, task: task(resolved.task), parameters: structuredClone(parameters), schedule_digest: schedule.schedule_digest });
+      const resolvedTask = task(resolved.task);
+      if (goalTaskDigest(resolvedTask) !== goal.task_digest) fail(`resolver task digest does not match goal ${goalId}`);
+      const clonedParameters = structuredClone(parameters);
+      prepared.set(goalId, { goal, schedule_row: row, task: resolvedTask, parameters: clonedParameters, schedule_digest: schedule.schedule_digest, task_digest: goal.task_digest, execution_binding_digest: digest({ parameters: clonedParameters }) });
     }
     if (this.journal !== undefined && options.batch_id !== undefined) {
-      for (const request of prepared.values()) this.journal.record({ batch_id: options.batch_id, goal_id: request.goal.goal_id, phase: "prepared", attempt: request.goal.attempt, revision: request.goal.revision, schedule_digest: schedule.schedule_digest });
+      for (const request of prepared.values()) this.journal.record({ batch_id: options.batch_id, goal_id: request.goal.goal_id, phase: "prepared", attempt: request.goal.attempt, revision: request.goal.revision, schedule_digest: schedule.schedule_digest, task_digest: request.task_digest, execution_binding_digest: request.execution_binding_digest });
     }
     const claim = schedule.selected_goal_ids.length === 0 ? null : this.scheduler.claim(this.ledger, schedule, { now_ns: typeof scheduleOptions.now_ns === "number" ? scheduleOptions.now_ns : undefined });
     const runs: LiveGoalWorkerRun[] = [];
@@ -223,7 +229,9 @@ export class AutonomousGoalWorker {
         for (const item of claim.claims) {
           const current = this.ledger.get(item.goal_id);
           if (!current) fail(`claimed goal ${item.goal_id} disappeared before journaling`);
-          this.journal.record({ batch_id: options.batch_id, goal_id: item.goal_id, phase: "claimed", attempt: current.attempt, revision: current.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest });
+          const request = prepared.get(item.goal_id);
+          if (!request) fail(`prepared request for goal ${item.goal_id} disappeared before journaling`);
+          this.journal.record({ batch_id: options.batch_id, goal_id: item.goal_id, phase: "claimed", attempt: current.attempt, revision: current.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, task_digest: request.task_digest, execution_binding_digest: request.execution_binding_digest });
         }
       }
       for (const goalId of schedule.selected_goal_ids) {
@@ -232,12 +240,12 @@ export class AutonomousGoalWorker {
         const current = this.ledger.get(goalId);
         if (!current || current.status !== "running" || current.revision !== claimRow.running_revision) fail(`claimed goal ${goalId} changed before execution`);
         try {
-          if (this.journal !== undefined && options.batch_id !== undefined) this.journal.record({ batch_id: options.batch_id, goal_id: goalId, phase: "dispatch_started", attempt: current.attempt, revision: current.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest });
+          if (this.journal !== undefined && options.batch_id !== undefined) this.journal.record({ batch_id: options.batch_id, goal_id: goalId, phase: "dispatch_started", attempt: current.attempt, revision: current.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, task_digest: request.task_digest, execution_binding_digest: request.execution_binding_digest });
           const liveResult = await this.executor(request);
           const resultStatus = status(liveResult);
           const updated = this.settle(current, resultStatus, liveResult);
           const outcomeDigest = digest({ goal_id: goalId, attempt: current.attempt, result_status: resultStatus });
-          if (this.journal !== undefined && options.batch_id !== undefined) this.journal.record({ batch_id: options.batch_id, goal_id: goalId, phase: "settled", attempt: current.attempt, revision: updated.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, outcome_digest: outcomeDigest });
+          if (this.journal !== undefined && options.batch_id !== undefined) this.journal.record({ batch_id: options.batch_id, goal_id: goalId, phase: "settled", attempt: current.attempt, revision: updated.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, outcome_digest: outcomeDigest, task_digest: request.task_digest, execution_binding_digest: request.execution_binding_digest });
           runs.push({ goal_id: goalId, domain: current.domain, attempt: current.attempt, execution_status: updated.status as AutonomousGoalWorkerRunStatus, goal_status: updated.status, outcome_digest: outcomeDigest, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, error_class: null, error_digest: null, live_result: liveResult as any });
         } catch (error) {
           const errorClass = error instanceof Error ? error.constructor.name : "UnknownError";
@@ -250,7 +258,7 @@ export class AutonomousGoalWorker {
             (wrapped as Error & { cause?: unknown }).cause = transitionError;
             throw wrapped;
           }
-          if (this.journal !== undefined && options.batch_id !== undefined) this.journal.record({ batch_id: options.batch_id, goal_id: goalId, phase: "failed", attempt: current.attempt, revision: updated.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, outcome_digest: outcomeDigest, error_digest: digest({ error_class: errorClass }) });
+          if (this.journal !== undefined && options.batch_id !== undefined) this.journal.record({ batch_id: options.batch_id, goal_id: goalId, phase: "failed", attempt: current.attempt, revision: updated.revision, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, outcome_digest: outcomeDigest, error_digest: digest({ error_class: errorClass }), task_digest: request.task_digest, execution_binding_digest: request.execution_binding_digest });
           runs.push({ goal_id: goalId, domain: current.domain, attempt: current.attempt, execution_status: "failed", goal_status: updated.status, outcome_digest: outcomeDigest, schedule_digest: schedule.schedule_digest, claim_digest: claim.claim_digest, error_class: errorClass, error_digest: digest({ error_class: errorClass }) });
         }
       }

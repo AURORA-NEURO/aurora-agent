@@ -185,6 +185,13 @@ provider effect. `JsonAutonomousGoalWorkerJournalPersistence` and
 `AutonomousGoalWorkerJournalPersistenceCoordinator` provide canonical caller-owned snapshot
 storage with optional compare-and-swap fencing. Journal snapshots exclude task text, prompts,
 parameters, credentials, and executor results just like the goal ledger.
+The worker also verifies `goal_task_digest(resolved_task)` against the immutable ledger identity
+before it claims anything, so a stale or mis-keyed protected queue cannot execute a different task.
+When parameters are present, each journal event carries only an `execution_binding_digest`; this
+binds transient action handoffs and other executor inputs across prepared/claimed/dispatch/settled
+phases without serializing them. `active_for()` and `assert_no_active()` expose a fail-closed
+restart fence: the caller must recover or explicitly reconcile an in-flight boundary before a new
+worker pass can resolve or dispatch that goal.
 `AutonomousGoalControlLoop` continues those bounded worker passes until every goal is terminal,
 no safe work is admissible, or an explicit cycle/run budget is exhausted. Its optional
 `options_factory(context)` receives only prior cycle metadata and ledger counts, so a caller can

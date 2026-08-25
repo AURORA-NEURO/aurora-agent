@@ -1707,3 +1707,14 @@ projections, while the existing caller-owned credentials, provider/source, evalu
 and deployment authorization responsibilities remain explicit. Remaining production work is still
 application wiring: persist protected task/request rehydrators, connect real identity/approval
 stores, and exercise restart/reconciliation behavior against the deployment's durable worker.
+
+The goal worker/restart seam is now stricter. Both SDKs verify that protected task rehydration
+matches the immutable goal `task_digest` before claim, and journal prepared/claimed/dispatch/settled
+events can carry only a task digest plus an `execution_binding_digest` for transient parameters
+(including action handoffs). Raw task text, handoffs, credentials, prompts, provider values, and
+results remain excluded. `activeFor`/`active_for` plus `assertNoActive`/`assert_no_active` fence a
+new worker pass until active pre- or post-dispatch events are recovered/reconciled, so a restart
+cannot silently substitute a different task or handoff. Tests cover drift refusal, digest propagation,
+metadata-only persistence, and the all-domain worker path. Remaining production work is application
+wiring: durable protected rehydrators, real identity/approval stores, and deployment-level
+restart/reconciliation orchestration.

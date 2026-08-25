@@ -77,9 +77,11 @@ class AutonomousGoalWorkerEvent:
     created_ns: int
     previous_digest: str
     event_digest: str
+    task_digest: str | None = None
+    execution_binding_digest: str | None = None
 
     def _body(self) -> dict[str, Any]:
-        return {
+        body = {
             "schema": GOAL_WORKER_JOURNAL_EVENT_SCHEMA,
             "sequence": self.sequence,
             "batch_id": self.batch_id,
@@ -96,6 +98,11 @@ class AutonomousGoalWorkerEvent:
             "retention": GOAL_WORKER_JOURNAL_RETENTION,
             "secret_material": "never_returned",
         }
+        if self.task_digest is not None:
+            body["task_digest"] = self.task_digest
+        if self.execution_binding_digest is not None:
+            body["execution_binding_digest"] = self.execution_binding_digest
+        return body
 
     def to_dict(self) -> dict[str, Any]:
         return {**self._body(), "event_digest": self.event_digest}
@@ -126,6 +133,8 @@ class AutonomousGoalWorkerEvent:
             created_ns=_integer(value.get("created_ns"), name="event.created_ns"),
             previous_digest=(value.get("previous_digest") if isinstance(value.get("previous_digest"), str) else ""),
             event_digest=_digest(value.get("event_digest"), name="event.event_digest") or "",
+            task_digest=_digest(value.get("task_digest"), name="event.task_digest") if value.get("task_digest") is not None else None,
+            execution_binding_digest=_digest(value.get("execution_binding_digest"), name="event.execution_binding_digest") if value.get("execution_binding_digest") is not None else None,
         )
         if event.sequence == 1 and event.previous_digest != "":
             _fail("first event must have an empty previous digest")
@@ -140,7 +149,7 @@ class AutonomousGoalWorkerEvent:
         return (
             "schema", "sequence", "batch_id", "goal_id", "phase", "attempt", "revision",
             "schedule_digest", "claim_digest", "outcome_digest", "error_digest", "created_ns",
-            "previous_digest", "event_digest", "retention", "secret_material",
+            "task_digest", "execution_binding_digest", "previous_digest", "event_digest", "retention", "secret_material",
         )
 
 
@@ -189,12 +198,16 @@ class AutonomousGoalWorkerJournal:
         claim_digest: str | None = None,
         outcome_digest: str | None = None,
         error_digest: str | None = None,
+        task_digest: str | None = None,
+        execution_binding_digest: str | None = None,
         created_ns: int | None = None,
     ) -> AutonomousGoalWorkerEvent:
         if len(self._events) >= self.max_events:
             _fail("event capacity is exhausted")
         if phase not in _ALL_PHASES:
             _fail("event phase is invalid")
+        normalized_task_digest = _digest(task_digest, name="task_digest") if task_digest is not None else None
+        normalized_execution_binding_digest = _digest(execution_binding_digest, name="execution_binding_digest") if execution_binding_digest is not None else None
         event_body = {
             "schema": GOAL_WORKER_JOURNAL_EVENT_SCHEMA,
             "sequence": len(self._events) + 1,
@@ -212,6 +225,10 @@ class AutonomousGoalWorkerJournal:
             "retention": GOAL_WORKER_JOURNAL_RETENTION,
             "secret_material": "never_returned",
         }
+        if normalized_task_digest is not None:
+            event_body["task_digest"] = normalized_task_digest
+        if normalized_execution_binding_digest is not None:
+            event_body["execution_binding_digest"] = normalized_execution_binding_digest
         event = AutonomousGoalWorkerEvent(
             sequence=event_body["sequence"],
             batch_id=event_body["batch_id"],
@@ -226,6 +243,8 @@ class AutonomousGoalWorkerJournal:
             created_ns=event_body["created_ns"],
             previous_digest=event_body["previous_digest"],
             event_digest=content_digest(event_body),
+            task_digest=normalized_task_digest,
+            execution_binding_digest=normalized_execution_binding_digest,
         )
         self._events.append(event)
         return event
@@ -242,6 +261,15 @@ class AutonomousGoalWorkerJournal:
         for event in self._events:
             latest[event.goal_id] = event
         return tuple(sorted((event for event in latest.values() if event.phase in _ACTIVE_PHASES), key=lambda event: event.sequence))
+
+    def active_for(self, goal_id: str) -> AutonomousGoalWorkerEvent | None:
+        normalized_goal_id = _identifier(goal_id, name="goal_id")
+        return next((event for event in self.active() if event.goal_id == normalized_goal_id), None)
+
+    def assert_no_active(self, goal_id: str) -> None:
+        event = self.active_for(goal_id)
+        if event is not None:
+            _fail(f"goal {goal_id} has an unreconciled {event.phase} event; recover or reconcile the worker journal before retrying")
 
     def snapshot(self) -> dict[str, Any]:
         body = {
@@ -331,6 +359,8 @@ class AutonomousGoalWorkerJournal:
                 schedule_digest=event.schedule_digest,
                 claim_digest=event.claim_digest,
                 outcome_digest=outcome_digest,
+                task_digest=event.task_digest,
+                execution_binding_digest=event.execution_binding_digest,
             )
             recovered.append({"goal_id": event.goal_id, "from_phase": event.phase, "goal_status": updated.status, "outcome_digest": outcome_digest})
         return {"schema": GOAL_WORKER_JOURNAL_SCHEMA, "recovered": recovered, "recovery_digest": content_digest(recovered), "retention": GOAL_WORKER_JOURNAL_RETENTION, "secret_material": "never_returned"}

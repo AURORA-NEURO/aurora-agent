@@ -1209,6 +1209,12 @@ paused for safe retry, while post-dispatch claims are blocked for explicit recon
 uncertain provider effect is never replayed. Use `JsonAutonomousGoalWorkerJournalPersistence`
 and `AutonomousGoalWorkerJournalPersistenceCoordinator` for canonical caller-owned storage and
 optional compare-and-swap fencing.
+The worker verifies `goalTaskDigest(resolvedTask)` against the immutable goal identity before
+claiming, preventing a stale protected rehydrator from executing a different task. Journal events
+carry only optional `task_digest` and `execution_binding_digest` fields; the latter binds transient
+action-handoff parameters across the worker boundary without retaining the handoff, credentials,
+or provider values. `activeFor(goalId)` and `assertNoActive(goalId)` provide a fail-closed restart
+fence until the caller recovers or explicitly reconciles an in-flight boundary.
 `AutonomousGoalControlLoop` continues worker passes with bounded `max_cycles` and
 `max_total_runs`; its optional `options_factory(context)` receives only prior cycle metadata and
 ledger counts, allowing fresh priority/urgency/retry/domain signals without exposing task text or
