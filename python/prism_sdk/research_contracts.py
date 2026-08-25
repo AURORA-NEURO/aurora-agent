@@ -125,6 +125,8 @@ DEPENDENCY_COMPOSITION_FEATURE_ID = "AFA-adapter-P27-F18"
 DEPENDENCY_COMPOSITION_CONTRACT_VERSION = "adapter-dependency-composition/1.0"
 ADAPTER_SEMANTIC_PARITY_FEATURE_ID = "AFA-adapter-P28-F06"
 ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION = "adapter-semantic-parity/1.0"
+ADAPTER_SCALE_FRONTIER_FEATURE_ID = "AFA-adapter-P29-F15"
+ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION = "adapter-scale-frontier/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -3092,3 +3094,42 @@ class AdapterSemanticParityReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "objective_id": self.objective_id, "disposition": self.disposition, "adapter_order": list(self.adapter_order), "study_order": list(self.study_order), "schema_order": list(self.schema_order), "semantic_digest": self.semantic_digest, "modality_order": list(self.modality_order), "artifact_order": list(self.artifact_order), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class ScaleFrontierReceipt:
+    request_id: str
+    workflow_id: str
+    disposition: str
+    scenario_order: tuple[str, ...]
+    admissible_order: tuple[str, ...]
+    blocked_order: tuple[str, ...]
+    frontier_order: tuple[str, ...]
+    max_admitted_concurrency: int
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    effect_receipts: tuple[str, ...]
+    artifact: Mapping[str, Any]
+    feature_id: str = ADAPTER_SCALE_FRONTIER_FEATURE_ID
+    contract_version: str = ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != ADAPTER_SCALE_FRONTIER_FEATURE_ID or self.contract_version != ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION:
+            raise ResearchContractError("adapter scale frontier schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.workflow_id.strip() or not self.scenario_order or not self.checks or not self.effect_receipts:
+            raise ResearchContractError("adapter scale frontier identity, scenarios, checks, effects, locality, or boundary are incomplete")
+        if self.disposition not in {"ready", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("adapter scale frontier disposition is unknown")
+        for values in (self.scenario_order, self.admissible_order, self.blocked_order, self.frontier_order, self.checks, self.omissions, self.uncertainty, self.negative_evidence, self.effect_receipts):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("adapter scale frontier ordering is invalid")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("adapter scale frontier receipt digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "workflow_id": self.workflow_id, "disposition": self.disposition, "scenario_order": list(self.scenario_order), "admissible_order": list(self.admissible_order), "blocked_order": list(self.blocked_order), "frontier_order": list(self.frontier_order), "max_admitted_concurrency": self.max_admitted_concurrency, "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

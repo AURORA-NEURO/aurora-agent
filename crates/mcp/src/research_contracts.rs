@@ -98,6 +98,10 @@ use bioprism_adapter::{
     MECHANISM_CONTROL_PLANE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    plan_adapter_scale_frontier, ScaleFrontierError, ScaleFrontierReceipt, ScaleFrontierRequest,
+    ADAPTER_SCALE_FRONTIER_FEATURE_ID,
+};
+use bioprism_adapter::{
     plan_reliable_capability, CapabilityWorkload, ReliabilityCopilotError,
     ReliableCapabilityResult, RELIABILITY_COPILOT_FEATURE_ID,
 };
@@ -272,6 +276,7 @@ pub const CONTRACT_FRONTIER_TOOL: &str = "adapter_contract_frontier";
 pub const LIMITATION_CLOSURE_TOOL: &str = "adapter_limitation_closure";
 pub const DEPENDENCY_COMPOSITION_TOOL: &str = "adapter_dependency_composition";
 pub const ADAPTER_SEMANTIC_PARITY_TOOL: &str = "adapter_semantic_parity";
+pub const ADAPTER_SCALE_FRONTIER_TOOL: &str = "adapter_scale_frontier";
 pub const RESEARCH_CONTRACT_SCHEMA_VERSION: &str =
     bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION;
 
@@ -1452,6 +1457,26 @@ pub fn validate_adapter_semantic_parity_json(
         .map_err(|error: SemanticParityError| error.to_string())?;
     if receipt.feature_id != ADAPTER_SEMANTIC_PARITY_FEATURE_ID {
         return Err("adapter semantic parity feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn plan_adapter_scale_frontier_json(value: &Value) -> Result<Value, String> {
+    let request: ScaleFrontierRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adapter scale frontier request: {error}"))?;
+    let receipt = plan_adapter_scale_frontier(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize adapter scale frontier receipt: {error}"))
+}
+
+pub fn validate_adapter_scale_frontier_json(value: &Value) -> Result<ScaleFrontierReceipt, String> {
+    let receipt: ScaleFrontierReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid adapter scale frontier receipt: {error}"))?;
+    receipt
+        .validate()
+        .map_err(|error: ScaleFrontierError| error.to_string())?;
+    if receipt.feature_id != ADAPTER_SCALE_FRONTIER_FEATURE_ID {
+        return Err("adapter scale frontier feature id mismatch".into());
     }
     Ok(receipt)
 }

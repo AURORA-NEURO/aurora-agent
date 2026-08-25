@@ -120,6 +120,7 @@ pub mod research_ingest;
 pub mod research_workbench;
 pub mod resource_workbench;
 pub mod retrieval_synthesis;
+pub mod scale_frontier;
 pub mod semantic_parity;
 pub mod source;
 pub mod tabular;
@@ -324,6 +325,12 @@ pub use retrieval_synthesis::{
     RetrievalSynthesisReceipt, ScopedRetrievalQuery, SynthesisEffectReceipt,
     CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use scale_frontier::{
+    plan_adapter_scale_frontier, ScaleDisposition, ScaleFrontierError, ScaleFrontierReceipt,
+    ScaleFrontierRequest, ScaleScenario,
+    CONTRACT_VERSION as ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_SCALE_FRONTIER_FEATURE_ID,
 };
 pub use semantic_parity::{
     evaluate_adapter_semantic_parity, AdapterSemanticParityReceipt, AdapterSemanticParityRequest,

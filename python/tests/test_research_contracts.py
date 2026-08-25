@@ -33,6 +33,7 @@ from prism_sdk.research_contracts import CONTRACT_FRONTIER_FEATURE_ID, CONTRACT_
 from prism_sdk.research_contracts import LIMITATION_CLOSURE_FEATURE_ID, LIMITATION_CLOSURE_CONTRACT_VERSION, LimitationClosureReceipt
 from prism_sdk.research_contracts import DEPENDENCY_COMPOSITION_FEATURE_ID, DEPENDENCY_COMPOSITION_CONTRACT_VERSION, AdapterCompositionReceipt
 from prism_sdk.research_contracts import ADAPTER_SEMANTIC_PARITY_FEATURE_ID, ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION, AdapterSemanticParityReceipt
+from prism_sdk.research_contracts import ADAPTER_SCALE_FRONTIER_FEATURE_ID, ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION, ScaleFrontierReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1353,4 +1354,27 @@ def test_adapter_semantic_parity_preserves_missing_modality_and_digest_compariso
     receipt.validate()
     assert receipt.feature_id == ADAPTER_SEMANTIC_PARITY_FEATURE_ID
     assert receipt.contract_version == ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_adapter_scale_frontier_preserves_blocked_budget_cells():
+    receipt = ScaleFrontierReceipt(
+        request_id="scale:adapter",
+        workflow_id="workflow:high-throughput",
+        disposition="partial",
+        scenario_order=("scenario:a", "scenario:b"),
+        admissible_order=("scenario:b",),
+        blocked_order=("scenario:a",),
+        frontier_order=("scenario:a", "scenario:b"),
+        max_admitted_concurrency=8,
+        checks=("scenarios are ordered by stable id",),
+        omissions=("scenario:scenario:a:capacity-below-required",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("exchange:permitted-scale-frontier-digests-only",),
+        artifact={"content_hash": "a" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == ADAPTER_SCALE_FRONTIER_FEATURE_ID
+    assert receipt.contract_version == ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

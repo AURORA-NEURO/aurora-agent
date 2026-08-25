@@ -118,6 +118,8 @@ export const DEPENDENCY_COMPOSITION_FEATURE_ID = "AFA-adapter-P27-F18" as const;
 export const DEPENDENCY_COMPOSITION_CONTRACT_VERSION = "adapter-dependency-composition/1.0" as const;
 export const ADAPTER_SEMANTIC_PARITY_FEATURE_ID = "AFA-adapter-P28-F06" as const;
 export const ADAPTER_SEMANTIC_PARITY_CONTRACT_VERSION = "adapter-semantic-parity/1.0" as const;
+export const ADAPTER_SCALE_FRONTIER_FEATURE_ID = "AFA-adapter-P29-F15" as const;
+export const ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION = "adapter-scale-frontier/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1985,6 +1987,39 @@ export function validateAdapterSemanticParityReceipt(receipt: AdapterSemanticPar
 }
 
 export function adapterSemanticParityReceiptDigest(receipt: AdapterSemanticParityReceipt): string { validateAdapterSemanticParityReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface ScaleFrontierReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  workflow_id: string;
+  disposition: "ready" | "partial" | "unknown" | "blocked";
+  scenario_order: string[];
+  admissible_order: string[];
+  blocked_order: string[];
+  frontier_order: string[];
+  max_admitted_concurrency: number;
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  effect_receipts: string[];
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateScaleFrontierReceipt(receipt: ScaleFrontierReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ADAPTER_SCALE_FRONTIER_FEATURE_ID || receipt.contract_version !== ADAPTER_SCALE_FRONTIER_CONTRACT_VERSION) throw new Error("adapter scale frontier schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.workflow_id.trim() || !receipt.scenario_order.length || !receipt.checks.length || !receipt.effect_receipts.length) throw new Error("adapter scale frontier identity, scenarios, checks, effects, locality, or boundary are incomplete");
+  if (!new Set(["ready", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("adapter scale frontier disposition is unknown");
+  for (const values of [receipt.scenario_order, receipt.admissible_order, receipt.blocked_order, receipt.frontier_order, receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("adapter scale frontier ordering is invalid");
+  if (!Number.isInteger(receipt.max_admitted_concurrency) || receipt.max_admitted_concurrency < 0) throw new Error("adapter scale frontier concurrency is invalid");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("adapter scale frontier receipt digest is invalid");
+}
+
+export function scaleFrontierReceiptDigest(receipt: ScaleFrontierReceipt): string { validateScaleFrontierReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
