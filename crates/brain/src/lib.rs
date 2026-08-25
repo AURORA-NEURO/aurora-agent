@@ -59,6 +59,7 @@ pub mod multimodal_evidence_workflow_fabric;
 pub mod multimodal_operations_control_plane;
 pub mod multimodal_protocol_adapter;
 pub mod multimodal_research_workbench;
+pub mod multimodal_retrieval_assurance_harness;
 pub mod multimodal_retrieval_contract_model;
 pub mod multimodal_retrieval_copilot;
 pub mod multimodal_retrieval_protocol_gateway;
@@ -284,6 +285,13 @@ pub use multimodal_research_workbench::{
     MultimodalWorkbenchError, MultimodalWorkbenchReceipt, MultimodalWorkbenchRequest,
     CONTRACT_VERSION as MULTIMODAL_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as MULTIMODAL_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use multimodal_retrieval_assurance_harness::{
+    multimodal_retrieval_assurance_harness_manifest, verify_multimodal_retrieval_assurance,
+    MultimodalRetrievalAssuranceError, MultimodalRetrievalAssuranceReceipt,
+    MultimodalRetrievalAssuranceVerdict,
+    CONTRACT_VERSION as MULTIMODAL_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_RETRIEVAL_ASSURANCE_FEATURE_ID,
 };
 pub use multimodal_retrieval_contract_model::{
     model_multimodal_retrieval_contract, multimodal_retrieval_contract_model_manifest,
