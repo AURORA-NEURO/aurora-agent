@@ -105,6 +105,8 @@ DETERMINISM_GATEWAY_FEATURE_ID = "AFA-adapter-P17-F24"
 DETERMINISM_GATEWAY_CONTRACT_VERSION = "typed-determinism-gateway/1.0"
 PROVENANCE_ASSURANCE_FEATURE_ID = "AFA-adapter-P18-F26"
 PROVENANCE_ASSURANCE_CONTRACT_VERSION = "multimodal-provenance-signing-assurance/1.0"
+POLICY_GATEWAY_FEATURE_ID = "AFA-adapter-P19-F24"
+POLICY_GATEWAY_CONTRACT_VERSION = "federated-policy-autonomy-gateway/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -2665,3 +2667,39 @@ class ProvenanceAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "envelope_id": self.envelope_id, "root_artifact_id": self.root_artifact_id, "root_digest": self.root_digest, "verdict": self.verdict, "lineage_order": list(self.lineage_order), "derivation_order": list(self.derivation_order), "study_order": list(self.study_order), "modality_order": list(self.modality_order), "tool_order": list(self.tool_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "semantic_loss": [dict(item) for item in self.semantic_loss], "reasons": list(self.reasons), "signer_public_key_hex": self.signer_public_key_hex, "signer_signature_hex": self.signer_signature_hex, "effect_receipt": self.effect_receipt, "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class PolicyGatewayReceipt:
+    request_id: str
+    action_id: str
+    decision: str
+    required_tier: str
+    permitted_actions: tuple[str, ...]
+    budget_order: tuple[str, ...]
+    reasons: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    effect_receipt: str
+    artifact: Mapping[str, Any]
+    feature_id: str = POLICY_GATEWAY_FEATURE_ID
+    contract_version: str = POLICY_GATEWAY_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != POLICY_GATEWAY_FEATURE_ID or self.contract_version != POLICY_GATEWAY_CONTRACT_VERSION:
+            raise ResearchContractError("policy gateway schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.action_id.strip() or not self.permitted_actions or not self.budget_order or not self.reasons or not self.effect_receipt.strip():
+            raise ResearchContractError("policy gateway identity, action, grant, budget, locality, boundary, reasons, or effects are incomplete")
+        if self.decision not in {"allowed", "approval_required", "local_only", "denied", "unresolved"}:
+            raise ResearchContractError("policy gateway decision is unknown")
+        if tuple(sorted(set(self.permitted_actions))) != self.permitted_actions or tuple(sorted(set(self.budget_order))) != self.budget_order:
+            raise ResearchContractError("policy gateway ordering is invalid")
+        if self.required_tier not in {"a0", "a1", "a2", "a3", "a4"}:
+            raise ResearchContractError("policy gateway autonomy tier is unknown")
+        if not isinstance(self.artifact.get("content_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", self.artifact["content_hash"]):
+            raise ResearchContractError("policy gateway artifact digest is invalid")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "action_id": self.action_id, "decision": self.decision, "required_tier": self.required_tier, "permitted_actions": list(self.permitted_actions), "budget_order": list(self.budget_order), "reasons": list(self.reasons), "uncertainty": list(self.uncertainty), "effect_receipt": self.effect_receipt, "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

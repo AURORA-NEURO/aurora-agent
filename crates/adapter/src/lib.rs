@@ -99,6 +99,7 @@ pub mod location;
 pub mod loss;
 pub mod mechanism_control_plane;
 pub mod multimodal_harmonization;
+pub mod policy_gateway;
 pub mod probe;
 pub mod protocol_simulation;
 pub mod provenance_assurance;
@@ -194,6 +195,11 @@ pub use multimodal_harmonization::{
     ModalityManifest, MultimodalHarmonizationRequest,
     FEATURE_ID as MULTIMODAL_HARMONIZATION_FEATURE_ID,
     FEATURE_VERSION as MULTIMODAL_HARMONIZATION_FEATURE_VERSION,
+};
+pub use policy_gateway::{
+    admit_policy_action, ActionAndAuthority, PolicyGatewayDecision, PolicyGatewayError,
+    PolicyGatewayReceipt, CONTRACT_VERSION as POLICY_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as POLICY_GATEWAY_FEATURE_ID,
 };
 pub use probe::{field_inventory, Inventory};
 pub use protocol_simulation::{

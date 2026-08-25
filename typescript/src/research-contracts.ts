@@ -98,6 +98,8 @@ export const DETERMINISM_GATEWAY_FEATURE_ID = "AFA-adapter-P17-F24" as const;
 export const DETERMINISM_GATEWAY_CONTRACT_VERSION = "typed-determinism-gateway/1.0" as const;
 export const PROVENANCE_ASSURANCE_FEATURE_ID = "AFA-adapter-P18-F26" as const;
 export const PROVENANCE_ASSURANCE_CONTRACT_VERSION = "multimodal-provenance-signing-assurance/1.0" as const;
+export const POLICY_GATEWAY_FEATURE_ID = "AFA-adapter-P19-F24" as const;
+export const POLICY_GATEWAY_CONTRACT_VERSION = "federated-policy-autonomy-gateway/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -1639,6 +1641,35 @@ export function validateProvenanceAssuranceReceipt(receipt: ProvenanceAssuranceR
 }
 
 export function provenanceAssuranceReceiptDigest(receipt: ProvenanceAssuranceReceipt): string { validateProvenanceAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface PolicyGatewayReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  action_id: string;
+  decision: "allowed" | "approval_required" | "local_only" | "denied" | "unresolved";
+  required_tier: "a0" | "a1" | "a2" | "a3" | "a4";
+  permitted_actions: string[];
+  budget_order: string[];
+  reasons: string[];
+  uncertainty: string[];
+  effect_receipt: string;
+  artifact: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validatePolicyGatewayReceipt(receipt: PolicyGatewayReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== POLICY_GATEWAY_FEATURE_ID || receipt.contract_version !== POLICY_GATEWAY_CONTRACT_VERSION) throw new Error("policy gateway schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.action_id.trim() || !receipt.permitted_actions.length || !receipt.budget_order.length || !receipt.reasons.length || !receipt.effect_receipt.trim()) throw new Error("policy gateway identity, action, grant, budget, locality, boundary, reasons, or effects are incomplete");
+  if (!new Set(["allowed", "approval_required", "local_only", "denied", "unresolved"]).has(receipt.decision)) throw new Error("policy gateway decision is unknown");
+  if (JSON.stringify([...new Set(receipt.permitted_actions)].sort()) !== JSON.stringify(receipt.permitted_actions) || JSON.stringify([...new Set(receipt.budget_order)].sort()) !== JSON.stringify(receipt.budget_order)) throw new Error("policy gateway ordering is invalid");
+  if (!new Set(["a0", "a1", "a2", "a3", "a4"]).has(receipt.required_tier)) throw new Error("policy gateway autonomy tier is unknown");
+  if (typeof receipt.artifact.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(receipt.artifact.content_hash)) throw new Error("policy gateway artifact digest is invalid");
+}
+
+export function policyGatewayReceiptDigest(receipt: PolicyGatewayReceipt): string { validatePolicyGatewayReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

@@ -23,6 +23,7 @@ from prism_sdk.research_contracts import REPLICATION_ASSURANCE_FEATURE_ID, REPLI
 from prism_sdk.research_contracts import RELEASE_ASSURANCE_FEATURE_ID, RELEASE_ASSURANCE_CONTRACT_VERSION, ReleaseAssuranceReceipt
 from prism_sdk.research_contracts import DETERMINISM_GATEWAY_FEATURE_ID, DETERMINISM_GATEWAY_CONTRACT_VERSION, DeterminismGatewayReceipt
 from prism_sdk.research_contracts import PROVENANCE_ASSURANCE_FEATURE_ID, PROVENANCE_ASSURANCE_CONTRACT_VERSION, ProvenanceAssuranceReceipt
+from prism_sdk.research_contracts import POLICY_GATEWAY_FEATURE_ID, POLICY_GATEWAY_CONTRACT_VERSION, PolicyGatewayReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1119,4 +1120,23 @@ def test_provenance_assurance_preserves_lineage_and_signing_boundary():
     receipt.validate()
     assert receipt.feature_id == PROVENANCE_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == PROVENANCE_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_policy_gateway_preserves_tier_budget_and_unresolved_state():
+    receipt = PolicyGatewayReceipt(
+        request_id="request:qc",
+        action_id="action:compute",
+        decision="approval_required",
+        required_tier="a3",
+        permitted_actions=("compute_local",),
+        budget_order=("cpu_seconds",),
+        reasons=("required autonomy approval reference is absent",),
+        uncertainty=("A3 action lacks signed preflight evidence",),
+        effect_receipt="block_or_localize_action_no_external_effect",
+        artifact={"content_hash": "f" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == POLICY_GATEWAY_FEATURE_ID
+    assert receipt.contract_version == POLICY_GATEWAY_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()
