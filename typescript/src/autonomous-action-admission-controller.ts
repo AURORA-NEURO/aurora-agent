@@ -1,4 +1,4 @@
-import { ArgumentError } from "./errors.js";
+import { ArgumentError, isObject } from "./errors.js";
 import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous.js";
 import {
   AutonomousActionAdmission,
@@ -25,6 +25,7 @@ export const AUTONOMOUS_ACTION_REVIEW_RETENTION = "metadata_only;operator_review
 export const AUTONOMOUS_ACTION_REVIEW_AUTHORITY = "caller_operator_projection_only;authorization_is_external_and_not_verified_by_sdk" as const;
 export const AUTONOMOUS_ACTION_REVIEW_EXECUTION = "review_control_only;does_not_authorize_provider_source_tool_effect_or_credentials" as const;
 export const AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL = "never_returned" as const;
+export const AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES = ["credential_scope", "provider_or_source_approval", "tool_and_effect_authority", "evaluator_settlement"] as const;
 
 export interface AutonomousActionReviewRow extends JsonObject {
   schema: typeof AUTONOMOUS_ACTION_REVIEW_ROW_SCHEMA;
@@ -120,6 +121,73 @@ function domainList(name: string, value: readonly string[]): AutonomousDomainNam
   });
   if (new Set(result).size !== result.length) fail(`${name} must contain unique domains`);
   return result;
+}
+
+const DISPATCH_HANDOFF_KEYS = [
+  "schema", "action_id", "record_digest", "plan_digest", "admission_digest", "plan", "admission",
+  "selected_domains", "requested_domains", "cross_domain", "execution_path", "status", "downstream_gates",
+  "authority", "retention", "execution", "secret_material", "handoff_digest",
+] as const;
+
+function exactHandoffKeys(value: Record<string, unknown>): void {
+  const allowed = new Set<string>(DISPATCH_HANDOFF_KEYS);
+  if (Object.keys(value).some((key) => !allowed.has(key)) || DISPATCH_HANDOFF_KEYS.some((key) => !(key in value))) fail("handoff has unsupported or missing fields");
+}
+
+function actionId(value: unknown): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 256 || !/^[A-Za-z0-9_.:+/-]+$/.test(value)) fail("handoff action_id is invalid");
+  return value;
+}
+
+/**
+ * Verify a handoff after it has crossed a persistence or process boundary.
+ *
+ * This proves only metadata continuity. It deliberately does not prove reviewer authorization,
+ * credential availability, provider readiness, source truth, evaluator quality, or effect safety;
+ * those remain independent downstream gates.
+ */
+export function validateAutonomousActionDispatchHandoff(value: unknown): AutonomousActionDispatchHandoff {
+  if (!isObject(value)) fail("handoff must be an object");
+  exactHandoffKeys(value);
+  if (value.schema !== AUTONOMOUS_ACTION_DISPATCH_HANDOFF_SCHEMA || value.authority !== AUTONOMOUS_ACTION_REVIEW_AUTHORITY || value.retention !== AUTONOMOUS_ACTION_REVIEW_RETENTION || value.execution !== AUTONOMOUS_ACTION_REVIEW_EXECUTION || value.secret_material !== AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL) fail("handoff markers are invalid");
+  const plan = AutonomousActionPlan.fromJSON(value.plan as AutonomousActionPlanJSON);
+  const admission = AutonomousActionAdmission.fromJSON(value.admission as AutonomousActionAdmissionJSON);
+  const recordDigest = digest("handoff record_digest", value.record_digest) as string;
+  const planDigest = digest("handoff plan_digest", value.plan_digest) as string;
+  const admissionDigest = digest("handoff admission_digest", value.admission_digest) as string;
+  const suppliedHandoffDigest = digest("handoff handoff_digest", value.handoff_digest) as string;
+  if (planDigest !== plan.plan_digest || admissionDigest !== admission.admission_digest || plan.plan_digest !== admission.plan_digest) fail("handoff plan or admission digest is inconsistent");
+  if (admission.status !== "admitted") fail("handoff admission is not admitted");
+  const selected = domainList("handoff selected_domains", value.selected_domains as readonly string[]);
+  const requested = domainList("handoff requested_domains", value.requested_domains as readonly string[]);
+  if (JSON.stringify(selected) !== JSON.stringify(plan.selected_domains) || JSON.stringify(selected) !== JSON.stringify(admission.selected_domains)) fail("handoff selected domains are inconsistent");
+  if (requested.some((domain) => !selected.includes(domain))) fail("handoff requested domains exceed the selected domains");
+  if (typeof value.cross_domain !== "boolean" || value.cross_domain !== plan.cross_domain) fail("handoff cross-domain posture is inconsistent");
+  if (typeof value.execution_path !== "string" || value.execution_path !== admission.execution_path) fail("handoff execution path is inconsistent");
+  if (value.status !== "ready_for_downstream_gates") fail("handoff status is invalid");
+  if (!Array.isArray(value.downstream_gates) || JSON.stringify(value.downstream_gates) !== JSON.stringify(AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES)) fail("handoff downstream gates are invalid");
+  const body = {
+    schema: AUTONOMOUS_ACTION_DISPATCH_HANDOFF_SCHEMA,
+    action_id: actionId(value.action_id),
+    record_digest: recordDigest,
+    plan_digest: planDigest,
+    admission_digest: admissionDigest,
+    plan: plan.toJSON(),
+    admission: admission.toJSON(),
+    selected_domains: selected,
+    requested_domains: requested,
+    cross_domain: value.cross_domain,
+    execution_path: value.execution_path,
+    status: "ready_for_downstream_gates" as const,
+    downstream_gates: [...AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES],
+    authority: AUTONOMOUS_ACTION_REVIEW_AUTHORITY,
+    retention: AUTONOMOUS_ACTION_REVIEW_RETENTION,
+    execution: AUTONOMOUS_ACTION_REVIEW_EXECUTION,
+    secret_material: AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL,
+  };
+  const expected = digestJsonSync(body);
+  if (suppliedHandoffDigest !== expected) fail("handoff digest does not match metadata");
+  return { ...body, handoff_digest: expected };
 }
 
 function normalizedRecord(record: AutonomousActionAdmissionRecord): { record: AutonomousActionAdmissionRecord; plan: AutonomousActionPlan; admission: AutonomousActionAdmission } {
@@ -251,12 +319,12 @@ export class AutonomousActionAdmissionController {
       cross_domain: plan.cross_domain,
       execution_path: admission.execution_path,
       status: "ready_for_downstream_gates" as const,
-      downstream_gates: ["credential_scope", "provider_or_source_approval", "tool_and_effect_authority", "evaluator_settlement"],
+      downstream_gates: [...AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES],
       authority: AUTONOMOUS_ACTION_REVIEW_AUTHORITY,
       retention: AUTONOMOUS_ACTION_REVIEW_RETENTION,
       execution: AUTONOMOUS_ACTION_REVIEW_EXECUTION,
       secret_material: AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL,
     };
-    return { ...body, handoff_digest: digestJsonSync(body) };
+    return validateAutonomousActionDispatchHandoff({ ...body, handoff_digest: digestJsonSync(body) });
   }
 }

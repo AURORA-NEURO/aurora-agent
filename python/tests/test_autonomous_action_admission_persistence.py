@@ -9,6 +9,7 @@ from prism_sdk import (
     AutonomousAgent,
     AutonomousActionAdmissionPersistenceCoordinator,
     AutonomousActionAdmissionController,
+    validate_autonomous_action_dispatch_handoff,
     InMemoryAutonomousActionAdmissionLedger,
     JsonAutonomousActionAdmissionSnapshotPersistence,
     LLMRuntime,
@@ -233,3 +234,48 @@ def test_operator_controller_projects_every_domain_and_requires_authorized_revie
     cross_handoff = controller.dispatch_handoff("operator-cross")
     assert cross_handoff["cross_domain"] is True
     assert len(cross_handoff["selected_domains"]) >= 2
+
+
+def test_dispatch_handoff_validation_replays_every_domain_and_rejects_tampering() -> None:
+    agent = _agent()
+    ledger = InMemoryAutonomousActionAdmissionLedger(max_records=32)
+    controller = AutonomousActionAdmissionController(ledger)
+    for domain in AUTONOMOUS_DOMAIN_NAMES:
+        plan = agent.action_plan(task=_TASKS[domain], domain=domain, allow_cross_domain=False)
+        controller.submit(
+            f"verified-{domain}",
+            plan,
+            approvals=_all_approvals(plan),
+            reviewed=True,
+            authorization_digest=str(len(domain)).zfill(64),
+        )
+        handoff = controller.dispatch_handoff(f"verified-{domain}")
+        verified = validate_autonomous_action_dispatch_handoff(handoff)
+        assert verified["plan_digest"] == plan["plan_digest"]
+        assert verified["selected_domains"] == [domain]
+        assert _TASKS[domain] not in json.dumps(verified)
+
+    cross_plan = agent.action_plan(
+        task="coordinate coding and biomedical evidence",
+        hints=("coding", "biomedical"),
+        allow_cross_domain=True,
+    )
+    controller.submit(
+        "verified-cross",
+        cross_plan,
+        approvals=_all_approvals(cross_plan),
+        reviewed=True,
+        authorization_digest="f" * 64,
+    )
+    cross = controller.dispatch_handoff("verified-cross")
+    verified_cross = validate_autonomous_action_dispatch_handoff(cross)
+    assert verified_cross["cross_domain"] is True
+    assert verified_cross["selected_domains"] == cross_plan["selected_domains"]
+    with pytest.raises(ArgumentError, match="outside"):
+        controller.dispatch_handoff("verified-cross", requested_domains=("evaluation",))
+    with pytest.raises(ArgumentError, match="digest"):
+        validate_autonomous_action_dispatch_handoff({**cross, "handoff_digest": "0" * 64})
+    with pytest.raises(ArgumentError, match="gates"):
+        validate_autonomous_action_dispatch_handoff({**cross, "downstream_gates": ["credential_scope"]})
+    with pytest.raises(ArgumentError, match="digest|selected"):
+        validate_autonomous_action_dispatch_handoff({**cross, "requested_domains": ["evaluation"]})

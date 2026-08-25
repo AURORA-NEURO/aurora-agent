@@ -2878,6 +2878,16 @@ handoff contain no task text, prompts, credentials, provider responses, source v
 arguments, evaluator evidence, or effects. A handoff only names the downstream gates; a separate
 worker/application must still rehydrate transient inputs and satisfy each gate before dispatch.
 
+Before a handoff enters a separate worker or service, call
+`validateAutonomousActionDispatchHandoff(...)` (TypeScript) or
+`validate_autonomous_action_dispatch_handoff(...)` (Python). The verifier rehydrates the
+metadata-only plan and admission, checks their digests and admitted status, proves that the
+requested domains are a subset of the selected domains, verifies the fixed downstream-gate
+contract, and recomputes `handoff_digest`. It does not verify the external reviewer identity,
+credentials, provider/source readiness, evaluator truth, or effect safety; those must remain
+separate gates after verification. A verified handoff is therefore a continuity proof for a
+worker resolver, never an execution token.
+
 ```python
 plan = agent.action_plan(task="analyze a bounded dataset", domain="data")
 execution = agent.execute_action_plan(

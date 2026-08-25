@@ -1743,7 +1743,9 @@ export {
   AUTONOMOUS_ACTION_REVIEW_AUTHORITY,
   AUTONOMOUS_ACTION_REVIEW_EXECUTION,
   AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL,
+  AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES,
   AutonomousActionAdmissionController,
+  validateAutonomousActionDispatchHandoff,
 } from "./autonomous-action-admission-controller.js";
 export type {
   AutonomousActionReviewRow,

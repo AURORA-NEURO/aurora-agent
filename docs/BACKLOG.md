@@ -64,6 +64,13 @@ pretend that a reviewer digest is a credential or that a local file is distribut
 deployment-owned identity, queue transport, encryption, worker rehydration, provider/source/tool
 authority, evaluator truth, and effect approval remain explicit integration responsibilities.
 
+The downstream action handoff now has a public replay verifier in both SDKs. Workers can
+rehydrate a handoff and prove plan/admission continuity, admitted status, all-domain selected
+and requested-domain closure, fixed downstream-gate identity, and the outer digest before
+opening any later gate. The verifier intentionally does not promote a reviewer digest into
+authorization or claim provider/source/evaluator/effect readiness; those deployment boundaries
+remain explicit.
+
 The TypeScript runtime now includes a keyless provider protocol conformance gate. It runs all seven
 built-in provider presets through the actual request, credential, response, model-discovery, and SSE
 stream boundaries using an intercepted fetch fixture, and refuses missing credentials before any

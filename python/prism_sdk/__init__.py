@@ -625,7 +625,9 @@ from .autonomous_action_admission_controller import (
     AUTONOMOUS_ACTION_REVIEW_AUTHORITY,
     AUTONOMOUS_ACTION_REVIEW_EXECUTION,
     AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL,
+    AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES,
     AutonomousActionAdmissionController,
+    validate_autonomous_action_dispatch_handoff,
 )
 from .autonomous_domain_response import (
     AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA,
@@ -6363,7 +6365,9 @@ __all__ = [
     "AUTONOMOUS_ACTION_REVIEW_AUTHORITY",
     "AUTONOMOUS_ACTION_REVIEW_EXECUTION",
     "AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL",
+    "AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES",
     "AutonomousActionAdmissionController",
+    "validate_autonomous_action_dispatch_handoff",
     "AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA",
     "AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_SCHEMA",
     "AUTONOMOUS_DOMAIN_RESPONSE_EVALUATION_SCHEMA",

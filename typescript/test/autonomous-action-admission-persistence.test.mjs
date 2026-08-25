@@ -11,6 +11,7 @@ import {
   TransactionalJsonAutonomousActionAdmissionSnapshotPersistence,
   AutonomousActionAdmissionPersistenceCoordinator,
   AutonomousActionAdmissionController,
+  validateAutonomousActionDispatchHandoff,
   admitAutonomousActionPlan,
   createAutonomousActionAdmissionRecord,
   validateAutonomousActionAdmissionRecord,
@@ -199,4 +200,37 @@ test("operator controller exposes every domain, enforces authorization and stale
   const crossHandoff = controller.dispatchHandoff("operator-cross");
   assert.equal(crossHandoff.cross_domain, true);
   assert.ok(crossHandoff.selected_domains.length >= 2);
+});
+
+test("dispatch handoff verification replays every domain, preserves cross-domain identity, and rejects tampering", async () => {
+  const brain = makeBrain();
+  const ledger = new InMemoryAutonomousActionAdmissionLedger({ maxRecords: 32 });
+  const controller = new AutonomousActionAdmissionController(ledger);
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const plan = await brain.actionPlan({ task: tasks[domain], domain, capability: "bounded_task", allow_cross_domain: false });
+    controller.submit(`verified-${domain}`, plan, {
+      approvals: allApprovals(plan),
+      reviewed: true,
+      authorizationDigest: `${domain.length}`.padStart(64, "0"),
+    });
+    const handoff = controller.dispatchHandoff(`verified-${domain}`);
+    const verified = validateAutonomousActionDispatchHandoff(handoff);
+    assert.equal(verified.plan_digest, plan.plan_digest, domain);
+    assert.deepEqual(verified.selected_domains, [domain], domain);
+    assert.equal(JSON.stringify(verified).includes(tasks[domain]), false, domain);
+  }
+  const crossPlan = await brain.actionPlan({ task: "coordinate coding and biomedical evidence", hints: ["coding", "biomedical"], allow_cross_domain: true });
+  controller.submit("verified-cross", crossPlan, {
+    approvals: allApprovals(crossPlan),
+    reviewed: true,
+    authorizationDigest: "f".repeat(64),
+  });
+  const cross = controller.dispatchHandoff("verified-cross");
+  const verifiedCross = validateAutonomousActionDispatchHandoff(cross);
+  assert.equal(verifiedCross.cross_domain, true);
+  assert.deepEqual(verifiedCross.selected_domains, crossPlan.selected_domains);
+  assert.throws(() => controller.dispatchHandoff("verified-cross", ["evaluation"]), /outside/);
+  assert.throws(() => validateAutonomousActionDispatchHandoff({ ...cross, handoff_digest: "0".repeat(64) }), /digest/);
+  assert.throws(() => validateAutonomousActionDispatchHandoff({ ...cross, downstream_gates: ["credential_scope"] }), /gates/);
+  assert.throws(() => validateAutonomousActionDispatchHandoff({ ...cross, requested_domains: ["evaluation"] }), /digest|selected/);
 });

@@ -466,6 +466,12 @@ persists only plan/admission/reviewer digests. The authorization digest is an ex
 identity, not a provider credential. The final handoff lists downstream gates but does not invoke
 a provider, source, tool, evaluator, learner, connector, or effect.
 
+Workers should call `validate_autonomous_action_dispatch_handoff()` after loading a handoff from
+the queue or another process. It rehydrates the plan and admission, checks their exact digests,
+admitted status, selected/requested-domain closure, downstream-gate list, and outer handoff
+digest. It proves metadata continuity only; external reviewer authorization, credential and
+provider readiness, source truth, evaluator quality, and effect approval remain independent.
+
 ### One-call deployment-managed execution
 
 When an application has already registered an environment source or secret-manager resolver,

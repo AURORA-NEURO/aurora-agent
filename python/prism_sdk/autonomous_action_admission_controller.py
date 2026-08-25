@@ -8,6 +8,7 @@ the controller never grants provider, source, tool, effect, learner, or credenti
 
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping, Sequence
 
 from .authoring import content_digest
@@ -28,6 +29,18 @@ AUTONOMOUS_ACTION_REVIEW_RETENTION = "metadata_only;operator_review_projection_a
 AUTONOMOUS_ACTION_REVIEW_AUTHORITY = "caller_operator_projection_only;authorization_is_external_and_not_verified_by_sdk"
 AUTONOMOUS_ACTION_REVIEW_EXECUTION = "review_control_only;does_not_authorize_provider_source_tool_effect_or_credentials"
 AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL = "never_returned"
+AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES = (
+    "credential_scope",
+    "provider_or_source_approval",
+    "tool_and_effect_authority",
+    "evaluator_settlement",
+)
+
+_HANDOFF_KEYS = {
+    "schema", "action_id", "record_digest", "plan_digest", "admission_digest", "plan", "admission",
+    "selected_domains", "requested_domains", "cross_domain", "execution_path", "status", "downstream_gates",
+    "authority", "retention", "execution", "secret_material", "handoff_digest",
+}
 
 
 def _fail(message: str) -> None:
@@ -49,6 +62,12 @@ def _domains(name: str, values: Sequence[str]) -> list[str]:
     if len(set(normalized)) != len(normalized):
         _fail(f"{name} must contain unique domains")
     return normalized
+
+
+def _action_id(value: Any) -> str:
+    if not isinstance(value, str) or not 1 <= len(value) <= 256 or re.fullmatch(r"[A-Za-z0-9_.:+/-]+", value) is None:
+        _fail("handoff action_id is invalid")
+    return value
 
 
 def _normalized(record: Mapping[str, Any]) -> tuple[dict[str, Any], AutonomousActionPlan, AutonomousActionAdmission]:
@@ -110,6 +129,69 @@ def _queue(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "secret_material": AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL,
     }
     return {**body, "queue_digest": content_digest(body)}
+
+
+def validate_autonomous_action_dispatch_handoff(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Verify a handoff after it crosses persistence or process boundaries.
+
+    This proves metadata continuity only. Reviewer authorization, credential readiness, provider
+    availability, source truth, evaluator quality, and effect safety remain downstream gates.
+    """
+
+    if not isinstance(value, Mapping) or set(value) != _HANDOFF_KEYS:
+        _fail("handoff contains unsupported or missing fields")
+    if value["schema"] != AUTONOMOUS_ACTION_DISPATCH_HANDOFF_SCHEMA or value["authority"] != AUTONOMOUS_ACTION_REVIEW_AUTHORITY or value["retention"] != AUTONOMOUS_ACTION_REVIEW_RETENTION or value["execution"] != AUTONOMOUS_ACTION_REVIEW_EXECUTION or value["secret_material"] != AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL:
+        _fail("handoff markers are invalid")
+    try:
+        plan = AutonomousActionPlan.from_dict(value["plan"])
+        admission = AutonomousActionAdmission.from_dict(value["admission"])
+    except Exception as error:
+        raise ArgumentError("autonomous action review controller handoff plan or admission is invalid") from error
+    record_digest = _digest("handoff record_digest", value["record_digest"])
+    plan_digest = _digest("handoff plan_digest", value["plan_digest"])
+    admission_digest = _digest("handoff admission_digest", value["admission_digest"])
+    supplied_digest = _digest("handoff handoff_digest", value["handoff_digest"])
+    if plan_digest != plan.plan_digest or admission_digest != admission.admission_digest or plan.plan_digest != admission.plan_digest:
+        _fail("handoff plan or admission digest is inconsistent")
+    if admission.status != "admitted":
+        _fail("handoff admission is not admitted")
+    selected = _domains("handoff selected_domains", value["selected_domains"])
+    requested = _domains("handoff requested_domains", value["requested_domains"])
+    if selected != list(plan.selected_domains) or selected != list(admission.selected_domains):
+        _fail("handoff selected domains are inconsistent")
+    if any(domain not in selected for domain in requested):
+        _fail("handoff requested domains exceed the selected domains")
+    if not isinstance(value["cross_domain"], bool) or value["cross_domain"] != plan.cross_domain:
+        _fail("handoff cross-domain posture is inconsistent")
+    if not isinstance(value["execution_path"], str) or value["execution_path"] != admission.execution_path:
+        _fail("handoff execution path is inconsistent")
+    if value["status"] != "ready_for_downstream_gates":
+        _fail("handoff status is invalid")
+    if value["downstream_gates"] != list(AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES):
+        _fail("handoff downstream gates are invalid")
+    body = {
+        "schema": AUTONOMOUS_ACTION_DISPATCH_HANDOFF_SCHEMA,
+        "action_id": _action_id(value["action_id"]),
+        "record_digest": record_digest,
+        "plan_digest": plan_digest,
+        "admission_digest": admission_digest,
+        "plan": plan.to_dict(),
+        "admission": admission.to_dict(),
+        "selected_domains": selected,
+        "requested_domains": requested,
+        "cross_domain": value["cross_domain"],
+        "execution_path": value["execution_path"],
+        "status": "ready_for_downstream_gates",
+        "downstream_gates": list(AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES),
+        "authority": AUTONOMOUS_ACTION_REVIEW_AUTHORITY,
+        "retention": AUTONOMOUS_ACTION_REVIEW_RETENTION,
+        "execution": AUTONOMOUS_ACTION_REVIEW_EXECUTION,
+        "secret_material": AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL,
+    }
+    expected = content_digest(body)
+    if supplied_digest != expected:
+        _fail("handoff digest does not match metadata")
+    return {**body, "handoff_digest": expected}
 
 
 class AutonomousActionAdmissionController:
@@ -204,13 +286,13 @@ class AutonomousActionAdmissionController:
             "cross_domain": plan.cross_domain,
             "execution_path": admission.execution_path,
             "status": "ready_for_downstream_gates",
-            "downstream_gates": ["credential_scope", "provider_or_source_approval", "tool_and_effect_authority", "evaluator_settlement"],
+            "downstream_gates": list(AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES),
             "authority": AUTONOMOUS_ACTION_REVIEW_AUTHORITY,
             "retention": AUTONOMOUS_ACTION_REVIEW_RETENTION,
             "execution": AUTONOMOUS_ACTION_REVIEW_EXECUTION,
             "secret_material": AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL,
         }
-        return {**body, "handoff_digest": content_digest(body)}
+        return validate_autonomous_action_dispatch_handoff({**body, "handoff_digest": content_digest(body)})
 
 
 __all__ = [
@@ -221,5 +303,7 @@ __all__ = [
     "AUTONOMOUS_ACTION_REVIEW_AUTHORITY",
     "AUTONOMOUS_ACTION_REVIEW_EXECUTION",
     "AUTONOMOUS_ACTION_REVIEW_SECRET_MATERIAL",
+    "AUTONOMOUS_ACTION_DISPATCH_DOWNSTREAM_GATES",
     "AutonomousActionAdmissionController",
+    "validate_autonomous_action_dispatch_handoff",
 ]
