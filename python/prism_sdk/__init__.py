@@ -328,6 +328,7 @@ from .brain_federated_surveillance import BrainFederatedEvidenceReceipt
 from .brain_evidence_contract import BrainEvidenceContractModelReceipt
 from .brain_multimodal_contract import BrainMultimodalContractModelReceipt
 from .brain_throughput_contract import BrainThroughputContractModelReceipt
+from .brain_federated_contract import BrainFederatedContractModelReceipt
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,

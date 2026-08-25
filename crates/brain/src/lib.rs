@@ -29,6 +29,7 @@ use thiserror::Error;
 
 pub mod evidence_contract_model;
 pub mod evidence_surveillance;
+pub mod federated_contract_model;
 pub mod federated_evidence_surveillance;
 pub mod high_throughput_evidence_surveillance;
 pub mod multimodal_contract_model;
@@ -46,6 +47,12 @@ pub use evidence_surveillance::{
     EvidenceSurveillanceDisposition, EvidenceSurveillanceError, QualifiedEvidenceSet,
     CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+pub use federated_contract_model::{
+    federated_contract_model_manifest, model_federated_contract, FederatedContractDisposition,
+    FederatedContractModelError, FederatedContractModelReceipt, FederatedContractModelRequest,
+    CONTRACT_VERSION as FEDERATED_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTRACT_MODEL_FEATURE_ID,
 };
 pub use federated_evidence_surveillance::{
     admit_federated_evidence, federated_evidence_surveillance_manifest,

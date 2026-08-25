@@ -78,6 +78,7 @@ from prism_sdk.brain_federated_surveillance import BrainFederatedEvidenceReceipt
 from prism_sdk.brain_evidence_contract import BrainEvidenceContractModelReceipt
 from prism_sdk.brain_multimodal_contract import BrainMultimodalContractModelReceipt
 from prism_sdk.brain_throughput_contract import BrainThroughputContractModelReceipt
+from prism_sdk.brain_federated_contract import BrainFederatedContractModelReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2499,6 +2500,39 @@ def test_brain_throughput_contract_keeps_capacity_overflow_explicit():
         negative_evidence=(),
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "d" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_federated_contract_keeps_signer_failure_explicit():
+    receipt = BrainFederatedContractModelReceipt(
+        request_id="request:federated-contract",
+        federation_id="federation:commons",
+        institution_id="institution:a",
+        purpose="benchmarking",
+        endpoint="https://hub.example/research",
+        semantic_profile="preclinical-evidence/v1",
+        disposition="blocked",
+        compatibility="additive",
+        input_schema="EvidenceFeed4@1",
+        output_schema="QualifiedEvidenceSet2@1",
+        required_order=("contract_digest", "provenance_digest", "semantic_digest"),
+        provided_order=("contract_digest", "provenance_digest", "semantic_digest"),
+        missing_order=(),
+        semantic_loss_order=(),
+        allowed_artifact_order=("raw-data",),
+        export_scope="federation:commons:institution:a:benchmarking",
+        semantic_digest="a" * 64,
+        provenance_digest="b" * 64,
+        contract_digest="c" * 64,
+        envelope_digest="d" * 64,
+        replay_identity="e" * 64,
+        omissions=("federation:permitted-artifact-missing",),
+        uncertainty=(),
+        negative_evidence=("request:signer-invalid",),
+        effect_receipts=("block:unsafe-release",),
+        artifact={"content_hash": "f" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()

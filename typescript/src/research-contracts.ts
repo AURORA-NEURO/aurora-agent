@@ -209,6 +209,8 @@ export const MULTIMODAL_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F06" as const
 export const MULTIMODAL_CONTRACT_MODEL_CONTRACT_VERSION = "brain-multimodal-evidence-contract/1.0" as const;
 export const THROUGHPUT_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F07" as const;
 export const THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION = "brain-throughput-evidence-contract/1.0" as const;
+export const FEDERATED_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F08" as const;
+export const FEDERATED_CONTRACT_MODEL_CONTRACT_VERSION = "brain-federated-evidence-contract/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3730,6 +3732,25 @@ export function validateBrainThroughputContractModelReceipt(receipt: BrainThroug
 }
 
 export function brainThroughputContractModelReceiptDigest(receipt: BrainThroughputContractModelReceipt): string { validateBrainThroughputContractModelReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainFederatedContractModelReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; federation_id: string; institution_id: string; purpose: string; endpoint: string; semantic_profile: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked"; compatibility: "additive" | "migration_required" | "breaking" | "unknown"; input_schema: string; output_schema: string;
+  required_order: string[]; provided_order: string[]; missing_order: string[]; semantic_loss_order: string[]; allowed_artifact_order: string[]; export_scope: string;
+  semantic_digest: string; provenance_digest: string; contract_digest: string; envelope_digest: string; replay_identity: string; omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainFederatedContractModelReceipt(receipt: BrainFederatedContractModelReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== FEDERATED_CONTRACT_MODEL_FEATURE_ID || receipt.contract_version !== FEDERATED_CONTRACT_MODEL_CONTRACT_VERSION) throw new Error("federated contract schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.institution_id.trim() || !receipt.purpose.trim() || !receipt.endpoint.trim() || !receipt.semantic_profile.trim() || receipt.input_schema !== "EvidenceFeed4@1" || receipt.output_schema !== "QualifiedEvidenceSet2@1" || !receipt.required_order.length || !receipt.provided_order.length || !receipt.allowed_artifact_order.length || !receipt.export_scope.trim() || !receipt.effect_receipts.length) throw new Error("federated identity, schemas, fields, artifact policy, export scope, locality, or effects are incomplete");
+  if (receipt.missing_order.some((value) => !receipt.required_order.includes(value)) || receipt.semantic_loss_order.some((value) => !receipt.provided_order.includes(value))) throw new Error("federated loss state is outside declared fields");
+  for (const values of [receipt.required_order, receipt.provided_order, receipt.missing_order, receipt.semantic_loss_order, receipt.allowed_artifact_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("federated contract ordering is invalid");
+  for (const value of [receipt.semantic_digest, receipt.provenance_digest, receipt.contract_digest, receipt.envelope_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("federated contract digest is invalid");
+  if (receipt.disposition === "qualified" && receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:permitted-artifacts:"))) throw new Error("qualified federation requires a permitted-artifact exchange receipt");
+  if (receipt.disposition !== "qualified" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("non-qualified federation must be explicitly blocked");
+}
+
+export function brainFederatedContractModelReceiptDigest(receipt: BrainFederatedContractModelReceipt): string { validateBrainFederatedContractModelReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");
