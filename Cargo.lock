@@ -262,7 +262,6 @@ dependencies = [
  "bioprism-devplat",
  "bioprism-domain",
  "bioprism-fiber",
- "bioprism-figures",
  "bioprism-ids",
  "bioprism-mcp",
  "bioprism-mutation",
