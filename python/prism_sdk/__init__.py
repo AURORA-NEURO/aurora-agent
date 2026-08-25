@@ -354,6 +354,7 @@ from .brain_multimodal_operations import BrainMultimodalOperationsReceipt
 from .brain_throughput_operations import BrainThroughputOperationsReceipt
 from .brain_federated_operations import BrainFederatedOperationsReceipt
 from .brain_retrieval_synthesis import BrainEvidenceSynthesis
+from .brain_multimodal_retrieval import BrainMultimodalEvidenceSynthesis
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
