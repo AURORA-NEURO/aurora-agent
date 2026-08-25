@@ -203,6 +203,8 @@ export const HIGH_THROUGHPUT_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F
 export const HIGH_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance-throughput/1.0" as const;
 export const FEDERATED_EVIDENCE_SURVEILLANCE_FEATURE_ID = "AFA-brain-P01-F04" as const;
 export const FEDERATED_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION = "brain-evidence-surveillance-federated/1.0" as const;
+export const EVIDENCE_CONTRACT_MODEL_FEATURE_ID = "AFA-brain-P01-F05" as const;
+export const EVIDENCE_CONTRACT_MODEL_CONTRACT_VERSION = "brain-evidence-contract-model/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -3661,6 +3663,27 @@ export function validateBrainFederatedEvidenceReceipt(receipt: BrainFederatedEvi
 }
 
 export function brainFederatedEvidenceReceiptDigest(receipt: BrainFederatedEvidenceReceipt): string { validateBrainFederatedEvidenceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface BrainEvidenceContractModelReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; study_id: string; scope: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked"; compatibility: "additive" | "migration_required" | "breaking" | "unknown";
+  input_schema: string; output_schema: string; required_order: string[]; provided_order: string[]; missing_order: string[]; semantic_loss_order: string[];
+  semantic_digest: string; artifact_digest: string; provenance_digest: string; contract_digest: string; replay_identity: string;
+  omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[]; artifact: Record<string, unknown>;
+  raw_data_local: boolean; boundary: string;
+}
+
+export function validateBrainEvidenceContractModelReceipt(receipt: BrainEvidenceContractModelReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== EVIDENCE_CONTRACT_MODEL_FEATURE_ID || receipt.contract_version !== EVIDENCE_CONTRACT_MODEL_CONTRACT_VERSION) throw new Error("evidence contract schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.study_id.trim() || !receipt.scope.trim() || receipt.input_schema !== "EvidenceFeed1@1" || receipt.output_schema !== "QualifiedEvidenceSet2@1" || !receipt.required_order.length || !receipt.provided_order.length || !receipt.effect_receipts.length) throw new Error("contract identity, schemas, fields, locality, or effects are incomplete");
+  if ([...receipt.missing_order].some((value) => !receipt.required_order.includes(value)) || [...receipt.semantic_loss_order].some((value) => !receipt.provided_order.includes(value))) throw new Error("contract loss state is outside declared fields");
+  for (const values of [receipt.required_order, receipt.provided_order, receipt.missing_order, receipt.semantic_loss_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("contract ordering is invalid");
+  for (const value of [receipt.semantic_digest, receipt.artifact_digest, receipt.provenance_digest, receipt.contract_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("contract digest is invalid");
+  if (receipt.disposition === "qualified" && receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-research-artifacts:"))) throw new Error("qualified contract requires a local-read receipt");
+  if (receipt.disposition !== "qualified" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("non-qualified contract must be explicitly blocked");
+}
+
+export function brainEvidenceContractModelReceiptDigest(receipt: BrainEvidenceContractModelReceipt): string { validateBrainEvidenceContractModelReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

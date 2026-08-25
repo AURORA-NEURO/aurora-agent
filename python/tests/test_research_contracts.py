@@ -75,6 +75,7 @@ from prism_sdk.brain_surveillance import BrainEvidenceSurveillanceReceipt
 from prism_sdk.brain_multimodal_surveillance import BrainMultimodalEvidenceSurveillanceReceipt
 from prism_sdk.brain_throughput_surveillance import BrainHighThroughputEvidenceReceipt
 from prism_sdk.brain_federated_surveillance import BrainFederatedEvidenceReceipt
+from prism_sdk.brain_evidence_contract import BrainEvidenceContractModelReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -2406,6 +2407,34 @@ def test_brain_federated_surveillance_keeps_signer_failure_explicit():
         replay_identity="a" * 64,
         effect_receipts=("block:unsafe-release",),
         artifact={"content_hash": "b" * 64},
+    )
+    receipt.validate()
+    assert receipt.digest() == receipt.digest()
+
+
+def test_brain_evidence_contract_keeps_missing_field_explicit():
+    receipt = BrainEvidenceContractModelReceipt(
+        request_id="request:contract",
+        study_id="study:organoid",
+        scope="organoid:neural",
+        disposition="partial",
+        compatibility="additive",
+        input_schema="EvidenceFeed1@1",
+        output_schema="QualifiedEvidenceSet2@1",
+        required_order=("artifact_digest", "provenance_digest", "scope"),
+        provided_order=("provenance_digest", "scope"),
+        missing_order=("artifact_digest",),
+        semantic_loss_order=(),
+        semantic_digest="a" * 64,
+        artifact_digest="b" * 64,
+        provenance_digest="c" * 64,
+        contract_digest="d" * 64,
+        replay_identity="e" * 64,
+        omissions=("field:artifact_digest:required-missing",),
+        uncertainty=(),
+        negative_evidence=(),
+        effect_receipts=("block:unsafe-release",),
+        artifact={"content_hash": "f" * 64},
     )
     receipt.validate()
     assert receipt.digest() == receipt.digest()

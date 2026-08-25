@@ -27,11 +27,18 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
+pub mod evidence_contract_model;
 pub mod evidence_surveillance;
 pub mod federated_evidence_surveillance;
 pub mod high_throughput_evidence_surveillance;
 pub mod multimodal_evidence_surveillance;
 
+pub use evidence_contract_model::{
+    evidence_contract_model_manifest, model_evidence_contract, ContractCompatibility,
+    ContractDisposition, EvidenceContractModelError, EvidenceContractModelReceipt,
+    EvidenceContractModelRequest, CONTRACT_VERSION as EVIDENCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_CONTRACT_MODEL_FEATURE_ID,
+};
 pub use evidence_surveillance::{
     evidence_surveillance_manifest, surveil_evidence, EvidenceFeedRequest, EvidenceObservation,
     EvidenceSurveillanceDisposition, EvidenceSurveillanceError, QualifiedEvidenceSet,
