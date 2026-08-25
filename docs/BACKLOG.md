@@ -1780,10 +1780,12 @@ non-authority/non-effect framing, while run projections and selection/request id
 lesson IDs, lesson digests, and a consolidated retrieval digest. Required mode fails closed when
 the index or resolver is unavailable; default mode preserves advisory memory failure semantics.
 All twelve built-in domains have approval-only integration coverage without API keys or provider
-dispatch. This increment adds the context-aware resolver bridge and canonical bounded JSON/
-in-memory lesson-text adapters in both SDKs. Resolver authorization now sees lesson scope, eligible
-domains, capabilities, risk classes, confidence, and requested domain/capability before text is
-read; the consolidation snapshot remains text-free and text-store tamper detection is digest-bound.
-Remaining deployment work is to supply encryption, tenant identity/access control, protected
-rehydration, and evaluator/consolidator scheduling; the SDK does not invent those external
-authorities.
+dispatch. This increment adds the context-aware resolver bridge, canonical bounded JSON/in-memory
+lesson-text adapters, and a restart-safe evaluator-to-consolidator scheduler in both SDKs. Resolver
+authorization now sees lesson scope, eligible domains, capabilities, risk classes, confidence, and
+requested domain/capability before text is read; the consolidation and scheduler snapshots remain
+text-free, and every queue lease/job/report identity is tamper-detected. Scheduling is explicit,
+priority/age deterministic, retry-bounded, quarantined after exhaustion, and projected across all
+twelve domains. Remaining deployment work is to supply encryption, tenant identity/access control,
+protected rehydration, and external exactly-once effect reconciliation; the SDK does not invent
+those authorities.

@@ -2792,6 +2792,22 @@ export {
   validateAutonomousMemoryConsolidationSnapshot,
 } from "./autonomous-memory-consolidation.js";
 export {
+  AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOB_SCHEMA,
+  AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SCHEMA,
+  AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SNAPSHOT_SCHEMA,
+  MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_ATTEMPTS,
+  MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_JOBS,
+  MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_LEASE_SECONDS,
+  MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_OBSERVATIONS_PER_JOB,
+  MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_SCHEDULER_SNAPSHOT_BYTES,
+  AutonomousMemoryConsolidationScheduler,
+  AutonomousMemoryConsolidationSchedulerError,
+  AutonomousMemoryConsolidationSchedulerPersistenceCoordinator,
+  JsonAutonomousMemoryConsolidationSchedulerPersistence,
+  TransactionalJsonAutonomousMemoryConsolidationSchedulerPersistence,
+  validateAutonomousMemoryConsolidationSchedulerSnapshot,
+} from "./autonomous-memory-consolidation-scheduler.js";
+export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,
   AUTONOMOUS_GOAL_MAX_CRITERIA,
@@ -3033,3 +3049,11 @@ export type {
   AutonomousMemoryLessonResolutionContext,
   AutonomousMemoryLessonContextResolver,
 } from "./autonomous-memory-consolidation.js";
+export type {
+  AutonomousMemoryConsolidationClaim,
+  AutonomousMemoryConsolidationScheduledJob,
+  AutonomousMemoryConsolidationSchedulerCoverage,
+  AutonomousMemoryConsolidationSchedulerSnapshot,
+  AutonomousMemoryConsolidationSchedulerTextStore,
+  AutonomousMemoryConsolidationSchedulerTransactionalTextStore,
+} from "./autonomous-memory-consolidation-scheduler.js";

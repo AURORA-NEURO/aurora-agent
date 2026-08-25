@@ -1803,6 +1803,46 @@ backup/retention policy, and protected rehydration. The SDK supplies the authori
 does not claim to be the deployment's identity or secret authority. Both SDKs exercise this path
 across all twelve built-in domains, including portable and domain-local scope behavior.
 
+#### Durable evaluator-to-consolidator scheduling
+
+The consolidation API is synchronous by design, while production evaluators often settle work in
+another process or after a run has been checkpointed. `AutonomousMemoryConsolidationScheduler`
+provides the missing bounded handoff in both SDKs. A caller submits an explicit batch of evaluator
+observations with a stable job ID, priority, submission time, and retry ceiling. Repeating the same
+job ID with the same immutable observation projection is idempotent; reusing it with changed
+observations, domains, priority, or retry policy fails closed. The scheduler never accepts a task,
+prompt, lesson text, provider response, credential, tool argument, or raw evaluator error.
+
+Workers claim the highest-priority queued job with deterministic age and job-ID tie breakers. A
+claim contains only the job digest, worker identity, attempt, lease expiry, and lease digest. The
+worker calls the configured provider-free consolidator exactly once for that claim, records only the
+result digest, and fences completion or failure with the lease. Expired leases are reclaimed before
+the next claim; transient failures requeue until the explicit attempt limit, while the final failure
+is quarantined with a stable error class. `run_until_idle`/`runUntilIdle` is cycle-bounded so a
+misbehaving evaluator cannot create a hot loop.
+
+Every scheduler snapshot projects all twelve autonomous domains in canonical order, including
+zero-activity rows, job/observation counts, and queued/leased/completed/quarantined counts. Jobs
+retain only normalized evaluator metadata and SHA-256 identities. Snapshot and per-job digests are
+recomputed on restore, policy drift is rejected, leases remain fenced across restart, and canonical
+JSON persistence supports compare-and-swap writers. A deployment can compose this queue with a
+protected caller-owned store, but the SDK does not pretend that metadata persistence provides
+encryption, tenancy, authorization, or exactly-once external effects:
+
+```python
+from prism_sdk import AutonomousMemoryConsolidationScheduler
+
+scheduler = AutonomousMemoryConsolidationScheduler(consolidator, default_max_attempts=3)
+scheduler.submit("eval-batch-2026-08-25", evaluator_observations, priority=0.8)
+while (result := scheduler.run_next("memory-worker-1")) is not None:
+    audit_metadata(result)  # result contains digests and counters, never provider values
+```
+
+The TypeScript surface has the same lifecycle as `submit`, `claimNext`, `complete`, `fail`,
+`runNext`, `runUntilIdle`, `snapshot`, and `restore`, plus JSON/CAS persistence coordinators. This
+means evaluator settlement can be asynchronous, restartable, and independently scalable without
+making reward inference implicit or allowing a failed provider call to become a learning lesson.
+
 ### Metadata-only run traces
 
 For operator dashboards, offline evaluation, and cross-process handoff, Python now exposes the
