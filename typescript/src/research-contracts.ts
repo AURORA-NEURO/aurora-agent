@@ -163,6 +163,8 @@ export const FIBER_MECHANISM_ASSURANCE_FEATURE_ID = "AFA-fiber-P08-F26" as const
 export const FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION = "fiber-mechanism-assurance/1.0" as const;
 export const HUBAPI_QUALITY_ASSURANCE_FEATURE_ID = "AFA-hubapi-P07-F27" as const;
 export const HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION = "hubapi-quality-assurance/1.0" as const;
+export const REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID = "AFA-registry-P05-F28" as const;
+export const REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION = "registry-federated-resource-discovery-assurance/1.0" as const;
 
 export type PolicyDecision = "allow" | "deny" | "redact" | "local_only" | "approval_required" | "unresolved";
 export type EvidenceState = "proven" | "supported" | "speculative" | "contradicted" | "unknown";
@@ -2797,6 +2799,48 @@ export function validateHubapiQualityAssuranceReceipt(receipt: HubapiQualityAssu
 }
 
 export function hubapiQualityAssuranceReceiptDigest(receipt: HubapiQualityAssuranceReceipt): string { validateHubapiQualityAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export interface RegistryResourceDiscoveryAssuranceReceipt {
+  schema_version: string;
+  contract_version: string;
+  feature_id: string;
+  request_id: string;
+  federation_id: string;
+  requester: string;
+  scope: string;
+  disposition: "qualified" | "partial" | "unknown" | "blocked";
+  candidate_order: string[];
+  selected_order: string[];
+  omitted_order: string[];
+  semantic_order: string[];
+  artifact_order: string[];
+  provenance_order: string[];
+  checks: string[];
+  omissions: string[];
+  uncertainty: string[];
+  negative_evidence: string[];
+  replay_identity: string;
+  effect_receipts: string[];
+  federation_manifest: Record<string, unknown>;
+  raw_data_local: boolean;
+  boundary: string;
+}
+
+export function validateRegistryResourceDiscoveryAssuranceReceipt(receipt: RegistryResourceDiscoveryAssuranceReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID || receipt.contract_version !== REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION) throw new Error("registry resource discovery assurance schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.requester.trim() || !receipt.scope.trim() || !receipt.candidate_order.length || !receipt.checks.length) throw new Error("registry resource discovery identity, locality, candidates, or checks are incomplete");
+  if (!new Set(["qualified", "partial", "unknown", "blocked"]).has(receipt.disposition)) throw new Error("registry resource discovery disposition is unknown");
+  if (new Set(receipt.candidate_order).size !== receipt.candidate_order.length || new Set(receipt.selected_order).size !== receipt.selected_order.length || new Set(receipt.omitted_order).size !== receipt.omitted_order.length) throw new Error("registry resource discovery ordering contains duplicates");
+  const candidateSet = new Set(receipt.candidate_order);
+  if ([...receipt.selected_order, ...receipt.omitted_order].some((value) => !candidateSet.has(value))) throw new Error("registry resource discovery selected or omitted resource is unknown");
+  for (const values of [receipt.omitted_order, receipt.checks, receipt.omissions, receipt.uncertainty, receipt.negative_evidence]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("registry resource discovery canonical ordering is invalid");
+  for (const values of [receipt.semantic_order, receipt.artifact_order, receipt.provenance_order]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("registry resource discovery digest ordering is invalid");
+  for (const value of [...receipt.semantic_order, ...receipt.artifact_order, ...receipt.provenance_order, receipt.replay_identity, receipt.federation_manifest.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("registry resource discovery digest is invalid");
+  if (receipt.selected_order.length && receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:signed-resource-manifest:"))) throw new Error("selected registry resources require signed manifest exchange receipts");
+  if (!receipt.selected_order.length && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:federated-resource-discovery"])) throw new Error("empty registry resource result must be explicitly blocked");
+}
+
+export function registryResourceDiscoveryAssuranceReceiptDigest(receipt: RegistryResourceDiscoveryAssuranceReceipt): string { validateRegistryResourceDiscoveryAssuranceReceipt(receipt); return digestJsonSync(receipt); }
 
 export function validatePolicyReceipt(receipt: PolicyReceipt): void {
   if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION) throw new Error("unsupported research contract schema");

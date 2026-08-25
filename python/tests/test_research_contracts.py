@@ -55,6 +55,7 @@ from prism_sdk.research_contracts import CLI_KNOWLEDGE_INTEROPERABILITY_FEATURE_
 from prism_sdk.research_contracts import LAB_EVIDENCE_SURVEILLANCE_FEATURE_ID, LAB_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION, LabEvidenceSurveillanceReceipt
 from prism_sdk.research_contracts import FIBER_MECHANISM_ASSURANCE_FEATURE_ID, FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION, FiberMechanismAssuranceReceipt
 from prism_sdk.research_contracts import HUBAPI_QUALITY_ASSURANCE_FEATURE_ID, HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION, HubapiQualityAssuranceReceipt
+from prism_sdk.research_contracts import REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID, REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION, RegistryResourceDiscoveryAssuranceReceipt
 
 
 def test_empty_evidence_is_explicit_unknown():
@@ -1790,4 +1791,31 @@ def test_hubapi_quality_assurance_preserves_witness_and_release_gate():
     receipt.validate()
     assert receipt.feature_id == HUBAPI_QUALITY_ASSURANCE_FEATURE_ID
     assert receipt.contract_version == HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION
+    assert receipt.digest() == receipt.digest()
+
+
+def test_registry_resource_discovery_preserves_stale_omission_and_manifest_exchange():
+    receipt = RegistryResourceDiscoveryAssuranceReceipt(
+        request_id="request:resources",
+        federation_id="federation:organoids",
+        requester="researcher:alice",
+        scope="organoid:neural",
+        disposition="partial",
+        candidate_order=("resource:a", "resource:b"),
+        selected_order=("resource:a",),
+        omitted_order=("resource:b",),
+        semantic_order=("a" * 64,),
+        artifact_order=("b" * 64,),
+        provenance_order=("c" * 64,),
+        checks=("candidate ranking is deterministic by trust then resource identity",),
+        omissions=("resource:resource:b:missing-modality",),
+        uncertainty=("resource:resource:b:stale-registry-epoch",),
+        negative_evidence=(),
+        replay_identity="d" * 64,
+        effect_receipts=("exchange:signed-resource-manifest:resource:a",),
+        federation_manifest={"content_hash": "e" * 64},
+    )
+    receipt.validate()
+    assert receipt.feature_id == REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID
+    assert receipt.contract_version == REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION
     assert receipt.digest() == receipt.digest()

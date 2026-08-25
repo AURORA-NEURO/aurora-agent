@@ -181,6 +181,8 @@ FIBER_MECHANISM_ASSURANCE_FEATURE_ID = "AFA-fiber-P08-F26"
 FIBER_MECHANISM_ASSURANCE_CONTRACT_VERSION = "fiber-mechanism-assurance/1.0"
 HUBAPI_QUALITY_ASSURANCE_FEATURE_ID = "AFA-hubapi-P07-F27"
 HUBAPI_QUALITY_ASSURANCE_CONTRACT_VERSION = "hubapi-quality-assurance/1.0"
+REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID = "AFA-registry-P05-F28"
+REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION = "registry-federated-resource-discovery-assurance/1.0"
 
 
 class ResearchContractError(ValueError):
@@ -4176,3 +4178,60 @@ class HubapiQualityAssuranceReceipt:
 
     def digest(self) -> str:
         self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "object_id": self.object_id, "study_id": self.study_id, "scope": self.scope, "target_schema": self.target_schema, "disposition": self.disposition, "ranked_metric_order": list(self.ranked_metric_order), "passed_order": list(self.passed_order), "failed_order": list(self.failed_order), "unknown_order": list(self.unknown_order), "witness_order": list(self.witness_order), "modality_order": list(self.modality_order), "artifact_order": list(self.artifact_order), "evidence_order": list(self.evidence_order), "provenance_order": list(self.provenance_order), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "artifact": dict(self.artifact), "raw_data_local": self.raw_data_local, "boundary": self.boundary})
+
+
+@dataclass(frozen=True)
+class RegistryResourceDiscoveryAssuranceReceipt:
+    """Cross-language validator for digest-only federated resource qualification."""
+
+    request_id: str
+    federation_id: str
+    requester: str
+    scope: str
+    disposition: str
+    candidate_order: tuple[str, ...]
+    selected_order: tuple[str, ...]
+    omitted_order: tuple[str, ...]
+    semantic_order: tuple[str, ...]
+    artifact_order: tuple[str, ...]
+    provenance_order: tuple[str, ...]
+    checks: tuple[str, ...]
+    omissions: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    negative_evidence: tuple[str, ...]
+    replay_identity: str
+    effect_receipts: tuple[str, ...]
+    federation_manifest: Mapping[str, Any]
+    feature_id: str = REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID
+    contract_version: str = REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION or self.feature_id != REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID or self.contract_version != REGISTRY_RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION:
+            raise ResearchContractError("registry resource discovery assurance schema, feature, or version mismatch")
+        if self.boundary != PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.request_id.strip() or not self.federation_id.strip() or not self.requester.strip() or not self.scope.strip() or not self.candidate_order or not self.checks:
+            raise ResearchContractError("registry resource discovery identity, candidate order, locality, or checks are incomplete")
+        if self.disposition not in {"qualified", "partial", "unknown", "blocked"}:
+            raise ResearchContractError("registry resource discovery disposition is unknown")
+        if len(set(self.candidate_order)) != len(self.candidate_order) or len(set(self.selected_order)) != len(self.selected_order) or len(set(self.omitted_order)) != len(self.omitted_order):
+            raise ResearchContractError("registry resource discovery ordering contains duplicates")
+        candidate_positions = {value: index for index, value in enumerate(self.candidate_order)}
+        if any(value not in candidate_positions for value in (*self.selected_order, *self.omitted_order)):
+            raise ResearchContractError("registry resource discovery selected or omitted resource is unknown")
+        if tuple(sorted(self.omitted_order)) != self.omitted_order or tuple(sorted(self.checks)) != self.checks or tuple(sorted(self.omissions)) != self.omissions or tuple(sorted(self.uncertainty)) != self.uncertainty or tuple(sorted(self.negative_evidence)) != self.negative_evidence:
+            raise ResearchContractError("registry resource discovery canonical ordering is invalid")
+        for values in (self.semantic_order, self.artifact_order, self.provenance_order):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("registry resource discovery digest ordering is invalid")
+        for value in (*self.semantic_order, *self.artifact_order, *self.provenance_order, self.replay_identity, self.federation_manifest.get("content_hash")):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("registry resource discovery digest is invalid")
+        if self.selected_order and any(not effect.startswith("exchange:signed-resource-manifest:") for effect in self.effect_receipts):
+            raise ResearchContractError("selected registry resources require signed manifest exchange receipts")
+        if not self.selected_order and self.effect_receipts != ("block:federated-resource-discovery",):
+            raise ResearchContractError("empty registry resource result must be explicitly blocked")
+
+    def digest(self) -> str:
+        self.validate(); return research_artifact_digest({"schema_version": self.schema_version, "contract_version": self.contract_version, "feature_id": self.feature_id, "request_id": self.request_id, "federation_id": self.federation_id, "requester": self.requester, "scope": self.scope, "disposition": self.disposition, "candidate_order": list(self.candidate_order), "selected_order": list(self.selected_order), "omitted_order": list(self.omitted_order), "semantic_order": list(self.semantic_order), "artifact_order": list(self.artifact_order), "provenance_order": list(self.provenance_order), "checks": list(self.checks), "omissions": list(self.omissions), "uncertainty": list(self.uncertainty), "negative_evidence": list(self.negative_evidence), "replay_identity": self.replay_identity, "effect_receipts": list(self.effect_receipts), "federation_manifest": dict(self.federation_manifest), "raw_data_local": self.raw_data_local, "boundary": self.boundary})

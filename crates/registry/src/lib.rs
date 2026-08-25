@@ -49,22 +49,23 @@
 //! gate here has demonstrated that its evidence is internally consistent and sufficient for the
 //! tier it claims. It has not been shown to be scientifically good.
 
-pub mod gate;
 pub mod context_assurance;
+pub mod gate;
 pub mod index;
 pub mod pack;
 pub mod promote;
+pub mod resource_assurance;
 pub mod tier;
 
-pub use gate::{gate, gate_document, GateFinding, GateOutcome, Policy};
 pub use context_assurance::{
-    assure_context_compilation, CompiledContext, ContextAssuranceError,
-    ContextAssuranceReceipt, ContextCompilationRequest, ContextDisposition, ContextFact, FactState,
+    assure_context_compilation, CompiledContext, ContextAssuranceError, ContextAssuranceReceipt,
+    ContextCompilationRequest, ContextDisposition, ContextFact, FactState,
     CONTRACT_VERSION as CONTEXT_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_ASSURANCE_FEATURE_ID,
     PRECLINICAL_BOUNDARY as CONTEXT_ASSURANCE_PRECLINICAL_BOUNDARY,
     SCHEMA_VERSION as CONTEXT_ASSURANCE_SCHEMA_VERSION,
 };
+pub use gate::{gate, gate_document, GateFinding, GateOutcome, Policy};
 pub use index::{PackStatus, PublicationEvent, RegistryError, RegistryIndex};
 pub use pack::{
     BenchmarkPack, OracleDisagreement, PackBuilder, PackError, PackInstance, ParentRef,
@@ -72,6 +73,13 @@ pub use pack::{
     YieldLedger, PACK_DIGEST_FIELD, PACK_SCHEMA_VERSION,
 };
 pub use promote::{promote, promote_with, Promotion, PromotionError};
+pub use resource_assurance::{
+    assure_resource_discovery, resource_discovery_assurance_manifest, FederatedResourceDescriptor,
+    QualifiedFederatedResource, ResourceAssuranceDisposition, ResourceDiscoveryAssuranceError,
+    ResourceDiscoveryAssuranceReceipt, ResourceDiscoveryAssuranceRequest, ResourceState,
+    CONTRACT_VERSION as RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID,
+};
 pub use tier::{
     assess, evaluate_tier, evaluate_tier_with, reassess, Requirement, RungAssessment,
     TierAssessment, TierPolicy, TierVerdict, TrustTier, UnmetRequirement,

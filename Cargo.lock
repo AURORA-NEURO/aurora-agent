@@ -830,6 +830,7 @@ dependencies = [
 name = "bioprism-registry"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-mutation",
  "bioprism-prism",
