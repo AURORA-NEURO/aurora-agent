@@ -1071,7 +1071,7 @@ class AutonomousEvidenceFailoverEvent:
 class AutonomousEvidenceAdapterFailoverAcquirer:
     """Execute only the candidates in a verified selection plan under bounded failover."""
 
-    def __init__(self, registry: AutonomousEvidenceAdapterRegistry, plan: AutonomousEvidenceAdapterSelectionPlan | Mapping[str, Any], *, policy: AutonomousEvidenceFailoverPolicy | None = None, classify: Callable[[BaseException], AutonomousEvidenceRetryClassification | Mapping[str, Any]] | None = None, observe_failover: Callable[[AutonomousEvidenceFailoverEvent], Any] | None = None, observe_attempt: Callable[[AutonomousEvidenceRetryAttempt], Any] | None = None, clock: Callable[[], float] | None = None, sleep: Callable[[int], Any] | None = None) -> None:
+    def __init__(self, registry: AutonomousEvidenceAdapterRegistry, plan: AutonomousEvidenceAdapterSelectionPlan | Mapping[str, Any], *, policy: AutonomousEvidenceFailoverPolicy | None = None, provider_contracts: Any | None = None, source_boundary: Mapping[str, Any] | None = None, classify: Callable[[BaseException], AutonomousEvidenceRetryClassification | Mapping[str, Any]] | None = None, observe_failover: Callable[[AutonomousEvidenceFailoverEvent], Any] | None = None, observe_attempt: Callable[[AutonomousEvidenceRetryAttempt], Any] | None = None, clock: Callable[[], float] | None = None, sleep: Callable[[int], Any] | None = None) -> None:
         if not isinstance(registry, AutonomousEvidenceAdapterRegistry):
             raise ArgumentError("evidence failover requires a typed registry")
         typed_plan = plan if isinstance(plan, AutonomousEvidenceAdapterSelectionPlan) else AutonomousEvidenceAdapterSelectionPlan.from_dict(plan)
@@ -1080,12 +1080,23 @@ class AutonomousEvidenceAdapterFailoverAcquirer:
             raise ArgumentError("evidence failover requires a complete selection plan")
         if policy is not None and not isinstance(policy, AutonomousEvidenceFailoverPolicy):
             raise ArgumentError("evidence failover policy is malformed")
+        if provider_contracts is not None and not callable(getattr(provider_contracts, "create_acquirer_for_adapter", None)):
+            raise ArgumentError("evidence failover provider contract registry is malformed")
+        if source_boundary is not None:
+            if not isinstance(source_boundary, Mapping):
+                raise ArgumentError("evidence failover source boundary is malformed")
+            if provider_contracts is None:
+                raise ArgumentError("source-bound evidence failover requires provider contracts")
+            if not callable(source_boundary.get("describe_source")):
+                raise ArgumentError("source-bound evidence failover requires a policy and describe_source callback")
         for callback in (classify, observe_failover, observe_attempt, clock, sleep):
             if callback is not None and not callable(callback):
                 raise ArgumentError("evidence failover callback is malformed")
         self.registry = registry
         self.plan = typed_plan
         self.policy = policy or AutonomousEvidenceFailoverPolicy()
+        self.provider_contracts = provider_contracts
+        self.source_boundary = dict(source_boundary) if source_boundary is not None else None
         self.classify = classify
         self.observe_failover = observe_failover
         self.observe_attempt = observe_attempt
@@ -1120,6 +1131,27 @@ class AutonomousEvidenceAdapterFailoverAcquirer:
             if index > 0:
                 self._emit(AutonomousEvidenceFailoverEvent(domain, adapter_id, manifest.manifest_digest, index, "fallback_started", None, True, failovers_used, len(candidates) - index))
             base = self.registry.create_acquirer({domain: adapter_id})
+            if self.provider_contracts is not None:
+                if self.source_boundary is None:
+                    base = self.provider_contracts.create_acquirer_for_adapter(adapter_id, domain)
+                else:
+                    from .autonomous_evidence_source import create_autonomous_evidence_source_acquirer
+
+                    contract = self.provider_contracts.contract_for_adapter(adapter_id, domain)
+                    source_kind = self.source_boundary.get("source_kind")
+                    if source_kind is None:
+                        if len(contract.source_kinds) != 1:
+                            raise ArgumentError(f"source-bound evidence failover requires source_kind for {contract.contract_id}")
+                        source_kind = contract.source_kinds[0]
+                    base = create_autonomous_evidence_source_acquirer(
+                        self.provider_contracts,
+                        adapter_id=adapter_id,
+                        domain=domain,
+                        source_kind=source_kind,
+                        policy=self.source_boundary["policy"],
+                        ledger=self.source_boundary.get("ledger"),
+                        describe_source=self.source_boundary["describe_source"],
+                    )
             retrying = create_autonomous_evidence_retrying_acquirer(base, policy=self.policy.retry_policy, classify=self.classify, observe=self.observe_attempt, clock=self.clock, sleep=self.sleep)
             try:
                 value = retrying.acquire(context)

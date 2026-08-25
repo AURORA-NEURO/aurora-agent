@@ -15485,6 +15485,87 @@ class AutonomousAgent:
             journal=journal,
         )
 
+    def prepare_reviewed_evidence(
+        self,
+        registry: Any,
+        domains: Sequence[str] = AUTONOMOUS_DOMAINS,
+        *,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+        **options: Any,
+    ) -> Any:
+        """Prepare a generic adapter execution plan without contacting a source.
+
+        This is the high-level bridge for applications that use one agent across files,
+        browsers, databases, scientific sources, enterprise systems, and other reviewed
+        connectors.  ``options`` are forwarded to the typed execution controller's planning
+        boundary; source dispatch remains impossible until the matching execute method receives
+        explicit approval.
+        """
+
+        from .autonomous_evidence_execution import AutonomousEvidenceExecutionController
+
+        if not hasattr(registry, "registry_digest"):
+            raise ArgumentError("prepare_reviewed_evidence requires an evidence adapter registry")
+        evidence_plan = self.evidence_plan(
+            domains,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+        )
+        return AutonomousEvidenceExecutionController(registry, options.pop("health_store", None)).prepare(evidence_plan, **options)
+
+    def execute_reviewed_evidence(
+        self,
+        registry: Any,
+        domains: Sequence[str],
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        prepare_options: Mapping[str, Any] | None = None,
+        execute_options: Mapping[str, Any] | None = None,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> Any:
+        """Run the complete generic reviewed-evidence lifecycle through the agent facade."""
+
+        from .autonomous_evidence_execution import AutonomousEvidenceExecutionController
+
+        plan = self.evidence_plan(domains, available_evidence=available_evidence, completed_stages=completed_stages)
+        preparation = dict(prepare_options or {})
+        health_store = preparation.pop("health_store", None)
+        controller = AutonomousEvidenceExecutionController(registry, health_store)
+        execution_plan = controller.prepare(plan, **preparation)
+        return controller.execute(execution_plan, plan, requests, **dict(execute_options or {}))
+
+    def execute_reviewed_evidence_resumable(
+        self,
+        registry: Any,
+        domains: Sequence[str],
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        checkpoint_store: Any,
+        prepare_options: Mapping[str, Any] | None = None,
+        execute_options: Mapping[str, Any] | None = None,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> Any:
+        """Execute or resume generic reviewed evidence with a digest-bound checkpoint."""
+
+        from .autonomous_evidence_execution import AutonomousEvidenceExecutionController
+        from .autonomous_evidence_execution_resumable import AutonomousEvidenceExecutionResumableController
+
+        plan = self.evidence_plan(domains, available_evidence=available_evidence, completed_stages=completed_stages)
+        preparation = dict(prepare_options or {})
+        health_store = preparation.pop("health_store", None)
+        controller = AutonomousEvidenceExecutionController(registry, health_store)
+        execution_plan = controller.prepare(plan, **preparation)
+        return AutonomousEvidenceExecutionResumableController(controller, checkpoint_store, job_id).run(
+            execution_plan,
+            plan,
+            requests,
+            **dict(execute_options or {}),
+        )
+
     def run_with_reviewed_evidence(
         self,
         *,

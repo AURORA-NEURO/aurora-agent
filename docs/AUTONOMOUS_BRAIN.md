@@ -10902,3 +10902,31 @@ source, provide credentials, or claim evaluator truth; source contracts, approva
 storage, and network policy remain caller-owned. Cross-domain Python tests cover all twelve
 domains, persistence recovery, open circuits, transient failure fallback, tamper refusal, and
 secret-shaped metadata rejection.
+
+## Reviewed generic evidence execution and restart recovery
+
+The Python SDK now composes the generic evidence plan, adapter selection, readiness audit, provider
+contract registry, source provenance policy, retry/failover budget, and evidence runtime through
+`AutonomousEvidenceExecutionController`. `prepare()` is a pure review artifact: it verifies the
+exact registry snapshot, records the selection and health image, binds optional provider/source
+contracts, and produces a `ready_for_review` or `blocked` execution plan. It never invokes an
+adapter. `execute()` requires `approve_source_dispatch=True`, verifies the plan again, re-audits
+health immediately before dispatch, and rejects any readiness drift so an operator cannot
+accidentally approve a route that changed after review.
+
+The same controller is available through `AutonomousAgent.prepare_reviewed_evidence()` and
+`AutonomousAgent.execute_reviewed_evidence()`. `execute_reviewed_evidence_resumable()` adds a
+checkpoint store whose identity is bound to the evidence plan digest, selection/execution plan,
+request-set digest, readiness report, and job ID. The checkpoint lifecycle is explicit:
+`approval_required` -> `dispatch_pending` -> a settled runtime status, with
+`reconciliation_required` after an ambiguous failure. JSON persistence is canonical and
+tamper-evident; transactional stores use compare-and-swap to fence stale workers.
+
+Runtime journals remain append-only when a restarted worker replays a prior request or revises an
+evaluator result. The prior receipt is retained as history and the replay/reconciliation receipt
+is appended as the next chain entry. Rehydrated values must still be supplied by the caller and
+must match the stored digest; without them, the runtime fails closed rather than dispatching a
+duplicate source call. Provider contracts now also bind provider-neutral adapter manifests, with
+`caller_owned` as the explicit provider identity when a generic manifest does not declare one.
+No API key, credential, raw source value, prompt, provider response, or exception message is
+written to the execution plan, checkpoint, health ledger, or durable runtime journal.

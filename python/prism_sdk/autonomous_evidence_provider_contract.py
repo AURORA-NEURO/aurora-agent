@@ -20,6 +20,10 @@ from .autonomous_evidence_adapter_orchestration import (
     _identifier,
     _json_bytes,
 )
+from .autonomous_evidence_adapters import (
+    AutonomousEvidenceAdapterManifest,
+    AutonomousEvidenceAdapterRegistry,
+)
 from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
 from .errors import ArgumentError
 
@@ -84,11 +88,31 @@ def _subset(name: str, values: Sequence[str], allowed: Sequence[str]) -> None:
         raise ArgumentError(f"{name} exceeds the bound adapter contract: {', '.join(missing)}")
 
 
-def _manifest_for(registry: AutonomousLLMEvidenceAdapterRegistry, adapter_id: str) -> AutonomousLLMEvidenceAdapterManifest:
+def _manifest_for(
+    registry: AutonomousLLMEvidenceAdapterRegistry | AutonomousEvidenceAdapterRegistry,
+    adapter_id: str,
+) -> AutonomousLLMEvidenceAdapterManifest | AutonomousEvidenceAdapterManifest:
     matches = tuple(manifest for manifest in registry.manifests() if manifest.adapter_id == adapter_id)
     if len(matches) != 1:
         raise ArgumentError(f"provider evidence contract references unknown or ambiguous adapter: {adapter_id}")
     return matches[0]
+
+
+def _manifest_provider(manifest: AutonomousLLMEvidenceAdapterManifest | AutonomousEvidenceAdapterManifest) -> str:
+    """Use the explicit provider on legacy LLM manifests and a stable generic fallback."""
+
+    provider = getattr(manifest, "provider", None)
+    return provider if isinstance(provider, str) and provider else "caller_owned"
+
+
+def _manifest_domains(manifest: AutonomousLLMEvidenceAdapterManifest | AutonomousEvidenceAdapterManifest) -> tuple[str, ...]:
+    domain = getattr(manifest, "domain", None)
+    if isinstance(domain, str):
+        return (domain,)
+    domains = getattr(manifest, "domains", None)
+    if isinstance(domains, Sequence):
+        return tuple(domains)
+    raise ArgumentError("provider evidence contract manifest has no domain scope")
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +138,7 @@ class AutonomousEvidenceProviderContract:
     @classmethod
     def bind(
         cls,
-        registry: AutonomousLLMEvidenceAdapterRegistry,
+        registry: AutonomousLLMEvidenceAdapterRegistry | AutonomousEvidenceAdapterRegistry,
         *,
         contract_id: str,
         version: str,
@@ -131,7 +155,7 @@ class AutonomousEvidenceProviderContract:
         required_metadata: Sequence[str] = (),
         operation_metadata_key: str | None = None,
     ) -> "AutonomousEvidenceProviderContract":
-        if not isinstance(registry, AutonomousLLMEvidenceAdapterRegistry):
+        if not isinstance(registry, (AutonomousLLMEvidenceAdapterRegistry, AutonomousEvidenceAdapterRegistry)):
             raise ArgumentError("provider evidence contract requires a typed adapter registry")
         normalized_adapter_id = _identifier("provider evidence contract adapter_id", adapter_id)
         manifest = _manifest_for(registry, normalized_adapter_id)
@@ -143,9 +167,10 @@ class AutonomousEvidenceProviderContract:
         normalized_operation_key = None if operation_metadata_key is None else _metadata_key("provider evidence contract operation_metadata_key", operation_metadata_key)
         if normalized_operation_key is not None and normalized_operation_key not in normalized_metadata:
             raise ArgumentError("provider evidence contract operation_metadata_key must be required metadata")
-        if provider != manifest.provider:
+        manifest_provider = _manifest_provider(manifest)
+        if provider != manifest_provider:
             raise ArgumentError("provider evidence contract provider does not match the adapter manifest")
-        _subset("provider evidence contract domains", normalized_domains, (manifest.domain,))
+        _subset("provider evidence contract domains", normalized_domains, _manifest_domains(manifest))
         _subset("provider evidence contract capabilities", normalized_capabilities, manifest.capabilities)
         _subset("provider evidence contract source_kinds", normalized_source_kinds, manifest.source_kinds)
         if protocol not in AUTONOMOUS_EVIDENCE_PROVIDER_PROTOCOLS:
@@ -160,7 +185,7 @@ class AutonomousEvidenceProviderContract:
             "schema": AUTONOMOUS_EVIDENCE_PROVIDER_CONTRACT_SCHEMA,
             "contract_id": _identifier("provider evidence contract contract_id", contract_id),
             "version": _identifier("provider evidence contract version", version),
-            "provider": manifest.provider,
+            "provider": manifest_provider,
             "protocol": protocol,
             "operations": list(normalized_operations),
             "domains": list(normalized_domains),
@@ -292,8 +317,8 @@ class AutonomousEvidenceProviderContractCoverage:
 class AutonomousEvidenceProviderContractRegistry:
     """Process-local contract registry bound to one adapter registry snapshot."""
 
-    def __init__(self, adapter_registry: AutonomousLLMEvidenceAdapterRegistry) -> None:
-        if not isinstance(adapter_registry, AutonomousLLMEvidenceAdapterRegistry):
+    def __init__(self, adapter_registry: AutonomousLLMEvidenceAdapterRegistry | AutonomousEvidenceAdapterRegistry) -> None:
+        if not isinstance(adapter_registry, (AutonomousLLMEvidenceAdapterRegistry, AutonomousEvidenceAdapterRegistry)):
             raise ArgumentError("provider evidence contract registry requires a typed adapter registry")
         self.adapter_registry = adapter_registry
         self._entries: dict[str, AutonomousEvidenceProviderContract] = {}
@@ -365,9 +390,9 @@ class AutonomousEvidenceProviderContractRegistry:
                 if contract.adapter_registry_digest != current:
                     raise ArgumentError("provider evidence contract adapter registry is stale or tampered")
                 raise ArgumentError(f"provider evidence contract adapter binding changed: {contract.contract_id}")
-            if contract.provider != manifest.provider:
+            if contract.provider != _manifest_provider(manifest):
                 raise ArgumentError(f"provider evidence contract provider binding changed: {contract.contract_id}")
-            _subset("provider evidence contract domains", contract.domains, (manifest.domain,))
+            _subset("provider evidence contract domains", contract.domains, _manifest_domains(manifest))
             _subset("provider evidence contract capabilities", contract.capabilities, manifest.capabilities)
             _subset("provider evidence contract source_kinds", contract.source_kinds, manifest.source_kinds)
         return self
@@ -386,7 +411,10 @@ class AutonomousEvidenceProviderContractRegistry:
     def create_acquirer_for_adapter(self, adapter_id: str, domain: str) -> Any:
         normalized_id = _identifier("provider evidence contract adapter_id", adapter_id)
         contract = self.contract_for_adapter(normalized_id, domain)
-        adapter = self.adapter_registry.resolve(domain, normalized_id)
+        if isinstance(self.adapter_registry, AutonomousEvidenceAdapterRegistry):
+            adapter = self.adapter_registry.create_acquirer({domain: normalized_id})
+        else:
+            adapter = self.adapter_registry.resolve(domain, normalized_id)
         registry = self
 
         class ContractAcquirer:
@@ -438,7 +466,7 @@ class AutonomousEvidenceProviderContractRegistry:
 
 
 def create_autonomous_evidence_provider_contract_registry(
-    adapter_registry: AutonomousLLMEvidenceAdapterRegistry,
+    adapter_registry: AutonomousLLMEvidenceAdapterRegistry | AutonomousEvidenceAdapterRegistry,
 ) -> AutonomousEvidenceProviderContractRegistry:
     return AutonomousEvidenceProviderContractRegistry(adapter_registry)
 

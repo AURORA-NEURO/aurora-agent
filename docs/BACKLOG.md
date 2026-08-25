@@ -1864,3 +1864,11 @@ is for caller-owned file, browser, database, scientific, enterprise, and connect
 Deployment responsibilities remain unchanged: source truth, credentials, approval, encrypted
 storage, distributed leases, external network authorization, and evaluator authority stay outside
 the SDK.
+
+Generic evidence execution is now composed in Python as well as TypeScript. The reviewed execution
+controller gates source dispatch, rechecks readiness, enforces provider/source contracts, and
+drives the existing runtime through bounded failover. The resumable controller adds canonical
+checkpoint/CAS persistence and append-only replay revisions, so the all-domain facade can recover
+without issuing an implicit duplicate source call. Remaining deployment work is still caller-owned:
+credential storage and rotation, source truth, identity and authorization, distributed leasing,
+encrypted raw-value retention, and reconciliation of uncertain external effects.

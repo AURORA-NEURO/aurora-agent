@@ -553,6 +553,9 @@ class InMemoryAutonomousEvidenceRuntimeJournal:
             existing = next((item for item in self._entries if item.receipt.request_digest == entry.receipt.request_digest), None)
             if existing is not None and content_digest(existing.to_dict()) == content_digest(entry.to_dict()):
                 return existing
+            # A replay or evaluator reconciliation is a new, hash-chained revision of the same
+            # request.  Keeping the earlier entry in the append-only journal preserves audit
+            # history while allowing rehydrated workers to publish the newer receipt.
             if entry.sequence != len(self._entries) + 1 or entry.previous_entry_digest != (self._entries[-1].entry_digest if self._entries else None):
                 raise ArgumentError("evidence runtime journal chain position is invalid")
             if content_digest({key: value for key, value in entry.to_dict().items() if key != "entry_digest"}) != entry.entry_digest:
