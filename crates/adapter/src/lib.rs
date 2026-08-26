@@ -102,6 +102,7 @@ pub mod federated_continual_evidence_surveillance_contract_model;
 pub mod local_evidence_surveillance_research_copilot;
 pub mod multimodal_evidence_surveillance_research_copilot;
 pub mod throughput_evidence_surveillance_research_copilot;
+pub mod federated_continual_evidence_surveillance_research_copilot;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
@@ -317,6 +318,17 @@ pub use experiment_design_control::{
     FederatedExperimentDesignRequest,
     CONTRACT_VERSION as EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
+};
+pub use federated_continual_evidence_surveillance_research_copilot::{
+    federated_continual_evidence_surveillance_research_copilot_manifest,
+    run_federated_continual_evidence_surveillance_research_copilot,
+    FederatedContinualEvidenceSurveillanceResearchCopilotError,
+    FederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
+    FederatedContinualEvidenceSurveillanceResearchCopilotRequest,
+    FederatedContinualResearchCopilotDisposition, FederatedCopilotEvidenceContribution,
+    FederatedCopilotQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
 };
 pub use fact::{FactDraft, ValueQualifiers};
 pub use federated_commons::{

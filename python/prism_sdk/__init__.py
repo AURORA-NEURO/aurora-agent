@@ -6659,6 +6659,11 @@ from .adapter_throughput_evidence_surveillance_research_copilot import (
     ThroughputEvidenceSurveillanceResearchCopilotReceipt,
     run_throughput_evidence_surveillance_research_copilot,
 )
+from .adapter_federated_continual_evidence_surveillance_research_copilot import (
+    FederatedCopilotEvidenceContribution,
+    FederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
+    run_federated_continual_evidence_surveillance_research_copilot,
+)
 
 __all__ += [
     "MultimodalCopilotEvidenceObservation",
@@ -6667,4 +6672,7 @@ __all__ += [
     "ThroughputCopilotEvidenceObservation",
     "ThroughputEvidenceSurveillanceResearchCopilotReceipt",
     "run_throughput_evidence_surveillance_research_copilot",
+    "FederatedCopilotEvidenceContribution",
+    "FederatedContinualEvidenceSurveillanceResearchCopilotReceipt",
+    "run_federated_continual_evidence_surveillance_research_copilot",
 ]
