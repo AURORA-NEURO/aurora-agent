@@ -129,6 +129,12 @@ use bioprism_adapter::{
     ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
 };
 use bioprism_adapter::{
+    render_local_retrieval_synthesis_research_workbench,
+    LocalRetrievalSynthesisResearchWorkbenchReceipt,
+    LocalRetrievalSynthesisResearchWorkbenchRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_throughput_retrieval_synthesis_inference_engine,
     ThroughputRetrievalSynthesisInferenceEngineReceipt,
     ThroughputRetrievalSynthesisInferenceEngineRequest,
@@ -443,6 +449,7 @@ pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str = "adapte
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str = "adapter_multimodal_retrieval_synthesis_workflow_fabric";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str = "adapter_throughput_retrieval_synthesis_workflow_fabric";
 pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str = "adapter_federated_continual_retrieval_synthesis_workflow_fabric";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_TOOL: &str = "adapter_local_retrieval_synthesis_research_workbench";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_throughput_retrieval_synthesis_contract_model";
@@ -1390,6 +1397,27 @@ pub fn validate_federated_continual_retrieval_synthesis_workflow_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID {
         return Err("federated continual retrieval workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_research_workbench_json(value: &Value) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisResearchWorkbenchRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid local retrieval workbench request: {error}"))?;
+    let receipt = render_local_retrieval_synthesis_research_workbench(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize local retrieval workbench receipt: {error}"))
+}
+
+pub fn validate_local_retrieval_synthesis_research_workbench_json(
+    value: &Value,
+) -> Result<LocalRetrievalSynthesisResearchWorkbenchReceipt, String> {
+    let receipt: LocalRetrievalSynthesisResearchWorkbenchReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid local retrieval workbench receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID {
+        return Err("local retrieval workbench feature id mismatch".into());
     }
     Ok(receipt)
 }
