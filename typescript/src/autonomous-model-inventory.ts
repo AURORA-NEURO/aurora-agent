@@ -239,6 +239,7 @@ export async function validateAutonomousModelInventorySnapshot(value: unknown): 
 export class AutonomousModelInventoryCoordinator {
   private expectedInventoryDigest: string | null = null;
   private expectedPersistence: AutonomousModelInventoryPersistence | undefined;
+  private lastSnapshot: AutonomousModelInventorySnapshot | null = null;
   private operationTail: Promise<void> = Promise.resolve();
 
   constructor(readonly agent: AutonomousAgent, readonly persistence?: AutonomousModelInventoryPersistence) {
@@ -333,6 +334,7 @@ export class AutonomousModelInventoryCoordinator {
       } else await persistence.write(snapshot);
       this.expectedInventoryDigest = snapshot.inventory_digest;
     }
+    this.lastSnapshot = snapshot;
     return snapshot;
   }
 
@@ -346,6 +348,7 @@ export class AutonomousModelInventoryCoordinator {
     const raw = await persistence.read();
     if (raw === null) {
       this.expectedInventoryDigest = null;
+      this.lastSnapshot = null;
       return null;
     }
     const snapshot = await validateAutonomousModelInventorySnapshot(raw);
@@ -358,6 +361,25 @@ export class AutonomousModelInventoryCoordinator {
       secret_material: "never_returned",
     };
     await this.agent.restoreModels(catalogueSnapshot);
+    this.expectedInventoryDigest = snapshot.inventory_digest;
+    this.lastSnapshot = snapshot;
+    return snapshot;
+  }
+
+  async flush(persistence: AutonomousModelInventoryPersistence = this.persistence as AutonomousModelInventoryPersistence): Promise<AutonomousModelInventorySnapshot | null> {
+    return this.enqueue(() => this.flushInternal(persistence));
+  }
+
+  private async flushInternal(persistence: AutonomousModelInventoryPersistence): Promise<AutonomousModelInventorySnapshot | null> {
+    if (!persistence || typeof persistence.write !== "function") throw new ArgumentError("model inventory flush requires persistence");
+    this.selectPersistence(persistence);
+    const snapshot = this.lastSnapshot;
+    if (snapshot === null) return null;
+    const currentCatalogueDigest = await digestJson(this.agent.models());
+    if (currentCatalogueDigest !== snapshot.catalogue_digest) throw new ArgumentError("model inventory catalogue changed outside the persistence coordinator");
+    if (typeof persistence.writeIfUnchanged === "function") {
+      if (!await persistence.writeIfUnchanged(this.expectedInventoryDigest, snapshot)) throw new ArgumentError("model inventory persistence compare-and-swap conflict");
+    } else await persistence.write(snapshot);
     this.expectedInventoryDigest = snapshot.inventory_digest;
     return snapshot;
   }

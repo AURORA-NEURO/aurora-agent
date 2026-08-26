@@ -10,6 +10,17 @@ are excluded from the coverage denominator — they specify no behaviour.
 A module leaves this list when a crate cites it, which is the same weak criterion coverage
 uses. This file tracks *attention*, not completeness.
 
+Both high-level SDK agents now also expose a coordinated persistence lifecycle. Restore and flush
+compose model inventory, runtime health, provider/model health when a coordinator exists, evaluator
+calibration, memory, online learning, and prompt learning in a fixed dependency order, then return
+one digest-bound component report. Strict failures preserve the typed redacted report; non-strict
+passes expose unconfigured and not-attempted components, while `require_all`/`requireAll` makes
+missing coordinators fail closed. Model inventory flush re-commits its last validated image only
+after a live catalogue digest check and never rediscoveries a provider. The lifecycle explicitly
+retains per-component CAS semantics rather than claiming a distributed cross-store transaction;
+deployment identity, approval ordering, encryption, and crash recovery between independent writes
+remain caller-owned.
+
 The TypeScript workflow path now reaches stage-contract parity with Python through
 `AutonomousWorkflowStageExecutionPlan`: every blueprint carries digest-bound capability,
 evidence, evaluator, and selected-tool metadata; staged dispatch rejects stale contracts and

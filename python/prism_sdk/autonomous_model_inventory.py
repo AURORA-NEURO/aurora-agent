@@ -830,6 +830,7 @@ class AutonomousModelInventoryPersistenceCoordinator:
         self.inventory = inventory
         self.store = store
         self._expected_snapshot_digest: str | None = None
+        self._last_snapshot: AutonomousModelInventorySnapshot | None = None
         self._lock = threading.RLock()
 
     def refresh(
@@ -869,6 +870,7 @@ class AutonomousModelInventoryPersistenceCoordinator:
                 self.inventory.catalogue.restore(before)
                 raise AutonomousModelInventoryError("inventory persistence compare-and-swap conflict")
             self._expected_snapshot_digest = snapshot.digest
+            self._last_snapshot = snapshot
             return snapshot
 
     def restore(self) -> AutonomousModelInventorySnapshot | None:
@@ -878,6 +880,7 @@ class AutonomousModelInventoryPersistenceCoordinator:
             snapshot = self.store.load()
             if snapshot is None:
                 self._expected_snapshot_digest = None
+                self._last_snapshot = None
                 return None
             catalogue = self.store.load_catalogue()
             if catalogue is None:
@@ -885,6 +888,33 @@ class AutonomousModelInventoryPersistenceCoordinator:
                     "inventory persistence snapshot does not contain a bound model catalogue"
                 )
             self.inventory.catalogue.restore(catalogue)
+            self._expected_snapshot_digest = snapshot.digest
+            self._last_snapshot = snapshot
+            return snapshot
+
+    def flush(self) -> AutonomousModelInventorySnapshot | None:
+        """Rewrite the last validated inventory image without rediscovering providers.
+
+        Inventory discovery is an explicit provider operation and therefore remains separate from
+        lifecycle shutdown.  This method only re-commits the last snapshot after proving that the
+        live catalogue still has the digest that snapshot advertised; an out-of-band catalogue
+        mutation fails closed instead of persisting a misleading inventory image.
+        """
+
+        with self._lock:
+            snapshot = self._last_snapshot
+            if snapshot is None:
+                return None
+            if content_digest(self.inventory.catalogue.to_dict()) != snapshot.catalogue_digest:
+                raise AutonomousModelInventoryError(
+                    "inventory catalogue changed outside the persistence coordinator"
+                )
+            if not self.store.save_if_unchanged(
+                snapshot,
+                self._expected_snapshot_digest,
+                catalogue=self.inventory.catalogue,
+            ):
+                raise AutonomousModelInventoryError("inventory persistence compare-and-swap conflict")
             self._expected_snapshot_digest = snapshot.digest
             return snapshot
 

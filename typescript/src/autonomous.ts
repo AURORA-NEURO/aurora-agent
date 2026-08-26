@@ -4891,6 +4891,10 @@ export class AutonomousAgent {
    * not load the optional inventory module until discovery or restore is requested.
    */
   private modelInventoryCoordinator?: import("./autonomous-model-inventory.js").AutonomousModelInventoryCoordinator;
+  private persistenceLifecycleCoordinator?: import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleCoordinator;
+  private persistenceLifecycleModelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+  private persistenceLifecycleRequireAll?: boolean;
+  private persistenceLifecycleContinueOnError?: boolean;
 
   constructor(llm: LLMRuntime, options: AutonomousAgentOptions = {}) {
     if (!(llm instanceof LLMRuntime)) throw new ProviderRuntimeError("AutonomousAgent requires an LLMRuntime");
@@ -5627,6 +5631,63 @@ export class AutonomousAgent {
     const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
     const coordinator = this.modelInventoryCoordinator ??= new AutonomousModelInventoryCoordinator(this);
     return coordinator.restore(persistence);
+  }
+
+  /** Re-commit the last validated inventory image without rediscovering provider models. */
+  async flushModelInventory(
+    persistence: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence,
+  ): Promise<AutonomousModelInventorySnapshot | null> {
+    const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
+    const coordinator = this.modelInventoryCoordinator ??= new AutonomousModelInventoryCoordinator(this);
+    return coordinator.flush(persistence);
+  }
+
+  private async persistenceLifecycleFor(options: {
+    modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+    requireAll?: boolean;
+    continueOnError?: boolean;
+  } = {}): Promise<import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleCoordinator> {
+    const { AutonomousAgentPersistenceLifecycleCoordinator } = await import("./autonomous-agent-lifecycle.js");
+    const requireAll = options.requireAll ?? false;
+    const continueOnError = options.continueOnError ?? false;
+    if (
+      this.persistenceLifecycleCoordinator === undefined
+      || this.persistenceLifecycleModelInventoryPersistence !== options.modelInventoryPersistence
+      || this.persistenceLifecycleRequireAll !== requireAll
+      || this.persistenceLifecycleContinueOnError !== continueOnError
+    ) {
+      this.persistenceLifecycleCoordinator = new AutonomousAgentPersistenceLifecycleCoordinator(this, {
+        modelInventoryPersistence: options.modelInventoryPersistence,
+        requireAll,
+        continueOnError,
+      });
+      this.persistenceLifecycleModelInventoryPersistence = options.modelInventoryPersistence;
+      this.persistenceLifecycleRequireAll = requireAll;
+      this.persistenceLifecycleContinueOnError = continueOnError;
+    }
+    return this.persistenceLifecycleCoordinator;
+  }
+
+  /** Restore all configured metadata coordinators in the reviewed dependency order. */
+  async restorePersistedState(options: {
+    modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+    strict?: boolean;
+    requireAll?: boolean;
+    continueOnError?: boolean;
+  } = {}): Promise<import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleReport> {
+    const coordinator = await this.persistenceLifecycleFor(options);
+    return coordinator.restore({ strict: options.strict, continueOnError: options.continueOnError });
+  }
+
+  /** Flush all configured metadata coordinators in reverse dependency order. */
+  async flushPersistedState(options: {
+    modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+    strict?: boolean;
+    requireAll?: boolean;
+    continueOnError?: boolean;
+  } = {}): Promise<import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleReport> {
+    const coordinator = await this.persistenceLifecycleFor(options);
+    return coordinator.flush({ strict: options.strict, continueOnError: options.continueOnError });
   }
 
   async profiles(): Promise<AutonomousDomainProfile[]> {

@@ -11446,3 +11446,36 @@ duplicate source call. Provider contracts now also bind provider-neutral adapter
 `caller_owned` as the explicit provider identity when a generic manifest does not declare one.
 No API key, credential, raw source value, prompt, provider response, or exception message is
 written to the execution plan, checkpoint, health ledger, or durable runtime journal.
+
+## Coordinated agent persistence lifecycle
+
+The high-level brain now has one explicit startup/shutdown seam in both SDKs:
+`restore_persisted_state()` / `restorePersistedState()` and
+`flush_persisted_state()` / `flushPersistedState()`. These methods compose the already configured
+caller-owned coordinators instead of introducing a second persistence implementation. Restore
+order is deterministic: model inventory, runtime transport health, provider/model health when
+available, evaluator calibration, episodic memory, online learning, and prompt learning. Flush
+uses the reverse order so the learner and prompt state settle before the process-level availability
+images are finalized. TypeScript reports the provider/model health slot as explicitly
+`unconfigured` unless the embedding supplies an equivalent coordinator; it never infers one from
+the live health controller.
+
+Each operation returns a digest-bound metadata report with one row per component, component
+status, snapshot/state digest projections, generation when available, a bounded error class, and
+an explicit `next_action`. Strict mode is the default: a failed component stops the pass and raises
+the typed `AutonomousAgentPersistenceLifecycleError` with the redacted report attached.
+Applications that
+want to inspect all independent stores can use `strict: false` plus `continue_on_error` /
+`continueOnError`; `require_all` / `requireAll` turns missing optional coordinators into a
+fail-closed lifecycle failure. Unconfigured components remain visible in non-strict reports rather
+than being mistaken for restored state.
+
+Model inventory now has an explicit flush operation as well. It re-commits only the last validated
+inventory snapshot after checking that the live catalogue still matches its catalogue digest; it
+does not rediscover models, contact a provider, restore credentials, or silently persist an
+out-of-band catalogue mutation. The lifecycle contract is intentionally not a distributed
+transaction: each component retains its own CAS fence, while cross-store atomicity, ordering with
+the deployment's identity/approval store, and crash recovery between component writes remain
+caller-owned. Reports therefore say `per_component_cas_only` instead of claiming all-or-nothing
+durability. Component projections retain no task text, prompts, provider payloads, credentials,
+evidence, tool arguments, effects, or raw exception messages.

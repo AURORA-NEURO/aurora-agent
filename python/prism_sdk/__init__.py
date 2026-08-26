@@ -1740,6 +1740,16 @@ from .autonomous_model_inventory import (
     AutonomousModelInventorySnapshot,
     AutonomousModelInventoryStore,
 )
+from .autonomous_agent_lifecycle import (
+    AUTONOMOUS_AGENT_LIFECYCLE_SCHEMA,
+    AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS,
+    AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER,
+    AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER,
+    AutonomousAgentPersistenceLifecycleCoordinator,
+    AutonomousAgentPersistenceLifecycleError,
+    AutonomousAgentPersistenceComponentResult,
+    AutonomousAgentPersistenceLifecycleReport,
+)
 from .llm_runtime import (
     CredentialError,
     CompositeProviderInvocationObserver,
@@ -7652,6 +7662,14 @@ __all__ = [
     "AutonomousModelInventoryProviderResult",
     "AutonomousModelInventorySnapshot",
     "AutonomousModelInventoryStore",
+    "AUTONOMOUS_AGENT_LIFECYCLE_SCHEMA",
+    "AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS",
+    "AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER",
+    "AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER",
+    "AutonomousAgentPersistenceLifecycleCoordinator",
+    "AutonomousAgentPersistenceLifecycleError",
+    "AutonomousAgentPersistenceComponentResult",
+    "AutonomousAgentPersistenceLifecycleReport",
     "AUTONOMOUS_TOOL_EVALUATION_SCHEMA",
     "AUTONOMOUS_TOOL_LEARNING_SCHEMA",
     "AUTONOMOUS_TOOL_REPLAY_CASE_SCHEMA",

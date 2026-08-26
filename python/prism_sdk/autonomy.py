@@ -190,6 +190,9 @@ from .autonomous_model_inventory import (
     AutonomousModelInventorySnapshot,
     AutonomousModelInventoryStore,
 )
+from .autonomous_agent_lifecycle import (
+    AutonomousAgentPersistenceLifecycleCoordinator,
+)
 from .autonomous_builtin_connectors import (
     register_builtin_autonomous_domain_connectors,
     register_builtin_autonomous_connectors,
@@ -14830,6 +14833,7 @@ class AutonomousAgent:
         self.catalogue = model_catalogue or ModelCatalogue()
         self.model_inventory = AutonomousModelInventoryCoordinator(runtime, self.catalogue)
         self.model_inventory_persistence: AutonomousModelInventoryPersistenceCoordinator | None = None
+        self._persistence_lifecycle_coordinator: AutonomousAgentPersistenceLifecycleCoordinator | None = None
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
         self.learning_persistence = learning_persistence
@@ -15133,6 +15137,75 @@ class AutonomousAgent:
         except AutonomousModelInventoryError as error:
             raise BrainRunError("model inventory restore failed") from error
         return None if snapshot is None else snapshot.to_dict()
+
+    def flush_model_inventory(
+        self,
+        snapshot_store: AutonomousModelInventoryStore,
+    ) -> dict[str, Any] | None:
+        """Re-commit the last inventory image without rediscovering or contacting a provider."""
+
+        try:
+            snapshot = self._model_inventory_persistence_for(snapshot_store).flush()
+        except AutonomousModelInventoryError as error:
+            raise BrainRunError("model inventory flush failed") from error
+        return None if snapshot is None else snapshot.to_dict()
+
+    def _persistence_lifecycle_for(
+        self,
+        model_inventory_store: AutonomousModelInventoryStore | None = None,
+        *,
+        require_all: bool = False,
+        continue_on_error: bool = False,
+    ) -> AutonomousAgentPersistenceLifecycleCoordinator:
+        coordinator = self._persistence_lifecycle_coordinator
+        if (
+            coordinator is None
+            or coordinator.model_inventory_store is not model_inventory_store
+            or coordinator.require_all != require_all
+            or coordinator.continue_on_error != continue_on_error
+        ):
+            coordinator = AutonomousAgentPersistenceLifecycleCoordinator(
+                self,
+                model_inventory_store=model_inventory_store,
+                require_all=require_all,
+                continue_on_error=continue_on_error,
+            )
+            self._persistence_lifecycle_coordinator = coordinator
+        return coordinator
+
+    def restore_persisted_state(
+        self,
+        *,
+        model_inventory_store: AutonomousModelInventoryStore | None = None,
+        strict: bool = True,
+        require_all: bool = False,
+        continue_on_error: bool = False,
+    ) -> dict[str, Any]:
+        """Restore all configured brain metadata stores in dependency order."""
+
+        report = self._persistence_lifecycle_for(
+            model_inventory_store,
+            require_all=require_all,
+            continue_on_error=continue_on_error,
+        ).restore(strict=strict, continue_on_error=continue_on_error)
+        return report.to_dict()
+
+    def flush_persisted_state(
+        self,
+        *,
+        model_inventory_store: AutonomousModelInventoryStore | None = None,
+        strict: bool = True,
+        require_all: bool = False,
+        continue_on_error: bool = False,
+    ) -> dict[str, Any]:
+        """Flush all configured brain metadata stores in reverse dependency order."""
+
+        report = self._persistence_lifecycle_for(
+            model_inventory_store,
+            require_all=require_all,
+            continue_on_error=continue_on_error,
+        ).flush(strict=strict, continue_on_error=continue_on_error)
+        return report.to_dict()
 
     def register_provider(self, config: ProviderConfig) -> None:
         """Register non-secret provider transport metadata for the key-entry flow."""

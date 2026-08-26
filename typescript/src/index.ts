@@ -597,6 +597,24 @@ export type {
   AutonomousModelInventoryRefreshOptions,
 } from "./autonomous-model-inventory.js";
 export {
+  AUTONOMOUS_AGENT_LIFECYCLE_SCHEMA,
+  AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS,
+  AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER,
+  AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER,
+  AutonomousAgentPersistenceLifecycleCoordinator,
+  AutonomousAgentPersistenceLifecycleError,
+} from "./autonomous-agent-lifecycle.js";
+export type {
+  AutonomousAgentPersistenceLifecycleComponent,
+  AutonomousAgentPersistenceLifecycleOperation,
+  AutonomousAgentPersistenceLifecycleStatus,
+  AutonomousAgentPersistenceLifecycleComponentStatus,
+  AutonomousAgentPersistenceComponentResult,
+  AutonomousAgentPersistenceLifecycleReport,
+  AutonomousAgentPersistenceLifecycleOptions,
+  AutonomousAgentPersistenceLifecycleRunOptions,
+} from "./autonomous-agent-lifecycle.js";
+export {
   AUTONOMOUS_WORKFLOW_PORTFOLIO_SCHEMA,
   AUTONOMOUS_WORKFLOW_PORTFOLIO_VERIFICATION_SCHEMA,
   MAX_AUTONOMOUS_WORKFLOW_PORTFOLIO_ITEMS,
