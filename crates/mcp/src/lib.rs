@@ -56,6 +56,8 @@ pub use research_contracts::{
     validate_throughput_retrieval_synthesis_contract_model_json,
     run_federated_retrieval_synthesis_inference_engine_json,
     validate_federated_retrieval_synthesis_inference_engine_json,
+    run_federated_retrieval_synthesis_contract_model_json,
+    validate_federated_retrieval_synthesis_contract_model_json,
     run_local_evidence_surveillance_research_copilot_json,
     validate_local_evidence_surveillance_research_copilot_json,
     run_multimodal_evidence_surveillance_research_copilot_json,

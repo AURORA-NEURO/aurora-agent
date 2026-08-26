@@ -3626,6 +3626,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterFederatedRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterFederatedRetrievalSynthesisContractModelReceiptDigest,
+  validateAdapterFederatedRetrievalSynthesisContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedRetrievalSynthesisContractModelReceipt } from "./research-contracts.js";
+export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,
   AUTONOMOUS_GOAL_MAX_CRITERIA,

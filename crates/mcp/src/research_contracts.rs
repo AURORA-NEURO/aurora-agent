@@ -99,6 +99,12 @@ use bioprism_adapter::{
     ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    run_federated_retrieval_synthesis_contract_model,
+    FederatedRetrievalSynthesisContractModelReceipt,
+    FederatedRetrievalSynthesisContractModelRequest,
+    ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+};
+use bioprism_adapter::{
     compile_experiment_design, ExperimentDesignReceipt, FederatedExperimentDesignRequest,
     EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
 };
@@ -385,6 +391,7 @@ pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_throughput_retrieval_synthesis_contract_model";
 pub const ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_federated_retrieval_synthesis_inference_engine";
+pub const ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_federated_retrieval_synthesis_contract_model";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
 pub const ADAPTER_RESOURCE_WORKBENCH_TOOL: &str = "adapter_resource_workbench";
@@ -1243,6 +1250,27 @@ pub fn validate_federated_retrieval_synthesis_inference_engine_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID {
         return Err("federated retrieval synthesis engine feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_retrieval_synthesis_contract_model_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedRetrievalSynthesisContractModelRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated retrieval contract model request: {error}"))?;
+    let receipt = run_federated_retrieval_synthesis_contract_model(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize federated retrieval contract model receipt: {error}"))
+}
+
+pub fn validate_federated_retrieval_synthesis_contract_model_json(
+    value: &Value,
+) -> Result<FederatedRetrievalSynthesisContractModelReceipt, String> {
+    let receipt: FederatedRetrievalSynthesisContractModelReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated retrieval contract model receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID {
+        return Err("federated retrieval contract model feature id mismatch".into());
     }
     Ok(receipt)
 }

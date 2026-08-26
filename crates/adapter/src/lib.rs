@@ -149,6 +149,7 @@ pub mod multimodal_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_contract_model;
 pub mod federated_retrieval_synthesis_inference_engine;
+pub mod federated_retrieval_synthesis_contract_model;
 pub mod scale_frontier;
 pub mod semantic_parity;
 pub mod source;
@@ -612,6 +613,15 @@ pub use federated_retrieval_synthesis_inference_engine::{
     FederatedRetrievalSynthesisInferenceEngineRequest,
     CONTRACT_VERSION as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use federated_retrieval_synthesis_contract_model::{
+    federated_retrieval_synthesis_contract_model_manifest,
+    run_federated_retrieval_synthesis_contract_model,
+    FederatedRetrievalSynthesisContractModelError,
+    FederatedRetrievalSynthesisContractModelReceipt,
+    FederatedRetrievalSynthesisContractModelRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
 };
 pub use scale_frontier::{
     plan_adapter_scale_frontier, ScaleDisposition, ScaleFrontierError, ScaleFrontierReceipt,
