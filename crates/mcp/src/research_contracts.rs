@@ -117,6 +117,12 @@ use bioprism_adapter::{
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
 };
 use bioprism_adapter::{
+    schedule_throughput_retrieval_synthesis_workflow,
+    ThroughputRetrievalSynthesisWorkflowReceipt,
+    ThroughputRetrievalSynthesisWorkflowRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_throughput_retrieval_synthesis_inference_engine,
     ThroughputRetrievalSynthesisInferenceEngineReceipt,
     ThroughputRetrievalSynthesisInferenceEngineRequest,
@@ -429,6 +435,7 @@ pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_TOOL: &str = "
 pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_TOOL: &str = "adapter_federated_continual_retrieval_synthesis_research_copilot";
 pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str = "adapter_local_retrieval_synthesis_workflow_fabric";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str = "adapter_multimodal_retrieval_synthesis_workflow_fabric";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str = "adapter_throughput_retrieval_synthesis_workflow_fabric";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_throughput_retrieval_synthesis_contract_model";
@@ -1334,6 +1341,27 @@ pub fn validate_multimodal_retrieval_synthesis_workflow_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID {
         return Err("multimodal retrieval workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_workflow_json(value: &Value) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisWorkflowRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid throughput retrieval workflow request: {error}"))?;
+    let receipt = schedule_throughput_retrieval_synthesis_workflow(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize throughput retrieval workflow receipt: {error}"))
+}
+
+pub fn validate_throughput_retrieval_synthesis_workflow_json(
+    value: &Value,
+) -> Result<ThroughputRetrievalSynthesisWorkflowReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisWorkflowReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid throughput retrieval workflow receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID {
+        return Err("throughput retrieval workflow feature id mismatch".into());
     }
     Ok(receipt)
 }

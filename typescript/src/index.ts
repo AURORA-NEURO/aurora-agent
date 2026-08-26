@@ -3640,6 +3640,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterMultimodalRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterThroughputRetrievalSynthesisWorkflowFabricReceiptDigest,
+  validateAdapterThroughputRetrievalSynthesisWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
+export {
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
   adapterMultimodalRetrievalSynthesisInferenceEngineReceiptDigest,
