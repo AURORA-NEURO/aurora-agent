@@ -1271,10 +1271,23 @@ fn the_whole_battery_finds_no_hole_outside_the_gaps_this_repository_has_named() 
              as an excuse the battery never reaches"
         );
     }
+    // Positions are the structural coverage claim, so they stay exact. Case totals are not: they
+    // count mutations generated from string CONTENT, and one subject's document is not byte-stable
+    // across platforms — the conformance certificate embeds digests whose hex differs between the
+    // Linux and Windows runs, which changes how many confusable substitutions apply without moving
+    // a single position. Pinning the total would fail one platform for a reason that says nothing
+    // about coverage, so exactness lives where it is meaningful and the total is a floor.
     assert_eq!(
-        (total_cases, total_positions),
-        (47_976, 5_221),
-        "the battery's coverage is a pinned claim; bounds were:\n{}",
+        total_positions,
+        5_221,
+        "every position the battery visits is a pinned claim; bounds were:\n{}",
+        bounds.join("\n")
+    );
+    assert!(
+        total_cases >= 47_900,
+        "the battery generated {total_cases} cases, below the floor this coverage has held at. \
+         A fall means a mutator stopped firing rather than that a document shifted; bounds \
+         were:\n{}",
         bounds.join("\n")
     );
 }
@@ -1605,9 +1618,12 @@ fn a_string_replaced_by_a_confusable_form_is_rejected_at_every_visited_position(
         }
         cases_run += cases.len();
     }
-    assert_eq!(
-        cases_run, 10_579,
-        "confusable cases across thirteen documents"
+    assert!(
+        cases_run >= 10_500,
+        "confusable cases across thirteen documents fell to {cases_run}, below the floor this \
+         family has held at. The exact total is content-derived and varies by platform for the \
+         reason recorded on the coverage assertion; a fall below the floor means the family \
+         stopped firing rather than that a document shifted"
     );
     excused.pin(16, &[("repair_acceptance_report", 81)], "confusable string");
 }
