@@ -863,10 +863,23 @@ name = "bioprism-receipts-audit"
 version = "0.1.0"
 dependencies = [
  "bioprism-autopilot",
+ "bioprism-bioworlds",
+ "bioprism-conformance",
+ "bioprism-cookbook",
  "bioprism-devplat",
+ "bioprism-domain",
+ "bioprism-examples",
+ "bioprism-fiber",
  "bioprism-ids",
+ "bioprism-mutation",
+ "bioprism-prism",
+ "bioprism-project",
+ "bioprism-registry",
+ "bioprism-repair",
  "bioprism-research",
  "bioprism-section",
+ "bioprism-world",
+ "bioprism-worldgen",
  "serde_json",
  "sha2",
 ]
