@@ -2578,6 +2578,7 @@ export {
   MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_STORED_REPORTS,
   MAX_AUTONOMOUS_EVALUATOR_CALIBRATION_STORE_BYTES,
   AutonomousEvaluatorCalibrationRegistry,
+  AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
   InMemoryAutonomousEvaluatorCalibrationStore,
   JsonAutonomousEvaluatorCalibrationStore,
   TransactionalJsonAutonomousEvaluatorCalibrationStore,

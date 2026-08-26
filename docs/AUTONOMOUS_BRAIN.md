@@ -2395,6 +2395,19 @@ read/write and compare-and-swap seams. Restore revalidates every report and the 
 so a worker can rehydrate the same readiness gate without retaining the caller's calibration cases,
 labels, evidence, prompts, provider responses, or credentials.
 
+The high-level `AutonomousAgent` now composes this boundary in both SDKs. Configure the registry
+and its persistence coordinator together, then use `registerEvaluatorCalibration()` /
+`register_evaluator_calibration()`, `restoreEvaluatorCalibration()` /
+`restore_evaluator_calibration()`, and `flushEvaluatorCalibration()` /
+`flush_evaluator_calibration()` as explicit lifecycle operations. The coordinator remembers the
+last restored or committed snapshot digest and uses compare-and-swap when the persistence adapter
+supports it; a coordinator bound to a different registry is rejected. Readiness can consume an
+explicit `calibrationReportDigest` / `calibration_report_digest`, which prevents silently selecting
+the newest report after restart. The report is still validated before projection, and a missing or
+held report remains fail-closed for calibrated learning. These APIs persist aggregate evaluator
+metrics and digests only—source cases, labels, prompts, responses, credentials, and evaluator
+authority stay caller-owned.
+
 Python now also exposes `AutonomousDeploymentReadinessAuditor` as the deployment-level join over
 the keyless agent readiness report and `agent.credential_provisioning_plan()`. It emits one
 digest-bound row for every built-in domain and explicit global/domain blockers for model catalogue,

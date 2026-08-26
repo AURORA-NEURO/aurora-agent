@@ -1917,3 +1917,12 @@ metadata-only catalogue while preserving that fence for the next refresh. This r
 stale-writer failure caused by constructing a fresh coordinator for every refresh and covers the
 same all-domain model-discovery/restart boundary without restoring credentials, provider payloads,
 or evaluator quality claims.
+
+Evaluator calibration is now a first-class lifecycle on both high-level agents. Python and
+TypeScript can register validated aggregate reports, restore them through a registry-bound
+coordinator, and flush them with the last snapshot digest retained for CAS fencing. Readiness can
+resolve a specific report by digest after restart, while rejecting missing reports, conflicting
+inline/digest inputs, and cross-registry persistence bindings. The lifecycle deliberately persists
+only evaluator metrics, report digests, and registry metadata; calibration cases, labels, evidence,
+prompts, responses, credentials, and evaluator authority remain caller-owned. Learning admission
+continues to fail closed until the explicitly selected report is validated and admitted.

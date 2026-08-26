@@ -117,6 +117,11 @@ from .autonomous_prompt_learning import (
     extract_autonomous_prompt_learning_selections,
     select_adaptive_autonomous_prompts,
 )
+from .autonomous_evaluator_calibration import (
+    AutonomousEvaluatorCalibrationRegistry,
+    AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
+    validate_autonomous_evaluator_calibration_report,
+)
 from .domain_tools import (
     AUTONOMOUS_DOMAIN_NAMES,
     AutonomousDomainTool,
@@ -14683,6 +14688,8 @@ class AutonomousAgent:
         connector_registry: AutonomousConnectorRegistry | None = None,
         connector_runtime: AutonomousConnectorRuntime | None = None,
         selection_promotion: AutonomousSelectionPromotionLifecycle | None = None,
+        evaluator_calibration_registry: AutonomousEvaluatorCalibrationRegistry | None = None,
+        evaluator_calibration_persistence: AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator | None = None,
         prompt_learning_coordinator: AutonomousPromptLearningPersistenceCoordinator | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
@@ -14766,6 +14773,25 @@ class AutonomousAgent:
             raise BrainRunError("connector_runtime must be an AutonomousConnectorRuntime or None")
         if selection_promotion is not None and not isinstance(selection_promotion, AutonomousSelectionPromotionLifecycle):
             raise BrainRunError("selection_promotion must be an AutonomousSelectionPromotionLifecycle or None")
+        if evaluator_calibration_registry is not None and not isinstance(
+            evaluator_calibration_registry,
+            AutonomousEvaluatorCalibrationRegistry,
+        ):
+            raise BrainRunError(
+                "evaluator_calibration_registry must be an AutonomousEvaluatorCalibrationRegistry or None"
+            )
+        if evaluator_calibration_persistence is not None and not isinstance(
+            evaluator_calibration_persistence,
+            AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "evaluator_calibration_persistence must be an AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator or None"
+            )
+        if (
+            evaluator_calibration_persistence is not None
+            and evaluator_calibration_persistence.registry is not evaluator_calibration_registry
+        ):
+            raise BrainRunError("evaluator_calibration_persistence must be bound to the supplied evaluator calibration registry")
         if prompt_learning_coordinator is not None and not isinstance(
             prompt_learning_coordinator,
             AutonomousPromptLearningPersistenceCoordinator,
@@ -14813,6 +14839,8 @@ class AutonomousAgent:
         self.tool_registry = tool_registry
         self.activation = activation or AutonomousCapabilityActivation()
         self.selection_promotion = selection_promotion
+        self.evaluator_calibration_registry = evaluator_calibration_registry
+        self.evaluator_calibration_persistence = evaluator_calibration_persistence
         self.prompt_learning_coordinator = prompt_learning_coordinator
         self.execution_journal = execution_journal
         self.execution_policy = resolved_execution_policy
@@ -17928,15 +17956,17 @@ class AutonomousAgent:
         require_promoted_selection: bool = False,
         evidence_readiness: Mapping[str, Any] | None = None,
         calibration_report: Mapping[str, Any] | None = None,
+        calibration_report_digest: str | None = None,
     ) -> dict[str, Any]:
         """Project provider/model readiness plus optional evidence and calibration gates.
 
         ``evidence_readiness`` is a caller-owned configuration mapping with a typed adapter
         registry, an optional health store, and optional auditor options.  ``calibration_report``
         is a validated, aggregate-only evaluator report produced by
-        :func:`calibrate_autonomous_evaluators`.  Supplying either option performs only a local
-        projection; it never dispatches an evidence source, mutates learning, or invokes a
-        provider.
+        :func:`calibrate_autonomous_evaluators`; ``calibration_report_digest`` resolves that
+        report from the explicitly configured aggregate registry.  Supplying either option
+        performs only a local projection; it never dispatches an evidence source, mutates
+        learning, or invokes a provider.
         """
 
         if not isinstance(require_promoted_selection, bool):
@@ -17951,12 +17981,23 @@ class AutonomousAgent:
         )
         promotion_blocks = require_promoted_selection and not promotion_admitted
 
-        evaluator_calibration_report = None
-        if calibration_report is not None:
-            from .autonomous_evaluator_calibration import validate_autonomous_evaluator_calibration_report
-
+        if calibration_report is not None and calibration_report_digest is not None:
+            raise BrainRunError("provide calibration_report or calibration_report_digest, not both")
+        stored_calibration_report = None
+        if calibration_report_digest is not None:
+            if self.evaluator_calibration_registry is None:
+                raise BrainRunError("calibration_report_digest requires an evaluator calibration registry")
             try:
-                evaluator_calibration_report = validate_autonomous_evaluator_calibration_report(calibration_report)
+                stored_calibration_report = self.evaluator_calibration_registry.get(calibration_report_digest)
+            except (ArgumentError, TypeError, ValueError) as error:
+                raise BrainRunError("calibration_report_digest was rejected") from error
+            if stored_calibration_report is None:
+                raise BrainRunError("calibration_report_digest was not found in the registry")
+        supplied_calibration_report = calibration_report if calibration_report is not None else stored_calibration_report
+        evaluator_calibration_report = None
+        if supplied_calibration_report is not None:
+            try:
+                evaluator_calibration_report = validate_autonomous_evaluator_calibration_report(supplied_calibration_report)
             except (ArgumentError, TypeError, ValueError) as error:
                 raise BrainRunError("evaluator calibration report was rejected") from error
         calibration_by_domain = (
@@ -20622,6 +20663,56 @@ class AutonomousAgent:
         """Compatibility alias for flushing runtime transport health."""
 
         return self.flush_runtime_health()
+
+    def register_evaluator_calibration(self, report: Mapping[str, Any]) -> str:
+        """Register one validated aggregate evaluator calibration report by digest."""
+
+        registry = self.evaluator_calibration_registry
+        if registry is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration registry is not configured")
+        try:
+            return registry.register(report)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("evaluator calibration report was rejected") from error
+
+    def evaluator_calibration_report(self, report_digest: str) -> dict[str, Any] | None:
+        """Return one aggregate calibration report without exposing source evaluation cases."""
+
+        registry = self.evaluator_calibration_registry
+        if registry is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration registry is not configured")
+        try:
+            return registry.get(report_digest)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("evaluator calibration report digest was rejected") from error
+
+    def evaluator_calibration_reports(self) -> list[dict[str, Any]]:
+        """Return all registered aggregate calibration reports in deterministic digest order."""
+
+        registry = self.evaluator_calibration_registry
+        if registry is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration registry is not configured")
+        return registry.reports()
+
+    def restore_evaluator_calibration(self) -> Any:
+        """Restore aggregate evaluator calibration before admitting readiness or learning."""
+
+        if self.evaluator_calibration_registry is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration registry is not configured")
+        coordinator = self.evaluator_calibration_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration persistence is not configured")
+        return coordinator.restore()
+
+    def flush_evaluator_calibration(self) -> Any:
+        """Flush aggregate evaluator calibration through its caller-owned CAS boundary."""
+
+        if self.evaluator_calibration_registry is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration registry is not configured")
+        coordinator = self.evaluator_calibration_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent evaluator calibration persistence is not configured")
+        return coordinator.flush()
 
     def restore_online_learning(self) -> Any:
         """Compatibility alias for restoring the agent's value-only online-learning ledger."""

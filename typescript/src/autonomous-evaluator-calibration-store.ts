@@ -269,3 +269,58 @@ export class AutonomousEvaluatorCalibrationRegistry {
     return this.snapshot();
   }
 }
+
+/**
+ * Serialize evaluator-calibration restore/flush operations and retain the last CAS fence.
+ *
+ * Calibration reports are aggregate-only, but they gate online learning. A caller that restores
+ * a report and then flushes a later import must not fall back to a create-if-absent write. This
+ * coordinator keeps that restart identity explicit without making the SDK an authority over the
+ * evaluator or its source cases.
+ */
+export class AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator {
+  private expectedSnapshotDigest: string | null = null;
+  private operationTail: Promise<void> = Promise.resolve();
+
+  constructor(
+    readonly registry: AutonomousEvaluatorCalibrationRegistry,
+    readonly persistence: AutonomousEvaluatorCalibrationStore,
+  ) {
+    if (!(registry instanceof AutonomousEvaluatorCalibrationRegistry)) throw new ArgumentError("evaluator calibration coordinator registry is malformed");
+    if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("evaluator calibration coordinator persistence is malformed");
+  }
+
+  async restore(): Promise<AutonomousEvaluatorCalibrationStoreSnapshot | null> {
+    return this.enqueue(async () => {
+      const snapshot = await this.persistence.read();
+      if (snapshot === null) {
+        this.expectedSnapshotDigest = null;
+        return null;
+      }
+      const validated = validateSnapshot(snapshot);
+      this.registry.restore(validated);
+      this.expectedSnapshotDigest = validated.snapshot_digest;
+      return this.registry.snapshot();
+    });
+  }
+
+  async flush(): Promise<AutonomousEvaluatorCalibrationStoreSnapshot> {
+    return this.enqueue(async () => {
+      const snapshot = this.registry.snapshot();
+      if (typeof (this.persistence as Partial<AutonomousEvaluatorCalibrationTransactionalStore>).writeIfUnchanged === "function") {
+        const committed = await (this.persistence as AutonomousEvaluatorCalibrationTransactionalStore).writeIfUnchanged(this.expectedSnapshotDigest, snapshot);
+        if (committed !== true) throw new ArgumentError("evaluator calibration persistence compare-and-swap conflict");
+      } else {
+        await this.persistence.write(snapshot);
+      }
+      this.expectedSnapshotDigest = snapshot.snapshot_digest;
+      return this.registry.snapshot();
+    });
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queued = this.operationTail.then(operation);
+    this.operationTail = queued.then(() => undefined, () => undefined);
+    return queued;
+  }
+}

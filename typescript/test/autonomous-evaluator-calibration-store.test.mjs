@@ -3,11 +3,14 @@ import test from "node:test";
 
 import {
   AUTONOMOUS_DOMAIN_NAMES,
+  AutonomousAgent,
   AutonomousEvaluatorCalibrationHarness,
   AutonomousEvaluatorCalibrationRegistry,
+  AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
   AutonomousValueEvaluatorRegistry,
   InMemoryAutonomousEvaluatorCalibrationStore,
   JsonAutonomousEvaluatorCalibrationStore,
+  LLMRuntime,
   TransactionalJsonAutonomousEvaluatorCalibrationStore,
   builtinAutonomousValueEvaluatorProfiles,
   canonicalJson,
@@ -105,4 +108,36 @@ test("calibration registry JSON persistence validates tampering and compare-and-
   tampered.reports[0].status = "miscalibrated";
   text = JSON.stringify(tampered);
   await assert.rejects(() => json.read(), /digest|inconsistent/);
+});
+
+test("AutonomousAgent composes calibration registry restore, flush, and digest readiness", async () => {
+  const calibration = report();
+  const registry = new AutonomousEvaluatorCalibrationRegistry();
+  const persistence = new InMemoryAutonomousEvaluatorCalibrationStore();
+  const coordinator = new AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator(registry, persistence);
+  const agent = new AutonomousAgent(new LLMRuntime(), {
+    evaluatorCalibrationRegistry: registry,
+    evaluatorCalibrationPersistence: coordinator,
+  });
+
+  const imported = agent.registerEvaluatorCalibration(calibration);
+  assert.equal(imported.created, true);
+  assert.equal(agent.evaluatorCalibrationReport(calibration.report_digest).report_digest, calibration.report_digest);
+  assert.deepEqual(agent.evaluatorCalibrationReports(), [calibration]);
+  const flushed = await agent.flushEvaluatorCalibration();
+  assert.equal((await persistence.read()).snapshot_digest, flushed.snapshot_digest);
+
+  const restartedRegistry = new AutonomousEvaluatorCalibrationRegistry();
+  const restartedCoordinator = new AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator(restartedRegistry, persistence);
+  const restarted = new AutonomousAgent(new LLMRuntime(), {
+    evaluatorCalibrationRegistry: restartedRegistry,
+    evaluatorCalibrationPersistence: restartedCoordinator,
+  });
+  assert.equal((await restarted.restoreEvaluatorCalibration()).snapshot_digest, flushed.snapshot_digest);
+  const readiness = await restarted.readiness({
+    calibrationReportDigest: calibration.report_digest,
+    requireCalibratedLearning: true,
+  });
+  assert.equal(readiness.learning.calibration.report_digest, calibration.report_digest);
+  assert.equal(readiness.learning.calibration.decision, "admit_learning");
 });

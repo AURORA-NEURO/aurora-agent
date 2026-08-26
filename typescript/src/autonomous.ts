@@ -61,6 +61,13 @@ import {
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import type { AutonomousEvaluatorCalibrationReport } from "./autonomous-evaluator-calibration.js";
+import type {
+  AutonomousEvaluatorCalibrationImport,
+  AutonomousEvaluatorCalibrationQueryOptions,
+  AutonomousEvaluatorCalibrationRegistry,
+  AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
+  AutonomousEvaluatorCalibrationStoreSnapshot,
+} from "./autonomous-evaluator-calibration-store.js";
 import type { AutonomousModelInventoryRefreshOptions, AutonomousModelInventorySnapshot } from "./autonomous-model-inventory.js";
 import type {
   AutonomousWorkflowPortfolioItemRequest,
@@ -1325,6 +1332,10 @@ export interface AutonomousAgentOptions {
   learnerPersistence?: AutonomousOnlineLearnerPersistenceCoordinator;
   /** Optional digest-only lifecycle that gates learned model selection until replay admission. */
   selectionPromotion?: AutonomousSelectionPromotionLifecycle;
+  /** Optional validated aggregate-only evaluator calibration registry used by readiness gates. */
+  evaluatorCalibrationRegistry?: AutonomousEvaluatorCalibrationRegistry;
+  /** Optional CAS-fenced persistence coordinator bound to the evaluator calibration registry. */
+  evaluatorCalibrationPersistence?: AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator;
   /** Optional caller-owned episodic memory used for bounded retrieval and value-only run recording. */
   memoryStore?: AutonomousEpisodicMemoryStore;
   /** Optional CAS-fenced persistence coordinator bound to `memoryStore` for restart-safe episodes. */
@@ -4847,6 +4858,9 @@ export class AutonomousAgent {
   /** Caller-owned persistence for the online learner; no state is written implicitly. */
   readonly learnerPersistence?: AutonomousOnlineLearnerPersistenceCoordinator;
   readonly selectionPromotion?: AutonomousSelectionPromotionLifecycle;
+  readonly evaluatorCalibrationRegistry?: AutonomousEvaluatorCalibrationRegistry;
+  /** Caller-owned persistence for aggregate evaluator calibration reports. */
+  readonly evaluatorCalibrationPersistence?: AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator;
   private readonly apiClient?: ApiClient;
   private readonly modelsById = new Map<string, AutonomousModelCandidate>();
   private readonly toolCatalogue?: ToolCatalogue;
@@ -4888,6 +4902,18 @@ export class AutonomousAgent {
     if (options.runtimeHealthPersistence !== undefined && options.runtimeHealthPersistence.runtime !== llm) throw new ArgumentError("AutonomousAgent runtimeHealthPersistence must be bound to the supplied LLMRuntime");
     if (options.activation !== undefined && !(options.activation instanceof AutonomousCapabilityActivation)) throw new ArgumentError("AutonomousAgent activation must be an AutonomousCapabilityActivation");
     if (options.selectionPromotion !== undefined && !(options.selectionPromotion instanceof AutonomousSelectionPromotionLifecycle)) throw new ArgumentError("AutonomousAgent selectionPromotion must be an AutonomousSelectionPromotionLifecycle");
+    if (options.evaluatorCalibrationRegistry !== undefined && (
+      typeof options.evaluatorCalibrationRegistry.import !== "function"
+      || typeof options.evaluatorCalibrationRegistry.get !== "function"
+      || typeof options.evaluatorCalibrationRegistry.query !== "function"
+      || typeof options.evaluatorCalibrationRegistry.snapshot !== "function"
+      || typeof options.evaluatorCalibrationRegistry.restore !== "function"
+    )) throw new ArgumentError("AutonomousAgent evaluatorCalibrationRegistry is malformed");
+    if (options.evaluatorCalibrationPersistence !== undefined && (
+      typeof options.evaluatorCalibrationPersistence.restore !== "function"
+      || typeof options.evaluatorCalibrationPersistence.flush !== "function"
+      || options.evaluatorCalibrationPersistence.registry !== options.evaluatorCalibrationRegistry
+    )) throw new ArgumentError("AutonomousAgent evaluatorCalibrationPersistence must be bound to the supplied registry");
     if (options.promptLearningCoordinator !== undefined && !(options.promptLearningCoordinator instanceof AutonomousPromptLearningPersistenceCoordinator)) throw new ArgumentError("AutonomousAgent promptLearningCoordinator must be an AutonomousPromptLearningPersistenceCoordinator");
     if (options.connectorRegistry !== undefined && !(options.connectorRegistry instanceof AutonomousConnectorRegistry)) throw new ArgumentError("AutonomousAgent connectorRegistry must be an AutonomousConnectorRegistry");
     if (options.connectorRuntime !== undefined && !(options.connectorRuntime instanceof AutonomousConnectorRuntime)) throw new ArgumentError("AutonomousAgent connectorRuntime must be an AutonomousConnectorRuntime");
@@ -4902,6 +4928,8 @@ export class AutonomousAgent {
     this.learner = options.learner;
     this.learnerPersistence = options.learnerPersistence;
     this.selectionPromotion = options.selectionPromotion;
+    this.evaluatorCalibrationRegistry = options.evaluatorCalibrationRegistry;
+    this.evaluatorCalibrationPersistence = options.evaluatorCalibrationPersistence;
     if (options.memoryStore !== undefined && (
       typeof options.memoryStore.retrieve !== "function"
       || typeof options.memoryStore.recordEpisode !== "function"
@@ -5041,6 +5069,38 @@ export class AutonomousAgent {
   /** Compatibility alias for flushing transport health through the agent boundary. */
   async flushTransportHealth(): Promise<LLMRuntimeHealthSnapshot> {
     return this.flushRuntimeHealth();
+  }
+
+  /** Register a validated aggregate evaluator calibration report; persistence remains explicit. */
+  registerEvaluatorCalibration(report: AutonomousEvaluatorCalibrationReport): AutonomousEvaluatorCalibrationImport {
+    if (!this.evaluatorCalibrationRegistry) throw new ArgumentError("AutonomousAgent evaluator calibration registry is not configured");
+    return this.evaluatorCalibrationRegistry.import(report);
+  }
+
+  /** Retrieve one persisted calibration report by its exact content digest. */
+  evaluatorCalibrationReport(reportDigest: string): AutonomousEvaluatorCalibrationReport | null {
+    if (!this.evaluatorCalibrationRegistry) throw new ArgumentError("AutonomousAgent evaluator calibration registry is not configured");
+    return this.evaluatorCalibrationRegistry.get(reportDigest);
+  }
+
+  /** Query only aggregate calibration metadata; source cases and labels are never retained here. */
+  evaluatorCalibrationReports(options: AutonomousEvaluatorCalibrationQueryOptions = {}): AutonomousEvaluatorCalibrationReport[] {
+    if (!this.evaluatorCalibrationRegistry) throw new ArgumentError("AutonomousAgent evaluator calibration registry is not configured");
+    return this.evaluatorCalibrationRegistry.query(options);
+  }
+
+  /** Restore evaluator calibration before enabling a calibration-gated learning path. */
+  async restoreEvaluatorCalibration(): Promise<AutonomousEvaluatorCalibrationStoreSnapshot | null> {
+    if (!this.evaluatorCalibrationRegistry) throw new ArgumentError("AutonomousAgent evaluator calibration registry is not configured");
+    if (!this.evaluatorCalibrationPersistence) throw new ArgumentError("AutonomousAgent evaluator calibration persistence is not configured");
+    return this.evaluatorCalibrationPersistence.restore();
+  }
+
+  /** Flush aggregate evaluator calibration through the caller-owned CAS boundary. */
+  async flushEvaluatorCalibration(): Promise<AutonomousEvaluatorCalibrationStoreSnapshot> {
+    if (!this.evaluatorCalibrationRegistry) throw new ArgumentError("AutonomousAgent evaluator calibration registry is not configured");
+    if (!this.evaluatorCalibrationPersistence) throw new ArgumentError("AutonomousAgent evaluator calibration persistence is not configured");
+    return this.evaluatorCalibrationPersistence.flush();
   }
 
   /**
@@ -5587,6 +5647,8 @@ export class AutonomousAgent {
     estimatedInputTokens?: number;
     requestedOutputTokens?: number;
     calibrationReport?: AutonomousEvaluatorCalibrationReport;
+    /** Exact digest of a report previously registered and restored into this agent. */
+    calibrationReportDigest?: string;
     requireCalibratedLearning?: boolean;
     selectionPromotionReport?: AutonomousSelectionPromotionReport;
     requirePromotedSelection?: boolean;
@@ -5602,10 +5664,16 @@ export class AutonomousAgent {
       if (!Number.isSafeInteger(value) || value < 1 || value > 10_000_000) throw new ArgumentError(`autonomous readiness ${name} is outside its bounds`);
     }
     if (options.requireCalibratedLearning !== undefined && typeof options.requireCalibratedLearning !== "boolean") throw new ArgumentError("autonomous readiness requireCalibratedLearning must be boolean");
-    if (options.requireCalibratedLearning === true && options.calibrationReport === undefined) throw new ArgumentError("autonomous readiness requires calibrationReport when calibrated learning is required");
+    if (options.calibrationReport !== undefined && options.calibrationReportDigest !== undefined) throw new ArgumentError("autonomous readiness accepts calibrationReport or calibrationReportDigest, not both");
+    const storedCalibrationReport = options.calibrationReportDigest === undefined
+      ? undefined
+      : this.evaluatorCalibrationReport(options.calibrationReportDigest);
+    if (options.calibrationReportDigest !== undefined && storedCalibrationReport === null) throw new ArgumentError("autonomous readiness calibrationReportDigest was not found in the registry");
+    const suppliedCalibrationReport = options.calibrationReport ?? storedCalibrationReport ?? undefined;
+    if (options.requireCalibratedLearning === true && suppliedCalibrationReport === undefined) throw new ArgumentError("autonomous readiness requires calibrationReport or calibrationReportDigest when calibrated learning is required");
     if (options.requirePromotedSelection !== undefined && typeof options.requirePromotedSelection !== "boolean") throw new ArgumentError("autonomous readiness requirePromotedSelection must be boolean");
-    const calibrationRuntime = options.calibrationReport === undefined ? null : await import("./autonomous-evaluator-calibration.js");
-    const calibrationReport = options.calibrationReport === undefined ? null : calibrationRuntime!.validateAutonomousEvaluatorCalibrationReport(options.calibrationReport);
+    const calibrationRuntime = suppliedCalibrationReport === undefined ? null : await import("./autonomous-evaluator-calibration.js");
+    const calibrationReport = suppliedCalibrationReport === undefined ? null : calibrationRuntime!.validateAutonomousEvaluatorCalibrationReport(suppliedCalibrationReport);
     const selectionPromotionRuntime = options.selectionPromotionReport === undefined ? null : await import("./autonomous-selection-promotion.js");
     const selectionPromotionReport = options.selectionPromotionReport === undefined ? null : selectionPromotionRuntime!.validateAutonomousSelectionPromotionReport(options.selectionPromotionReport);
     const selectionPromotionState = this.selectionPromotion?.state ?? null;

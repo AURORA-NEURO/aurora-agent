@@ -6,11 +6,13 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
+    AutonomousAgent,
     AutonomousEvaluatorCalibrationRegistry,
     AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
     DomainEvaluatorRegistry,
     InMemoryAutonomousEvaluatorCalibrationPersistence,
     JsonAutonomousEvaluatorCalibrationPersistence,
+    LLMRuntime,
     SQLiteAutonomousEvaluatorCalibrationPersistence,
     admit_autonomous_evaluator_calibration,
     calibrate_autonomous_evaluators,
@@ -197,3 +199,42 @@ def test_calibration_registry_json_cas_and_sqlite_roundtrip(tmp_path):
         sqlite_persistence.write(snapshot)
         assert sqlite_persistence.read() == snapshot
         assert sqlite_persistence.write_if_unchanged("0" * 64, snapshot) is False
+
+
+def test_agent_composes_calibration_registry_restore_flush_and_digest_readiness():
+    report = calibrate_autonomous_evaluators(
+        _cases(),
+        min_calibration_cases_per_domain=2,
+        min_holdout_cases_per_domain=2,
+    )
+    registry = AutonomousEvaluatorCalibrationRegistry()
+    persistence = InMemoryAutonomousEvaluatorCalibrationPersistence()
+    coordinator = AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator(registry, persistence)
+    agent = AutonomousAgent(
+        object(),
+        LLMRuntime(),
+        evaluator_calibration_registry=registry,
+        evaluator_calibration_persistence=coordinator,
+    )
+
+    assert agent.register_evaluator_calibration(report) == report["report_digest"]
+    assert agent.evaluator_calibration_report(report["report_digest"]) == report
+    assert agent.evaluator_calibration_reports() == [report]
+    flushed = agent.flush_evaluator_calibration()
+    assert flushed["snapshot_digest"] == persistence.read()["snapshot_digest"]
+
+    restarted_registry = AutonomousEvaluatorCalibrationRegistry()
+    restarted_coordinator = AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator(
+        restarted_registry,
+        persistence,
+    )
+    restarted = AutonomousAgent(
+        object(),
+        LLMRuntime(),
+        evaluator_calibration_registry=restarted_registry,
+        evaluator_calibration_persistence=restarted_coordinator,
+    )
+    assert restarted.restore_evaluator_calibration()["status"] == "restored"
+    readiness = restarted.readiness(calibration_report_digest=report["report_digest"])
+    assert readiness["evaluator_calibration"]["report_digest"] == report["report_digest"]
+    assert readiness["evaluator_calibration"]["decision"] == "admit_learning"
