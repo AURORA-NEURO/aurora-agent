@@ -292,6 +292,59 @@ for a bounded routing proposal, while `--planning-mode provider` asks it to prio
 already-reviewed workflow stages; both remain separate provider approval boundaries and neither
 can create a new domain, capability, connector, credential, or effect.
 
+#### One-shot evaluator, online-learning, and bounded replan cycles
+
+Applications that want the full autonomous feedback loop can use the explicit cycle façade instead
+of manually composing route, invocation, evaluation, and retry calls. Python exposes
+`agent.run_auto_replan_cycle(...)`; TypeScript exposes `agent.runAutoReplanCycle(...)` and the
+matching `runAutonomousAutoReplanCycle(...)` function. The façade resolves one route, freezes its
+digest for every attempt, invokes the ordinary model-selection/prompt/provider path, sends only the
+value-only execution projection to the caller-owned evaluator, settles the existing online learner,
+and accepts a retry only when the evaluator requests one. `max_replans` is bounded by the SDK, so
+an evaluator or provider cannot create an unbounded autonomous loop.
+
+```python
+from prism_sdk import BrainOutcomeEvaluator, BrainEpisodicMemory
+
+memory = BrainEpisodicMemory("state/brain-memory.sqlite3")
+evaluator = BrainOutcomeEvaluator(
+    lambda value: {
+        "reward": 1.0 if value["status"] == "completed_provider_call" else 0.0,
+        "passed": value["status"] == "completed_provider_call",
+        "failed": value["status"] != "completed_provider_call",
+    },
+    evaluator_id="application-quality",
+    evaluator_version="1.0.0",
+)
+cycle = agent.run_auto_replan_cycle(
+    task="compare the implementation, dataset, and evaluation evidence",
+    credentials=user_credential_session,
+    evaluator=evaluator,
+    max_replans=1,
+    decision_cycle_id="review-2026-08-25-001",
+    decision_cycle_store=decision_cycle_store,
+    approve_provider_call=True,
+)
+audit_metadata(cycle.to_dict())
+```
+
+Configure a `BrainEpisodicMemory` on the agent when using online or cross-domain replan learning;
+the learner must have a caller-owned persistence boundary. `decision_cycle_store` adds a separate
+hash-chained restart journal. On restart, the application rehydrates the private live result with
+`decision_cycle_rehydrate_result`; the journal verifies task, route, selection, outcome, evaluation,
+and settlement digests without storing task text, prompts, provider responses, evaluator
+instructions, credential handles, or tool arguments. The public `AutonomousAutoReplanResult`
+projection contains attempt/evaluation identities and instruction digests only. It is therefore
+appropriate for queue events and audit records, while `final` and `attempt_results` remain
+caller-transient.
+
+Cross-domain cycles settle every specialist and synthesis decision for an attempt before allowing
+the next attempt. The reviewed route, selected domains, domain policy, capability contracts,
+provider approval, effect approval, and aggregate cost budget remain fixed across retries; an
+evaluator can improve bounded context but cannot use feedback to widen the route or mint a new
+connector. The same contract is exercised across all twelve built-in domains, including explicit
+route abstention before provider invocation and credential-shaped feedback refusal.
+
 #### Binding a reviewed launch admission at the CLI
 
 Deployments that require an operator or queue decision before credential intake can persist the

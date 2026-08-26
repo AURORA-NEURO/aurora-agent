@@ -328,6 +328,8 @@ AUTONOMOUS_PROVISIONED_RUN_SCHEMA = "bioprism-python-autonomous-provisioned-run/
 AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
 AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-trajectory-learning/0.1"
 AUTONOMOUS_ROUTE_SCHEMA = "bioprism-python-autonomous-route/0.1"
+AUTONOMOUS_REPLAN_CYCLE_SCHEMA = "bioprism-python-autonomous-auto-replan-cycle/0.1"
+AUTONOMOUS_REPLAN_CONTEXT_SCHEMA = "bioprism-python-autonomous-replan-context/0.1"
 AUTONOMOUS_DOMAIN_PACK_SCHEMA = "bioprism-python-autonomous-domain-pack/0.1"
 AUTONOMOUS_EXECUTION_PLAN_SCHEMA = "bioprism-python-autonomous-execution-plan/0.1"
 AUTONOMOUS_DOMAIN_LEARNING_STATE_SCHEMA = "bioprism-python-autonomous-domain-learning-state/0.1"
@@ -371,6 +373,10 @@ MAX_AUTONOMOUS_ROUTE_CANDIDATES = len(AUTONOMOUS_DOMAINS)
 MAX_AUTONOMOUS_ROUTE_DOMAINS = 4
 MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN = 8
 MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS = 3
+MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS = MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS
+MAX_AUTONOMOUS_REPLAN_CYCLE_EVALUATIONS = (
+    (MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS + 1) * (MAX_AUTONOMOUS_ROUTE_DOMAINS + 1)
+)
 MAX_AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_BYTES = 128_000
 MAX_AUTONOMOUS_DOMAIN_PACK_ITEMS = 64
 MAX_AUTONOMOUS_EXECUTION_PLAN_BYTES = 512_000
@@ -3788,6 +3794,152 @@ class AutonomousAutoResult:
             "task_decision_digest": self.task_decision_digest,
             "task_decision_posture": self.task_decision_posture,
             "retention": "route_metadata_only; provider_result_caller_owned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousAutoReplanResult:
+    """Route-frozen automatic execution with evaluator-controlled bounded replanning.
+
+    ``AutonomousAgent.run_auto`` already contains the lower-level provider, prompt, model,
+    and learning machinery.  This envelope makes the complete automatic loop inspectable as a
+    first-class application result: route once, execute through the existing approval boundary,
+    settle explicit evaluator feedback, and allow only a bounded evaluator-requested retry.
+
+    ``final`` and ``attempt_results`` are caller-transient execution values.  ``to_dict`` emits
+    only route, attempt identity, evaluation values, and digests, so an application can attach
+    the projection to a queue event or restart journal without persisting task text, prompts,
+    provider responses, tool arguments, credentials, or evaluator instructions.
+    """
+
+    status: str
+    mode: str | None
+    route: AutonomousRouteProposal
+    final: AutonomousAutoResult | None = None
+    attempt_results: tuple[Any, ...] = ()
+    evaluations: tuple[Mapping[str, Any], ...] = ()
+    replan_count: int = 0
+    semantic_route: AutonomousSemanticRouteResult | None = None
+
+    _STATUSES = frozenset({
+        "completed",
+        "completed_without_replan",
+        "replan_limit_reached",
+        "route_review_required",
+        "planning_review_required",
+        "policy_review_required",
+        "policy_blocked",
+        "approval_required",
+        "provider_invalid",
+        "plan_refused",
+        "provider_abstained",
+        "provider_disagreement",
+        "reconciliation_required",
+    })
+
+    def __post_init__(self) -> None:
+        if self.status not in self._STATUSES:
+            raise BrainRunError("automatic replan result status is invalid")
+        if self.mode not in {None, "single_domain", "cross_domain"}:
+            raise BrainRunError("automatic replan result mode is invalid")
+        if not isinstance(self.route, AutonomousRouteProposal):
+            raise BrainRunError("automatic replan result requires a route proposal")
+        expected_mode = (
+            "cross_domain" if self.route.cross_domain and len(self.route.selected_domains) > 1
+            else "single_domain"
+        ) if not self.route.abstained else None
+        if self.mode != expected_mode:
+            raise BrainRunError("automatic replan result mode does not match its route")
+        if self.final is not None and not isinstance(self.final, AutonomousAutoResult):
+            raise BrainRunError("automatic replan result final value is malformed")
+        attempts = tuple(self.attempt_results)
+        if len(attempts) > MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS + 1:
+            raise BrainRunError("automatic replan result exceeds its attempt bound")
+        if any(not hasattr(value, "status") for value in attempts):
+            raise BrainRunError("automatic replan result contains a malformed attempt")
+        if not isinstance(self.evaluations, Sequence) or isinstance(self.evaluations, (str, bytes)):
+            raise BrainRunError("automatic replan result evaluations must be a sequence")
+        if any(not isinstance(value, Mapping) for value in self.evaluations):
+            raise BrainRunError("automatic replan result evaluations must contain mappings")
+        evaluations = tuple(dict(value) for value in self.evaluations)
+        if len(evaluations) > MAX_AUTONOMOUS_REPLAN_CYCLE_EVALUATIONS:
+            raise BrainRunError("automatic replan result exceeds its evaluation bound")
+        if isinstance(self.replan_count, bool) or not isinstance(self.replan_count, int) or not 0 <= self.replan_count <= MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS:
+            raise BrainRunError("automatic replan result replan_count is outside its bound")
+        if self.replan_count != max(0, len(attempts) - 1) and attempts:
+            raise BrainRunError("automatic replan result replan_count does not match attempts")
+        if self.semantic_route is not None and not isinstance(self.semantic_route, AutonomousSemanticRouteResult):
+            raise BrainRunError("automatic replan result semantic route is malformed")
+        object.__setattr__(self, "attempt_results", attempts)
+        object.__setattr__(self, "evaluations", evaluations)
+
+    @staticmethod
+    def _attempt_projection(value: Any) -> dict[str, Any]:
+        status = getattr(value, "status", None)
+        if not isinstance(status, str):
+            status = "unknown"
+        selection = getattr(value, "selection", None)
+        selection_digest = selection.get("decision_digest") if isinstance(selection, Mapping) else None
+        outcome_digest = getattr(value, "outcome_digest", None)
+        if outcome_digest is not None and (not isinstance(outcome_digest, str) or len(outcome_digest) != 64):
+            outcome_digest = None
+        return {
+            "status": status,
+            "selection_digest": selection_digest if isinstance(selection_digest, str) else None,
+            "outcome_digest": outcome_digest,
+            "result_kind": type(value).__name__,
+            "retention": "metadata_only;provider_result_caller_owned",
+        }
+
+    @staticmethod
+    def _evaluation_projection(value: Mapping[str, Any]) -> dict[str, Any]:
+        decision = value.get("decision", value.get("evaluation", value))
+        if not isinstance(decision, Mapping):
+            raise BrainRunError("automatic replan evaluation is malformed")
+        projection = {
+            key: decision.get(key)
+            for key in (
+                "evaluator_id", "evaluator_version", "reward", "passed", "failed",
+                "feedback_digest", "failure_class", "evidence_digest", "replan_requested",
+            )
+            if key in decision
+        }
+        instruction = decision.get("replan_instruction")
+        projection["replan_instruction_digest"] = (
+            content_digest(instruction) if isinstance(instruction, str) else None
+        )
+        projection["retention"] = "value_only_evaluation;replan_instruction_digest_only"
+        return projection
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_REPLAN_CYCLE_SCHEMA,
+            "status": self.status,
+            "mode": self.mode,
+            "route": self.route.to_dict(),
+            "semantic_route": None if self.semantic_route is None else self.semantic_route.to_dict(),
+            "attempts": [self._attempt_projection(value) for value in self.attempt_results],
+            "evaluations": [self._evaluation_projection(value) for value in self.evaluations],
+            "replan_count": self.replan_count,
+            "final_status": None if self.final is None else self.final.execution_status,
+            "next_action": {
+                "completed": "inspect_result",
+                "completed_without_replan": "inspect_evaluator_feedback",
+                "replan_limit_reached": "review_replan_limit",
+                "route_review_required": "review_route",
+                "planning_review_required": "review_plan",
+                "policy_review_required": "review_policy",
+                "policy_blocked": "resolve_policy_block",
+                "approval_required": "approve_provider_call",
+                "provider_invalid": "review_provider_output",
+                "plan_refused": "review_plan",
+                "provider_abstained": "review_route",
+                "provider_disagreement": "review_route",
+                "reconciliation_required": "reconcile_provider_boundary",
+            }[self.status],
+            "retention": "provider_response_local;replan_instructions_transient;value_only_evaluation_and_learning_projection",
+            "authorization": "routing_and_provider_invocation_require_separate_explicit_approval",
+            "secret_material": "never_returned",
         }
 
 
@@ -9728,6 +9880,7 @@ class AutonomousTaskOrchestrator:
         self,
         *,
         task: str,
+        route_override: AutonomousRouteProposal | None = None,
         hints: Sequence[str] = (),
         context: Mapping[str, Any] | None = None,
         constraints: Sequence[str] = (),
@@ -9749,14 +9902,22 @@ class AutonomousTaskOrchestrator:
     ) -> AutonomousAutoBlueprint:
         """Create a single- or cross-domain blueprint, or an explicit review request."""
 
-        route = self.route_task(
-            task=task,
-            hints=hints,
-            min_confidence=min_confidence,
-            min_margin=min_margin,
-            max_domains=max_domains,
-            allow_cross_domain=allow_cross_domain,
-        )
+        if route_override is None:
+            route = self.route_task(
+                task=task,
+                hints=hints,
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+            )
+        else:
+            if not isinstance(route_override, AutonomousRouteProposal):
+                raise BrainRunError("route_override must be an AutonomousRouteProposal")
+            expected_task_digest = content_digest({"task": task})
+            if route_override.task_digest != expected_task_digest:
+                raise BrainRunError("route_override task does not match the automatic task")
+            route = route_override
         return self._prepare_auto_from_route(
             task=task,
             route=route,
@@ -21729,6 +21890,7 @@ class AutonomousAgent:
         *,
         task: str,
         credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        route_override: AutonomousRouteProposal | None = None,
         model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
         hints: Sequence[str] = (),
         min_confidence: float = 0.25,
@@ -21826,6 +21988,13 @@ class AutonomousAgent:
 
         if not isinstance(workflow_execution, bool):
             raise BrainRunError("workflow_execution must be a boolean")
+        if route_override is not None:
+            if not isinstance(route_override, AutonomousRouteProposal):
+                raise BrainRunError("route_override must be an AutonomousRouteProposal")
+            if route_override.task_digest != content_digest({"task": task}):
+                raise BrainRunError("route_override task does not match the automatic task")
+            if semantic_routing:
+                raise BrainRunError("route_override cannot be combined with semantic_routing")
         if planning_mode not in AUTONOMOUS_PLANNING_MODES:
             raise BrainRunError(
                 "planning_mode must be one of: " + ", ".join(AUTONOMOUS_PLANNING_MODES)
@@ -22100,6 +22269,8 @@ class AutonomousAgent:
                 "memory_episodes",
             }
         }
+        if route_override is not None:
+            prepare_options["route_override"] = route_override
         if semantic_routing:
             blueprint = self.prepare_auto_with_provider(
                 task=task,
@@ -22613,6 +22784,212 @@ class AutonomousAgent:
                 settlement_digests=settlement_digests,
             )
         return automatic_result
+
+    def run_auto_replan_cycle(
+        self,
+        *,
+        task: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        max_replans: int = 1,
+        route_override: AutonomousRouteProposal | None = None,
+        hints: Sequence[str] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        semantic_routing: bool = False,
+        decision_cycle_id: str | None = None,
+        decision_cycle_store: AutonomousDecisionCycleStateStore | None = None,
+        **kwargs: Any,
+    ) -> AutonomousAutoReplanResult:
+        """Run one route-frozen evaluator/learning/replan cycle.
+
+        The route is resolved once before execution (or once by the provider-assisted semantic
+        intake path), then every bounded retry reuses that route.  A caller-owned
+        :class:`BrainOutcomeEvaluator` sees only the existing value-only evaluation projection;
+        its reward updates the next bandit state through the ordinary online learner.  Replan
+        feedback is screened and added as transient context by the existing brain kernel.  The
+        method therefore makes the complete automatic loop easy to use without weakening the
+        lower-level provider, credential, tool, effect, evidence, or evaluator boundaries.
+
+        ``decision_cycle_store`` and ``decision_cycle_id`` opt into the existing hash-chained
+        metadata checkpoint.  Private route/run/evaluator values remain caller-owned and must be
+        supplied through the normal ``resume_decision_cycle`` rehydration callback when a process
+        restarts after a provider boundary.
+        """
+
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("automatic replan task must be non-empty text")
+        if not isinstance(evaluator, (BrainOutcomeEvaluator, DomainEvaluatorRegistry)):
+            raise BrainRunError("automatic replan evaluator must be a BrainOutcomeEvaluator or DomainEvaluatorRegistry")
+        if isinstance(max_replans, bool) or not isinstance(max_replans, int) or not 0 <= max_replans <= MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS:
+            raise BrainRunError(
+                f"automatic replan max_replans must be within [0, {MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS}]"
+            )
+        if (decision_cycle_id is None) != (decision_cycle_store is None):
+            raise BrainRunError("decision_cycle_id and decision_cycle_store must be supplied together")
+        if route_override is not None and not isinstance(route_override, AutonomousRouteProposal):
+            raise BrainRunError("route_override must be an AutonomousRouteProposal")
+        if route_override is not None and semantic_routing:
+            raise BrainRunError("route_override cannot be combined with semantic_routing")
+
+        semantic_route: AutonomousSemanticRouteResult | None = None
+        if route_override is None and not semantic_routing:
+            route = self.route(
+                task=task,
+                hints=hints,
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+            )
+            if route.abstained:
+                final = AutonomousAutoResult(status="route_review_required", route=route)
+                return AutonomousAutoReplanResult(
+                    status="route_review_required",
+                    mode=None,
+                    route=route,
+                    final=final,
+                )
+        elif route_override is None:
+            semantic_route = self.route_with_provider(
+                task=task,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                hints=hints,
+                context=kwargs.get("context"),
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+                semantic_weight=kwargs.pop("semantic_weight", 0.65),
+                bandit_state=kwargs.pop("semantic_bandit_state", None) or self.learning_state(),
+                contextual_observations=kwargs.pop("semantic_contextual_observations", ()),
+                selection_overrides=kwargs.pop("semantic_selection_overrides", None),
+                input_tokens=kwargs.pop("semantic_input_tokens", 4_096),
+                requested_output_tokens=kwargs.pop("semantic_requested_output_tokens", 1_024),
+                max_cost_per_million_tokens=kwargs.pop("semantic_max_cost_per_million_tokens", None),
+                max_latency_ms=kwargs.pop("semantic_max_latency_ms", None),
+                min_quality=kwargs.pop("semantic_min_quality", None),
+                approve_provider_call=kwargs.get("approve_provider_call", False),
+                run_id=kwargs.pop("semantic_run_id", None),
+                max_output_tokens=kwargs.pop("semantic_max_output_tokens", 1_024),
+                temperature=kwargs.pop("semantic_temperature", None),
+                domain_policy_mode=kwargs.get("domain_policy_mode", "audit"),
+                domain_policy_evidence_ready=kwargs.get("domain_policy_evidence_ready"),
+                domain_policy_evaluator_configured=kwargs.get("domain_policy_evaluator_configured"),
+                domain_policy_effects_requested=kwargs.get("domain_policy_effects_requested"),
+                domain_policy_effects_approved=kwargs.get("domain_policy_effects_approved"),
+            )
+            route = semantic_route.route
+            if semantic_route.status != "completed":
+                return AutonomousAutoReplanResult(
+                    status=semantic_route.status,
+                    mode=(
+                        "cross_domain"
+                        if route.cross_domain and len(route.selected_domains) > 1
+                        else "single_domain"
+                    ) if not route.abstained else None,
+                    route=route,
+                    semantic_route=semantic_route,
+                )
+            # The provider classifier has already been approved and reconciled. Hand its exact
+            # route to the ordinary execution path so evaluator retries cannot classify again.
+            semantic_routing = False
+        else:
+            route = route_override
+
+        call_options = dict(kwargs)
+        if "evaluator" in call_options or "cross_domain_evaluator" in call_options:
+            raise BrainRunError("run_auto_replan_cycle reserves evaluator and cross_domain_evaluator")
+        call_options.update(
+            {
+                "hints": hints,
+                "min_confidence": min_confidence,
+                "min_margin": min_margin,
+                "max_domains": max_domains,
+                "allow_cross_domain": allow_cross_domain,
+                "semantic_routing": False,
+                "route_override": route,
+                "decision_cycle_id": decision_cycle_id,
+                "decision_cycle_store": decision_cycle_store,
+                "approve_provider_call": call_options.get("approve_provider_call", False),
+            }
+        )
+        if call_options.get("bandit_state") is None:
+            call_options["bandit_state"] = self.learning_state()
+
+        if route is not None and route.cross_domain and len(route.selected_domains) > 1:
+            call_options.update(
+                {
+                    "cross_domain_replan_learning": True,
+                    "cross_domain_replan_max_replans": max_replans,
+                    "cross_domain_evaluator": evaluator,
+                    "learning_mode": "off",
+                }
+            )
+        else:
+            call_options.update(
+                {
+                    "learning_mode": "online",
+                    "evaluator": evaluator if isinstance(evaluator, BrainOutcomeEvaluator) else None,
+                    "evaluator_registry": evaluator if isinstance(evaluator, DomainEvaluatorRegistry) else None,
+                    "max_replans": max_replans,
+                }
+            )
+            if call_options["evaluator"] is None:
+                call_options.pop("evaluator")
+            if call_options["evaluator_registry"] is None:
+                call_options.pop("evaluator_registry")
+
+        final = self.run_auto(
+            task=task,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            **call_options,
+        )
+        if route is None:
+            route = final.route
+        inner = final.result
+        if final.status != "completed":
+            status = final.status
+            attempts: tuple[Any, ...] = ()
+            evaluations: tuple[Mapping[str, Any], ...] = ()
+            replan_count = 0
+        elif isinstance(inner, (AutonomousLearningResult, AutonomousCrossDomainReplanResult)):
+            status = inner.status
+            attempts = tuple(getattr(inner, "attempts", ()))
+            if isinstance(inner, AutonomousCrossDomainReplanResult):
+                evaluations = tuple(
+                    evaluation
+                    for attempt in attempts
+                    for evaluation in getattr(attempt, "evaluations", ())
+                )
+            else:
+                evaluations = tuple(getattr(inner, "evaluations", ()))
+            replan_count = int(getattr(inner, "replan_count", max(0, len(attempts) - 1)))
+        else:
+            status = final.execution_status
+            attempts = (inner,) if inner is not None else ()
+            evaluations = ()
+            replan_count = 0
+
+        return AutonomousAutoReplanResult(
+            status=status,
+            mode=(
+                "cross_domain"
+                if final.route.cross_domain and len(final.route.selected_domains) > 1
+                else "single_domain"
+            ) if not final.route.abstained else None,
+            route=final.route,
+            final=final,
+            attempt_results=attempts,
+            evaluations=evaluations,
+            replan_count=replan_count,
+            semantic_route=semantic_route if semantic_route is not None else final.semantic_route,
+        )
 
     def run_cross_domain_learning(
         self,
@@ -23440,6 +23817,8 @@ __all__ = [
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CONTEXT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA",
+    "AUTONOMOUS_REPLAN_CYCLE_SCHEMA",
+    "AUTONOMOUS_REPLAN_CONTEXT_SCHEMA",
     "AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA",
     "AUTONOMOUS_PROVISIONED_RUN_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA",
@@ -23472,6 +23851,8 @@ __all__ = [
     "MAX_AUTONOMOUS_ROUTE_DOMAINS",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_CHILDREN",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_REPLANS",
+    "MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS",
+    "MAX_AUTONOMOUS_REPLAN_CYCLE_EVALUATIONS",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_BYTES",
     "MAX_AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_BYTES",
     "AUTONOMOUS_WORKFLOW_SCHEMA",
@@ -23518,6 +23899,7 @@ __all__ = [
     "AutonomousCrossDomainReplanCheckpoint",
     "AutonomousAutoBlueprint",
     "AutonomousAutoResult",
+    "AutonomousAutoReplanResult",
     "AutonomousProvisionedRun",
     "AutonomousBatchItem",
     "AutonomousBatchResult",
