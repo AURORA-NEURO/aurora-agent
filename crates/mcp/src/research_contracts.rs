@@ -427,6 +427,7 @@ use bioprism_foundation::{
     MechanismExplorationAssuranceRequest, PolicyReceipt,
     FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
 };
+use bioprism_oraclex::publication_release_contract_model::{compile_publication_release, PublicationReleaseReceipt, PublicationReleaseRequest, feature_id as PUBLICATION_RELEASE_FEATURE_ID};
 use bioprism_influence::{
     run_federated_continual_interpretation, EvidenceBackedResult4,
     FederatedInterpretationError, InteractiveInterpretation,
@@ -565,6 +566,7 @@ pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str = "adapter_throughput_retrieval_synthesis_federated_control_plane";
 pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str = "adapter_federated_continual_retrieval_synthesis_federated_control_plane";
 pub const FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_TOOL: &str = "foundation_mechanism_exploration_assurance";
+pub const ORACLEX_PUBLICATION_RELEASE_TOOL: &str = "oraclex_publication_release";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_throughput_retrieval_synthesis_contract_model";
@@ -1735,6 +1737,17 @@ pub fn validate_foundation_mechanism_exploration_assurance_json(value: &Value) -
     let receipt: MechanismExplorationAssuranceReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid foundation mechanism assurance receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID { return Err("foundation mechanism assurance feature id mismatch".into()); }
+    Ok(receipt)
+}
+pub fn run_oraclex_publication_release_json(value: &Value) -> Result<Value, String> {
+    let request: PublicationReleaseRequest = serde_json::from_value(value.clone()).map_err(|error| format!("invalid oraclex publication release request: {error}"))?;
+    let receipt = compile_publication_release(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize oraclex publication release receipt: {error}"))
+}
+pub fn validate_oraclex_publication_release_json(value: &Value) -> Result<PublicationReleaseReceipt, String> {
+    let receipt: PublicationReleaseReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid oraclex publication release receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != PUBLICATION_RELEASE_FEATURE_ID { return Err("oraclex publication release feature id mismatch".into()); }
     Ok(receipt)
 }
 

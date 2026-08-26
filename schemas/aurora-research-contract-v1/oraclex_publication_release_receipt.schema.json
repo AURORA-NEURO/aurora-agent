@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/oraclex_publication_release_receipt.schema.json",
+  "title": "AURORA Oraclex publication and research-object release receipt",
+  "description": "Deterministic prospective batch admission for digest-only publication of preclinical research objects.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "request_id", "consumer", "batch_id", "release_channel", "verdict", "candidate_order", "accepted_order", "conditional_order", "blocked_order", "unknown_order", "decisions", "gate_order", "passed_gates", "failed_gates", "omissions", "uncertainty", "negative_evidence", "semantic_loss", "replay_identity", "release_digest", "effect_receipts", "artifact", "raw_data_local", "network_permitted", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "oraclex-prospective-publication-release/1.0"},
+    "feature_id": {"const": "AFA-oraclex-P16-F07"},
+    "request_id": {"type": "string", "minLength": 1},
+    "consumer": {"type": "string", "minLength": 1},
+    "batch_id": {"type": "string", "minLength": 1},
+    "release_channel": {"type": "string", "minLength": 1},
+    "verdict": {"enum": ["released", "conditional", "blocked", "unknown"]},
+    "candidate_order": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "accepted_order": {"type": "array", "items": {"type": "string"}},
+    "conditional_order": {"type": "array", "items": {"type": "string"}},
+    "blocked_order": {"type": "array", "items": {"type": "string"}},
+    "unknown_order": {"type": "array", "items": {"type": "string"}},
+    "decisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "disposition", "failed_gates", "conditional_gates", "negative_findings", "source_digests"],
+        "properties": {
+          "artifact_id": {"type": "string", "minLength": 1},
+          "disposition": {"enum": ["accepted", "conditional", "blocked"]},
+          "failed_gates": {"type": "array", "items": {"type": "string"}},
+          "conditional_gates": {"type": "array", "items": {"type": "string"}},
+          "negative_findings": {"type": "array", "items": {"type": "string"}},
+          "source_digests": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/digest"}}
+        }
+      }
+    },
+    "gate_order": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "passed_gates": {"type": "array", "items": {"type": "string"}},
+    "failed_gates": {"type": "array", "items": {"type": "string"}},
+    "omissions": {"type": "array", "items": {"type": "string"}},
+    "uncertainty": {"type": "array", "items": {"type": "string"}},
+    "negative_evidence": {"type": "array", "items": {"type": "string"}},
+    "semantic_loss": {"type": "array", "items": {"type": "object", "required": ["field", "reason", "severity"], "properties": {"field": {"type": "string"}, "reason": {"type": "string"}, "severity": {"enum": ["none", "bounded", "decision_relevant", "unknown"]}}, "additionalProperties": false}},
+    "replay_identity": {"$ref": "#/$defs/digest"},
+    "prior_release_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "release_digest": {"$ref": "#/$defs/digest"},
+    "effect_receipts": {"type": "array", "minItems": 1, "items": {"enum": ["release:publication-research-object", "release:conditional-review", "block:unsafe-release"]}},
+    "artifact": {"type": "object", "required": ["schema_version", "artifact_id", "content_type", "content_hash", "semantic_loss", "provenance", "boundary"], "properties": {"schema_version": {"const": "aurora-research-contract/1.0"}, "artifact_id": {"type": "string", "minLength": 1}, "content_type": {"const": "application/vnd.aurora.publication-release+json"}, "content_hash": {"$ref": "#/$defs/digest"}, "semantic_loss": {"type": "array"}, "provenance": {"type": "array"}, "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}}, "additionalProperties": true},
+    "raw_data_local": {"const": true},
+    "network_permitted": {"type": "boolean"},
+    "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

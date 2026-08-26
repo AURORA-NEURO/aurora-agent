@@ -101,6 +101,7 @@ pub mod orthogonal;
 pub mod panel;
 pub mod perturbation;
 pub mod program;
+pub mod publication_release_contract_model;
 pub mod standard;
 pub mod units;
 pub mod verdict;
@@ -115,7 +116,7 @@ pub use verdict::{
 /// `crates/modalities` established the pattern: "no invented constants" is not expressible as a type,
 /// so it is expressed as a test over the text. `include_str!` bakes the sources in at compile time, so
 /// the test reads no files at runtime and stays deterministic.
-pub const SOURCES: [(&str, &str); 17] = [
+pub const SOURCES: [(&str, &str); 18] = [
     ("audit.rs", include_str!("audit.rs")),
     ("citation.rs", include_str!("citation.rs")),
     ("compose.rs", include_str!("compose.rs")),
@@ -130,6 +131,10 @@ pub const SOURCES: [(&str, &str); 17] = [
     ("panel.rs", include_str!("panel.rs")),
     ("perturbation.rs", include_str!("perturbation.rs")),
     ("program.rs", include_str!("program.rs")),
+    (
+        "publication_release_contract_model.rs",
+        include_str!("publication_release_contract_model.rs"),
+    ),
     ("standard.rs", include_str!("standard.rs")),
     ("units.rs", include_str!("units.rs")),
     ("verdict.rs", include_str!("verdict.rs")),

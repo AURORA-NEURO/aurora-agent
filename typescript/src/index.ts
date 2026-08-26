@@ -974,6 +974,15 @@ export {
 } from "./research-contracts.js";
 export type { BrainMultimodalKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
 export {
+  ORACLEX_PUBLICATION_RELEASE_FEATURE_ID,
+  ORACLEX_PUBLICATION_RELEASE_CONTRACT_VERSION,
+  ORACLEX_PUBLICATION_RELEASE_INPUT_SCHEMA,
+  ORACLEX_PUBLICATION_RELEASE_OUTPUT_SCHEMA,
+  oraclexPublicationReleaseReceiptDigest,
+  validateOraclexPublicationReleaseReceipt,
+} from "./research-contracts.js";
+export type { OraclexPublicationReleaseReceipt } from "./research-contracts.js";
+export {
   THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
   THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
   brainThroughputKnowledgeRepresentationContractModelReceiptDigest,

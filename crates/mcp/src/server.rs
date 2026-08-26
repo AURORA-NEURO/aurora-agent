@@ -1951,6 +1951,7 @@ impl Server {
             "foundation_mechanism_exploration_assurance" => {
                 self.foundation_mechanism_exploration_assurance(&arguments)
             },
+            "oraclex_publication_release" => self.oraclex_publication_release(&arguments),
             "influence_federated_continual_interpretation" => {
                 self.influence_federated_continual_interpretation(&arguments)
             },
@@ -25458,6 +25459,12 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_foundation::FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance evaluates prospective high-throughput mechanism candidates against typed evidence, provenance, artifact, comparability, baseline, replay, policy, approval, protected-closure, and capacity gates", "unknown, speculative, contradicted, below-threshold, omitted, negative, and required-but-not-admitted candidates remain explicit", "non-qualified portfolios fail closed with block:unsafe-release and raw preclinical data remains local"], "limitations": ["the assurance harness is not a clinical decision system", "operators remain responsible for independent replication, causal interpretation, baseline selection, and release governance"]}))
     }
 
+    fn oraclex_publication_release(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a PublicationReleaseRequest")?;
+        let receipt = crate::research_contracts::run_oraclex_publication_release_json(request)?;
+        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_oraclex::publication_release_contract_model::feature_id(), "receipt": receipt, "guarantees": ["A2 release admission requires typed artifact, provenance, workflow replay, evaluation baseline, standards, reproducibility, policy, protected closure, signed authority, federation permission, and raw-locality gates", "unknown and speculative evidence become conditional review, contradicted evidence and failed gates block release, and negative findings remain in the signed receipt", "release payloads are content-addressed and digest-only across the federation boundary; contract migration records semantic loss and preserves replay identity"], "limitations": ["the contract model does not mint signatures, upload payloads, or perform publication hosting", "the capability is not a clinical decision system and does not process human-subject or clinical-source data"]}))
+    }
+
     fn influence_federated_continual_interpretation(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -37809,6 +37816,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "oraclex_publication_release",
+            "domains": ["publication and research-object release", "RO-Crate and PROV-O metadata", "provenance and evaluation closure", "negative-result disclosure", "digest-only federation", "contract migration"],
+            "crates": ["bioprism-oraclex", "bioprism-foundation", "bioprism-mcp"],
+            "mcp_tools": ["oraclex_publication_release"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
@@ -40613,6 +40628,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "foundation_mechanism_exploration_assurance",
             "description": "Assure a prospective high-throughput mechanism-exploration candidate batch with typed evidence/provenance/comparability, baseline, replay, capacity, policy, approval, protected-closure, negative-result, and fail-closed release gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MechanismExplorationAssuranceRequest with candidate evidence digests, baseline/algorithm identity, support threshold, bounded capacity, required mechanisms, policy/approval/closure/locality controls, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "oraclex_publication_release",
+            "description": "Compile an A2 prospective high-throughput publication and research-object release receipt with typed digest, provenance, evaluation baseline, standards, reproducibility, policy, authority, locality, negative-result, and contract-migration gates.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized PublicationReleaseRequest with release candidates, content/provenance/workflow/evidence/evaluation digests, required standards, capacity, policy and protected-closure controls, signed approval, reproducibility and negative-result disclosure, federation permission, migration version, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "influence_federated_continual_interpretation",
