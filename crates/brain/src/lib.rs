@@ -110,6 +110,7 @@ pub mod local_context_compilation_federated_control_plane;
 pub mod multimodal_context_compilation_federated_control_plane;
 pub mod throughput_context_compilation_federated_control_plane;
 pub mod federated_continual_context_compilation_federated_control_plane;
+pub mod local_knowledge_representation_inference_engine;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
@@ -700,6 +701,13 @@ pub use throughput_contract_model::{
     ThroughputContractModelError, ThroughputContractModelReceipt, ThroughputContractModelRequest,
     CONTRACT_VERSION as THROUGHPUT_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use local_knowledge_representation_inference_engine::{
+    infer_local_knowledge_representation, local_knowledge_representation_inference_engine_manifest,
+    KnowledgeRepresentationClaim, KnowledgeRepresentationDisposition,
+    KnowledgeRepresentationError, KnowledgeRepresentationReceipt, KnowledgeRepresentationRequest,
+    CONTRACT_VERSION as LOCAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as LOCAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
 };
 pub use throughput_operations_control_plane::{
     operate_throughput_evidence, throughput_operations_control_plane_manifest,
