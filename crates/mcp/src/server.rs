@@ -37836,7 +37836,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "mutation_and_causal_discovery",
             "domains": ["metamorphic testing", "causal divergence", "robustness"],
             "crates": ["bioprism-mutation", "bioprism-benchcompiler", "bioprism-stress", "bioprism-influence"],
-            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review", "stress_profile", "stress_report", "influence_analyze"],
+            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review", "stress_profile", "stress_report", "influence_analyze", "influence_federated_continual_interpretation"],
             "cli_entrypoints": ["mutate family"],
             "status": "available"
         },
