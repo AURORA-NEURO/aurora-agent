@@ -135,6 +135,8 @@ import type {
 } from "./autonomous-domain-evidence-brain.js";
 import type {
   AutonomousEpisodicMemoryStore,
+  AutonomousMemoryPersistenceCoordinator,
+  AutonomousMemorySnapshot,
   AutonomousMemoryEpisode,
   AutonomousMemoryQuery,
   AutonomousMemoryReceipt,
@@ -1321,6 +1323,8 @@ export interface AutonomousAgentOptions {
   selectionPromotion?: AutonomousSelectionPromotionLifecycle;
   /** Optional caller-owned episodic memory used for bounded retrieval and value-only run recording. */
   memoryStore?: AutonomousEpisodicMemoryStore;
+  /** Optional CAS-fenced persistence coordinator bound to `memoryStore` for restart-safe episodes. */
+  memoryPersistence?: AutonomousMemoryPersistenceCoordinator;
   /** Optional evaluator-gated lesson index; raw lesson text remains caller-resolved and transient. */
   memoryConsolidator?: AutonomousMemoryConsolidator;
   /** Optional registry-bound, CAS-fenced prompt learner used by every high-level run. */
@@ -4850,6 +4854,8 @@ export class AutonomousAgent {
   readonly connectorRuntime?: AutonomousConnectorRuntime;
   /** Caller-owned episodic memory; exposed so the learning controller can close evaluation feedback. */
   readonly memoryStore?: AutonomousEpisodicMemoryStore;
+  /** Caller-owned persistence for episodic memory; no episode state is written implicitly. */
+  readonly memoryPersistence?: AutonomousMemoryPersistenceCoordinator;
   /** Optional evaluator-gated lesson index; it never receives prompts, provider payloads, or keys. */
   readonly memoryConsolidator?: AutonomousMemoryConsolidator;
   readonly promptLearningCoordinator?: AutonomousPromptLearningPersistenceCoordinator;
@@ -4885,6 +4891,12 @@ export class AutonomousAgent {
       || typeof options.memoryStore.get !== "function"
     )) throw new ArgumentError("AutonomousAgent memoryStore is malformed");
     this.memoryStore = options.memoryStore;
+    if (options.memoryPersistence !== undefined && (
+      typeof options.memoryPersistence.restore !== "function"
+      || typeof options.memoryPersistence.flush !== "function"
+      || options.memoryPersistence.store !== options.memoryStore
+    )) throw new ArgumentError("AutonomousAgent memoryPersistence must be bound to the supplied memoryStore");
+    this.memoryPersistence = options.memoryPersistence;
     if (options.memoryConsolidator !== undefined && (
       typeof options.memoryConsolidator.consolidate !== "function"
       || typeof options.memoryConsolidator.recall !== "function"
@@ -4983,6 +4995,30 @@ export class AutonomousAgent {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
     if (!this.learnerPersistence) throw new ArgumentError("AutonomousAgent online learner persistence is not configured");
     return this.learnerPersistence.flush();
+  }
+
+  /**
+   * Restore the hash-chained episodic memory before the agent accepts new run context.
+   *
+   * Restoration is explicit and exact-store-bound. A coordinator for a different memory store
+   * is rejected during construction so a restart cannot appear successful while restoring into a
+   * store that the agent does not actually query.
+   */
+  async restoreMemory(): Promise<AutonomousMemorySnapshot | null> {
+    if (!this.memoryStore) throw new ArgumentError("AutonomousAgent has no episodic memory store");
+    if (!this.memoryPersistence) throw new ArgumentError("AutonomousAgent memory persistence is not configured");
+    return this.memoryPersistence.restore();
+  }
+
+  /**
+   * Flush value-only memory episodes and evaluations through the caller-owned CAS boundary.
+   * Prompts, task text, provider responses, tool payloads, and credentials never enter the
+   * persisted memory image; only the memory store's validated digest projections are written.
+   */
+  async flushMemory(): Promise<AutonomousMemorySnapshot> {
+    if (!this.memoryStore) throw new ArgumentError("AutonomousAgent has no episodic memory store");
+    if (!this.memoryPersistence) throw new ArgumentError("AutonomousAgent memory persistence is not configured");
+    return this.memoryPersistence.flush();
   }
 
   /** Consolidate explicit evaluator observations through the configured lesson index. */

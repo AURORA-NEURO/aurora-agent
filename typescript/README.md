@@ -1280,6 +1280,29 @@ The coordinator must reference the exact learner instance supplied to the agent.
 flush are explicit lifecycle operations: a missing binding never silently resets adaptation, and
 no prompt, task, provider response, credential, or tool value can enter the learner snapshot.
 
+The same lifecycle is available for the agent's episodic memory. Bind the existing
+`AutonomousMemoryPersistenceCoordinator` to the exact `memoryStore` used for retrieval and
+recording, then restore it before accepting new work:
+
+```typescript
+const memoryPersistence = new AutonomousMemoryPersistenceCoordinator(
+  memoryStore,
+  new TransactionalJsonAutonomousMemoryPersistence(memoryStoreAdapter),
+);
+const agent = new AutonomousAgent(runtime, { memoryStore, memoryPersistence });
+
+await agent.restoreMemory(); // validates the complete hash chain before retrieval
+// Run direct, adaptive, goal, mission, workflow, or cross-domain work.
+await agent.flushMemory(); // explicit CAS-fenced value-only checkpoint
+```
+
+`restoreMemory()` and `flushMemory()` are also exposed by `AutonomousBrainFacade`. The agent
+rejects a coordinator bound to another store, and it never silently creates or restores a fresh
+memory image. Snapshots retain only bounded episode metadata, route/context digests, evaluations,
+and the hash chain; task text, prompts, provider responses, tool payloads, credentials, and raw
+evidence remain transient. This gives all twelve domains one restart-safe memory path without
+turning retrieval into authorization or evaluator credit.
+
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,
 latency, quality, and circuit projections per provider/model arm, and exposes a deterministic

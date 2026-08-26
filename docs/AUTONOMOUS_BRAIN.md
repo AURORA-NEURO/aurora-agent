@@ -7865,6 +7865,32 @@ and evaluator/outcome digests. Prompt text, task text, provider responses, crede
 arguments, and live results remain outside the snapshot. This gives all twelve built-in domains
 the same restart-safe contextual adaptation path without weakening the explicit evaluator gate.
 
+### Agent-owned episodic-memory persistence
+
+Episodic memory now has the same high-level restart seam. Attach its existing hash-chained,
+CAS-fenced coordinator to the exact store queried by the agent:
+
+```ts
+const memoryPersistence = new AutonomousMemoryPersistenceCoordinator(
+  memoryStore,
+  new TransactionalJsonAutonomousMemoryPersistence(memoryStoreAdapter),
+);
+const agent = new AutonomousAgent(runtime, { memoryStore, memoryPersistence });
+
+await agent.restoreMemory();
+// Direct, goal, mission, workflow, adaptive, and cross-domain runs may now recall prior episodes.
+await agent.flushMemory();
+```
+
+The agent and `AutonomousBrainFacade` expose explicit `restoreMemory()` and `flushMemory()`
+operations. Construction rejects a coordinator whose `store` is not the exact `memoryStore` used
+by the agent, preventing a successful-looking restore into an unused object. Restore validates the
+complete event chain and snapshot digest before mutating the live store; flush uses the caller's
+compare-and-swap boundary and serializes concurrent operations. The image is still metadata-only:
+bounded context, route, outcome, evaluation, and integrity digests are retained, while task text,
+prompts, provider responses, credentials, tool arguments, and raw evidence are excluded. The same
+contract therefore applies uniformly to all twelve built-in domains and cross-domain synthesis.
+
 The server-visible equivalent is `AutonomousDurableJobWorker` over
 `AutonomousDurableJobController`. It atomically pulls `brain_job_claim_next`, hands only the
 metadata projection to a caller-owned resolver, recomputes the deterministic route/task digest,

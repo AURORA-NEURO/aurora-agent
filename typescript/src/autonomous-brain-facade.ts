@@ -60,6 +60,7 @@ import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type { ProviderInvocationObserver } from "./llm.js";
 import { AutonomousCostBudget } from "./llm.js";
 import type { JsonObject, JsonValue } from "./types.js";
+import type { AutonomousMemorySnapshot } from "./autonomous-memory.js";
 import type {
   AutonomousWorkflowPortfolioAdmission,
   AutonomousWorkflowPortfolioAdmissionOptions,
@@ -1411,6 +1412,16 @@ export class AutonomousBrainFacade {
   /** Return the redacted provider/model/tool posture needed to render onboarding UI. */
   async readiness(options: AutonomousBrainReadinessOptions = {}): Promise<AutonomousBrainReadinessReport> {
     return this.agent.readiness(options);
+  }
+
+  /** Restore the agent's caller-owned, digest-bound episodic memory before execution. */
+  async restoreMemory(): Promise<AutonomousMemorySnapshot | null> {
+    return this.agent.restoreMemory();
+  }
+
+  /** Flush the agent's value-only episodic memory through its CAS-fenced persistence boundary. */
+  async flushMemory(): Promise<AutonomousMemorySnapshot> {
+    return this.agent.flushMemory();
   }
 
   /**
