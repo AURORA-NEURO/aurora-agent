@@ -389,7 +389,7 @@ mod tests {
     fn computes_local_synthesis() {
         let receipt = run_multimodal_retrieval_synthesis_inference_engine(&request()).unwrap();
         assert_eq!(receipt.feature_id, FEATURE_ID);
-        assert_eq!(receipt.selected_order, vec!["evidence:f21"]);
+        assert_eq!(receipt.selected_order, vec!["evidence:f21", "evidence:f22"]);
     }
 
     #[test]
