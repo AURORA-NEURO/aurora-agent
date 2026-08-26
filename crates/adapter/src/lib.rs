@@ -152,6 +152,7 @@ pub mod multimodal_retrieval_synthesis_research_copilot;
 pub mod throughput_retrieval_synthesis_research_copilot;
 pub mod federated_continual_retrieval_synthesis_research_copilot;
 pub mod local_retrieval_synthesis_workflow_fabric;
+pub mod multimodal_retrieval_synthesis_workflow_fabric;
 pub mod multimodal_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_contract_model;
@@ -629,6 +630,15 @@ pub use local_retrieval_synthesis_workflow_fabric::{
     LocalRetrievalSynthesisWorkflowRequest,
     CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use multimodal_retrieval_synthesis_workflow_fabric::{
+    multimodal_retrieval_synthesis_workflow_fabric_manifest,
+    schedule_multimodal_retrieval_synthesis_workflow,
+    MultimodalRetrievalSynthesisWorkflowError,
+    MultimodalRetrievalSynthesisWorkflowReceipt,
+    MultimodalRetrievalSynthesisWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use multimodal_retrieval_synthesis_inference_engine::{
     multimodal_retrieval_synthesis_inference_engine_manifest,
