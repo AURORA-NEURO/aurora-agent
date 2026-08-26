@@ -16,6 +16,9 @@ from prism_sdk import (
     AutonomousModelInventoryStore,
     AutonomousCapabilityJournalPersistenceCoordinator,
     InMemoryAutonomousCapabilityJournalStore,
+    AutonomousDecisionCycle,
+    AutonomousDecisionCyclePersistenceCoordinator,
+    InMemoryAutonomousDecisionCycleStateStore,
     AutonomousExecutionController,
     AutonomousExecutionJournal,
     AutonomousExecutionPersistenceCoordinator,
@@ -38,6 +41,7 @@ class _LifecycleAgent:
             "learning",
             "prompt_learning",
             "capability_journal",
+            "decision_cycle",
             "execution",
         ):
             setattr(self, f"{component}_persistence", object())
@@ -66,6 +70,14 @@ class _LifecycleAgent:
     def flush_capability_journal_persistence(self) -> dict[str, object]:
         self.calls.append("flush:capability_journal")
         return self._value("capability_journal", "flush")
+
+    def restore_decision_cycle_persistence(self) -> dict[str, object]:
+        self.calls.append("restore:decision_cycle")
+        return self._value("decision_cycle", "restore")
+
+    def flush_decision_cycle_persistence(self) -> dict[str, object]:
+        self.calls.append("flush:decision_cycle")
+        return self._value("decision_cycle", "flush")
 
     def restore_execution_persistence(self) -> dict[str, object]:
         self.calls.append("restore:execution")
@@ -100,6 +112,7 @@ def test_lifecycle_restores_and_flushes_in_explicit_dependency_order() -> None:
         activation_store=object(),
         selection_promotion_store=object(),
         capability_journal_persistence=object(),
+        decision_cycle_persistence=object(),
         execution_persistence=object(),
         require_all=True,
     )
@@ -135,7 +148,7 @@ def test_lifecycle_strict_failure_keeps_redacted_report_and_not_attempted_rows()
     assert report["failed_component_id"] == "health"
     assert report["components"][2]["status"] == "failed"
     assert report["components"][2]["error_class"] == "ValueError"
-    assert report["components"][5]["status"] == "not_attempted"
+    assert report["components"][6]["status"] == "not_attempted"
     assert "private task/prompt/provider payload" not in json.dumps(report)
     assert coordinator.last_report is raised.value.report
 
@@ -216,20 +229,20 @@ def test_agent_persisted_state_composes_inventory_restore_and_flush_without_prov
         selection_promotion_store=selection_store,
         strict=False,
     )
-    assert flushed["components"][10]["status"] == "flushed"
-    assert flushed["components"][10]["snapshot_digest"] == restored["components"][0]["snapshot_digest"]
+    assert flushed["components"][11]["status"] == "flushed"
+    assert flushed["components"][11]["snapshot_digest"] == restored["components"][0]["snapshot_digest"]
     assert "credentials" not in json.dumps(restored)
 
 
 class _MetadataSnapshotStore:
     def __init__(self) -> None:
-        self.value: dict[str, object] | None = None
+        self.value: object | None = None
 
-    def read(self) -> dict[str, object] | None:
+    def read(self) -> object | None:
         return self.value
 
-    def write(self, value: dict[str, object]) -> None:
-        self.value = dict(value)
+    def write(self, value: object) -> None:
+        self.value = value.to_dict() if hasattr(value, "to_dict") else dict(value) if isinstance(value, dict) else value
 
 
 def test_agent_lifecycle_restores_capability_barrier_before_execution_checkpoint(tmp_path) -> None:
@@ -244,12 +257,24 @@ def test_agent_lifecycle_restores_capability_barrier_before_execution_checkpoint
         execution_journal,
         _MetadataSnapshotStore(),
     )
+    decision_store = InMemoryAutonomousDecisionCycleStateStore()
+    decision_persistence = AutonomousDecisionCyclePersistenceCoordinator(
+        decision_store,
+        _MetadataSnapshotStore(),
+    )
+    AutonomousDecisionCycle(
+        decision_store,
+        cycle_id="lifecycle-decision",
+        task="restart-safe lifecycle decision",
+        mode="single_domain",
+    )
     source = AutonomousAgent(
         object(),
         runtime,
         capability_journal=capability_store,
         capability_journal_persistence=capability_persistence,
         execution_journal=execution_journal,
+        decision_cycle_persistence=decision_persistence,
         execution_persistence=execution_persistence,
     )
     controller = AutonomousExecutionController(
@@ -262,9 +287,10 @@ def test_agent_lifecycle_restores_capability_barrier_before_execution_checkpoint
     )
     controller.checkpoint(status="paused", reason="process_restart")
     flushed = source.flush_persisted_state(strict=False)
-    assert flushed["ordered_component_ids"][:2] == ["execution", "capability_journal"]
+    assert flushed["ordered_component_ids"][:3] == ["execution", "decision_cycle", "capability_journal"]
     assert flushed["components"][0]["status"] == "flushed"
     assert flushed["components"][1]["status"] == "flushed"
+    assert flushed["components"][1]["snapshot_digest"]
 
     restored_capability_store = InMemoryAutonomousCapabilityJournalStore()
     restored_capability_persistence = AutonomousCapabilityJournalPersistenceCoordinator(
@@ -276,17 +302,26 @@ def test_agent_lifecycle_restores_capability_barrier_before_execution_checkpoint
         restored_execution_journal,
         execution_persistence.persistence,
     )
+    restored_decision_store = InMemoryAutonomousDecisionCycleStateStore()
+    restored_decision_persistence = AutonomousDecisionCyclePersistenceCoordinator(
+        restored_decision_store,
+        decision_persistence.persistence,
+    )
     restarted = AutonomousAgent(
         object(),
         runtime,
         capability_journal=restored_capability_store,
         capability_journal_persistence=restored_capability_persistence,
         execution_journal=restored_execution_journal,
+        decision_cycle_persistence=restored_decision_persistence,
         execution_persistence=restored_execution_persistence,
     )
     restored = restarted.restore_persisted_state(strict=False)
+    assert restored["components"][-3]["status"] == "restored"
     assert restored["components"][-2]["status"] == "restored"
     assert restored["components"][-1]["status"] == "restored"
-    assert restored["components"][-2]["generation"] == 1
+    assert restored["components"][-2]["snapshot_digest"]
+    assert restored["components"][-3]["generation"] == 1
     assert restarted.execution_state("lifecycle-recovery")["status"] == "paused"
+    assert restored_decision_store.load("lifecycle-decision") is not None
     assert "rows" not in json.dumps(restored)

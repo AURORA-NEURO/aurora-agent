@@ -6,6 +6,7 @@ import type { AutonomousModelInventoryPersistence } from "./autonomous-model-inv
 import type { AutonomousSelectionLifecycleStore } from "./autonomous-selection-lifecycle.js";
 import type { AutonomousCapabilityJournalPersistenceCoordinator } from "./autonomous-capability-persistence.js";
 import type { AutonomousExecutionPersistenceCoordinator } from "./autonomous-execution.js";
+import type { AutonomousDecisionCyclePersistenceCoordinator } from "./autonomous-decision-persistence.js";
 
 /**
  * Strict startup/shutdown composition for the autonomous brain. Each component keeps its own
@@ -14,7 +15,7 @@ import type { AutonomousExecutionPersistenceCoordinator } from "./autonomous-exe
  * arguments, or raw exception messages, and it never claims cross-store atomicity.
  */
 export const AUTONOMOUS_AGENT_LIFECYCLE_SCHEMA = "bioprism-typescript-autonomous-agent-persistence-lifecycle/0.1" as const;
-export const AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS = ["model_inventory", "runtime_health", "health", "activation", "selection_promotion", "evaluator_calibration", "memory", "learning", "prompt_learning", "capability_journal", "execution"] as const;
+export const AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS = ["model_inventory", "runtime_health", "health", "activation", "selection_promotion", "evaluator_calibration", "memory", "learning", "prompt_learning", "capability_journal", "decision_cycle", "execution"] as const;
 export const AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER = AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS;
 export const AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER = [...AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS].reverse() as unknown as typeof AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS;
 
@@ -59,6 +60,7 @@ export interface AutonomousAgentPersistenceLifecycleOptions {
   activationStore?: AutonomousCapabilityActivationSnapshotStore;
   selectionPromotionStore?: AutonomousSelectionLifecycleStore;
   capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
   executionPersistence?: AutonomousExecutionPersistenceCoordinator;
   requireAll?: boolean;
   continueOnError?: boolean;
@@ -135,6 +137,7 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
   readonly activationStore?: AutonomousCapabilityActivationSnapshotStore;
   readonly selectionPromotionStore?: AutonomousSelectionLifecycleStore;
   readonly capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  readonly decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
   readonly executionPersistence?: AutonomousExecutionPersistenceCoordinator;
   readonly requireAll: boolean;
   readonly continueOnError: boolean;
@@ -150,6 +153,8 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
     if (options.selectionPromotionStore !== undefined && !(agent as unknown as { selectionPromotion?: unknown }).selectionPromotion) throw new ArgumentError("agent lifecycle selection promotion store requires a configured lifecycle");
     if (options.capabilityJournalPersistence !== undefined && (typeof options.capabilityJournalPersistence.restore !== "function" || typeof options.capabilityJournalPersistence.flush !== "function")) throw new ArgumentError("agent lifecycle capability journal persistence is malformed");
     if (options.capabilityJournalPersistence !== undefined && (agent as unknown as { capabilityJournalPersistence?: unknown }).capabilityJournalPersistence !== options.capabilityJournalPersistence) throw new ArgumentError("agent lifecycle capability journal persistence must be bound to the agent");
+    if (options.decisionCyclePersistence !== undefined && (typeof options.decisionCyclePersistence.restore !== "function" || typeof options.decisionCyclePersistence.flush !== "function")) throw new ArgumentError("agent lifecycle decision-cycle persistence is malformed");
+    if (options.decisionCyclePersistence !== undefined && (agent as unknown as { decisionCyclePersistence?: unknown }).decisionCyclePersistence !== options.decisionCyclePersistence) throw new ArgumentError("agent lifecycle decision-cycle persistence must be bound to the agent");
     if (options.executionPersistence !== undefined && (typeof options.executionPersistence.restore !== "function" || typeof options.executionPersistence.flush !== "function")) throw new ArgumentError("agent lifecycle execution persistence is malformed");
     if (options.executionPersistence !== undefined && (agent as unknown as { executionPersistence?: unknown }).executionPersistence !== options.executionPersistence) throw new ArgumentError("agent lifecycle execution persistence must be bound to the agent");
     if (options.requireAll !== undefined && typeof options.requireAll !== "boolean") throw new ArgumentError("agent lifecycle requireAll must be boolean");
@@ -159,6 +164,7 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
     this.activationStore = options.activationStore;
     this.selectionPromotionStore = options.selectionPromotionStore;
     this.capabilityJournalPersistence = options.capabilityJournalPersistence;
+    this.decisionCyclePersistence = options.decisionCyclePersistence;
     this.executionPersistence = options.executionPersistence;
     this.requireAll = options.requireAll ?? false;
     this.continueOnError = options.continueOnError ?? false;
@@ -171,6 +177,7 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
     if (componentId === "activation") return this.activationStore !== undefined;
     if (componentId === "selection_promotion") return this.selectionPromotionStore !== undefined && Boolean((this.agent as unknown as { selectionPromotion?: unknown }).selectionPromotion);
     if (componentId === "capability_journal") return Boolean(this.capabilityJournalPersistence ?? (this.agent as unknown as { capabilityJournalPersistence?: unknown }).capabilityJournalPersistence);
+    if (componentId === "decision_cycle") return Boolean(this.decisionCyclePersistence ?? (this.agent as unknown as { decisionCyclePersistence?: unknown }).decisionCyclePersistence);
     if (componentId === "execution") return Boolean(this.executionPersistence ?? (this.agent as unknown as { executionPersistence?: unknown }).executionPersistence);
     if (componentId === "health") return Boolean((this.agent as unknown as { healthPersistence?: unknown }).healthPersistence);
     const names = {
@@ -189,6 +196,7 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
     if (componentId === "activation") return operation === "restore" ? this.agent.restoreActivation(this.activationStore!) : this.agent.saveActivation(this.activationStore!);
     if (componentId === "selection_promotion") return operation === "restore" ? this.agent.restoreSelectionPromotion(this.selectionPromotionStore!) : this.agent.saveSelectionPromotion(this.selectionPromotionStore!);
     if (componentId === "capability_journal") return operation === "restore" ? this.agent.restoreCapabilityJournalPersistence() : this.agent.flushCapabilityJournalPersistence();
+    if (componentId === "decision_cycle") return operation === "restore" ? this.agent.restoreDecisionCyclePersistence() : this.agent.flushDecisionCyclePersistence();
     if (componentId === "execution") return operation === "restore" ? this.agent.restoreExecutionPersistence() : this.agent.flushExecutionPersistence();
     const names: Record<AutonomousAgentPersistenceLifecycleComponent, [string, string]> = {
       model_inventory: ["restoreModelInventory", "flushModelInventory"],
@@ -201,6 +209,7 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
       learning: ["restoreOnlineLearning", "flushOnlineLearning"],
       prompt_learning: ["restorePromptLearning", "flushPromptLearning"],
       capability_journal: ["restoreCapabilityJournalPersistence", "flushCapabilityJournalPersistence"],
+      decision_cycle: ["restoreDecisionCyclePersistence", "flushDecisionCyclePersistence"],
       execution: ["restoreExecutionPersistence", "flushExecutionPersistence"],
     };
     const methodNames = names[componentId];

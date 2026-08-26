@@ -183,6 +183,7 @@ from .autonomous_run_analytics_ledger import (
 )
 from .autonomous_decision_persistence import (
     AutonomousDecisionCycle,
+    AutonomousDecisionCyclePersistenceCoordinator,
     AutonomousDecisionCycleRehydrationContext,
     AutonomousDecisionCycleStateStore,
 )
@@ -14692,6 +14693,7 @@ class AutonomousAgent:
         capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
         activation: AutonomousCapabilityActivation | None = None,
         execution_journal: AutonomousExecutionJournal | None = None,
+        decision_cycle_persistence: AutonomousDecisionCyclePersistenceCoordinator | None = None,
         execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
         execution_policy: AutonomousExecutionPolicy | Mapping[str, Any] | None = None,
         credential_provisioner: CredentialProvisioner | None = None,
@@ -14793,6 +14795,13 @@ class AutonomousAgent:
             )
         if execution_persistence is not None and execution_persistence.journal is not execution_journal:
             raise BrainRunError("execution_persistence must be bound to the supplied execution_journal")
+        if decision_cycle_persistence is not None and not isinstance(
+            decision_cycle_persistence,
+            AutonomousDecisionCyclePersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "decision_cycle_persistence must be an AutonomousDecisionCyclePersistenceCoordinator or None"
+            )
         if credential_provisioner is not None and not isinstance(credential_provisioner, CredentialProvisioner):
             raise BrainRunError("credential_provisioner must be a CredentialProvisioner or None")
         if connector_registry is not None and not isinstance(connector_registry, AutonomousConnectorRegistry):
@@ -14860,6 +14869,7 @@ class AutonomousAgent:
         self._persistence_lifecycle_activation_store: AutonomousCapabilityActivationStore | None = None
         self._persistence_lifecycle_selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None
         self._persistence_lifecycle_capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None
+        self._persistence_lifecycle_decision_cycle_persistence: AutonomousDecisionCyclePersistenceCoordinator | None = None
         self._persistence_lifecycle_execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
@@ -14877,6 +14887,7 @@ class AutonomousAgent:
         self.evaluator_calibration_persistence = evaluator_calibration_persistence
         self.prompt_learning_coordinator = prompt_learning_coordinator
         self.execution_journal = execution_journal
+        self.decision_cycle_persistence = decision_cycle_persistence
         self.execution_persistence = execution_persistence
         self.execution_policy = resolved_execution_policy
         self.connector_registry = connector_registry or (
@@ -15186,6 +15197,7 @@ class AutonomousAgent:
         activation_store: AutonomousCapabilityActivationStore | None = None,
         selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
         capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
+        decision_cycle_persistence: AutonomousDecisionCyclePersistenceCoordinator | None = None,
         execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
         require_all: bool = False,
         continue_on_error: bool = False,
@@ -15197,6 +15209,7 @@ class AutonomousAgent:
             or coordinator.activation_store is not activation_store
             or coordinator.selection_promotion_store is not selection_promotion_store
             or coordinator.capability_journal_persistence is not capability_journal_persistence
+            or coordinator.decision_cycle_persistence is not decision_cycle_persistence
             or coordinator.execution_persistence is not execution_persistence
             or coordinator.require_all != require_all
             or coordinator.continue_on_error != continue_on_error
@@ -15207,6 +15220,7 @@ class AutonomousAgent:
                 activation_store=activation_store,
                 selection_promotion_store=selection_promotion_store,
                 capability_journal_persistence=capability_journal_persistence,
+                decision_cycle_persistence=decision_cycle_persistence,
                 execution_persistence=execution_persistence,
                 require_all=require_all,
                 continue_on_error=continue_on_error,
@@ -15215,6 +15229,7 @@ class AutonomousAgent:
             self._persistence_lifecycle_activation_store = activation_store
             self._persistence_lifecycle_selection_promotion_store = selection_promotion_store
             self._persistence_lifecycle_capability_journal_persistence = capability_journal_persistence
+            self._persistence_lifecycle_decision_cycle_persistence = decision_cycle_persistence
             self._persistence_lifecycle_execution_persistence = execution_persistence
         return coordinator
 
@@ -15225,6 +15240,7 @@ class AutonomousAgent:
         activation_store: AutonomousCapabilityActivationStore | None = None,
         selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
         capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
+        decision_cycle_persistence: AutonomousDecisionCyclePersistenceCoordinator | None = None,
         execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
         strict: bool = True,
         require_all: bool = False,
@@ -15237,6 +15253,7 @@ class AutonomousAgent:
             activation_store=activation_store,
             selection_promotion_store=selection_promotion_store,
             capability_journal_persistence=(self.capability_journal_persistence if capability_journal_persistence is None else capability_journal_persistence),
+            decision_cycle_persistence=(self.decision_cycle_persistence if decision_cycle_persistence is None else decision_cycle_persistence),
             execution_persistence=(self.execution_persistence if execution_persistence is None else execution_persistence),
             require_all=require_all,
             continue_on_error=continue_on_error,
@@ -15250,6 +15267,7 @@ class AutonomousAgent:
         activation_store: AutonomousCapabilityActivationStore | None = None,
         selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
         capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
+        decision_cycle_persistence: AutonomousDecisionCyclePersistenceCoordinator | None = None,
         execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
         strict: bool = True,
         require_all: bool = False,
@@ -15262,6 +15280,7 @@ class AutonomousAgent:
             activation_store=activation_store,
             selection_promotion_store=selection_promotion_store,
             capability_journal_persistence=(self.capability_journal_persistence if capability_journal_persistence is None else capability_journal_persistence),
+            decision_cycle_persistence=(self.decision_cycle_persistence if decision_cycle_persistence is None else decision_cycle_persistence),
             execution_persistence=(self.execution_persistence if execution_persistence is None else execution_persistence),
             require_all=require_all,
             continue_on_error=continue_on_error,
@@ -18057,6 +18076,43 @@ class AutonomousAgent:
         if self.capability_journal_persistence is None:
             raise BrainRunError("flush_capability_journal_persistence requires configured persistence")
         return self.capability_journal_persistence.flush()
+
+    def restore_decision_cycle_persistence(self) -> dict[str, Any]:
+        """Restore metadata-only route/planning/evaluation checkpoints for all persisted cycles."""
+
+        if self.decision_cycle_persistence is None:
+            raise BrainRunError("restore_decision_cycle_persistence requires configured persistence")
+        snapshot = self.decision_cycle_persistence.restore()
+        if snapshot is None:
+            return {
+                "restored": False,
+                "snapshot_digest": None,
+                "cycles": 0,
+                "terminal_cycles": 0,
+                "retention": "metadata_only_hash_bound",
+            }
+        return {
+            "restored": True,
+            "schema": snapshot.schema,
+            "snapshot_digest": snapshot.snapshot_digest,
+            "cycles": len(snapshot.states),
+            "terminal_cycles": sum(state.phase == "terminal" for state in snapshot.states),
+            "retention": "metadata_only_hash_bound",
+        }
+
+    def flush_decision_cycle_persistence(self) -> dict[str, Any]:
+        """Flush decision-cycle checkpoints while projecting no task or provider payloads."""
+
+        if self.decision_cycle_persistence is None:
+            raise BrainRunError("flush_decision_cycle_persistence requires configured persistence")
+        snapshot = self.decision_cycle_persistence.flush()
+        return {
+            "schema": snapshot.schema,
+            "snapshot_digest": snapshot.snapshot_digest,
+            "cycles": len(snapshot.states),
+            "terminal_cycles": sum(state.phase == "terminal" for state in snapshot.states),
+            "retention": "metadata_only_hash_bound",
+        }
 
     def capability_execution_evidence(self) -> list[dict[str, Any]]:
         """Return bounded metadata-only capability records for evaluator integration."""
@@ -22791,6 +22847,8 @@ class AutonomousAgent:
         # Bind the persistent prompt learner before routing or provider-assisted planning so the
         # automatic path cannot silently use a different prompt state than direct execution.
         kwargs = self._prompt_learning_options(kwargs)
+        if decision_cycle_store is None and decision_cycle_id is not None and self.decision_cycle_persistence is not None:
+            decision_cycle_store = self.decision_cycle_persistence.store
         if (decision_cycle_id is None) != (decision_cycle_store is None):
             raise BrainRunError("decision_cycle_id and decision_cycle_store must be supplied together")
         if not isinstance(resume_decision_cycle, bool):
@@ -23640,6 +23698,8 @@ class AutonomousAgent:
             raise BrainRunError(
                 f"automatic replan max_replans must be within [0, {MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS}]"
             )
+        if decision_cycle_store is None and decision_cycle_id is not None and self.decision_cycle_persistence is not None:
+            decision_cycle_store = self.decision_cycle_persistence.store
         if (decision_cycle_id is None) != (decision_cycle_store is None):
             raise BrainRunError("decision_cycle_id and decision_cycle_store must be supplied together")
         if route_override is not None and not isinstance(route_override, AutonomousRouteProposal):

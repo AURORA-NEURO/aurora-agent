@@ -10,6 +10,8 @@ import {
   AutonomousCapabilityActivationStore,
   AutonomousCapabilityJournalPersistenceCoordinator,
   InMemoryAutonomousCapabilityJournalStore,
+  AutonomousDecisionCyclePersistenceCoordinator,
+  InMemoryAutonomousDecisionCycleStateStore,
   AutonomousExecutionPersistenceCoordinator,
   InMemoryAutonomousExecutionJournal,
   AutonomousSelectionPromotionLifecycle,
@@ -36,6 +38,7 @@ function fakeAgent(calls, failure = null) {
     learnerPersistence: {},
     promptLearningCoordinator: {},
     capabilityJournalPersistence: {},
+    decisionCyclePersistence: {},
     executionPersistence: {},
     restoreModelInventory: async () => { calls.push("restore:model_inventory"); return value("model_inventory", "restore"); },
     flushModelInventory: async () => { calls.push("flush:model_inventory"); return value("model_inventory", "flush"); },
@@ -46,6 +49,8 @@ function fakeAgent(calls, failure = null) {
   };
   agent.restoreCapabilityJournalPersistence = async () => { calls.push("restore:capability_journal"); if (failure === "capability_journal") throw new Error("private task/prompt/provider payload must not escape"); return value("capability_journal", "restore"); };
   agent.flushCapabilityJournalPersistence = async () => { calls.push("flush:capability_journal"); if (failure === "capability_journal") throw new Error("private task/prompt/provider payload must not escape"); return value("capability_journal", "flush"); };
+  agent.restoreDecisionCyclePersistence = async () => { calls.push("restore:decision_cycle"); if (failure === "decision_cycle") throw new Error("private task/prompt/provider payload must not escape"); return value("decision_cycle", "restore"); };
+  agent.flushDecisionCyclePersistence = async () => { calls.push("flush:decision_cycle"); if (failure === "decision_cycle") throw new Error("private task/prompt/provider payload must not escape"); return value("decision_cycle", "flush"); };
   agent.restoreExecutionPersistence = async () => { calls.push("restore:execution"); if (failure === "execution") throw new Error("private task/prompt/provider payload must not escape"); return value("execution", "restore"); };
   agent.flushExecutionPersistence = async () => { calls.push("flush:execution"); if (failure === "execution") throw new Error("private task/prompt/provider payload must not escape"); return value("execution", "flush"); };
   for (const component of ["runtime_health", "health", "evaluator_calibration", "memory", "learning", "prompt_learning"]) {
@@ -129,11 +134,22 @@ test("high-level agent lifecycle composes model inventory restart and flush with
   const store = persistence();
   const activationStore = new AutonomousCapabilityActivationStore();
   const selectionStore = new AutonomousSelectionPromotionLifecycleStore();
-  const agent = new AutonomousAgent(llm, { selectionPromotion: new AutonomousSelectionPromotionLifecycle() });
+  const decisionStore = new InMemoryAutonomousDecisionCycleStateStore();
+  const decisionSnapshotStore = { value: null, read() { return this.value; }, write(snapshot) { this.value = structuredClone(snapshot); } };
+  const decisionPersistence = new AutonomousDecisionCyclePersistenceCoordinator(decisionStore, decisionSnapshotStore);
+  const agent = new AutonomousAgent(llm, { selectionPromotion: new AutonomousSelectionPromotionLifecycle(), decisionCyclePersistence: decisionPersistence });
   const snapshot = await agent.refreshModelInventory([{
     provider: "offline",
     defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 0, reliability: 0.9 },
   }], { persistence: store, refreshId: "lifecycle-inventory" });
+  const automatic = await agent.runAutoCycle("Review a bounded coding change.", {
+    domain: "coding",
+    cycleId: "lifecycle-auto-cycle",
+    approveProviderCall: true,
+    maxOutputTokens: 512,
+  });
+  assert.equal(automatic.status, "completed");
+  assert.ok(await decisionStore.load("lifecycle-auto-cycle"));
   await agent.saveActivation(activationStore);
   await agent.saveSelectionPromotion(selectionStore);
   const restarted = new AutonomousAgent(llm, { selectionPromotion: new AutonomousSelectionPromotionLifecycle() });
@@ -154,8 +170,8 @@ test("high-level agent lifecycle composes model inventory restart and flush with
     selectionPromotionStore: selectionStore,
     strict: false,
   });
-  assert.equal(flushed.components[10].status, "flushed");
-  assert.equal(flushed.components[10].snapshot_digest, snapshot.inventory_digest);
+  assert.equal(flushed.components[11].status, "flushed");
+  assert.equal(flushed.components[11].snapshot_digest, snapshot.inventory_digest);
   assert.doesNotMatch(JSON.stringify(restored), /credentials|lifecycle-model/);
 });
 
@@ -167,23 +183,31 @@ test("high-level agent lifecycle carries capability and execution restart barrie
   const capabilityPersistence = new AutonomousCapabilityJournalPersistenceCoordinator(capabilityJournal, capabilitySnapshotStore);
   const executionJournal = new InMemoryAutonomousExecutionJournal();
   const executionPersistence = new AutonomousExecutionPersistenceCoordinator(executionJournal, executionSnapshotStore);
-  const source = new AutonomousAgent(llm, { capabilityJournal, capabilityJournalPersistence: capabilityPersistence, executionJournal, executionPersistence });
+  const decisionJournal = new InMemoryAutonomousDecisionCycleStateStore();
+  const decisionSnapshotStore = { value: null, read() { return this.value; }, write(snapshot) { this.value = structuredClone(snapshot); } };
+  const decisionPersistence = new AutonomousDecisionCyclePersistenceCoordinator(decisionJournal, decisionSnapshotStore);
+  const source = new AutonomousAgent(llm, { capabilityJournal, capabilityJournalPersistence: capabilityPersistence, executionJournal, executionPersistence, decisionCyclePersistence: decisionPersistence });
   const flushed = await source.flushPersistedState({ strict: false });
-  assert.deepEqual(flushed.ordered_component_ids.slice(0, 2), ["execution", "capability_journal"]);
+  assert.deepEqual(flushed.ordered_component_ids.slice(0, 3), ["execution", "decision_cycle", "capability_journal"]);
   assert.equal(flushed.components[0].status, "flushed");
   assert.equal(flushed.components[1].status, "flushed");
+  assert.ok(flushed.components[1].snapshot_digest);
 
   const restoredCapabilityJournal = new InMemoryAutonomousCapabilityJournalStore();
   const restoredExecutionJournal = new InMemoryAutonomousExecutionJournal();
+  const restoredDecisionJournal = new InMemoryAutonomousDecisionCycleStateStore();
   const restored = new AutonomousAgent(llm, {
     capabilityJournal: restoredCapabilityJournal,
     capabilityJournalPersistence: new AutonomousCapabilityJournalPersistenceCoordinator(restoredCapabilityJournal, capabilitySnapshotStore),
     executionJournal: restoredExecutionJournal,
     executionPersistence: new AutonomousExecutionPersistenceCoordinator(restoredExecutionJournal, executionSnapshotStore),
+    decisionCyclePersistence: new AutonomousDecisionCyclePersistenceCoordinator(restoredDecisionJournal, decisionPersistence.persistence),
   });
   const report = await restored.restorePersistedState({ strict: false });
   assert.equal(report.components[9].status, "restored");
   assert.equal(report.components[10].status, "restored");
+  assert.equal(report.components[11].status, "restored");
+  assert.equal(report.components[10].snapshot_digest, flushed.components[1].snapshot_digest);
   assert.equal(report.components[9].generation, 1);
   assert.doesNotMatch(JSON.stringify(report), /entries|rows|credentials/);
 });

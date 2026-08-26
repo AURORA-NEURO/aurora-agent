@@ -42,6 +42,7 @@ import type {
   AutonomousCapabilityJournalPersistenceCoordinator,
   AutonomousCapabilityJournalStore,
 } from "./autonomous-capability-persistence.js";
+import type { AutonomousDecisionCyclePersistenceCoordinator } from "./autonomous-decision-persistence.js";
 import {
   autonomousRunTraceStatus,
   AutonomousRunTraceSession,
@@ -1338,6 +1339,8 @@ export interface AutonomousAgentOptions {
   executionJournal?: AutonomousExecutionSnapshotJournal;
   /** Optional durable coordinator for execution checkpoints. */
   executionPersistence?: AutonomousExecutionPersistenceCoordinator;
+  /** Optional durable coordinator for route/planning/evaluation decision-cycle checkpoints. */
+  decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
   /** Optional caller-owned durable replay barrier for capability evaluator settlements. */
   capabilityLearningSettlementStore?: AutonomousCapabilityLearningSettlementStore;
   learner?: AutonomousOnlineLearner;
@@ -4887,6 +4890,8 @@ export class AutonomousAgent {
   readonly executionJournal?: AutonomousExecutionSnapshotJournal;
   /** Caller-owned persistence for execution checkpoints. */
   readonly executionPersistence?: AutonomousExecutionPersistenceCoordinator;
+  /** Caller-owned persistence for route/planning/evaluation decision-cycle checkpoints. */
+  readonly decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
   private readonly capabilityLearningSettlementStore: AutonomousCapabilityLearningSettlementStore;
   /** Caller-owned connector catalogue and runtime for bounded external evidence/provider work. */
   readonly connectorRegistry?: AutonomousConnectorRegistry;
@@ -4915,6 +4920,7 @@ export class AutonomousAgent {
   private persistenceLifecycleActivationStore?: AutonomousCapabilityActivationSnapshotStore;
   private persistenceLifecycleSelectionPromotionStore?: AutonomousSelectionLifecycleStore;
   private persistenceLifecycleCapabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  private persistenceLifecycleDecisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
   private persistenceLifecycleExecutionPersistence?: AutonomousExecutionPersistenceCoordinator;
   private persistenceLifecycleRequireAll?: boolean;
   private persistenceLifecycleContinueOnError?: boolean;
@@ -4998,10 +5004,12 @@ export class AutonomousAgent {
     if (options.capabilityJournalPersistence !== undefined && (typeof options.capabilityJournalPersistence.restore !== "function" || typeof options.capabilityJournalPersistence.flush !== "function" || options.capabilityJournalPersistence.store !== options.capabilityJournal)) throw new ArgumentError("AutonomousAgent capabilityJournalPersistence must be bound to the supplied capabilityJournal");
     if (options.executionJournal !== undefined && (typeof options.executionJournal.append !== "function" || typeof options.executionJournal.state !== "function" || typeof options.executionJournal.snapshot !== "function" || typeof options.executionJournal.restore !== "function")) throw new ArgumentError("AutonomousAgent executionJournal is malformed");
     if (options.executionPersistence !== undefined && (typeof options.executionPersistence.restore !== "function" || typeof options.executionPersistence.flush !== "function" || options.executionPersistence.journal !== options.executionJournal)) throw new ArgumentError("AutonomousAgent executionPersistence must be bound to the supplied executionJournal");
+    if (options.decisionCyclePersistence !== undefined && (typeof options.decisionCyclePersistence.restore !== "function" || typeof options.decisionCyclePersistence.flush !== "function" || typeof options.decisionCyclePersistence.store?.snapshot !== "function" || typeof options.decisionCyclePersistence.store?.restore !== "function")) throw new ArgumentError("AutonomousAgent decisionCyclePersistence is malformed");
     this.capabilityJournal = options.capabilityJournal;
     this.capabilityJournalPersistence = options.capabilityJournalPersistence;
     this.executionJournal = options.executionJournal;
     this.executionPersistence = options.executionPersistence;
+    this.decisionCyclePersistence = options.decisionCyclePersistence;
     if (options.capabilityLearningSettlementStore !== undefined && (typeof options.capabilityLearningSettlementStore.load !== "function" || typeof options.capabilityLearningSettlementStore.save !== "function")) throw new ArgumentError("AutonomousAgent capabilityLearningSettlementStore is malformed");
     this.capabilityLearningSettlementStore = options.capabilityLearningSettlementStore ?? new InMemoryAutonomousCapabilityLearningSettlementStore();
     this.connectorRegistry = options.connectorRegistry ?? options.connectorRuntime?.registry;
@@ -5491,6 +5499,34 @@ export class AutonomousAgent {
     };
   }
 
+  /** Restore metadata-only route/planning/evaluation checkpoints for all persisted cycles. */
+  async restoreDecisionCyclePersistence(): Promise<Record<string, unknown>> {
+    if (this.decisionCyclePersistence === undefined) throw new ArgumentError("restoreDecisionCyclePersistence requires configured persistence");
+    const snapshot = await this.decisionCyclePersistence.restore();
+    if (snapshot === null) return { restored: false, snapshot_digest: null, cycles: 0, terminal_cycles: 0, retention: "metadata_only_hash_bound" };
+    return {
+      restored: true,
+      schema: snapshot.schema,
+      snapshot_digest: snapshot.snapshot_digest,
+      cycles: snapshot.states.length,
+      terminal_cycles: snapshot.states.filter((state) => state.phase === "terminal").length,
+      retention: "metadata_only_hash_bound",
+    };
+  }
+
+  /** Flush decision-cycle checkpoints without returning task, prompt, or provider payloads. */
+  async flushDecisionCyclePersistence(): Promise<Record<string, unknown>> {
+    if (this.decisionCyclePersistence === undefined) throw new ArgumentError("flushDecisionCyclePersistence requires configured persistence");
+    const snapshot = await this.decisionCyclePersistence.flush();
+    return {
+      schema: snapshot.schema,
+      snapshot_digest: snapshot.snapshot_digest,
+      cycles: snapshot.states.length,
+      terminal_cycles: snapshot.states.filter((state) => state.phase === "terminal").length,
+      retention: "metadata_only_hash_bound",
+    };
+  }
+
   /** Return metadata-only capability records produced by this agent instance. */
   capabilityExecutionEvidence(): AutonomousCapabilityExecutionRecord[] {
     return this.capabilityRuntime?.executionEvidence() ?? [];
@@ -5727,6 +5763,7 @@ export class AutonomousAgent {
     activationStore?: AutonomousCapabilityActivationSnapshotStore;
     selectionPromotionStore?: AutonomousSelectionLifecycleStore;
     capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+    decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
     executionPersistence?: AutonomousExecutionPersistenceCoordinator;
     requireAll?: boolean;
     continueOnError?: boolean;
@@ -5740,6 +5777,7 @@ export class AutonomousAgent {
       || this.persistenceLifecycleActivationStore !== options.activationStore
       || this.persistenceLifecycleSelectionPromotionStore !== options.selectionPromotionStore
       || this.persistenceLifecycleCapabilityJournalPersistence !== options.capabilityJournalPersistence
+      || this.persistenceLifecycleDecisionCyclePersistence !== options.decisionCyclePersistence
       || this.persistenceLifecycleExecutionPersistence !== options.executionPersistence
       || this.persistenceLifecycleRequireAll !== requireAll
       || this.persistenceLifecycleContinueOnError !== continueOnError
@@ -5749,6 +5787,7 @@ export class AutonomousAgent {
         activationStore: options.activationStore,
         selectionPromotionStore: options.selectionPromotionStore,
         capabilityJournalPersistence: options.capabilityJournalPersistence,
+        decisionCyclePersistence: options.decisionCyclePersistence,
         executionPersistence: options.executionPersistence,
         requireAll,
         continueOnError,
@@ -5757,6 +5796,7 @@ export class AutonomousAgent {
       this.persistenceLifecycleActivationStore = options.activationStore;
       this.persistenceLifecycleSelectionPromotionStore = options.selectionPromotionStore;
       this.persistenceLifecycleCapabilityJournalPersistence = options.capabilityJournalPersistence;
+      this.persistenceLifecycleDecisionCyclePersistence = options.decisionCyclePersistence;
       this.persistenceLifecycleExecutionPersistence = options.executionPersistence;
       this.persistenceLifecycleRequireAll = requireAll;
       this.persistenceLifecycleContinueOnError = continueOnError;
@@ -5770,6 +5810,7 @@ export class AutonomousAgent {
     activationStore?: AutonomousCapabilityActivationSnapshotStore;
     selectionPromotionStore?: AutonomousSelectionLifecycleStore;
     capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+    decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
     executionPersistence?: AutonomousExecutionPersistenceCoordinator;
     strict?: boolean;
     requireAll?: boolean;
@@ -5785,6 +5826,7 @@ export class AutonomousAgent {
     activationStore?: AutonomousCapabilityActivationSnapshotStore;
     selectionPromotionStore?: AutonomousSelectionLifecycleStore;
     capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+    decisionCyclePersistence?: AutonomousDecisionCyclePersistenceCoordinator;
     executionPersistence?: AutonomousExecutionPersistenceCoordinator;
     strict?: boolean;
     requireAll?: boolean;
@@ -6751,7 +6793,14 @@ export class AutonomousAgent {
    * provider-planning, persistence, and rehydration boundaries.
    */
   async runAutoCycle(task: string, options: AutonomousAutoDecisionCycleOptions = {}): Promise<AutonomousAutoDecisionCycleResult> {
-    return runAutonomousAutoDecisionCycle(this, task, options);
+    const decisionStateStore = options.decisionStateStore ?? this.decisionCyclePersistence?.store;
+    return runAutonomousAutoDecisionCycle(
+      this,
+      task,
+      decisionStateStore === undefined || options.decisionStateStore !== undefined
+        ? options
+        : { ...options, decisionStateStore },
+    );
   }
 
   /**

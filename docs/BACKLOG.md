@@ -13,8 +13,9 @@ uses. This file tracks *attention*, not completeness.
 Both high-level SDK agents now also expose a coordinated persistence lifecycle. Restore and flush
 compose model inventory, runtime health, provider/model health when a coordinator exists, redacted
 activation, selection-promotion authority, evaluator calibration, memory, online learning, prompt
-learning, capability replay journals, and long-horizon execution checkpoints in a fixed dependency
-order, then return one digest-bound component report. Strict
+learning, capability replay journals, route/planning/evaluation decision-cycle checkpoints, and
+long-horizon execution checkpoints in a fixed dependency order, then return one digest-bound
+component report. Strict
 failures preserve the typed redacted report; non-strict passes expose unconfigured and
 not-attempted components, while `require_all`/`requireAll` makes missing coordinators fail closed.
 Activation restore preserves revocation, identity, and monotonic revision fences, while a supplied
@@ -24,7 +25,9 @@ The lifecycle explicitly retains per-component CAS/atomic-store semantics rather
 distributed cross-store transaction; deployment identity, approval ordering, encryption, and crash
 recovery between independent writes remain caller-owned. Capability-journal restore also
 rehydrates only metadata-only replay identities, and execution restore precedes admission so a
-restarted worker cannot resume with its duplicate-call barrier empty. Neither checkpoint restores
+restarted worker cannot resume with its duplicate-call barrier empty. Decision-cycle restore now
+precedes execution admission and flushes before capability replay state, while keeping all route,
+planning, evaluation, learning, and settlement values digest-only. Neither checkpoint restores
 prompts, provider responses, credentials, tool arguments, effect authority, or raw values;
 cross-store interruption remains an explicit reconciliation case.
 

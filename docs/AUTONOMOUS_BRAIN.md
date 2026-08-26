@@ -11456,9 +11456,10 @@ caller-owned coordinators instead of introducing a second persistence implementa
 order is deterministic: model inventory, runtime transport health, provider/model health when
 available, redacted capability activation, learned-selection promotion authority, evaluator
 calibration, episodic memory, online learning, prompt learning, the capability replay journal,
-and the long-horizon execution checkpoint. Flush uses the reverse order so the execution
-checkpoint and capability replay barrier are finalized before learned selection and activation
-state settle, while process-level availability images are written last. TypeScript reports the
+the route/planning/evaluation decision-cycle checkpoint, and the long-horizon execution
+checkpoint. Flush uses the reverse order so the execution checkpoint, decision-cycle checkpoint,
+and capability replay barrier are finalized before learned selection and activation state settle,
+while process-level availability images are written last. TypeScript reports the
 provider/model health slot as explicitly
 `unconfigured` unless the embedding supplies an equivalent coordinator; it never infers one from
 the live health controller.
@@ -11487,6 +11488,20 @@ restores request/replay identities and bounded evaluator metadata, never raw too
 capability call whose value is not available in the new process therefore replays as a
 metadata-only result or fails closed according to the capability contract. The lifecycle report
 projects the journal schema, digest, entry count, and snapshot generation without copying entries.
+
+The decision-cycle component restores the hash-chained route, planning, selection, outcome,
+evaluation, learning-episode, and settlement digests that let a restarted worker determine which
+phase needs caller-owned rehydration. It never restores task text, prompts, route objects, model
+responses, evaluator payloads, or private run values; those must be supplied through the existing
+resume callback and revalidated against the stored digests. Its lifecycle projection contains only
+the snapshot schema/digest and bounded cycle counts. The decision-cycle store is restored after
+capability replay metadata is available and flushed before that barrier, so a crash cannot make a
+cycle appear settled while its duplicate-capability guard is still uncommitted.
+When the high-level agent is constructed with this coordinator, `run_auto()` and
+`run_auto_replan_cycle()` (Python) and `runAutoCycle()` (TypeScript) automatically reuse its
+validated state store whenever the caller supplies a cycle ID but no per-call store. A cycle ID
+is still mandatory, explicit per-call stores take precedence, and an unconfigured agent still
+fails closed instead of silently creating an in-memory persistence path.
 
 The execution component performs the same boundary for long-horizon policy state. It restores
 the hash-checked journal snapshot before new work is admitted and flushes only event count,

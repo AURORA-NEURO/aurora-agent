@@ -31,6 +31,8 @@ from prism_sdk import (
     AutonomousCrossDomainResult,
     AutonomousCrossDomainReplanResult,
     InMemoryAutonomousDecisionCycleStateStore,
+    AutonomousDecisionCyclePersistenceCoordinator,
+    TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
     AutonomousRoutingHoldoutCase,
     AutonomousRoutingHoldoutEvaluator,
     AutonomousTaskRouter,
@@ -5047,8 +5049,17 @@ def test_builtin_workflow_learning_signal_contract_covers_every_domain():
 
 def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehydration():
     runtime, store, server, thread = _runtime()
-    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
     cycle_store = InMemoryAutonomousDecisionCycleStateStore()
+    cycle_persistence = AutonomousDecisionCyclePersistenceCoordinator(
+        cycle_store,
+        TransactionalJsonAutonomousDecisionCycleSnapshotPersistence(_CasTextStore()),
+    )
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+        decision_cycle_persistence=cycle_persistence,
+    )
     try:
         with agent.onboarding.start_session(session_id="decision-cycle-session") as session:
             session.register_value("openai", "decision-cycle-secret")
@@ -5057,7 +5068,6 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
                 credentials=session,
                 approve_provider_call=True,
                 decision_cycle_id="decision-cycle-1",
-                decision_cycle_store=cycle_store,
             )
             assert result.status == "completed"
             assert result.execution_status == "completed_provider_call"
@@ -5082,14 +5092,12 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
                     credentials=session,
                     approve_provider_call=True,
                     decision_cycle_id="decision-cycle-1",
-                    decision_cycle_store=cycle_store,
                 )
 
             resumed = agent.run_auto(
                 task="fix the Rust tests in the repository",
                 credentials=session,
                 decision_cycle_id="decision-cycle-1",
-                decision_cycle_store=cycle_store,
                 resume_decision_cycle=True,
                 decision_cycle_rehydrate_result=lambda _context: result,
             )
@@ -5100,7 +5108,6 @@ def test_run_auto_binds_a_restart_safe_decision_cycle_without_reinvoking_on_rehy
                     task="fix the Rust tests in the repository",
                     credentials=session,
                     decision_cycle_id="decision-cycle-1",
-                    decision_cycle_store=cycle_store,
                     resume_decision_cycle=True,
                     decision_cycle_rehydrate_result=lambda _context: tampered_result,
                 )

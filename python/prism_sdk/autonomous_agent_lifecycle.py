@@ -35,6 +35,7 @@ AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS = (
     "learning",
     "prompt_learning",
     "capability_journal",
+    "decision_cycle",
     "execution",
 )
 AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER = AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS
@@ -243,6 +244,7 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
         activation_store: Any | None = None,
         selection_promotion_store: Any | None = None,
         capability_journal_persistence: Any | None = None,
+        decision_cycle_persistence: Any | None = None,
         execution_persistence: Any | None = None,
         require_all: bool = False,
         continue_on_error: bool = False,
@@ -258,6 +260,7 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
         self.activation_store = activation_store
         self.selection_promotion_store = selection_promotion_store
         self.capability_journal_persistence = capability_journal_persistence
+        self.decision_cycle_persistence = decision_cycle_persistence
         self.execution_persistence = execution_persistence
         if selection_promotion_store is not None and getattr(agent, "selection_promotion", None) is None:
             raise ArgumentError("selection promotion persistence requires a configured selection lifecycle")
@@ -279,6 +282,8 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
             return self.selection_promotion_store
         if component_id == "capability_journal":
             return self.capability_journal_persistence
+        if component_id == "decision_cycle":
+            return self.decision_cycle_persistence
         if component_id == "execution":
             return self.execution_persistence
         return getattr(self.agent, f"{component_id}_persistence", None)
@@ -300,6 +305,10 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
             if operation == "restore":
                 return self.agent.restore_capability_journal_persistence()
             return self.agent.flush_capability_journal_persistence()
+        if component_id == "decision_cycle":
+            if operation == "restore":
+                return self.agent.restore_decision_cycle_persistence()
+            return self.agent.flush_decision_cycle_persistence()
         if component_id == "execution":
             if operation == "restore":
                 return self.agent.restore_execution_persistence()
