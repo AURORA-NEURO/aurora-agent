@@ -223,6 +223,8 @@ from .research_contracts import (
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
@@ -6688,6 +6690,10 @@ from .adapter_local_retrieval_synthesis_contract_model import (
     LocalRetrievalSynthesisContractModelReceipt,
     run_local_retrieval_synthesis_contract_model,
 )
+from .adapter_local_retrieval_synthesis_research_copilot import (
+    LocalRetrievalSynthesisResearchCopilotReceipt,
+    run_local_retrieval_synthesis_research_copilot,
+)
 from .adapter_multimodal_retrieval_synthesis_inference_engine import (
     MultimodalRetrievalSynthesisCandidate,
     MultimodalRetrievalSynthesisInferenceEngineReceipt,
@@ -6726,6 +6732,8 @@ __all__ += [
     "run_local_retrieval_synthesis_inference_engine",
     "LocalRetrievalSynthesisContractModelReceipt",
     "run_local_retrieval_synthesis_contract_model",
+    "LocalRetrievalSynthesisResearchCopilotReceipt",
+    "run_local_retrieval_synthesis_research_copilot",
     "MultimodalRetrievalSynthesisCandidate",
     "MultimodalRetrievalSynthesisInferenceEngineReceipt",
     "run_multimodal_retrieval_synthesis_inference_engine",
