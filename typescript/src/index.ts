@@ -3681,6 +3681,8 @@ export { ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWA
 export type { AdapterFederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
 export { ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterLocalRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterLocalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
 export type { AdapterLocalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export { ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterMultimodalRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterMultimodalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
 export {
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,

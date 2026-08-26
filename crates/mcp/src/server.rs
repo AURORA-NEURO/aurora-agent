@@ -1927,6 +1927,9 @@ impl Server {
             "adapter_local_retrieval_synthesis_assurance_harness" => {
                 self.adapter_local_retrieval_synthesis_assurance_harness(&arguments)
             },
+            "adapter_multimodal_retrieval_synthesis_assurance_harness" => {
+                self.adapter_multimodal_retrieval_synthesis_assurance_harness(&arguments)
+            },
             "adapter_multimodal_retrieval_synthesis_inference_engine" => {
                 self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
             },
@@ -25383,6 +25386,12 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates a local retrieval/synthesis workbench against explicit policy, protected-closure, provenance, and evidence predicates", "counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for baseline selection, independent replication, and institutional release governance"]}))
     }
 
+    fn adapter_multimodal_retrieval_synthesis_assurance_harness(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisAssuranceHarnessRequest")?;
+        let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_assurance_harness_json(request)?;
+        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates multimodal retrieval/synthesis against explicit modality, comparability, policy, protected-closure, provenance, and evidence predicates", "counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for comparability baselines, independent replication, and institutional release governance"]}))
+    }
+
     fn adapter_multimodal_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(request)?;
@@ -37646,6 +37655,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "adapter_multimodal_retrieval_synthesis_assurance_harness",
+            "domains": ["multimodal retrieval synthesis assurance", "comparability verification", "counterexample checking", "omission-aware release gates"],
+            "crates": ["bioprism-adapter", "bioprism-mcp"],
+            "mcp_tools": ["adapter_multimodal_retrieval_synthesis_assurance_harness"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
@@ -40410,6 +40427,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "adapter_local_retrieval_synthesis_assurance_harness",
             "description": "Verify a local retrieval and synthesis workbench against explicit policy, protected-closure, provenance, evidence-completeness, replay, and omission-aware release predicates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisAssuranceHarnessRequest with local workbench request, baseline identity, policy and closure predicates, provenance/evidence completeness, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "adapter_multimodal_retrieval_synthesis_assurance_harness",
+            "description": "Verify a multimodal retrieval and synthesis workbench against modality closure, comparability, policy, protected-closure, provenance, evidence-completeness, replay, and omission-aware release predicates.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalRetrievalSynthesisAssuranceHarnessRequest with multimodal workbench request, baseline and modality/comparability contracts, policy and closure predicates, provenance/evidence completeness, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "adapter_multimodal_retrieval_synthesis_inference_engine",
