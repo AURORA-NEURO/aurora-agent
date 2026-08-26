@@ -153,6 +153,12 @@ use bioprism_adapter::{
     ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 use bioprism_adapter::{
+    render_local_retrieval_synthesis_interoperability_gateway,
+    LocalRetrievalSynthesisInteroperabilityGatewayReceipt,
+    LocalRetrievalSynthesisInteroperabilityGatewayRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_throughput_retrieval_synthesis_inference_engine,
     ThroughputRetrievalSynthesisInferenceEngineReceipt,
     ThroughputRetrievalSynthesisInferenceEngineRequest,
@@ -471,6 +477,7 @@ pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_TOOL: &str = "ada
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_TOOL: &str = "adapter_multimodal_retrieval_synthesis_research_workbench";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_TOOL: &str = "adapter_throughput_retrieval_synthesis_research_workbench";
 pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_TOOL: &str = "adapter_federated_continual_retrieval_synthesis_research_workbench";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_TOOL: &str = "adapter_local_retrieval_synthesis_interoperability_gateway";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_throughput_retrieval_synthesis_contract_model";
@@ -1485,6 +1492,18 @@ pub fn validate_federated_continual_retrieval_synthesis_research_workbench_json(
     let receipt: FederatedContinualRetrievalSynthesisResearchWorkbenchReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid federated continual retrieval workbench receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID { return Err("federated continual retrieval workbench feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_interoperability_gateway_json(value: &Value) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisInteroperabilityGatewayRequest = serde_json::from_value(value.clone()).map_err(|error| format!("invalid local retrieval interoperability request: {error}"))?;
+    let receipt = render_local_retrieval_synthesis_interoperability_gateway(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize local retrieval interoperability receipt: {error}"))
+}
+pub fn validate_local_retrieval_synthesis_interoperability_gateway_json(value: &Value) -> Result<LocalRetrievalSynthesisInteroperabilityGatewayReceipt, String> {
+    let receipt: LocalRetrievalSynthesisInteroperabilityGatewayReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid local retrieval interoperability receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID { return Err("local retrieval interoperability feature id mismatch".into()); }
     Ok(receipt)
 }
 
