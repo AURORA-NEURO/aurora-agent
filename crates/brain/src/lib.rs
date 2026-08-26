@@ -96,13 +96,11 @@ pub mod retrieval_research_copilot;
 pub mod retrieval_research_workbench;
 pub mod retrieval_synthesis;
 pub mod retrieval_workflow_fabric;
-pub mod throughput_context_compilation;
 pub mod throughput_context_workbench;
 pub mod federated_context_workbench;
 pub mod context_protocol_adapter;
 pub mod multimodal_context_protocol;
 pub mod throughput_context_protocol;
-pub mod throughput_context_workflow_fabric;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
@@ -567,13 +565,6 @@ pub use retrieval_workflow_fabric::{
     CONTRACT_VERSION as RETRIEVAL_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_WORKFLOW_FABRIC_FEATURE_ID,
 };
-pub use throughput_context_compilation::{
-    compile_throughput_context, throughput_context_compilation_manifest,
-    ThroughputContextCompilationError, ThroughputContextCompilationReceipt,
-    ThroughputContextCompilationRequest, ThroughputContextItem,
-    CONTRACT_VERSION as THROUGHPUT_CONTEXT_COMPILATION_CONTRACT_VERSION,
-    FEATURE_ID as THROUGHPUT_CONTEXT_COMPILATION_FEATURE_ID,
-};
 pub use throughput_context_workbench::{
     render_throughput_context_workbench, throughput_context_workbench_manifest,
     ThroughputContextWorkbenchError, ThroughputContextWorkbenchJob,
@@ -617,13 +608,6 @@ pub use throughput_context_protocol::{
     PROTOCOL_VERSION as THROUGHPUT_CONTEXT_PROTOCOL_VERSION,
     RESPONSE_SCHEMA as THROUGHPUT_CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
     ROUTE as THROUGHPUT_CONTEXT_PROTOCOL_ROUTE,
-};
-pub use throughput_context_workflow_fabric::{
-    compile_throughput_context_workflow, throughput_context_workflow_fabric_manifest,
-    ThroughputContextJob, ThroughputContextWorkflowError, ThroughputContextWorkflowReceipt,
-    ThroughputContextWorkflowRequest,
-    CONTRACT_VERSION as THROUGHPUT_CONTEXT_WORKFLOW_FABRIC_CONTRACT_VERSION,
-    FEATURE_ID as THROUGHPUT_CONTEXT_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use throughput_contract_model::{
     model_throughput_contract, throughput_contract_model_manifest, ThroughputContractDisposition,
