@@ -4955,6 +4955,43 @@ result values before resuming. The decision receipt is an audit correlation, not
 authorization: the live catalogue, credentials, approval, budget, and effect boundary are
 revalidated on every resumed step.
 
+The TypeScript `AutonomousAgent.runMissionReplanCycle()` façade composes this kernel with the
+agent's real model-selection, provider invocation, prompt registry, and exact-tool runtime. It is
+the recommended embedding boundary when a host already has a reviewed `AgentMissionArgs` graph
+and wants the same twelve-domain behavior without manually wiring `AutonomousMissionExecutor`
+and `agentMissionStepExecutor`:
+
+```typescript
+const cycle = await agent.runMissionReplanCycle(reviewedMission, {
+  evaluate: heldOutMissionEvaluator,
+  maxReplans: 2,
+  checkpointStore: missionCheckpointStore,
+  resultStore: privateMissionResultStore,
+  stepRun: {
+    candidates: agent.models(),
+    credentialFor: provider => credentialSession.handle(provider),
+  },
+  approveEffects: false,
+});
+```
+
+The façade uses the attached `ToolCatalogue` by default, converts each catalogue definition into
+the transient provider tool contract, and then requires the provider to invoke exactly the
+mission step's declared tool with exactly the digest-bound arguments. A missing catalogue,
+unregistered domain binding, absent credential, provider refusal, approval pause, or uncertain
+effect remains an explicit non-success state. The façade never invents a provider key: hosts
+register providers and supply short-lived opaque credential handles through `stepRun`.
+
+When an `AutonomousPromptLearningPersistenceCoordinator` is attached to the agent, each model-backed
+step contributes only its validated adaptive selection receipt. `cycle.prompt_learning` and
+`agent.promptLearningSelections(cycle)` expose prompt-arm IDs, registry/plan/selection digests,
+and retention markers; rendered prompt messages and provider responses stay transient. Prompt
+quality must be settled separately with an evaluator reward through `agent.settlePromptLearning()`.
+This preserves credit assignment: transport success, latency, model confidence, and tool
+completion are not silently converted into prompt reward. The same receipt path works for every
+built-in domain and survives mission retries because the mission checkpoint retains only the
+normalized value-only decision metadata.
+
 `BrainRunResult.to_dict()` and `build_brain_evaluation_input()` expose these redacted provider
 receipts to an explicit evaluator. Transport health continues to flow through
 `ProviderHealthLedger`; task quality still requires the caller-owned evaluator and bandit update.

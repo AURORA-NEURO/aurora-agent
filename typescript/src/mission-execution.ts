@@ -15,6 +15,10 @@ import type {
   MissionPreflightResult,
 } from "./types.js";
 import type { ProviderTool, ProviderToolCall, ProviderToolResult } from "./llm.js";
+import {
+  AutonomousPromptAdaptiveSelection,
+  type AutonomousPromptAdaptiveSelectionJSON,
+} from "./autonomous-prompt-registry.js";
 import type {
   AutonomousEvaluatorRewardInput,
   AutonomousLearningEpisode,
@@ -98,6 +102,8 @@ export interface AutonomousMissionStepDecision extends JsonObject {
   route_digest: string | null;
   plan_digest: string | null;
   prompt_digest: string | null;
+  /** Exact value-only prompt-arm receipt; rendered messages remain transient. */
+  adaptive_selection?: AutonomousPromptAdaptiveSelectionJSON | null;
 }
 
 export class AutonomousMissionExecutionError extends ArgumentError {
@@ -469,7 +475,7 @@ function pointerSet(root: JsonObject, pointer: string, value: JsonValue): JsonOb
 function normalizeDecision(value: unknown): AutonomousMissionStepDecision | null {
   if (value === undefined || value === null) return null;
   if (!isObject(value)) throw new AutonomousMissionExecutionError("step decision metadata must be an object");
-  return {
+  const normalized: AutonomousMissionStepDecision = {
     selection_digest: boundedDigest("step decision selection_digest", value.selection_digest, true),
     provider: safeLabel(value.provider, "unknown"),
     model: safeLabel(value.model, "unknown"),
@@ -477,6 +483,17 @@ function normalizeDecision(value: unknown): AutonomousMissionStepDecision | null
     plan_digest: boundedDigest("step decision plan_digest", value.plan_digest, true),
     prompt_digest: boundedDigest("step decision prompt_digest", value.prompt_digest, true),
   };
+  if (value.adaptive_selection !== undefined) {
+    if (value.adaptive_selection === null) normalized.adaptive_selection = null;
+    else {
+      try {
+        normalized.adaptive_selection = AutonomousPromptAdaptiveSelection.fromJSON(value.adaptive_selection as JsonObject).toJSON();
+      } catch (error) {
+        throw new AutonomousMissionExecutionError(`step decision adaptive_selection is malformed: ${error instanceof Error ? error.message : "invalid selection"}`);
+      }
+    }
+  }
+  return normalized;
 }
 
 function normalizeStepResult(value: unknown): AutonomousMissionStepExecutionResult {
@@ -1210,6 +1227,8 @@ export function agentMissionStepExecutor(agent: AutonomousAgent, options: {
   run?: Omit<AutonomousRunOptions, "domain" | "capability" | "tools" | "authorizeAndExecute" | "context" | "approveProviderCall" | "signal">;
   approveEffects?: boolean;
   signal?: AbortSignal;
+  /** Receives only the validated prompt-arm receipt, never the provider response or rendered prompt. */
+  onPromptSelection?: (selection: AutonomousPromptAdaptiveSelectionJSON, context: AutonomousMissionStepExecutionContext) => Promise<void> | void;
   learning?: {
     adapter: AutonomousMissionLearningAdapter;
     episodeId?: (context: AutonomousMissionStepExecutionContext) => string;
@@ -1244,6 +1263,9 @@ export function agentMissionStepExecutor(agent: AutonomousAgent, options: {
       approveEffects: options.approveEffects,
       signal: options.signal ?? context.signal,
     });
+    if (run.prompt?.adaptive_selection !== undefined && run.prompt.adaptive_selection !== null) {
+      await options.onPromptSelection?.(structuredClone(run.prompt.adaptive_selection), context);
+    }
     if (run.status === "reconciliation_required" || run.tool_loop?.status === "reconciliation_required") return { status: "reconciliation_required", run_status: run.status };
     if (run.status === "approval_required" || run.tool_loop?.status === "authorization_required") return { status: "approval_required", run_status: run.status };
     if (!sawExpectedCall) return { status: "refused", run_status: run.status, detail: "provider did not invoke the mission step's exact tool contract" };
@@ -1255,6 +1277,9 @@ export function agentMissionStepExecutor(agent: AutonomousAgent, options: {
       route_digest: typeof run.route?.route_digest === "string" ? boundedDigest("mission route_digest", run.route.route_digest) : null,
       plan_digest: typeof run.blueprint?.plan?.plan_digest === "string" ? boundedDigest("mission plan_digest", run.blueprint.plan.plan_digest) : null,
       prompt_digest: typeof run.blueprint?.prompt?.prompt_digest === "string" ? boundedDigest("mission prompt_digest", run.blueprint.prompt.prompt_digest) : null,
+      ...(run.prompt?.adaptive_selection === undefined || run.prompt.adaptive_selection === null
+        ? {}
+        : { adaptive_selection: structuredClone(run.prompt.adaptive_selection) }),
     };
     let learningEpisodeId: string | null = null;
     if (options.learning) {

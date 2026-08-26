@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   AUTONOMOUS_DOMAIN_NAMES,
+  builtinAutonomousDomainProfiles,
   AutonomousAgent,
   AutonomousLearningController,
   AutonomousOnlineLearner,
@@ -16,6 +17,8 @@ import {
   CredentialStore,
   LLMRuntime,
   ToolCatalogue,
+  builtinAutonomousPromptRegistry,
+  AutonomousPromptLearningPersistenceCoordinator,
   openaiCompatibleProvider,
   runAutonomousMissionReplanCycle,
   validateAutonomousMissionReplanCheckpoint,
@@ -221,6 +224,70 @@ test("mission ordered-step planning reaches every built-in autonomous domain thr
     assert.equal(result.plan_refinement.status, "completed", domain);
   }
   assert.equal(calls(), AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
+test("agent-owned mission replanning composes model invocation, exact tools, and adaptive prompts across every domain", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("network must not be reached"); } });
+  let providerCalls = 0;
+  runtime.registerInMemoryProvider("mission-agent-offline", (request) => {
+    providerCalls += 1;
+    if (request.messages.some((message) => message.role === "tool")) return { output_text: "bounded mission completion" };
+    const tool = request.tools?.[0];
+    return tool === undefined
+      ? { output_text: "bounded mission completion" }
+      : { tool_calls: [{ call_id: `mission-call-${providerCalls}`, name: tool.name, arguments: {} }] };
+  });
+  const profiles = await builtinAutonomousDomainProfiles();
+  const domainTools = Object.fromEntries(profiles.map((profile) => [profile.domain, profile.tool_profile.bindings[0].name]));
+  const allDomainTools = [...new Set(Object.values(domainTools))];
+  const agentToolCatalogue = await ToolCatalogue.fromDefinitions(allDomainTools.map((name) => ({
+    name,
+    description: `bounded ${name} mission adapter`,
+    inputSchema: { type: "object", additionalProperties: true },
+  })));
+  const promptCoordinator = new AutonomousPromptLearningPersistenceCoordinator(builtinAutonomousPromptRegistry());
+  const agent = new AutonomousAgent(runtime, {
+    toolCatalogue: agentToolCatalogue,
+    toolExecutor: async () => ({ ok: true, private_provider_output: "must remain local" }),
+    promptLearningCoordinator: promptCoordinator,
+  });
+  agent.registerModel({
+    provider: "mission-agent-offline",
+    model: "mission-agent-model",
+    capabilities: ["reasoning", "structured_output", "code", "web", "data", "science", "biomedical", "operations", "enterprise", "coordination", "multimodal", "evaluation"],
+    context_window_tokens: 32_000,
+    max_output_tokens: 2_000,
+    quality: 0.9,
+    latency_ms: 10,
+    cost_per_million_tokens: 0,
+    reliability: 0.99,
+  });
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const tool = domainTools[domain];
+    const root = mission([{
+      id: `agent-${domain}`,
+      domain,
+      capability: "verification",
+      objective: `verify ${domain}`,
+      tool,
+      arguments: {},
+    }], `agent-mission-${domain}`);
+    root.policy.allowed_tools = [tool];
+    const result = await agent.runMissionReplanCycle(root, {
+      evaluate: () => ({ evaluator_id: "mission-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+      stepRun: { candidates: agent.models() },
+      approveEffects: true,
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.final_execution.results[0].decision.provider, "mission-agent-offline", domain);
+    assert.equal(result.final_execution.results[0].decision.adaptive_selection.retention, "selection_metadata_only;rendered_messages_transient", domain);
+    assert.equal(result.prompt_learning.selection_count, 1, domain);
+    assert.equal(result.prompt_learning.selection_digests[0], result.prompt_learning.selections[0].selection_digest, domain);
+    assert.equal(agent.promptLearningSelections(result).length, 1, domain);
+    assert.doesNotMatch(JSON.stringify(result.prompt_learning), /private_provider_output|verify coding|api[_-]?key/i, domain);
+  }
+  assert.equal(providerCalls, AUTONOMOUS_DOMAIN_NAMES.length * 2, "each mission step requires one tool turn and one completion turn");
 });
 
 test("mission provider planning rehydrates accepted ordering without planner replay after interruption", async () => {

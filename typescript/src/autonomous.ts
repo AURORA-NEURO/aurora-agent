@@ -111,6 +111,17 @@ import type {
   AutonomousEvidenceExecutionResult,
 } from "./autonomous-evidence-execution.js";
 import type {
+  AutonomousMissionCheckpointStore,
+  AutonomousMissionExecuteOptions,
+  AutonomousMissionResultStore,
+  AutonomousMissionStepResult,
+} from "./mission-execution.js";
+import type {
+  AutonomousMissionReplanOptions,
+  AutonomousMissionReplanPromptLearningProjection,
+  AutonomousMissionReplanResult,
+} from "./mission-replan.js";
+import type {
   AutonomousEvidenceExecutionCheckpointStore,
   AutonomousEvidenceExecutionResumableRun,
 } from "./autonomous-evidence-execution-resumable.js";
@@ -237,6 +248,8 @@ import type {
   BrainModelSelectionArgs,
   BrainModelSelectionContext,
   BrainProviderHealth,
+  AgentMissionArgs,
+  AgentMissionStep,
   JsonObject,
   JsonValue,
   AutonomousCrossDomainPlanRefinementResult,
@@ -1619,6 +1632,32 @@ export interface AutonomousCrossDomainRunOptions extends AutonomousRunOptions {
   synthesize?: boolean;
   /** Maximum number of specialist provider calls in flight during bounded fan-out. */
   maxParallelChildren?: number;
+}
+
+/**
+ * Agent-owned composition boundary for durable mission replanning.
+ *
+ * The mission contract, checkpoint stores, evaluator, and provider-planning controls remain
+ * caller-owned. The agent supplies the exact model/prompt/tool invocation adapter for each step,
+ * so the TypeScript façade cannot accidentally fall back to a provider-free executor or lose
+ * prompt-learning receipts at the mission boundary.
+ */
+export interface AutonomousAgentMissionReplanOptions extends Omit<AutonomousMissionReplanOptions, "execute"> {
+  /** Aggregate mission execution controls; provider calls remain explicitly approved. */
+  execute?: Omit<AutonomousMissionExecuteOptions, "signal" | "execution_attempt">;
+  /** Per-step autonomous run controls, including candidates, credentials, prompts, and learning. */
+  stepRun?: Omit<AutonomousRunOptions, "domain" | "capability" | "tools" | "authorizeAndExecute" | "context" | "approveProviderCall" | "signal">;
+  /** Use a caller-owned catalogue instead of the catalogue attached to this agent. */
+  catalogue?: ToolCatalogue;
+  /** Narrow the provider-visible tool definition for each exact mission step. */
+  toolsForStep?: (step: AgentMissionStep) => readonly ProviderTool[] | undefined;
+  /** Explicit effect approval passed to the existing tool/effect boundary. */
+  approveEffects?: boolean;
+  /** Caller-owned metadata checkpoint and raw-result stores used by the mission executor. */
+  checkpointStore?: AutonomousMissionCheckpointStore;
+  resultStore?: AutonomousMissionResultStore;
+  /** Metadata-only step outcome observer; raw values remain in the caller-owned result store. */
+  onStepOutcome?: (outcome: AutonomousMissionStepResult, context: { mission_id: string; wave: number }) => Promise<void> | void;
 }
 
 /** Explicit caller-owned metadata trace controls for one autonomous run. */
@@ -6352,6 +6391,90 @@ export class AutonomousAgent {
    */
   async runAutoReplanCycle(task: string, options: AutonomousAutoReplanCycleOptions): Promise<AutonomousAutoReplanCycleResult> {
     return runAutonomousAutoReplanCycle(this, task, options);
+  }
+
+  /**
+   * Compose the full agent-owned provider/tool boundary with the durable mission replan kernel.
+   *
+   * Callers provide the reviewed mission and evaluator. This method supplies the exact-step
+   * autonomous adapter, the attached tool catalogue, provider credentials/models from `stepRun`,
+   * and optional persistent prompt-learning receipts. Mission checkpoints contain only the
+   * existing value-only metadata; provider responses, rendered prompts, credentials, and tool
+   * arguments remain transient or in caller-owned stores.
+   */
+  async runMissionReplanCycle(
+    mission: AgentMissionArgs,
+    options: AutonomousAgentMissionReplanOptions,
+  ): Promise<AutonomousMissionReplanResult> {
+    if (!isObject(mission)) throw new ArgumentError("runMissionReplanCycle requires an AgentMissionArgs object");
+    if (!isObject(options) || typeof options.evaluate !== "function") throw new ArgumentError("runMissionReplanCycle requires an evaluator callback");
+    const catalogue = options.catalogue ?? this.toolCatalogue;
+    if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("runMissionReplanCycle requires a ToolCatalogue on the agent or call options");
+
+    // Dynamic import keeps the existing autonomous <-> mission-execution type boundary free of a
+    // module-initialization cycle. `mission-execution` imports this class for its runtime adapter.
+    const {
+      AutonomousMissionExecutor,
+      agentMissionStepExecutor,
+      runAutonomousMissionReplanCycle,
+    } = await import("./mission-execution.js").then(async (missionExecution) => ({
+      AutonomousMissionExecutor: missionExecution.AutonomousMissionExecutor,
+      agentMissionStepExecutor: missionExecution.agentMissionStepExecutor,
+      runAutonomousMissionReplanCycle: (await import("./mission-replan.js")).runAutonomousMissionReplanCycle,
+    }));
+
+    const promptSelections: AutonomousPromptAdaptiveSelectionJSON[] = [];
+    const promptSelectionDigests = new Set<string>();
+    const promptCoordinator = this.promptLearningCoordinator;
+    const defaultToolsForStep = (step: AgentMissionStep): readonly ProviderTool[] => {
+      const definition = catalogue.get(step.tool);
+      return [{ name: definition.name, description: definition.description, parameters: definition.inputSchema }];
+    };
+    const toolsForStep = (step: AgentMissionStep): readonly ProviderTool[] | undefined => options.toolsForStep?.(step) ?? defaultToolsForStep(step);
+    const executeStep = agentMissionStepExecutor(this, {
+      toolsForStep,
+      run: options.stepRun,
+      approveEffects: options.approveEffects,
+      signal: options.signal,
+      onPromptSelection: promptCoordinator === undefined
+        ? undefined
+        : (selection) => {
+            const normalized = extractAutonomousPromptLearningSelections({ adaptive_selection: selection }, promptCoordinator.registry);
+            for (const item of normalized) {
+              if (promptSelectionDigests.has(item.selectionDigest)) continue;
+              promptSelectionDigests.add(item.selectionDigest);
+              promptSelections.push(item.toJSON());
+            }
+          },
+    });
+    const executor = new AutonomousMissionExecutor({
+      agent: this,
+      catalogue,
+      executeStep,
+      checkpointStore: options.checkpointStore,
+      resultStore: options.resultStore,
+      onStepOutcome: options.onStepOutcome,
+    });
+    const {
+      catalogue: _catalogue,
+      toolsForStep: _toolsForStep,
+      stepRun: _stepRun,
+      approveEffects: _approveEffects,
+      checkpointStore: _checkpointStore,
+      resultStore: _resultStore,
+      onStepOutcome: _onStepOutcome,
+      ...cycleOptions
+    } = options;
+    const result = await runAutonomousMissionReplanCycle(executor, mission, cycleOptions);
+    if (promptCoordinator === undefined) return result;
+    const prompt_learning: AutonomousMissionReplanPromptLearningProjection = {
+      selection_count: promptSelections.length,
+      selection_digests: promptSelections.map((selection) => selection.selection_digest),
+      selections: promptSelections,
+      retention: "selection_metadata_only;rendered_messages_transient",
+      secret_material: "never_returned",
+    };
+    return { ...result, prompt_learning };
   }
 
   /**

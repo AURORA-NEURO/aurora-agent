@@ -936,6 +936,7 @@ export type {
   AutonomousProviderPlanningOptions,
   AutonomousOrderedStepPlanStep,
   AutonomousOrderedStepPlanRequest,
+  AutonomousAgentMissionReplanOptions,
   DomainToolApprover,
   DomainToolExecutor,
 } from "./autonomous.js";
@@ -2441,6 +2442,7 @@ export type {
   AutonomousMissionReplanStatus,
   AutonomousMissionPlanningStatus,
   AutonomousMissionPlannerLearningStatus,
+  AutonomousMissionReplanPromptLearningProjection,
 } from "./mission-replan.js";
 export {
   AUTONOMOUS_MISSION_REPLAN_JOB_QUEUE_SCHEMA,

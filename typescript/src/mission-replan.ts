@@ -14,6 +14,7 @@ import type { AutonomousDomainName, AutonomousOrderedStepPlanRequest, Autonomous
 import type { AutonomousLearningController, AutonomousPlanningQualitySettlement } from "./autonomous-learning.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { AutonomousEvaluatorRewardInput } from "./autonomous-learning.js";
+import type { AutonomousPromptAdaptiveSelectionJSON } from "./autonomous-prompt-registry.js";
 import type { AgentMissionArgs, AgentMissionStep, AutonomousOrderedStepPlanRefinementResult, JsonObject } from "./types.js";
 
 /** Durable mission-level evaluator/replanning metadata. Raw evaluator instructions stay transient. */
@@ -269,7 +270,17 @@ export interface AutonomousMissionReplanResult {
   planner_learning_settlement: AutonomousPlanningQualitySettlement | null;
   replan_count: number;
   final_execution: AutonomousMissionExecutionResult;
+  /** Optional value-only prompt-arm receipts collected by an agent-owned step adapter. */
+  prompt_learning?: AutonomousMissionReplanPromptLearningProjection;
   retention: "provider_responses_local;replan_instructions_transient;value_only_evaluation_and_learning_projection";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousMissionReplanPromptLearningProjection extends JsonObject {
+  selection_count: number;
+  selection_digests: string[];
+  selections: AutonomousPromptAdaptiveSelectionJSON[];
+  retention: "selection_metadata_only;rendered_messages_transient";
   secret_material: "never_returned";
 }
 
