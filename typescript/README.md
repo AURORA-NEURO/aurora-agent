@@ -215,6 +215,18 @@ its own stage objectives, evidence outputs, evaluator signals, dependencies, and
 Workflow digests are identical across the two SDKs, which binds checkpoints and learning
 trajectories to the same reviewed domain contract.
 
+### Provider receipt evaluation and model learning
+
+`AutonomousProviderOutcomeEvaluator` is the explicit bridge from a completed
+`provider_invocations` receipt to model-arm learning. It passes an independent evaluator only
+bounded provider metadata, digests, and caller-supplied safe evidence. Prompt/response content,
+messages, request bodies, headers, credentials, and raw provider errors are rejected and never
+enter the learning report. Provider success alone never earns reward. The returned
+`provider/model` arms, evaluator decision digests, idempotent replay markers, and next contextual
+state are value-only metadata; persist `report.next_learning_state` through the deployment's own
+CAS/snapshot boundary. Python has the same evaluator, projection, and default model-state updater
+under snake_case names.
+
 ## Autonomous orchestration across all domains
 
 The evidence integration surface also includes `builtinAutonomousDomainHttpSourcePresets()` and

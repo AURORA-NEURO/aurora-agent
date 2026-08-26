@@ -1440,6 +1440,25 @@ provider request remains only a local response, and evaluator reward still requi
 caller-owned evaluator. Cross-domain children share the supplied controller, so fan-out and
 synthesis consume the same provider/tool/cost budget and are visible in one execution identity.
 
+To connect those receipts to model adaptation, use `AutonomousProviderOutcomeEvaluator` and
+`agent.evaluateProviderReceipts()`. The evaluator receives the bounded receipt projection plus
+optional safe evidence; it never receives the provider response, prompt, messages, request body,
+headers, or credential. Transport completion is not a reward. Only the evaluator's bounded
+`reward`/`passed` decision can advance the configured contextual model learner. The receipt
+identity is used as the evidence key, and the context digest binds the stable
+`{domain, capability, risk_class, task_family}` identity.
+
+The bridge derives the `provider/model` arm, binds rewards to receipt/evaluator/context digests,
+and marks retries as idempotent when the caller reuses the returned learning state. Evidence and
+learning state are bounded JSON; secret-shaped or transient fields are rejected recursively.
+Disable learning with `learning: false` when a report is needed without mutation, or provide a
+caller-owned `learningUpdater` when the deployment uses a different state store. Python exposes
+the same boundary as `AutonomousProviderOutcomeEvaluator`,
+`autonomous_provider_outcome_evaluation_input()`, and
+`agent.evaluate_provider_receipts()`; its default updater writes the same contextual state shape.
+This is an outcome-evaluation bridge, not a claim of factual, clinical, scientific, or operational
+truth—the deployment remains responsible for independent evaluators, evidence, and persistence.
+
 `runAutonomousCrossDomainDecisionCycle()` is the fan-out/fan-in counterpart. It accepts the same
 optional semantic-routing gate, validates that the route actually selects multiple reviewed
 domains, and delegates child/synthesis identity creation to `runCrossDomain()`. When learning is

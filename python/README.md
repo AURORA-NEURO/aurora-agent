@@ -364,6 +364,17 @@ can feed `BrainModelHealthStore` into future model selection. `BrainReplayEngine
 caller-rehydrated evidence across every built-in domain and optionally advances a caller-owned
 bandit updater without replaying provider calls.
 
+Provider invocation receipts can be evaluated through the same explicit model-learning boundary.
+`AutonomousProviderOutcomeEvaluator` accepts only redacted provider metadata, digests, and
+bounded caller evidence; prompt/response text, messages, request bodies, headers, credentials,
+and raw provider errors are rejected. The transport status is never treated as task quality. The
+default `agent.evaluate_provider_receipts(...)` updater applies the evaluator's bounded reward to
+the existing `provider/model` contextual bandit state, while deployments may provide a custom
+updater and persist `next_learning_state` through their own snapshot/CAS boundary. Reusing that
+state makes a repeated receipt idempotent and does not rerun a provider. This bridge is an
+evaluation and adaptation mechanism, not a factual, clinical, scientific, or operational truth
+oracle.
+
 `create_autonomous_cycle_evaluator_bridge()` closes the callback-plumbing seam for the automatic
 learning paths. It validates a complete twelve-domain autonomous evaluator registry, exposes
 stable catalogue and policy digests, and returns exact-domain evaluators for single-domain

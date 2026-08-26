@@ -46,6 +46,12 @@ import {
   AutonomousToolOutcomeEvaluator,
   type AutonomousToolLearningReport,
 } from "./autonomous-tool-evaluation.js";
+import {
+  AutonomousProviderOutcomeEvaluator,
+  type AutonomousProviderLearningReport,
+  type AutonomousProviderLearningUpdater,
+  type AutonomousProviderOutcomeContext,
+} from "./autonomous-provider-evaluation.js";
 import type { AutonomousDecisionCyclePersistenceCoordinator } from "./autonomous-decision-persistence.js";
 import {
   autonomousRunTraceStatus,
@@ -5702,6 +5708,46 @@ export class AutonomousAgent {
       evidence: options.evidence,
       toolSelectionState: options.toolSelectionState,
       toolSelectionUpdater: settleAutonomousToolSelectionOutcome,
+    });
+  }
+
+  /**
+   * Evaluate provider invocation receipts and feed explicit model-quality credit into the
+   * configured online learner. Provider transport success is never treated as task quality;
+   * only the caller-owned evaluator can create a model-arm update.
+   */
+  async evaluateProviderReceipts(
+    options: {
+      evaluator: AutonomousProviderOutcomeEvaluator;
+      receipts?: readonly AutonomousProviderInvocationReceipt[];
+      contexts?: Readonly<Record<string, AutonomousProviderOutcomeContext>>;
+      evidence?: Readonly<Record<string, JsonObject>>;
+      learningState?: JsonObject | null;
+      learning?: boolean;
+      learningUpdater?: AutonomousProviderLearningUpdater;
+    },
+  ): Promise<AutonomousProviderLearningReport> {
+    if (!(options?.evaluator instanceof AutonomousProviderOutcomeEvaluator)) throw new ArgumentError("evaluateProviderReceipts requires an AutonomousProviderOutcomeEvaluator");
+    const receipts = options.receipts === undefined ? [] : [...options.receipts];
+    const updater = options.learningUpdater ?? (options.learning === false || !this.learner
+      ? undefined
+      : (armId, reward, update) => this.recordEvaluatorReward(armId, reward, {
+        failed: update.failed,
+        outcomeDigest: update.outcomeDigest,
+        contractDigest: update.contractDigest,
+        contextDigest: update.contextDigest,
+        context: update.context,
+      }));
+    const learningState = options.learningState !== undefined
+      ? options.learningState
+      : updater && this.learner
+        ? this.learner.snapshot()
+        : null;
+    return options.evaluator.evaluateReceipts(receipts, {
+      contexts: options.contexts,
+      evidence: options.evidence,
+      learningState,
+      learningUpdater: updater,
     });
   }
 

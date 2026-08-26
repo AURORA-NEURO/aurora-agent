@@ -228,6 +228,12 @@ from .autonomy_evaluation import (
     AutonomousToolLearningReport,
     AutonomousToolOutcomeEvaluator,
 )
+from .autonomous_provider_evaluation import (
+    AutonomousProviderLearningReport,
+    AutonomousProviderOutcomeEvaluator,
+    settle_autonomous_provider_model_outcome,
+)
+from .autonomy_provider import AutonomousProviderInvocationReceipt
 from .llm_runtime import (
     CredentialHandle,
     CredentialProvisioner,
@@ -18783,6 +18789,40 @@ class AutonomousAgent:
             )
         except (ArgumentError, ValueError) as error:
             raise BrainRunError("domain tool receipt evaluation failed") from error
+
+    def evaluate_provider_receipts(
+        self,
+        *,
+        evaluator: AutonomousProviderOutcomeEvaluator,
+        receipts: Sequence[Mapping[str, Any] | AutonomousProviderInvocationReceipt],
+        contexts: Mapping[str, Mapping[str, Any]] | None = None,
+        evidence: Mapping[str, Mapping[str, Any]] | None = None,
+        learning_state: Mapping[str, Any] | None = None,
+        learning_updater: Callable[[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]] | None = None,
+    ) -> AutonomousProviderLearningReport:
+        """Evaluate redacted provider receipts and update explicit model-arm learning.
+
+        Provider success is transport evidence only.  The independent evaluator is the sole
+        source of reward, while the default updater applies the value-only result to the same
+        portable contextual bandit state used by model selection.  Callers that persist a
+        learning ledger should persist ``report.next_learning_state`` through their normal
+        caller-owned snapshot/CAS boundary; no credential or provider payload is retained here.
+        """
+
+        if not isinstance(evaluator, AutonomousProviderOutcomeEvaluator):
+            raise BrainRunError("evaluator must be an AutonomousProviderOutcomeEvaluator")
+        if learning_updater is None:
+            learning_updater = settle_autonomous_provider_model_outcome
+        try:
+            return evaluator.evaluate_receipts(
+                receipts,
+                contexts=contexts,
+                evidence=evidence,
+                learning_state=self.learning_state() if learning_state is None else learning_state,
+                learning_updater=learning_updater,
+            )
+        except (ArgumentError, ValueError, TypeError) as error:
+            raise BrainRunError("provider receipt evaluation failed") from error
 
     def readiness(
         self,

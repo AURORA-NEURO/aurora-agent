@@ -503,6 +503,26 @@ export type {
   AutonomousToolLearningReport,
 } from "./autonomous-tool-evaluation.js";
 export {
+  AUTONOMOUS_PROVIDER_EVALUATION_SCHEMA,
+  AUTONOMOUS_PROVIDER_LEARNING_SCHEMA,
+  MAX_AUTONOMOUS_PROVIDER_EVALUATION_EVIDENCE_BYTES,
+  MAX_AUTONOMOUS_PROVIDER_EVALUATION_RECEIPTS,
+  AutonomousProviderOutcomeEvaluator,
+  autonomousProviderOutcomeEvaluationInput,
+  autonomousProviderReceiptIdentity,
+} from "./autonomous-provider-evaluation.js";
+export type {
+  AutonomousProviderOutcomeContext,
+  AutonomousProviderOutcomeEvaluationInput,
+  AutonomousProviderEvaluatorAssessment,
+  AutonomousProviderEvaluation,
+  AutonomousProviderOutcomeEvaluatorOptions,
+  AutonomousProviderLearningUpdate,
+  AutonomousProviderLearningUpdater,
+  AutonomousProviderLearningEvaluation,
+  AutonomousProviderLearningReport,
+} from "./autonomous-provider-evaluation.js";
+export {
   AUTONOMOUS_RUN_TRACE_SCHEMA,
   AUTONOMOUS_RUN_TRACE_EVENT_SCHEMA,
   AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA,

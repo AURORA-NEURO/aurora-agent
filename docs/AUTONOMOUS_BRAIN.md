@@ -5059,6 +5059,18 @@ enter the receipt. A receipt proves how a provider attempt was classified, not t
 valid, scientifically sound, rewarded, or externally effective; those judgments remain caller-owned
 evaluator and effect-reconciliation responsibilities.
 
+Provider receipts can then feed explicit model adaptation without exposing the provider payload.
+`AutonomousProviderOutcomeEvaluator` in either SDK receives only the receipt's provider/model,
+status/outcome, token/cost/latency counters, digests, a stable domain context, and bounded safe
+evidence. It rejects prompt/response text, messages, request/response bodies, headers, credentials,
+and raw errors. Only its bounded evaluator reward can credit the `provider/model` arm; transport
+completion remains an observation. `AutonomousAgent.evaluateProviderReceipts()` and
+`AutonomousAgent.evaluate_provider_receipts()` return per-domain/per-model settlements and a
+contextual next state, with deterministic receipt/evaluator/model digests for replay. Reusing that
+state is idempotent and does not rerun a provider. Applications persist the returned value-only
+state through their own snapshot/CAS boundary or supply a custom updater; this is routing
+adaptation, not factual, scientific, clinical, or external-effect truth.
+
 ### TypeScript mission execution as a durable dependency runtime
 
 The TypeScript SDK now has a local mission executor for applications that need an explicit
