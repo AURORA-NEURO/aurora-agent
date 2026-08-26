@@ -73,6 +73,7 @@ from prism_sdk import (
     ModelCatalogue,
     ProviderHealthLedger,
     ProviderError,
+    ProviderRequest,
     ProviderTool,
     ProviderToolResult,
     builtin_autonomous_domain_evaluator_profiles,
@@ -4687,6 +4688,146 @@ def test_durable_cross_domain_worker_resumes_children_and_synthesis_across_resta
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_durable_cross_domain_worker_requires_structured_response_review_after_restart(tmp_path: Path):
+    runtime = LLMRuntime()
+    calls: list[ProviderRequest] = []
+
+    def structured_handler(request: ProviderRequest) -> Mapping[str, object]:
+        calls.append(request)
+        assert request.response_schema is not None
+        return {
+            "model": request.model,
+            "output_text": json.dumps(_structured_value_from_schema(request.response_schema)),
+        }
+
+    runtime.register_in_memory_provider("openai", structured_handler)
+    model_candidates = _model()
+    model_candidates[0] = {
+        **model_candidates[0],
+        "capabilities": [*model_candidates[0]["capabilities"], "structured_output"],
+    }
+    brain = AutonomousBrain(_Workspace(), runtime)
+    task = "Review a bounded biomedical neuroscience EEG evidence package."
+    subtasks = [
+        {"id": "biomedical", "task": "Review the biomedical evidence and safety boundary.", "domain": "biomedical"},
+        {"id": "neuroscience", "task": "Analyze the EEG neuroscience design and signal limits.", "domain": "neuroscience"},
+    ]
+    blueprint = brain.prepare_cross_domain(
+        task=task,
+        subtasks=subtasks,
+        structured_domain_response=True,
+    )
+    caller_results: dict[str, object] = {}
+    alignments: list[Mapping[str, object]] = []
+    job_path = tmp_path / "durable-cross-domain-response-gate.sqlite3"
+
+    def resolve(metadata: dict[str, object]) -> dict[str, object]:
+        checkpoint_wire = metadata.get("checkpoint", {})
+        checkpoint = checkpoint_wire if isinstance(checkpoint_wire, dict) else {}
+        nested = checkpoint.get("cross_domain_checkpoint", {})
+        nested = nested if isinstance(nested, dict) else {}
+        completed = {
+            child_id: caller_results[child_id]
+            for child_id in nested.get("completed_child_ids", [])
+            if child_id in caller_results
+        }
+        return {
+            "blueprint": blueprint,
+            "model_candidates": model_candidates,
+            "credentials": {},
+            "completed_child_results": completed,
+            "cross_domain_options": {
+                "approve_provider_call": True,
+                "require_response_alignment": True,
+                "response_alignments": alignments,
+            },
+        }
+
+    with BrainJobStore(job_path) as store:
+        job, _ = store.submit(
+            {
+                "idempotency_key": "durable-cross-domain-response-gate",
+                "spec_digest": "a" * 64,
+                "domain": "cross_domain",
+                "capability": "cross_domain_synthesis",
+                "risk_class": "review",
+                "max_attempts": 8,
+            }
+        )
+        worker = BrainWorker(
+            brain,
+            store,
+            worker_id="response-gate-worker-a",
+            resolver=resolve,
+            evaluator=None,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            execution_kind="cross_domain",
+            lease_seconds=10,
+            heartbeat_seconds=0.1,
+        )
+        first = worker.run_once(job.job_id)
+        assert first is not None and first.status == "queued"
+        assert first.workflow is not None and first.workflow.phase == "child"
+        caller_results[first.workflow.item_id] = first.workflow.result
+        second = worker.run_once(job.job_id)
+        assert second is not None and second.status == "queued"
+        assert second.workflow is not None and second.workflow.phase == "child"
+        caller_results[second.workflow.item_id] = second.workflow.result
+        record = store.get(job.job_id)
+        assert record is not None
+        checkpoint = AutonomousCrossDomainCheckpoint.from_dict(record.checkpoint["cross_domain_checkpoint"])
+        assert checkpoint.status == "synthesis_pending"
+        assert checkpoint.completed_child_ids == ("biomedical", "neuroscience")
+
+    with BrainJobStore(job_path) as reopened:
+        restarted = BrainWorker(
+            brain,
+            reopened,
+            worker_id="response-gate-worker-b",
+            resolver=resolve,
+            evaluator=None,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            execution_kind="cross_domain",
+            lease_seconds=10,
+            heartbeat_seconds=0.1,
+        )
+        review = restarted.run_once(job.job_id)
+        assert review is not None and review.status == "queued"
+        assert review.workflow is not None
+        assert review.workflow.status == "response_review_required"
+        assert review.workflow.result is None
+        assessment = review.workflow.response_assessment
+        assert assessment is not None
+        assert assessment.status == "needs_alignment_review"
+        assert "pairwise_alignment_incomplete" in assessment.gate_reasons
+        rows = [row for row in assessment.rows if row.role == "specialist"]
+        assert len(rows) == 2
+        alignments[:] = [{
+            "alignment_id": "biomedical-neuroscience-review",
+            "left_domain": rows[0].domain,
+            "right_domain": rows[1].domain,
+            "stance": "neutral",
+            "confidence": 1.0,
+            "topic_digest": content_digest({"topic": "bounded EEG review"}),
+            "rationale_digest": None,
+            "left_response_digest": rows[0].response_digest,
+            "right_response_digest": rows[1].response_digest,
+        }]
+        completed = restarted.run_once(job.job_id)
+        assert completed is not None and completed.status == "succeeded"
+        assert completed.workflow is not None and completed.workflow.phase == "synthesis"
+        assert completed.workflow.result is not None
+        final = reopened.get(job.job_id)
+        assert final is not None and final.state == "succeeded"
+        final_checkpoint = AutonomousCrossDomainCheckpoint.from_dict(
+            final.checkpoint["result_metadata"]["cross_domain_checkpoint"]
+        )
+        assert final_checkpoint.status == "completed"
+        assert completed.workflow.response_assessment is not None
+        assert final_checkpoint.response_assessment_digest == completed.workflow.response_assessment.assessment_digest
+        assert len(calls) == 3
 
 
 def test_durable_cross_domain_worker_parks_and_releases_provider_approval(tmp_path: Path):

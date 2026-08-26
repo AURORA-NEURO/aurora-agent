@@ -461,3 +461,71 @@ test("durable cross-domain structured-response learning survives restart and set
     /result digest does not match/,
   );
 });
+
+test("durable cross-domain execution cannot bypass structured response review after restart", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const contracts = new Map();
+  for (const profile of profiles) contracts.set(profile.domain, await buildAutonomousDomainResponseContract(profile));
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("durable-cross-gate", (request) => {
+    const domain = request.responseSchema?.properties?.domain?.const;
+    return { structured: structuredResponse(contracts.get(domain)) };
+  });
+  const candidate = { ...model(), provider: "durable-cross-gate", model: "durable-cross-gate-model" };
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate);
+  const store = new InMemoryAutonomousCrossDomainCheckpointStore();
+  const executor = new AutonomousCrossDomainExecutor(agent, store);
+  const options = {
+    candidates: [candidate],
+    subtasks,
+    structuredDomainResponse: true,
+    requireResponseAlignment: true,
+    approveProviderCall: true,
+    maxSteps: 2,
+    jobId: "durable-cross-response-gate-1",
+  };
+
+  const first = await executor.start(task, options);
+  assert.equal(first.status, "paused");
+  assert.equal(first.completed_children, 2);
+  assert.equal(first.checkpoint.status, "synthesis_pending");
+  const children = new Map(first.step_results.map((step) => [step.item_id, step.run]));
+
+  const blocked = await executor.resume("durable-cross-response-gate-1", task, {
+    ...options,
+    jobId: undefined,
+    maxSteps: 1,
+    resolveChildResult: (id) => children.get(id) ?? null,
+  });
+  assert.equal(blocked.status, "response_review_required");
+  assert.equal(blocked.synthesis, null);
+  assert.equal(blocked.response_assessment?.status, "needs_alignment_review");
+  assert.ok(blocked.response_assessment?.gate_reasons.includes("pairwise_alignment_incomplete"));
+  assert.equal(blocked.checkpoint.status, "response_review_required");
+  assert.equal(blocked.checkpoint.response_assessment_digest, blocked.response_assessment.assessment_digest);
+  assert.equal(blocked.events.some((event) => event.event_type === "response_review_required"), true);
+
+  const rows = blocked.response_assessment.rows.filter((row) => row.role === "specialist");
+  const alignment = {
+    alignment_id: "bio-neuro-review",
+    left_domain: rows[0].domain,
+    right_domain: rows[1].domain,
+    stance: "neutral",
+    confidence: 1,
+    topic_digest: await digestJson({ topic: "bounded EEG review" }),
+    rationale_digest: null,
+    left_response_digest: rows[0].response_digest,
+    right_response_digest: rows[1].response_digest,
+  };
+  const completed = await executor.resume("durable-cross-response-gate-1", task, {
+    ...options,
+    jobId: undefined,
+    maxSteps: 1,
+    responseAlignments: [alignment],
+    resolveChildResult: (id) => children.get(id) ?? null,
+  });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.checkpoint.status, "completed");
+  assert.equal(completed.synthesis?.response?.structured?.domain, "cross_domain");
+});

@@ -5355,7 +5355,9 @@ class AutonomousBrain:
                 "idempotency_key", "mission_policy", "mission_options", "route_request", "auto_route",
                 "enforce_route_tools", "require_resolved_route", "provider_tools", "tool_choice",
                 "max_provider_failovers", "tool_loop_options", "bandit_state",
-                "accepted_plan_refinement",
+                "accepted_plan_refinement", "response_alignments", "require_response_alignment",
+                "minimum_response_reward", "minimum_response_alignment_confidence",
+                "response_contradiction_confidence_threshold",
             }
             unknown_options = sorted(set(options).difference(allowed_options))
             if unknown_options:
@@ -5482,6 +5484,36 @@ class AutonomousBrain:
             )
             if not isinstance(step_result, AutonomousCrossDomainStepResult):
                 raise BrainRunError("cross-domain durable execution returned an unsupported step")
+            if step_result.status == "response_review_required":
+                assessment = step_result.response_assessment
+                if assessment is None:
+                    raise BrainRunError("cross-domain response review did not return an assessment")
+                if current.status == "response_review_required" and current.response_assessment_digest == assessment.assessment_digest:
+                    review_checkpoint = current
+                else:
+                    review_checkpoint = AutonomousCrossDomainCheckpoint(
+                        run_id=current.run_id,
+                        task_digest=current.task_digest,
+                        base_plan_digest=current.base_plan_digest,
+                        execution_child_ids=current.execution_child_ids,
+                        completed_child_ids=step_result.completed_child_ids,
+                        child_result_digests=step_result.child_result_digests,
+                        next_child_id=None,
+                        plan_refinement_digest=current.plan_refinement_digest,
+                        response_assessment_digest=assessment.assessment_digest,
+                        status="response_review_required",
+                        generation=current.generation + 1,
+                        previous_checkpoint_digest=current.checkpoint_digest,
+                    )
+                    store.checkpoint(
+                        job.job_id,
+                        worker_id,
+                        phase="cross_domain_response_review_required",
+                        checkpoint=checkpoint_metadata(review_checkpoint, phase="cross_domain_response_review_required", step=step_result),
+                        side_effect_boundary="preflight",
+                    )
+                released = store.release(job.job_id, worker_id, reason="response admission requires explicit review before synthesis")
+                return BrainJobRunResult(status="queued", job=released.to_dict(), cycle=None, workflow=step_result)
             if step_result.status in {"approval_required", "mission_approval_required"}:
                 approval_checkpoint = AutonomousCrossDomainCheckpoint(
                     run_id=current.run_id,
@@ -5595,6 +5627,7 @@ class AutonomousBrain:
                     child_result_digests=step_result.child_result_digests,
                     next_child_id=next_child,
                     plan_refinement_digest=current.plan_refinement_digest,
+                    response_assessment_digest=None,
                     status="synthesis_pending" if is_last_child else "children_pending",
                     generation=current.generation + 1,
                     previous_checkpoint_digest=current.checkpoint_digest,
@@ -5623,6 +5656,7 @@ class AutonomousBrain:
                 next_child_id=None,
                 plan_refinement_digest=current.plan_refinement_digest,
                 synthesis_result_digest=_autonomous_result_digest(step_result.result),
+                response_assessment_digest=None if step_result.response_assessment is None else step_result.response_assessment.assessment_digest,
                 status="completed",
                 generation=current.generation + 1,
                 previous_checkpoint_digest=current.checkpoint_digest,

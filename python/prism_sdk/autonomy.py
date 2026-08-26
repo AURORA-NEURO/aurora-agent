@@ -890,6 +890,24 @@ def _sequence(name: str, value: Any, *, maximum: int = MAX_AUTONOMY_LIST_ITEMS) 
     return tuple(result)
 
 
+def _mapping_sequence(
+    name: str,
+    value: Any,
+    *,
+    maximum: int = MAX_AUTONOMY_LIST_ITEMS,
+) -> tuple[Mapping[str, Any], ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise BrainRunError(f"{name} must be a sequence")
+    if len(value) > maximum:
+        raise BrainRunError(f"{name} may contain at most {maximum} entries")
+    result: list[Mapping[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise BrainRunError(f"{name} must contain mappings")
+        result.append(item)
+    return tuple(result)
+
+
 def _cross_domain_subtask_domains_for_launch_admission(
     subtasks: Sequence[Mapping[str, Any]],
 ) -> tuple[str, ...]:
@@ -5327,6 +5345,8 @@ class AutonomousCrossDomainCheckpoint:
     next_child_id: str | None = None
     plan_refinement_digest: str | None = None
     synthesis_result_digest: str | None = None
+    # Digest-only pre-synthesis response admission; structured response values remain caller-owned.
+    response_assessment_digest: str | None = None
     status: str = "children_pending"
     last_item_id: str | None = None
     last_item_phase: str | None = None
@@ -5385,10 +5405,19 @@ class AutonomousCrossDomainCheckpoint:
             _route_digest(self.synthesis_result_digest, "cross-domain checkpoint synthesis_result_digest")
             if len(completed) != len(execution):
                 raise BrainRunError("cross-domain checkpoint cannot contain synthesis before all children")
-        if self.status not in {"children_pending", "synthesis_pending", "approval_required", "completed", "reconciliation_required"}:
+        if self.response_assessment_digest is not None:
+            _route_digest(self.response_assessment_digest, "cross-domain checkpoint response_assessment_digest")
+        if self.status not in {"children_pending", "synthesis_pending", "response_review_required", "approval_required", "completed", "reconciliation_required"}:
             raise BrainRunError("cross-domain checkpoint has an invalid status")
         if self.status == "synthesis_pending" and len(completed) != len(execution):
             raise BrainRunError("cross-domain synthesis_pending checkpoint has incomplete children")
+        if self.status == "response_review_required" and (
+            len(completed) != len(execution)
+            or self.next_child_id is not None
+            or self.synthesis_result_digest is not None
+            or self.response_assessment_digest is None
+        ):
+            raise BrainRunError("cross-domain response_review_required checkpoint must bind complete pre-synthesis assessment")
         if self.status == "completed" and self.synthesis_result_digest is None:
             raise BrainRunError("completed cross-domain checkpoint must contain synthesis digest")
         if self.last_item_id is not None:
@@ -5416,6 +5445,7 @@ class AutonomousCrossDomainCheckpoint:
                 "next_child_id": self.next_child_id,
                 "plan_refinement_digest": self.plan_refinement_digest,
                 "synthesis_result_digest": self.synthesis_result_digest,
+                "response_assessment_digest": self.response_assessment_digest,
                 "status": self.status,
                 "last_item_id": self.last_item_id,
                 "last_item_phase": self.last_item_phase,
@@ -5471,6 +5501,7 @@ class AutonomousCrossDomainCheckpoint:
             "next_child_id": self.next_child_id,
             "plan_refinement_digest": self.plan_refinement_digest,
             "synthesis_result_digest": self.synthesis_result_digest,
+            "response_assessment_digest": self.response_assessment_digest,
             "status": self.status,
             "last_item_id": self.last_item_id,
             "last_item_phase": self.last_item_phase,
@@ -5496,6 +5527,7 @@ class AutonomousCrossDomainCheckpoint:
             next_child_id=value.get("next_child_id"),
             plan_refinement_digest=value.get("plan_refinement_digest"),
             synthesis_result_digest=value.get("synthesis_result_digest"),
+            response_assessment_digest=value.get("response_assessment_digest"),
             status=value.get("status", "children_pending"),
             last_item_id=value.get("last_item_id"),
             last_item_phase=value.get("last_item_phase"),
@@ -5532,11 +5564,12 @@ class AutonomousCrossDomainStepResult:
     phase: str
     item_id: str
     blueprint: AutonomousCrossDomainBlueprint
-    result: BrainRunResult | BrainToolLoopResult | BrainMissionResult
+    result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None
     execution_child_ids: tuple[str, ...]
     completed_child_ids: tuple[str, ...] = ()
     child_result_digests: Mapping[str, str] = field(default_factory=dict)
     plan_refinement_digest: str | None = None
+    response_assessment: AutonomousCrossDomainResponseAssessment | None = None
 
     def __post_init__(self) -> None:
         if self.phase not in {"child", "synthesis"}:
@@ -5545,7 +5578,10 @@ class AutonomousCrossDomainStepResult:
             raise BrainRunError("cross-domain step item_id must be non-empty")
         if not isinstance(self.blueprint, AutonomousCrossDomainBlueprint):
             raise BrainRunError("cross-domain step blueprint is invalid")
-        if not isinstance(self.result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+        if self.result is None:
+            if self.status != "response_review_required" or self.phase != "synthesis" or self.response_assessment is None:
+                raise BrainRunError("cross-domain step may omit its result only at response review")
+        elif not isinstance(self.result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
             raise BrainRunError("cross-domain step result is unsupported")
         execution = _sequence(
             "cross-domain step execution_child_ids",
@@ -5585,7 +5621,8 @@ class AutonomousCrossDomainStepResult:
             "completed_child_ids": list(self.completed_child_ids),
             "child_result_digests": dict(self.child_result_digests),
             "plan_refinement_digest": self.plan_refinement_digest,
-            "result": self.result.to_dict(),
+            "response_assessment": None if self.response_assessment is None else self.response_assessment.to_dict(),
+            "result": None if self.result is None else self.result.to_dict(),
             "retention": "provider_result_caller_owned; continuation_metadata_digest_bound",
         }
 
@@ -11967,6 +12004,11 @@ class AutonomousTaskOrchestrator:
         max_provider_failovers: int = 2,
         tool_loop_options: Mapping[str, Any] | None = None,
         bandit_state: Mapping[str, Any] | None = None,
+        response_alignments: Sequence[Mapping[str, Any]] = (),
+        require_response_alignment: bool = False,
+        minimum_response_reward: float = 0.8,
+        minimum_response_alignment_confidence: float = 0.75,
+        response_contradiction_confidence_threshold: float = 0.75,
         execution_controller: AutonomousExecutionController | None = None,
     ) -> AutonomousCrossDomainStepResult:
         """Execute exactly one child or the final synthesis for restart-safe fan-out.
@@ -11978,6 +12020,16 @@ class AutonomousTaskOrchestrator:
 
         if not isinstance(blueprint, AutonomousCrossDomainBlueprint):
             raise BrainRunError("cross-domain step requires an AutonomousCrossDomainBlueprint")
+        if not isinstance(require_response_alignment, bool):
+            raise BrainRunError("require_response_alignment must be a boolean")
+        response_alignments = _mapping_sequence("cross-domain response_alignments", response_alignments, maximum=64)
+        for name, value in (
+            ("minimum_response_reward", minimum_response_reward),
+            ("minimum_response_alignment_confidence", minimum_response_alignment_confidence),
+            ("response_contradiction_confidence_threshold", response_contradiction_confidence_threshold),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or not 0.0 <= float(value) <= 1.0:
+                raise BrainRunError(f"{name} must be finite and within [0, 1]")
         plan_priority, plan_refinement_digest, plan_focus_child_ids = self._accepted_cross_domain_plan(
             blueprint,
             accepted_plan_refinement,
@@ -12030,7 +12082,8 @@ class AutonomousTaskOrchestrator:
                 context=context,
                 max_steps=item.spec.max_steps,
                 require_json=item.spec.require_json,
-                response_schema=item.spec.response_schema,
+                structured_domain_response=item.spec.structured_domain_response,
+                response_schema=None if item.spec.structured_domain_response else item.spec.response_schema,
                 execution_mode=item.spec.execution_mode,
                 required_model_capabilities=tuple(
                     capability
@@ -12103,6 +12156,45 @@ class AutonomousTaskOrchestrator:
 
         if set(prior) != set(execution_child_ids):
             raise BrainRunError("cross-domain synthesis requires every completed child result")
+        response_assessment = None
+        structured_mode = any(
+            item.spec.structured_domain_response
+            for item in (*blueprint.child_blueprints, blueprint.synthesis_blueprint)
+        )
+        if structured_mode:
+            entries = self._cross_domain_response_entries(
+                blueprint,
+                execution_child_ids,
+                tuple(prior[child_id] for child_id in execution_child_ids),
+            )
+            if entries is not None:
+                response_assessment = assess_autonomous_cross_domain_response_set(
+                    entries,
+                    requested_domains=tuple(child.profile.domain for child in blueprint.child_blueprints),
+                    context_digest=blueprint.task_digest,
+                    alignments=response_alignments,
+                    require_synthesis=False,
+                    require_complete_alignment=require_response_alignment,
+                    minimum_reward=float(minimum_response_reward),
+                    minimum_alignment_confidence=float(minimum_response_alignment_confidence),
+                    contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
+                )
+        if response_assessment is not None and not response_assessment.ready_to_synthesize:
+            return AutonomousCrossDomainStepResult(
+                status="response_review_required",
+                phase="synthesis",
+                item_id="synthesis",
+                blueprint=blueprint,
+                result=None,
+                execution_child_ids=execution_child_ids,
+                completed_child_ids=execution_child_ids,
+                child_result_digests={
+                    child_id: _autonomous_result_digest(prior[child_id])
+                    for child_id in execution_child_ids
+                },
+                plan_refinement_digest=plan_refinement_digest,
+                response_assessment=response_assessment,
+            )
         child_outputs = [
             {
                 "id": child_id,
@@ -12143,6 +12235,7 @@ class AutonomousTaskOrchestrator:
                 for child_id in execution_child_ids
             },
             plan_refinement_digest=plan_refinement_digest,
+            response_assessment=response_assessment,
         )
 
     def run_workflow(
@@ -13273,13 +13366,11 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("synthesize and allow_partial must be booleans")
         if not isinstance(require_response_alignment, bool):
             raise BrainRunError("require_response_alignment must be a boolean")
-        response_alignments = _sequence(
+        response_alignments = _mapping_sequence(
             "cross-domain response_alignments",
             response_alignments,
             maximum=64,
         )
-        if any(not isinstance(alignment, Mapping) for alignment in response_alignments):
-            raise BrainRunError("cross-domain response_alignments must contain mappings")
         for name, value in (
             ("minimum_response_reward", minimum_response_reward),
             ("minimum_response_alignment_confidence", minimum_response_alignment_confidence),
