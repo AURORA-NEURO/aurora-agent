@@ -163,6 +163,7 @@ pub mod local_retrieval_synthesis_interoperability_gateway;
 pub mod multimodal_retrieval_synthesis_interoperability_gateway;
 pub mod throughput_retrieval_synthesis_interoperability_gateway;
 pub mod federated_continual_retrieval_synthesis_interoperability_gateway;
+pub mod local_retrieval_synthesis_assurance_harness;
 pub mod multimodal_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_contract_model;
@@ -739,6 +740,15 @@ pub use federated_continual_retrieval_synthesis_interoperability_gateway::{
     FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest,
     CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+pub use local_retrieval_synthesis_assurance_harness::{
+    local_retrieval_synthesis_assurance_harness_manifest,
+    assure_local_retrieval_synthesis,
+    LocalRetrievalSynthesisAssuranceHarnessError,
+    LocalRetrievalSynthesisAssuranceHarnessReceipt,
+    LocalRetrievalSynthesisAssuranceHarnessRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
 };
 pub use multimodal_retrieval_synthesis_inference_engine::{
     multimodal_retrieval_synthesis_inference_engine_manifest,

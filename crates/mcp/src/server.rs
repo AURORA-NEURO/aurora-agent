@@ -1924,6 +1924,9 @@ impl Server {
             "adapter_federated_continual_retrieval_synthesis_interoperability_gateway" => {
                 self.adapter_federated_continual_retrieval_synthesis_interoperability_gateway(&arguments)
             },
+            "adapter_local_retrieval_synthesis_assurance_harness" => {
+                self.adapter_local_retrieval_synthesis_assurance_harness(&arguments)
+            },
             "adapter_multimodal_retrieval_synthesis_inference_engine" => {
                 self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
             },
@@ -25374,6 +25377,12 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual gateway negotiates purpose-bound pinned retrieval/synthesis schemas with quorum and aggregate-only controls", "peer capability gaps, semantic loss, quorum failures, protected-closure gaps, and policy denials fail closed", "raw preclinical observations remain institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for consortium membership, purpose policy, endpoint trust, migration review, and independent replication"]}))
     }
 
+    fn adapter_local_retrieval_synthesis_assurance_harness(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a LocalRetrievalSynthesisAssuranceHarnessRequest")?;
+        let receipt = crate::research_contracts::run_local_retrieval_synthesis_assurance_harness_json(request)?;
+        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates a local retrieval/synthesis workbench against explicit policy, protected-closure, provenance, and evidence predicates", "counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for baseline selection, independent replication, and institutional release governance"]}))
+    }
+
     fn adapter_multimodal_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(request)?;
@@ -37629,6 +37638,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "adapter_local_retrieval_synthesis_assurance_harness",
+            "domains": ["local retrieval synthesis assurance", "counterexample checking", "omission-aware release gates", "replay verification"],
+            "crates": ["bioprism-adapter", "bioprism-mcp"],
+            "mcp_tools": ["adapter_local_retrieval_synthesis_assurance_harness"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
@@ -40388,6 +40405,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "adapter_federated_continual_retrieval_synthesis_interoperability_gateway",
             "description": "Negotiate a purpose-bound federated continual retrieval and synthesis protocol with peer quorum, aggregate-only locality, capability and semantic-loss receipts, omission preservation, and content-addressed artifact exchange.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest with federation purpose/peer quorum, aggregate-only policy, federated workbench request, pinned schemas, migration policy, semantic-loss budget, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "adapter_local_retrieval_synthesis_assurance_harness",
+            "description": "Verify a local retrieval and synthesis workbench against explicit policy, protected-closure, provenance, evidence-completeness, replay, and omission-aware release predicates.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisAssuranceHarnessRequest with local workbench request, baseline identity, policy and closure predicates, provenance/evidence completeness, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "adapter_multimodal_retrieval_synthesis_inference_engine",
