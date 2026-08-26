@@ -5,13 +5,16 @@
 //! is arrived at by subtraction, and the subtraction is sound exactly to the extent that every
 //! other omission was named first. These tests exercise the ways the naming can come up short:
 //! more than one displaced provider of a needed variable, a displaced provider whose winner was
-//! withheld for an unrelated reason, and the two shapes of a corpus that gives two facts the same
-//! identifier so no identifier-keyed accounting can tell them apart.
+//! withheld for an unrelated reason, the two shapes of a corpus that gives two facts the same
+//! identifier so no identifier-keyed accounting can tell them apart, and a sibling output of a
+//! multi-output factor, which the backward slice never needs and the compiled region carries
+//! anyway.
 //!
-//! One test here asserts a defect rather than a guarantee.
-//! `a_sibling_output_of_a_selected_factor_is_published_as_proven_though_the_region_carries_it`
-//! pins the population the remainder still absorbs silently, so that the crate documentation's
-//! statement of the limit and the compiler's behaviour cannot drift apart without a failure.
+//! The sibling-output tests are the ones that check the compiler against the artefact it ships
+//! beside the certificate. `bioprism_fiber::plan::compile_region` is rebuilt here from the same
+//! world and asked which factors carry the variable, because the claim under test is not that the
+//! group came out a particular size but that the certificate and the region agree about what the
+//! query reached.
 
 use bioprism_fiber::{compile, CompileOutput, Query, UnprovenRemainder};
 use bioprism_section::{InfluenceClass, OmissionAccountingError};
@@ -209,11 +212,11 @@ fn a_displaced_provider_whose_winner_was_withheld_by_policy_is_neither_dropped_n
     );
 }
 
-/// The two ways one identifier can stand for two facts that provide a needed variable.
+/// The two ways one identifier can stand for two facts that provide a variable the compile reaches.
 ///
 /// Both are refusals rather than smaller numbers, and they are refused by different checks:
-/// [`Collision::WinnerAmongDisplaced`] by the compiler's ambiguity guard, because the displaced
-/// fact is filtered out against the selection before any accounting sees it, and
+/// [`Collision::WinnerAmongDisplaced`] by the compiler's ambiguity guard, which both classifying
+/// passes run so that one collision produces one verdict, and
 /// [`Collision::OneIdentifierForTwoVariables`] by
 /// [`bioprism_section::ProvenUnreachable::from_classified`], because both copies reach it.
 enum Collision {
@@ -402,20 +405,95 @@ fn one_identifier_for_two_displaced_providers_is_refused_rather_than_deduplicate
         .any(|group| group.reason.contains("do not partition the omitted corpus")));
 }
 
-/// A sibling output of a selected factor is published as proven, and the region can still perturb it.
+/// A carried sibling output with two providers under one identifier refuses the same way.
 ///
-/// The known limit of the zero group, pinned so it stays known. `factor.joint_readout` emits
-/// `risk_score` and `calibration_drift` together; the backward slice enters that factor through
-/// `risk_score`, so `calibration_drift` never becomes a needed variable and no lookup in the
-/// displaced-provider pass ever asks about it. `QueryRegion::from_world_slice` meanwhile puts
-/// `calibration_drift` in that same factor's scope, and scope membership is exactly the relation
-/// `bioprism_fiber::influence` perturbs along — the relation whose *absence* it reports as
-/// `NotPosable::OutsideCompiledRegion`, documented there as not zero influence. So a fact providing
-/// it is omitted, has an image in the compiled region, and is nonetheless published with a bound of
-/// `0.0` under a class that says no dependency path reaches the target. The crate documentation
-/// states this rather than claiming a per-fact proof, and this test is what keeps the two agreeing.
+/// The collision is the corpus's, not the pass's, so the two passes that can meet it must say the
+/// same thing about it. Before the guard reached this pass they did not: the region-carried loop
+/// pushed both colliding copies, and `ProvenUnreachable::from_classified` refused as
+/// `NamedTwice` — a verdict about the classifier disagreeing with itself, for a corpus that cannot
+/// tell two facts apart. It also cost the balance the other verdict keeps: the group counted one
+/// fact twice, named it twice in `examples`, and `total_omitted` came out at 2 against a corpus of
+/// 3. Two passes, one defect, two answers is the inconsistency this accounting exists to prevent.
 #[test]
-fn a_sibling_output_of_a_selected_factor_is_published_as_proven_though_the_region_carries_it() {
+fn a_carried_variable_with_two_providers_under_one_identifier_yields_no_proven_group() {
+    let mut world = reference_example("multi_output_world.json");
+    facts_of(&mut world).push(json!({
+        "id": "fact.drift",
+        "provenance": ["assay/drift.json"],
+        "provides": "calibration_drift",
+        "scope": {"cohort": "MULTI-001"},
+        "tags": ["measurement"],
+        "value": ["stable", "drifting"],
+    }));
+    let source = CollidingIdentifiers {
+        inner: World::from_json(world).expect("world loads"),
+        collision: Collision::WinnerAmongDisplaced {
+            variable: "calibration_drift".to_string(),
+        },
+    };
+    let query =
+        Query::from_json(reference_example("multi_output_query.json")).expect("query loads");
+    let out = compile(&source, &query).expect("compiles");
+
+    assert_eq!(
+        out.trace.unproven_remainder,
+        Some(UnprovenRemainder::AmbiguousIdentifier {
+            variables: vec!["calibration_drift".to_string()]
+        }),
+        "a variable only the region carries refuses through the same check as a needed one"
+    );
+    assert_eq!(
+        out.certificate.manifest.count_in(InfluenceClass::Zero),
+        0,
+        "no fact may be published as provably irrelevant over a corpus that cannot name it"
+    );
+    assert_eq!(
+        out.certificate.manifest.total_omitted(),
+        out.certificate.omissions.total_facts,
+        "and the refusal keeps the books balanced, which absorbing the collision did not"
+    );
+
+    let carried = out
+        .certificate
+        .manifest
+        .groups
+        .iter()
+        .find(|group| {
+            group
+                .reason
+                .contains("a selected factor carries in its scope")
+        })
+        .expect("the carried group is still published");
+    assert_eq!(
+        carried.count, 1,
+        "one fact, counted once: the colliding copy is refused, not counted a second time"
+    );
+    assert_eq!(carried.examples, vec!["fact.drift".to_string()]);
+    assert!(!out.certificate.manifest.supports_sufficiency_claim());
+}
+
+/// A sibling output the compiled region carries is unproven, not proven with a bound of `0.0`.
+///
+/// `factor.joint_readout` emits `risk_score` and `calibration_drift` together; the backward slice
+/// enters that factor through `risk_score`, so `calibration_drift` is produced by the compiled
+/// program rather than required by it and never becomes a needed variable.
+/// `QueryRegion::from_world_slice` nonetheless puts it in that same factor's scope, and scope
+/// membership is exactly the relation `bioprism_fiber::influence` perturbs along — the relation
+/// whose *absence* it reports as `NotPosable::OutsideCompiledRegion`, documented there as not zero
+/// influence. A fact providing that variable is therefore omitted and has an image in the compiled
+/// region, so the one thing the certificate may not say about it is that no dependency path reaches
+/// the target.
+///
+/// The region is rebuilt here from the same world and interrogated directly, because a count is not
+/// the claim. The claim is that the certificate and the region shipped beside it agree, and the
+/// only way to test that is to ask them both.
+///
+/// `fact.scanner` is the control. It provides `scanner_id`, which only `factor.drift_model`
+/// consumes, and that factor produces `calibration_drift` alone — a variable no selected factor
+/// needs — so it is not in the region at all and stays proven. Were the pass classing everything
+/// omitted as unknown, this assertion would be the one that failed.
+#[test]
+fn a_sibling_output_of_a_selected_factor_is_unproven_because_the_compiled_region_carries_it() {
     let mut world = reference_example("multi_output_world.json");
     facts_of(&mut world).push(json!({
         "id": "fact.drift",
@@ -440,16 +518,39 @@ fn a_sibling_output_of_a_selected_factor_is_published_as_proven_though_the_regio
             .contains(&"factor.joint_readout".to_string()),
         "the factor carrying its variable is on the certificate as selected"
     );
-    let proven =
-        group_in(&out, InfluenceClass::Zero).expect("the remainder is published as proven");
+
+    let unproven = group_in(&out, InfluenceClass::Unknown)
+        .expect("the fact the region carries is classified, not left to the remainder");
+    assert_eq!(unproven.count, 1);
+    assert_eq!(unproven.examples, vec!["fact.drift".to_string()]);
     assert_eq!(
-        proven.count, 2,
-        "fact.scanner and fact.drift, and only fact.scanner is out of the region"
+        unproven.bound, None,
+        "no bound was computed for it, and a group that names none may not carry one"
+    );
+    assert!(
+        unproven
+            .reason
+            .contains("calibration_drift in factor.joint_readout"),
+        "the reason must name the variable and the factor that carries it, so the contradiction \
+         can be checked against the selected factors on this same certificate: {}",
+        unproven.reason
+    );
+    assert!(!out.certificate.manifest.supports_sufficiency_claim());
+
+    let proven = group_in(&out, InfluenceClass::Zero).expect("fact.scanner is still proved");
+    assert_eq!(
+        proven.count, 1,
+        "fact.scanner alone: no selected factor has scanner_id in scope"
     );
     assert_eq!(proven.bound, Some(0.0));
     assert_eq!(
+        out.certificate.manifest.total_omitted(),
+        out.certificate.omissions.total_facts,
+        "moving a fact between groups must not drop it or count it twice"
+    );
+    assert_eq!(
         out.trace.unproven_remainder, None,
-        "nothing in this compile declines the proof, which is the defect"
+        "the accounting balances; naming this population is a classification, not a refusal"
     );
 
     let region = bioprism_fiber::plan::compile_region(
@@ -472,8 +573,198 @@ fn a_sibling_output_of_a_selected_factor_is_published_as_proven_though_the_regio
     assert_eq!(
         carrying,
         vec!["factor.joint_readout"],
-        "the compiled region has an image of the variable the certificate calls unreachable"
+        "the region carries the variable, which is why the certificate may not call it unreachable"
     );
+    assert!(
+        !region
+            .factors()
+            .iter()
+            .any(|factor| factor.scope().iter().any(|name| name == "scanner_id")),
+        "and does not carry the control's variable, which is why that one stays proven"
+    );
+}
+
+/// Both providers of a carried sibling output are unproven, the tiebreak winner included.
+///
+/// The distinction from the displaced-provider pass, and the half of this defect a narrower fix
+/// would miss. For a *needed* variable the winner is selected and only the losers are omitted, so
+/// naming the losers is enough. For a variable that only a factor's scope carries, nothing selected
+/// any provider of it — selection is keyed on the needed set apart from the protected closure, and
+/// neither fact below is protected — so the winner of the document-order tiebreak is omitted
+/// exactly like its shadowed sibling and is the fact that was being published with a bound of
+/// `0.0`. A pass that asked only `shadowed_provider_ids` would leave it there.
+#[test]
+fn every_provider_of_a_carried_sibling_output_is_unproven_including_the_tiebreak_winner() {
+    let mut world = reference_example("multi_output_world.json");
+    for id in ["fact.drift_provisional", "fact.drift_final"] {
+        facts_of(&mut world).push(json!({
+            "id": id,
+            "provenance": [format!("assay/{id}.json")],
+            "provides": "calibration_drift",
+            "scope": {"cohort": "MULTI-001"},
+            "tags": ["measurement"],
+            "value": ["stable", "drifting"],
+        }));
+    }
+    let out = compiled(world, reference_example("multi_output_query.json"));
+
+    let unproven = group_in(&out, InfluenceClass::Unknown).expect("both providers land here");
+    assert_eq!(unproven.count, 2);
+    assert_eq!(
+        unproven.examples,
+        vec![
+            "fact.drift_final".to_string(),
+            "fact.drift_provisional".to_string()
+        ],
+        "the winner of the tiebreak is named alongside the fact it displaced"
+    );
+    assert_eq!(
+        group_in(&out, InfluenceClass::Zero)
+            .expect("fact.scanner is still proved")
+            .count,
+        1
+    );
+    assert_eq!(
+        out.certificate.manifest.total_omitted(),
+        out.certificate.omissions.total_facts
+    );
+    assert_eq!(out.trace.unproven_remainder, None);
+}
+
+/// A sibling output nothing selected is unproven-because-carried even when the cut governs it.
+///
+/// The precondition is in the name and it is load-bearing: `fact.drift` below carries no protected
+/// tag, so nothing puts it in the selection and the cut has nothing to remove. The cut therefore
+/// never classifies it, and the region-carried pass does — a label the compiler can check, in place
+/// of one it never evaluated. Drop the precondition and the claim is false;
+/// [`a_protected_sibling_output_behind_the_temporal_cut_is_deferred_because_the_cut_removed_it`]
+/// is that case.
+///
+/// Both labels void the sufficiency claim, so the certificate is not weaker than the evidence
+/// either way. What may never happen is the fact landing in the proven group, and that holds
+/// under both preconditions for a reason that needs neither: whatever the cut removes it names.
+#[test]
+fn an_unprotected_sibling_output_behind_the_temporal_cut_is_unproven_rather_than_deferred() {
+    let mut world = reference_example("multi_output_world.json");
+    facts_of(&mut world).push(json!({
+        "id": "fact.drift",
+        "provenance": ["assay/drift.json"],
+        "provides": "calibration_drift",
+        "scope": {"cohort": "MULTI-001"},
+        "tags": ["measurement"],
+        "value": ["stable", "drifting"],
+    }));
+    world["events"] = json!([{
+        "id": "event.drift_release",
+        "event_time": "2024-06-01T00:00:00Z",
+        "availability_time": "2030-01-01T00:00:00Z",
+        "causal_parents": [],
+        "produces": ["calibration_drift"],
+    }]);
+    let out = compiled(world, reference_example("multi_output_query.json"));
+
+    assert!(
+        out.trace
+            .temporal_cut
+            .event_managed()
+            .contains("calibration_drift"),
+        "the cut knows the variable is governed by an event it has not released"
+    );
+    assert_eq!(
+        out.certificate.omissions.inaccessible_selected_before_cut,
+        Vec::<String>::new(),
+        "the cut never saw the fact, because nothing selected it for the cut to remove"
+    );
+    assert!(
+        group_in(&out, InfluenceClass::DeferredAcquisition).is_none(),
+        "so no deferred group exists to hold it"
+    );
+
+    let unproven = group_in(&out, InfluenceClass::Unknown).expect("it is classified anyway");
+    assert_eq!(unproven.examples, vec!["fact.drift".to_string()]);
+    assert_eq!(
+        group_in(&out, InfluenceClass::Zero)
+            .expect("fact.scanner is still proved")
+            .count,
+        1,
+        "the fact behind the cut is not in the proven group, which is the property that matters"
+    );
+    assert!(!out.certificate.manifest.supports_sufficiency_claim());
+    assert_eq!(
+        out.certificate.manifest.total_omitted(),
+        out.certificate.omissions.total_facts
+    );
+}
+
+/// A protected sibling output *is* in the selection, and the cut removes it and defers it.
+///
+/// The counterexample to the wider claim, in three facts. The selection is not keyed on the needed
+/// set alone: it is the needed set's providers unioned with the protected closure, so a fact
+/// carrying one of the query's protected tags is selected whatever variable it provides, and a
+/// sibling output's provider is reachable by the temporal cut after all. The same world with
+/// `protected` dropped from the tags is
+/// [`an_unprotected_sibling_output_behind_the_temporal_cut_is_unproven_rather_than_deferred`], and
+/// the two land in different classes.
+///
+/// What survives the counterexample is the property the accounting needs: the cut names what it
+/// removes, so `fact.drift` is in the deferred group rather than in a proven one. That half of the
+/// argument holds however the fact entered the selection, which is why it is the half the
+/// compiler's guarantee rests on.
+#[test]
+fn a_protected_sibling_output_behind_the_temporal_cut_is_deferred_because_the_cut_removed_it() {
+    let mut world = reference_example("multi_output_world.json");
+    facts_of(&mut world).retain(|fact| fact["id"] != json!("fact.scanner"));
+    world["factors"]
+        .as_array_mut()
+        .expect("factors is an array")
+        .retain(|factor| factor["id"] != json!("factor.drift_model"));
+    facts_of(&mut world).push(json!({
+        "id": "fact.drift",
+        "provenance": ["assay/drift.json"],
+        "provides": "calibration_drift",
+        "scope": {"cohort": "MULTI-001"},
+        "tags": ["measurement", "protected"],
+        "value": ["stable", "drifting"],
+    }));
+    world["events"] = json!([{
+        "id": "event.drift_release",
+        "event_time": "2024-06-01T00:00:00Z",
+        "availability_time": "2030-01-01T00:00:00Z",
+        "causal_parents": [],
+        "produces": ["calibration_drift"],
+    }]);
+    let out = compiled(world, reference_example("multi_output_query.json"));
+
+    assert!(
+        out.certificate
+            .protected_closure
+            .contains(&"fact.drift".to_string()),
+        "the protected closure put a sibling output's provider in the selection, which is the step \
+         the wider claim says cannot happen"
+    );
+    assert_eq!(
+        out.certificate.omissions.inaccessible_selected_before_cut,
+        vec!["fact.drift".to_string()],
+        "and the cut then removed it, so the cut does reach this population"
+    );
+
+    let deferred =
+        group_in(&out, InfluenceClass::DeferredAcquisition).expect("the cut names what it removes");
+    assert_eq!(deferred.examples, vec!["fact.drift".to_string()]);
+    assert!(
+        group_in(&out, InfluenceClass::Unknown).is_none(),
+        "the region-carried pass does not also claim it: one omission, one class"
+    );
+    assert_eq!(
+        out.certificate.manifest.count_in(InfluenceClass::Zero),
+        0,
+        "and it is not in the proven group, which is the guarantee the counterexample leaves intact"
+    );
+    assert_eq!(
+        out.certificate.manifest.total_omitted(),
+        out.certificate.omissions.total_facts
+    );
+    assert_eq!(out.trace.unproven_remainder, None);
 }
 
 /// The same displaced provider under a distinct identifier still yields a proven group, so the

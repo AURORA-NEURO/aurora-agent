@@ -26,6 +26,7 @@ use crate::policy::{self, PolicyEnvelope, PolicyOutcome, PolicyScreen, POLICY_RE
 use crate::qir::Query;
 use crate::slice::{backward_slice, max_selected_arity};
 use crate::temporal::{temporal_cut, TemporalCut};
+use bioprism_backends::{QueryRegion, RegionError};
 use bioprism_epistemic::{
     adaptive::AdaptivePolicy,
     adaptive_policy as epistemic_adaptive_policy, decision_equivalence_quotient,
@@ -66,6 +67,14 @@ const REFERENCE_LIMITATION: &str = "Reference slicer uses dependency reachabilit
 /// `bioprism_section::certificate` says about the v0.1 shape in its own documentation.
 const OMISSION_CLASSIFICATION: &str = "no_backward_dependency_path_or_temporally_inaccessible";
 const RETROSPECTIVE_ACTION: &str = "advance_time_cut_or_use_retrospective_mode";
+
+/// How many members the region-carried group's `OmissionGroup::examples` names.
+///
+/// Named rather than written at each use because that group renders the same members twice — once
+/// as identifiers in `examples` and once as the sites its reason string names — and two literals
+/// would let the two lists drift onto different facts as soon as the group outgrew them. The other
+/// groups render their members once and take their own three.
+const EXAMPLES_SHOWN: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PassReceipt {
@@ -546,11 +555,23 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         refinement_frontier: frontier,
     };
 
+    // Built before the omission classification rather than after it, because the classification
+    // reads this region's factor scopes: scope membership is what decides whether an omitted fact
+    // has an image the region could perturb, and deriving factor scopes a second time here would
+    // let the compiler's answer and the region's drift apart on exactly the multi-output shape
+    // where they differ.
+    let region = plan::compile_region(
+        source,
+        query.query_id.as_str(),
+        query.targets.iter().map(|t| t.as_str()),
+    );
+
     // Counted, never enumerated: the omitted set is the corpus minus the selection, and
     // materialising it would reintroduce the very whole-world traversal the design rejects.
     let omitted_total = source.total_facts().saturating_sub(selected_facts.len());
     let reachable_but_unselected = reachable_but_unselected(
         source,
+        region.as_ref(),
         &slice.needed_variables,
         &selected_facts,
         &withheld_by_policy,
@@ -564,11 +585,6 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
         .count_with_tag("exploratory")
         .saturating_sub(selected_exploratory);
 
-    let region = plan::compile_region(
-        source,
-        query.query_id.as_str(),
-        query.targets.iter().map(|t| t.as_str()),
-    );
     let evaluation = plan::evaluate(region.as_ref());
     let plan = evaluation.descriptor(
         slice.selected_factors.len(),
@@ -657,13 +673,23 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
     })
 }
 
-/// Omitted facts that provide a variable the slice needs, and that nothing else accounts for.
+/// Omitted facts that the compiled region still reaches, and that nothing else accounts for.
 ///
-/// The structural predicate behind [`InfluenceClass::Zero`]. A fact whose variable is not in
-/// `needed` cannot reach a target through any factor chain, because the backward slice is by
-/// construction the set of variables that can; its omission provably cannot move the decision. A
-/// fact whose variable *is* in `needed` has such a path, so its omission is proved to be
-/// irrelevant by nothing at all.
+/// The structural predicate behind [`InfluenceClass::Zero`], in the two relations that defeat it.
+///
+/// The first is the backward slice. A fact whose variable *is* in `needed` has a dependency path
+/// to a target, so its omission is proved to be irrelevant by nothing at all.
+///
+/// The second is scope membership, and it is the relation that "not in `needed`" fails to
+/// capture. [`crate::slice::backward_slice`] admits a variable only when a selected factor
+/// *consumes* it, so a factor's sibling outputs never enter `needed` — while
+/// [`bioprism_backends::QueryRegion::from_world_slice`] puts inputs and outputs alike into that
+/// factor's scope. A fact providing a sibling output is therefore absent from `needed` and present
+/// in the compiled region, and [`crate::influence`] treats scope membership as exactly the
+/// relation that makes a withholding perturbable — reporting its *absence* as
+/// [`influence::NotPosable::OutsideCompiledRegion`], documented there as not zero influence.
+/// Classing such a fact zero would have the certificate assert a proof the region it ships
+/// alongside contradicts. [`carried_by_region`] is that second pass.
 ///
 /// Exactly one fact per needed variable survives selection —
 /// [`bioprism_world::WorldSource::fact_providing`] returns the last in document order — so every
@@ -690,6 +716,7 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
 /// remainder, published as provably unable to matter.
 fn reachable_but_unselected<S: WorldSource + ?Sized>(
     source: &S,
+    region: Result<&QueryRegion, &RegionError>,
     needed: &BTreeSet<String>,
     selected: &BTreeSet<String>,
     withheld_by_policy: &[String],
@@ -719,8 +746,147 @@ fn reachable_but_unselected<S: WorldSource + ?Sized>(
     }
     unselected.sort();
     reaching.unselected = unselected;
+    match region {
+        Ok(region) => {
+            let carried = carried_by_region(
+                source,
+                region,
+                needed,
+                selected,
+                withheld_by_policy,
+                inaccessible,
+            );
+            reaching.region_carried = carried.carried;
+            ambiguous.extend(carried.ambiguous);
+        }
+        Err(error) => reaching.region_unavailable = Some(error.to_string()),
+    }
     reaching.ambiguous_variables = ambiguous.into_iter().collect();
     reaching
+}
+
+/// Omitted facts providing a variable a selected factor carries but no target needs.
+///
+/// The sibling-output population. Every variable here is one the compiled region declares and
+/// sizes for elimination, so an omitted fact providing it has an image the region can perturb, and
+/// the certificate may not call it provably unable to move the decision.
+///
+/// The region is read rather than recomputed. `bioprism-backends` owns the scope construction —
+/// inputs and outputs, deduplicated, per selected factor — and it is the same region object handed
+/// to [`crate::influence`], so the compiler's judgement about what the region carries and the
+/// pass that perturbs it cannot disagree.
+///
+/// Both the winner and the displaced providers are examined, which is the difference from
+/// [`reachable_but_unselected`]'s loop. There, the winner of a needed variable is *selected* and so
+/// not omitted at all; here the variable is not needed, so unless the fact carries one of the
+/// query's protected tags nothing selected any provider of it, and the winner is omitted exactly
+/// like its shadowed siblings — it is the fact the defect actually misclassified. Anything the
+/// protected closure did select is filtered out below along with the policy- and cut-withheld.
+///
+/// The winner-among-displaced guard is [`reachable_but_unselected`]'s, and it is here for the
+/// reason the accounting exists: two passes reading one corpus defect may not reach two verdicts
+/// about it. Left unguarded this pass pushed both colliding copies, and the collision did
+/// self-report — [`ProvenUnreachable::from_classified`] saw the repeat and refused as
+/// [`OmissionAccountingError::NamedTwice`]. That refusal was the wrong one twice over. It named a
+/// classifier disagreement where the corpus, not the classifier, is what cannot tell two facts
+/// apart, and it left this group counting one fact twice, so
+/// [`OmissionManifest::total_omitted`] fell short of the corpus while the sibling pass's
+/// [`UnprovenRemainder::AmbiguousIdentifier`] keeps the books balanced on the same defect.
+///
+/// A variable is visited once however many factors carry it, and the site recorded is the
+/// lowest-numbered of them — [`QueryRegion::factors`] is sorted by identifier. Visiting per factor
+/// instead would push one fact once per carrying factor and turn a two-factor scope overlap into a
+/// spurious [`OmissionAccountingError::NamedTwice`].
+///
+/// Output-sensitive: the scan is over the compiled region's factor scopes, and the lookups are two
+/// per scope variable the slice did not already need. Nothing here touches the omitted corpus.
+///
+/// A region is required rather than optional. Without one this pass cannot run at all, and its
+/// whole population would fall back into the remainder and be published with a bound of `0.0` —
+/// the defect the pass exists to remove, restored silently. [`reachable_but_unselected`] declines
+/// the proof in that case instead. No compile is known to reach it: every refusal
+/// [`QueryRegion::from_world_slice`] can raise is ruled out by how it builds the region under
+/// `CardinalityPolicy::default()`. That argument belongs to another crate, so the type keeps the
+/// obligation here rather than importing the conclusion.
+fn carried_by_region<S: WorldSource + ?Sized>(
+    source: &S,
+    region: &QueryRegion,
+    needed: &BTreeSet<String>,
+    selected: &BTreeSet<String>,
+    withheld_by_policy: &[String],
+    inaccessible: &[String],
+) -> CarriedByRegion {
+    let mut sites: BTreeMap<&str, &str> = BTreeMap::new();
+    for factor in region.factors() {
+        for variable in factor.scope() {
+            if needed.contains(variable.as_str()) {
+                continue;
+            }
+            sites
+                .entry(variable.as_str())
+                .or_insert_with(|| factor.id());
+        }
+    }
+
+    let mut found = CarriedByRegion::default();
+    for (variable, factor) in sites {
+        let winner = source
+            .fact_providing(variable)
+            .map(|fact| fact.id.as_str().to_string());
+        for (position, id) in winner
+            .iter()
+            .cloned()
+            .chain(source.shadowed_provider_ids(variable))
+            .enumerate()
+        {
+            if position > 0 && winner.as_deref() == Some(id.as_str()) {
+                found.ambiguous.push(variable.to_string());
+                continue;
+            }
+            if selected.contains(&id)
+                || withheld_by_policy.contains(&id)
+                || inaccessible.contains(&id)
+            {
+                continue;
+            }
+            found.carried.push(RegionCarried {
+                fact: id,
+                variable: variable.to_string(),
+                factor: factor.to_string(),
+            });
+        }
+    }
+    found
+        .carried
+        .sort_by(|left, right| left.fact.cmp(&right.fact));
+    found
+}
+
+/// What [`carried_by_region`] found: the classified population, and the variables it could not
+/// classify over.
+///
+/// Two outputs for the same reason [`ReachingOmissions`] has two: naming a fact is only a
+/// classification when the corpus can tell that fact from another one, and a variable whose
+/// displaced provider carries the winner's own identifier fails that precondition. The ambiguity
+/// travels back to [`ReachingOmissions::ambiguous_variables`] rather than being answered here, so
+/// one collision reaches one refusal however many passes noticed it.
+#[derive(Debug, Default)]
+struct CarriedByRegion {
+    carried: Vec<RegionCarried>,
+    ambiguous: Vec<String>,
+}
+
+/// An omitted fact, the region variable it provides, and a selected factor carrying that variable.
+///
+/// The variable and the factor are kept beside the identifier so the manifest can say *where* the
+/// region touches the omission. A group whose reason said only that some factor carried some
+/// variable would leave a reader holding a fact identifier and no way to find the contradiction on
+/// the certificate they are already reading, when the certificate names the selected factors.
+#[derive(Debug, Clone)]
+struct RegionCarried {
+    fact: String,
+    variable: String,
+    factor: String,
 }
 
 /// The omitted facts that still reach a needed variable, and whether the corpus could name them.
@@ -741,8 +907,29 @@ struct ReachingOmissions {
     /// Omitted facts providing a needed variable that nothing else accounts for, in certificate
     /// order, duplicates kept.
     unselected: Vec<String>,
-    /// Needed variables whose shadowed provider carries the winning fact's own identifier.
+    /// Variables whose shadowed provider carries the winning fact's own identifier, from both
+    /// passes, sorted and deduplicated.
+    ///
+    /// One list rather than one per pass, because the defect is in the corpus and not in whichever
+    /// pass met it: a needed variable and a variable only the region carries produce the same
+    /// refusal, and a reader of [`UnprovenRemainder::AmbiguousIdentifier`] should not have to know
+    /// which loop noticed.
     ambiguous_variables: Vec<String>,
+    /// Omitted facts providing a variable a selected factor's scope carries but no target needs,
+    /// in certificate order, duplicates kept.
+    ///
+    /// Disjoint from [`Self::unselected`] on any world [`bioprism_world::World`] can load: a fact
+    /// provides exactly one variable and the two populations are keyed on complementary variable
+    /// sets. A [`bioprism_world::WorldSource`] that reports one identifier under both is not a
+    /// partition, and the duplicate survives to [`ProvenUnreachable::from_classified`] for the same
+    /// reason it does within either list.
+    region_carried: Vec<RegionCarried>,
+    /// Why no compiled region was available, when none was.
+    ///
+    /// [`Self::region_carried`] being empty means two different things — the region carries no
+    /// unclassified provider, or there was no region to ask — and only one of them supports a
+    /// proof. Recording the refusal keeps the second from rendering as the first.
+    region_unavailable: Option<String>,
 }
 
 /// Why this compile's omitted remainder carries no proof, when it carries none.
@@ -753,9 +940,19 @@ struct ReachingOmissions {
 /// omission was classified elsewhere" from "the proof was refused".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnprovenRemainder {
-    /// A needed variable has two providers carrying one identifier, so no identifier-keyed
-    /// accounting over this corpus is a partition of its facts.
+    /// A variable the compile reaches has two providers carrying one identifier, so no
+    /// identifier-keyed accounting over this corpus is a partition of its facts.
+    ///
+    /// Reached by dependency or by scope alike: the two passes that meet this collision report it
+    /// the same way, because it is a property of the corpus rather than of the pass that noticed.
     AmbiguousIdentifier { variables: Vec<String> },
+    /// No region could be compiled, so the pass that classifies what the region carries never ran.
+    ///
+    /// Its population would otherwise be the remainder's, published with a bound of `0.0` — a proof
+    /// resting on a scope check that never happened. [`crate::plan::evaluate`] publishes the same
+    /// rejection as [`crate::plan::PortfolioOutcome::RegionRejected`], but a reader of the manifest
+    /// is owed the consequence for the *omissions* and not only for the plan.
+    RegionUnavailable { error: String },
     /// The classified populations did not partition the omitted corpus.
     ///
     /// The four populations are disjoint by construction on any world [`bioprism_world::World`] can
@@ -769,7 +966,7 @@ pub enum UnprovenRemainder {
 
 /// Groups omissions by structural reason and assigns each an influence class.
 ///
-/// Facts with no backward dependency path are classed [`InfluenceClass::Zero`] *conditional on
+/// Facts the compiled region does not reach are classed [`InfluenceClass::Zero`] *conditional on
 /// the declared factor graph being complete* — the reason string states that assumption, because
 /// an incomplete factor graph would turn a zero-influence claim into an unknown-influence one.
 /// That class is now minted from [`ProvenUnreachable`] rather than from a bare remainder, so the
@@ -830,36 +1027,34 @@ fn build_manifest(
         .chain(withheld.deferred.iter())
         .chain(withheld_by_policy.iter())
         .chain(reaching.unselected.iter())
-        .map(String::as_str);
+        .map(String::as_str)
+        .chain(
+            reaching
+                .region_carried
+                .iter()
+                .map(|carried| carried.fact.as_str()),
+        );
 
     let mut refused = None;
     match ProvenUnreachable::from_classified(omitted_total, classified) {
         Ok(proven) if proven.count() == 0 => {}
-        Ok(proven) if reaching.ambiguous_variables.is_empty() => {
-            manifest.push(OmissionGroup::structurally_zero(
+        Ok(proven) => match declined(reaching) {
+            None => manifest.push(OmissionGroup::structurally_zero(
                 "no backward dependency path to any target under the declared factor graph",
                 proven,
                 Vec::new(),
-            ));
-        }
-        Ok(proven) => {
-            let variables = reaching.ambiguous_variables.clone();
-            manifest.push(OmissionGroup {
-                reason: format!(
-                    "left over once every other omission was classified, but no proof follows: \
-                     {} needed variable(s) have two providers under one identifier, so the \
-                     classification cannot tell a delivered fact from a displaced one; the \
-                     collision is on {}",
-                    variables.len(),
-                    named_variables(&variables)
-                ),
-                influence: InfluenceClass::Unknown,
-                count: proven.count(),
-                bound: None,
-                examples: Vec::new(),
-            });
-            refused = Some(UnprovenRemainder::AmbiguousIdentifier { variables });
-        }
+            )),
+            Some((reason, remainder)) => {
+                manifest.push(OmissionGroup {
+                    reason,
+                    influence: InfluenceClass::Unknown,
+                    count: proven.count(),
+                    bound: None,
+                    examples: Vec::new(),
+                });
+                refused = Some(remainder);
+            }
+        },
         Err(error) => {
             manifest.push(OmissionGroup {
                 reason: format!(
@@ -884,6 +1079,21 @@ fn build_manifest(
             count: reaching.unselected.len(),
             bound: None,
             examples: reaching.unselected.iter().take(3).cloned().collect(),
+        });
+    }
+    if !reaching.region_carried.is_empty() {
+        let named = &reaching.region_carried[..reaching.region_carried.len().min(EXAMPLES_SHOWN)];
+        manifest.push(OmissionGroup {
+            reason: format!(
+                "provides a variable no target needs but that a selected factor carries in its \
+                 scope, so the compiled region has an image of the omission to perturb and no \
+                 bound on it was computed; the fact(s) named here are carried at {}",
+                named_scope_sites(named)
+            ),
+            influence: InfluenceClass::Unknown,
+            count: reaching.region_carried.len(),
+            bound: None,
+            examples: named.iter().map(|carried| carried.fact.clone()).collect(),
         });
     }
     if !withheld_by_policy.is_empty() {
@@ -912,6 +1122,46 @@ fn build_manifest(
     (manifest, refused)
 }
 
+/// Why the remainder carries no proof, when a condition the compiler checked says it may not.
+///
+/// The subtraction can succeed and the proof still be unavailable, and both conditions here are of
+/// that shape: the arithmetic balances, but something the count would have to mean is not
+/// established. `None` is the only value that lets a zero-influence group be minted.
+///
+/// A missing region is reported ahead of an ambiguous identifier, because without a region the
+/// pass that reads factor scopes never ran and the ambiguity list it contributes to is therefore
+/// partial. Naming the region says the larger thing, and both refusals carry the same remainder
+/// count, so nothing is lost by ordering them.
+fn declined(reaching: &ReachingOmissions) -> Option<(String, UnprovenRemainder)> {
+    if let Some(error) = &reaching.region_unavailable {
+        return Some((
+            format!(
+                "left over once every other omission was classified, but no proof follows: no \
+                 region could be compiled, so nothing checked whether a selected factor's scope \
+                 carries these omissions; the region was refused because {error}"
+            ),
+            UnprovenRemainder::RegionUnavailable {
+                error: error.clone(),
+            },
+        ));
+    }
+    if reaching.ambiguous_variables.is_empty() {
+        return None;
+    }
+    let variables = reaching.ambiguous_variables.clone();
+    Some((
+        format!(
+            "left over once every other omission was classified, but no proof follows: {} \
+             variable(s) the compile reaches have two providers under one identifier, so the \
+             classification cannot tell a delivered fact from a displaced one; the collision is \
+             on {}",
+            variables.len(),
+            named_variables(&variables)
+        ),
+        UnprovenRemainder::AmbiguousIdentifier { variables },
+    ))
+}
+
 /// The first few of `variables`, rendered for a reason string.
 ///
 /// The ambiguous-identifier group has no members it is allowed to name — that a fact cannot be
@@ -932,6 +1182,32 @@ fn named_variables(variables: &[String]) -> String {
     } else {
         shown.join(", ")
     }
+}
+
+/// The places the region carries the omissions in `named`, rendered for a reason string.
+///
+/// A site is a variable and the selected factor whose scope carries it, and it is the site rather
+/// than the fact that answers the reader's question: the group's own `examples` already name facts,
+/// and the certificate they are on names the selected factors, so a site is the pair that lets the
+/// contradiction be checked against the certificate without re-running the compile.
+///
+/// `named` is the same slice the group's `examples` are built from, and that is the point of taking
+/// a slice rather than the whole population. Truncating here independently — the first few sites of
+/// the whole group under one ordering, beside the first few facts under another — let the reason
+/// describe facts the examples do not name once the group grew past what either shows.
+///
+/// Deduplicated because several omitted facts can share one site — every displaced provider of a
+/// carried variable does — and repeating it once per fact would misreport how many places the
+/// region touches as the number of facts it touches there. First appearance wins, so the sites come
+/// out in the order the facts beside them do.
+fn named_scope_sites(named: &[RegionCarried]) -> String {
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let sites: Vec<String> = named
+        .iter()
+        .map(|entry| format!("{} in {}", entry.variable, entry.factor))
+        .filter(|site| seen.insert(site.clone()))
+        .collect();
+    sites.join(", ")
 }
 
 /// Passes the wire formats cannot support, each with the field that is missing.
@@ -977,4 +1253,139 @@ fn deferred_passes(query: &Query) -> Vec<(&'static str, &'static str)> {
         ));
     }
     deferred
+}
+
+/// Refusals and renderings [`build_manifest`] decides, reached directly.
+///
+/// Neither case below is one a world can pose today, which is why they are posed to the function
+/// that decides them. `QueryRegion::from_world_slice` under `CardinalityPolicy::default()` has no
+/// failing branch reachable from here: every domain size it derives is at least one, every scope
+/// name is declared before the region is built, scopes are deduplicated on the way in, and a
+/// structurally derived factor carries no table to mismatch. So the missing-region arm is held
+/// against an invariant that lives in `bioprism-backends` and that this crate cannot check — which
+/// is the argument for keeping the arm rather than against it, because the fallback it replaces
+/// fails by publishing a proof nobody computed. A region-carried group larger than the examples it
+/// shows likewise needs a corpus wider than any fixture, and the pairing of the two renderings is
+/// the property under test rather than the width.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn carried(fact: &str, variable: &str, factor: &str) -> RegionCarried {
+        RegionCarried {
+            fact: fact.to_string(),
+            variable: variable.to_string(),
+            factor: factor.to_string(),
+        }
+    }
+
+    /// With no region, the remainder is published unproven and the reason names the missing region.
+    ///
+    /// The silent alternative is the defect this pass was written to remove: with nothing to read
+    /// factor scopes from, every sibling-output provider falls through to the remainder and is
+    /// published as provably unable to matter, with no reader able to tell that from a corpus that
+    /// genuinely had nothing carried.
+    #[test]
+    fn a_compile_with_no_region_declines_the_proof_and_names_the_region() {
+        let reaching = ReachingOmissions {
+            region_unavailable: Some("variable \"x\" has cardinality zero".to_string()),
+            ..ReachingOmissions::default()
+        };
+        let (manifest, refused) = build_manifest(4, &WithheldSplit::default(), &[], &reaching, 0);
+
+        assert_eq!(
+            refused,
+            Some(UnprovenRemainder::RegionUnavailable {
+                error: "variable \"x\" has cardinality zero".to_string()
+            })
+        );
+        assert_eq!(manifest.count_in(InfluenceClass::Zero), 0);
+        assert_eq!(manifest.count_in(InfluenceClass::Unknown), 4);
+        assert_eq!(
+            manifest.total_omitted(),
+            4,
+            "declining the proof must not drop the omissions it would have covered"
+        );
+        let group = manifest
+            .groups
+            .first()
+            .expect("the declined remainder is on the manifest");
+        assert!(
+            group.reason.contains("no region could be compiled")
+                && group.reason.contains("variable \"x\" has cardinality zero"),
+            "the reason must name what was missing and why: {}",
+            group.reason
+        );
+        assert_eq!(group.bound, None);
+    }
+
+    /// The carried group's examples and its reason describe the same facts.
+    ///
+    /// Six facts at six sites, and only three of each are shown. Truncating the two lists
+    /// independently — the facts in identifier order, the sites in their own — let a reader compare
+    /// a named fact against a site belonging to a different one.
+    #[test]
+    fn the_carried_group_names_the_sites_of_the_facts_it_shows() {
+        let reaching = ReachingOmissions {
+            region_carried: vec![
+                carried("fact.a", "var_z", "factor.one"),
+                carried("fact.b", "var_y", "factor.one"),
+                carried("fact.c", "var_x", "factor.two"),
+                carried("fact.d", "var_a", "factor.two"),
+                carried("fact.e", "var_b", "factor.three"),
+                carried("fact.f", "var_c", "factor.three"),
+            ],
+            ..ReachingOmissions::default()
+        };
+        let (manifest, refused) = build_manifest(6, &WithheldSplit::default(), &[], &reaching, 0);
+
+        assert_eq!(refused, None);
+        let group = manifest
+            .groups
+            .iter()
+            .find(|group| group.reason.contains("carries in its scope"))
+            .expect("the carried group is on the manifest");
+        assert_eq!(group.count, 6, "the count is the whole population");
+        assert_eq!(
+            group.examples,
+            vec![
+                "fact.a".to_string(),
+                "fact.b".to_string(),
+                "fact.c".to_string()
+            ]
+        );
+        assert!(
+            group
+                .reason
+                .ends_with("var_z in factor.one, var_y in factor.one, var_x in factor.two"),
+            "the sites are those of the facts named, in their order: {}",
+            group.reason
+        );
+        assert!(
+            !group.reason.contains("var_a") && !group.reason.contains("factor.three"),
+            "and no others: var_a is fact.d's site, and fact.d is not a fact this group names: {}",
+            group.reason
+        );
+    }
+
+    /// One site named once, however many of the shown facts share it.
+    #[test]
+    fn the_carried_group_names_a_shared_site_once() {
+        let reaching = ReachingOmissions {
+            region_carried: vec![
+                carried("fact.a", "var_a", "factor.one"),
+                carried("fact.b", "var_a", "factor.one"),
+            ],
+            ..ReachingOmissions::default()
+        };
+        let (manifest, _) = build_manifest(2, &WithheldSplit::default(), &[], &reaching, 0);
+
+        let group = manifest
+            .groups
+            .iter()
+            .find(|group| group.reason.contains("carries in its scope"))
+            .expect("the carried group is on the manifest");
+        assert!(group.reason.ends_with("carried at var_a in factor.one"));
+        assert_eq!(group.examples.len(), 2);
+    }
 }
