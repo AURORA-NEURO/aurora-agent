@@ -1422,6 +1422,67 @@ must produce and evaluate it separately. The same contract is generated for all 
 domains and for each specialist in a cross-domain fan-out, so integrations can use one evidence
 UI, acquisition scheduler, or evaluator adapter without domain-specific special cases.
 
+### Value-driven information acquisition and active discovery
+
+Evidence planning now has a provider-free acquisition-selection layer in both SDKs. It answers a
+narrow but important autonomous question: given caller-owned candidate descriptions, which bounded
+context or evidence request should be attempted next, and what should be left for review? The
+planner does not fetch a source or treat a candidate description as evidence. It produces a
+digest-bound proposal that an application-owned source adapter, approval service, or reviewed
+evidence runtime may consume later.
+
+Each candidate is a value-only description containing its domain, capability, source identity,
+expected information gain, expected uncertainty reduction, reliability, freshness, coverage,
+cost, latency, risk, conflict risk, priority, status, and optional dependency identities. Source
+values, prompts, locators, credentials, and arbitrary secret-shaped metadata are rejected or never
+returned. The deterministic score combines the positive value dimensions, subtracts normalized
+cost/latency and risk/conflict penalties, adds a bounded exploration term for under-observed
+choices, and adds a coverage bonus when a candidate opens a requested domain. Ties resolve by
+domain and candidate identity, so a restart or a Python/TypeScript replay chooses the same order.
+
+The policy constrains total cost, item count, latency, minimum score, minimum reliability, stale or
+partial-source posture, exploration, and whether all requested domains must be covered. Selection
+is dependency-aware: an eligible prerequisite is selected before its dependent request, while
+unavailable, stale, low-confidence, over-budget, conflicted, approval-required, and dependency-
+blocked candidates remain explicit omissions with reason codes. The resulting plan reports the
+requested/selected/missing domains, ranked metadata-only selections, omission reasons, consumed
+budget, policy digest, generation, and plan digest. It is explicitly marked
+`planning_only`; it is not a provider, connector, tool, learner, or effect admission.
+
+```python
+plan = agent.plan_information_acquisition(
+    task="choose bounded evidence for a cross-domain diagnosis",
+    domains=("biomedical", "neuroscience", "evaluation"),
+    candidates=candidate_descriptions,
+    policy={
+        "max_cost": 1.5,
+        "max_items": 6,
+        "require_domain_coverage": True,
+        "min_reliability": 0.7,
+    },
+)
+```
+
+```typescript
+const plan = await agent.planInformationAcquisition(
+  "choose bounded evidence for a cross-domain diagnosis",
+  {
+    domains: ["biomedical", "neuroscience", "evaluation"],
+    candidates: candidateDescriptions,
+    policy: { maxCost: 1.5, maxItems: 6, requireDomainCoverage: true, minReliability: 0.7 },
+  },
+);
+```
+
+After reviewed acquisition, a caller can submit only value-level observations such as
+`accepted`, `partial`, `rejected`, `failed`, or `reconciliation_required`, together with bounded
+information/uncertainty deltas and digests. Replanning penalizes failed or rejected candidates,
+updates expected value from accepted or partial observations, preserves candidate-digest fences,
+and increments the generation from the prior plan. Replanning therefore supports contextual
+bandit-style active discovery without pretending that transport success is a reward or that the
+SDK has authority over truth. The source adapter, evaluator, approvals, and any reinforcement
+learning settlement remain separate caller-owned boundaries.
+
 ### Evidence acquisition, projection, evaluation, and replay
 
 The SDK now provides the reusable boundary between that plan and an application-owned source. It

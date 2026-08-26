@@ -15901,6 +15901,57 @@ class AutonomousAgent:
 
         return self.orchestrator.registry.catalogue()
 
+    def plan_information_acquisition(
+        self,
+        *,
+        task: str,
+        candidates: Sequence[Mapping[str, Any] | Any],
+        domains: Sequence[str] | None = None,
+        hints: Sequence[str] = (),
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        policy: Mapping[str, Any] | Any | None = None,
+        satisfied_candidate_ids: Sequence[str] = (),
+    ) -> Any:
+        """Choose the next evidence/context acquisitions without dispatching anything.
+
+        Automatic intake binds the plan to the deterministic route digest.  Explicit ``domains``
+        are caller-selected and therefore get an explicit-domain digest rather than being
+        presented as semantic routing evidence.  The returned plan is the input to a caller's
+        reviewed evidence queue; this method never contacts a source, provider, tool, learner,
+        or credential store.
+        """
+
+        from .autonomous_information_acquisition import plan_autonomous_information_acquisition
+
+        if not isinstance(task, str) or not task.strip() or "\x00" in task or len(task.encode("utf-8")) > 32_000:
+            raise BrainRunError("information acquisition task is outside its bound")
+        task_digest = content_digest({"task": task})
+        if domains is None:
+            route = self.route(
+                task=task,
+                hints=hints,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+            )
+            if route.abstained:
+                raise BrainRunError("information acquisition planning requires route review before candidate selection")
+            requested_domains = route.selected_domains or ((route.primary_domain,) if route.primary_domain else ())
+            route_digest = route.route_digest
+        else:
+            requested_domains = tuple(domains)
+            route_digest = content_digest({"schema": "bioprism-python-explicit-information-domains/0.1", "domains": list(requested_domains)})
+        if not requested_domains:
+            raise BrainRunError("information acquisition planning requires at least one routed domain")
+        return plan_autonomous_information_acquisition(
+            task_digest=task_digest,
+            route_digest=route_digest,
+            candidates=candidates,
+            requested_domains=requested_domains,
+            policy=policy,
+            satisfied_candidate_ids=satisfied_candidate_ids,
+        )
+
     def evidence_plan(
         self,
         domains: Sequence[str] = AUTONOMOUS_DOMAINS,

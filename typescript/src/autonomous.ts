@@ -144,6 +144,14 @@ import type {
   AutonomousEvidenceExecutionCheckpointStore,
   AutonomousEvidenceExecutionResumableRun,
 } from "./autonomous-evidence-execution-resumable.js";
+import {
+  planAutonomousInformationAcquisition,
+  type AutonomousInformationAcquisitionCandidate,
+  type AutonomousInformationAcquisitionPlan,
+  type AutonomousInformationAcquisitionPolicy,
+  type AutonomousInformationAcquisitionPolicyInput,
+} from "./autonomous-information-acquisition.js";
+import type { AutonomousInformationAcquisitionCandidateInput } from "./autonomous-information-acquisition.js";
 import type {
   AutonomousDomainEvidenceBrainRunOptions,
   AutonomousDomainEvidenceBrainRunResult,
@@ -6322,6 +6330,53 @@ export class AutonomousAgent {
     };
     const semanticRoute = await semanticRouteAutonomousTask(this, taskText, semanticOptions);
     return { route: semanticRoute.route, semanticRoute };
+  }
+
+  /**
+   * Select the next bounded context/evidence acquisitions before the reviewed evidence queue.
+   * Automatic mode binds the candidate plan to the deterministic route digest; explicit domains
+   * are caller-selected and get a separate explicit-domain identity. No source, provider, tool,
+   * learner, or credential operation occurs here.
+   */
+  async planInformationAcquisition(
+    task: string,
+    options: {
+      candidates: readonly (AutonomousInformationAcquisitionCandidate | AutonomousInformationAcquisitionCandidateInput | Record<string, unknown>)[];
+      domains?: readonly AutonomousDomainName[];
+      hints?: readonly string[];
+      maxDomains?: number;
+      allowCrossDomain?: boolean;
+      policy?: AutonomousInformationAcquisitionPolicy | AutonomousInformationAcquisitionPolicyInput;
+      satisfiedCandidateIds?: readonly string[];
+    },
+  ): Promise<AutonomousInformationAcquisitionPlan> {
+    const taskText = boundedText("information acquisition task", task, 32_000);
+    let requestedDomains: readonly AutonomousDomainName[];
+    let routeDigest: string;
+    if (options.domains === undefined) {
+      const route = await this.route(taskText, {
+        hints: options.hints,
+        maxDomains: options.maxDomains,
+        allowCrossDomain: options.allowCrossDomain,
+      });
+      if (route.abstained) throw new ArgumentError("information acquisition planning requires route review before candidate selection");
+      requestedDomains = route.selected_domains.length > 0
+        ? route.selected_domains
+        : route.primary_domain === null ? [] : [route.primary_domain];
+      routeDigest = route.route_digest;
+    } else {
+      requestedDomains = options.domains;
+      routeDigest = await digestJson({ schema: "bioprism-typescript-explicit-information-domains/0.1", domains: [...requestedDomains] });
+    }
+    if (requestedDomains.length === 0) throw new ArgumentError("information acquisition planning requires at least one routed domain");
+    return planAutonomousInformationAcquisition({
+      taskDigest: await digestJson({ task: taskText }),
+      routeDigest,
+      candidates: options.candidates,
+      requestedDomains,
+      policy: options.policy,
+      satisfiedCandidateIds: options.satisfiedCandidateIds,
+    });
   }
 
   /** Resolve the bounded policy for a domain without provider, tool, or source activity. */
