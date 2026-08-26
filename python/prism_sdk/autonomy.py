@@ -20655,6 +20655,24 @@ class AutonomousAgent:
         adaptive_options["response_schema"] = (
             adaptive_options.get("response_schema") or blueprint.spec.response_schema
         )
+
+        def record_mission_model_quality(
+            result: BrainMissionResult,
+            decision: BrainEvaluatorDecision,
+        ) -> Mapping[str, Any]:
+            """Record only evaluator-derived model quality; never retain the live result."""
+
+            try:
+                episode = self.brain.prepare_learning_episode(result, evidence=evidence)
+                return self._record_model_quality_feedback(episode, decision)
+            except Exception as error:
+                return {
+                    "status": "failed",
+                    "error_class": type(error).__name__,
+                    "retention": "metadata_only_model_quality_no_payloads",
+                    "secret_material": "never_returned",
+                }
+
         try:
             result = run_autonomous_mission_replan_cycle(
                 self.brain,
@@ -20679,6 +20697,7 @@ class AutonomousAgent:
                 execution_controller=execution_controller,
                 invocation_observer=resolved_options.get("invocation_observer"),
                 trace_event_callback=resolved_options.get("trace_event_callback"),
+                model_quality_callback=record_mission_model_quality,
             )
         except Exception as error:
             self._finish_execution(execution_controller, error=error)

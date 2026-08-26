@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Mapping
 
@@ -20,6 +21,7 @@ from prism_sdk import (
     JsonAutonomousMissionReplanSnapshotPersistence,
     LLMRuntime,
     ModelCatalogue,
+    ProviderHealthLedger,
     run_autonomous_mission_replan_cycle,
 )
 
@@ -99,13 +101,27 @@ def _bandit_state() -> dict[str, Any]:
 
 
 def _mission_result(index: int, *, dispatched: bool = False) -> BrainMissionResult:
+    context = {
+        "domain": "coding",
+        "capability": "implementation",
+        "risk_class": "research",
+        "task_family": None,
+    }
     run = BrainRunResult(
         run_id=f"synthetic-run-{index}",
         status="completed_provider_call",
         selection={
             "selected_model": {"provider": "offline", "model": "replan-model"},
             "decision_digest": "d" * 64,
-            "context_digest": "c" * 64,
+            "context_digest": hashlib.sha256(
+                json.dumps(
+                    context,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest(),
+            "context": context,
         },
         prompt={"prompt_digest": "p" * 64},
         plan={"plan": {"plan_digest": "l" * 64}},
@@ -410,3 +426,70 @@ def test_agent_facade_prepares_and_runs_every_builtin_domain(
         assert len(result.attempts) == 1
         assert len(seen) == 1
     assert len(calls) == len(AUTONOMOUS_DOMAINS)
+
+
+def test_agent_mission_replan_settles_model_quality_for_every_live_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    workspace = _Workspace()
+    health = ProviderHealthLedger(tmp_path / "mission-quality.jsonl")
+    agent = AutonomousAgent(
+        workspace,
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_candidate()]),
+        health_ledger=health,
+    )
+    calls = 0
+
+    def run_adaptive_mission(**_kwargs: Any) -> BrainMissionResult:
+        nonlocal calls
+        calls += 1
+        return _mission_result(calls)
+
+    monkeypatch.setattr(agent.brain, "run_adaptive_mission", run_adaptive_mission)
+    seen: list[Mapping[str, Any]] = []
+    result = agent.run_mission_replan_cycle(
+        task="adapt model choice from held-out mission quality",
+        domain="coding",
+        credentials={},
+        mission_policy={"allowed_tools": ["read_only"]},
+        evaluator=_evaluator(seen),
+        model_candidates=[_candidate()],
+        max_replans=1,
+    )
+
+    assert result.status == "completed"
+    assert calls == 2
+    assert all(row["model_quality"]["status"] == "recorded" for row in result.evaluations)
+    model_health = health.model_health_snapshot()
+    assert model_health["offline/replan-model"]["quality_observations"] == 2
+    assert model_health["offline/replan-model"]["quality_mean"] == pytest.approx(0.575)
+    public = json.dumps(result.to_dict())
+    assert "adapt model choice" not in public
+    assert "private_provider_text" not in public
+
+
+def test_mission_replan_rejects_payload_shaped_model_quality_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _Workspace()
+    brain = _brain(workspace)
+
+    monkeypatch.setattr(brain, "run_adaptive_mission", lambda **_kwargs: _mission_result(1))
+    with pytest.raises(BrainRunError, match="unsupported fields"):
+        run_autonomous_mission_replan_cycle(
+            brain,
+            task="reject payload-shaped quality",
+            model_candidates=[_candidate()],
+            prompt={"system": "system", "context": []},
+            plan={"steps": []},
+            credentials={},
+            mission_policy={"allowed_tools": ["read_only"]},
+            evaluator=_evaluator([]),
+            bandit_state=_bandit_state(),
+            model_quality_callback=lambda _result, _decision: {
+                "private_provider_text": "must never cross the checkpoint boundary",
+            },
+            max_replans=0,
+        )

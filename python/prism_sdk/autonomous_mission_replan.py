@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import re
 import threading
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -58,6 +59,31 @@ _SECRET_MARKER = re.compile(
     r"access[_-]?token|refresh[_-]?token|secret|transcript|provider[_-]?response|"
     r"tool[_-]?argument|raw[_-]?instruction)",
     re.IGNORECASE,
+)
+_MODEL_QUALITY_FIELDS = frozenset(
+    {
+        "status",
+        "error_class",
+        "provider",
+        "model",
+        "domain",
+        "capability",
+        "risk_class",
+        "evaluator_id",
+        "evaluator_version",
+        "reward",
+        "passed",
+        "outcome_digest",
+        "evidence_digest",
+        "feedback_digest",
+        "health_record_digest",
+        "replayed",
+        "retention",
+        "secret_material",
+    }
+)
+_MODEL_QUALITY_DIGEST_FIELDS = frozenset(
+    {"outcome_digest", "evidence_digest", "feedback_digest", "health_record_digest"}
 )
 
 
@@ -130,6 +156,35 @@ def _private_shape_free(value: Mapping[str, Any], *, label: str) -> None:
         raise BrainRunError(f"{label} contains private or payload-shaped material")
 
 
+def _model_quality_projection(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Allow only the bounded fields that a health settlement can persist."""
+
+    if not isinstance(value, Mapping):
+        raise BrainRunError("mission model quality callback must return a mapping or None")
+    unknown = [key for key in value if not isinstance(key, str) or key not in _MODEL_QUALITY_FIELDS]
+    if unknown:
+        raise BrainRunError("mission model quality projection contains unsupported fields")
+    _safe_metadata(value, label="mission model quality projection")
+    _private_shape_free(value, label="mission model quality projection")
+    for field, item in value.items():
+        if field in _MODEL_QUALITY_DIGEST_FIELDS:
+            if item is not None and not isinstance(item, str):
+                raise BrainRunError(f"mission model quality {field} must be a digest or None")
+            if item is not None and not re.fullmatch(r"[0-9a-f]{64}", item):
+                raise BrainRunError(f"mission model quality {field} must be a lowercase SHA-256 digest")
+        elif field in {"reward"}:
+            if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(float(item)):
+                raise BrainRunError("mission model quality reward must be finite")
+            if not 0.0 <= float(item) <= 1.0:
+                raise BrainRunError("mission model quality reward must be within [0, 1]")
+        elif field in {"passed", "replayed"}:
+            if not isinstance(item, bool):
+                raise BrainRunError(f"mission model quality {field} must be boolean")
+        elif not isinstance(item, str) or not item.strip() or "\x00" in item or len(item.encode("utf-8")) > 512:
+            raise BrainRunError(f"mission model quality {field} must be bounded text")
+    return dict(value)
+
+
 def _screen_instruction(value: Any) -> str:
     if not isinstance(value, str) or not value.strip() or "\x00" in value:
         raise BrainRunError("mission replan instruction must be bounded text")
@@ -194,7 +249,11 @@ def _counts(result: BrainMissionResult) -> tuple[int, int, int]:
     return completed, succeeded, failed
 
 
-def _evaluation_projection(decision: BrainEvaluatorDecision) -> dict[str, Any]:
+def _evaluation_projection(
+    decision: BrainEvaluatorDecision,
+    *,
+    model_quality: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     instruction = decision.replan_instruction
     projection = {
         "evaluator_id": decision.evaluator_id,
@@ -210,6 +269,8 @@ def _evaluation_projection(decision: BrainEvaluatorDecision) -> dict[str, Any]:
         "retention": "evaluator_values_and_digests_only",
         "secret_material": _SECRET_MATERIAL,
     }
+    if model_quality is not None:
+        projection["model_quality"] = _model_quality_projection(model_quality)
     projection["evaluation_digest"] = content_digest(projection)
     _private_shape_free(projection, label="mission evaluator projection")
     return projection
@@ -828,6 +889,10 @@ def run_autonomous_mission_replan_cycle(
     execution_controller: Any | None = None,
     invocation_observer: ProviderInvocationObserver | None = None,
     trace_event_callback: Callable[..., Any] | None = None,
+    model_quality_callback: Callable[
+        [BrainMissionResult, BrainEvaluatorDecision], Mapping[str, Any] | None
+    ]
+    | None = None,
 ) -> AutonomousMissionReplanResult:
     """Run bounded mission attempts with restart-safe evaluator handoff.
 
@@ -844,6 +909,8 @@ def run_autonomous_mission_replan_cycle(
         raise BrainRunError("mission replan task must be non-empty text")
     if not isinstance(evaluator, BrainOutcomeEvaluator):
         raise BrainRunError("mission replan evaluator must be a BrainOutcomeEvaluator")
+    if model_quality_callback is not None and not callable(model_quality_callback):
+        raise BrainRunError("mission model_quality_callback must be callable or None")
     if not isinstance(bandit_state, Mapping):
         raise BrainRunError("mission replan bandit_state must be a mapping")
     BrainLearningLedger._assert_safe(bandit_state)
@@ -1172,7 +1239,13 @@ def run_autonomous_mission_replan_cycle(
         next_state = report.get("next_state")
         if isinstance(next_state, Mapping):
             current_bandit_state = dict(next_state)
-        projection = _evaluation_projection(decision)
+        model_quality = None
+        if model_quality_callback is not None:
+            try:
+                model_quality = model_quality_callback(result, decision)
+            except Exception as error:
+                raise BrainRunError("mission model quality callback failed") from error
+        projection = _evaluation_projection(decision, model_quality=model_quality)
         evaluation_digest = projection["evaluation_digest"]
         completed_steps, succeeded_steps, failed_steps = _counts(result)
         attempt_record = AutonomousMissionReplanAttempt(

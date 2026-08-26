@@ -6125,6 +6125,14 @@ transient developer context chunk; it cannot add a tool, credential, route, budg
 permission, or external effect. The hard SDK limit is three replans, for at most four proposal
 attempts.
 
+Each live evaluator settlement also feeds the optional `ProviderHealthLedger` model-quality
+prior. This is deliberately separate from transport health: the ledger records only provider,
+model, stable domain context, evaluator identity, bounded reward/pass values, and outcome/evidence/
+feedback digests, so a retry can improve future model selection without retaining provider output,
+task text, prompt content, credential handles, or evaluator prose. A ledger write is best-effort
+and is surfaced as a bounded diagnostic projection; it cannot change the mission result or widen
+the next attempt's contract.
+
 The optional `state_store` persists a hash-chained metadata cursor with phases
 `execution_pending`, `evaluation_pending`, `replan_handoff`, and `terminal`. It contains attempt
 and evaluation projections, protected-contract and outcome digests, the bandit-state digest, and
