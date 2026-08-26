@@ -227,6 +227,8 @@ from .research_contracts import (
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
@@ -6700,6 +6702,11 @@ from .adapter_multimodal_retrieval_synthesis_research_copilot import (
     MultimodalRetrievalSynthesisResearchCopilotReceipt,
     run_multimodal_retrieval_synthesis_research_copilot,
 )
+from .adapter_throughput_retrieval_synthesis_research_copilot import (
+    ThroughputRetrievalSynthesisCandidate,
+    ThroughputRetrievalSynthesisResearchCopilotReceipt,
+    run_throughput_retrieval_synthesis_research_copilot,
+)
 from .adapter_multimodal_retrieval_synthesis_inference_engine import (
     MultimodalRetrievalSynthesisCandidate,
     MultimodalRetrievalSynthesisInferenceEngineReceipt,
@@ -6742,6 +6749,9 @@ __all__ += [
     "run_local_retrieval_synthesis_research_copilot",
     "MultimodalRetrievalSynthesisResearchCopilotReceipt",
     "run_multimodal_retrieval_synthesis_research_copilot",
+    "ThroughputRetrievalSynthesisResearchCopilotReceipt",
+    "run_throughput_retrieval_synthesis_research_copilot",
+    "ThroughputRetrievalSynthesisCandidate",
     "MultimodalRetrievalSynthesisCandidate",
     "MultimodalRetrievalSynthesisInferenceEngineReceipt",
     "run_multimodal_retrieval_synthesis_inference_engine",
