@@ -530,6 +530,56 @@ test("durable cross-domain execution cannot bypass structured response review af
   assert.equal(completed.synthesis?.response?.structured?.domain, "cross_domain");
 });
 
+test("durable cross-domain fan-in defers weak direct response status to the parent gate", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const contracts = new Map();
+  for (const profile of profiles) contracts.set(profile.domain, await buildAutonomousDomainResponseContract(profile));
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("durable-cross-weak", (request) => {
+    const domain = request.responseSchema?.properties?.domain?.const;
+    const contract = contracts.get(domain);
+    const response = structuredResponse(contract);
+    response.observations = [];
+    response.inferences = [];
+    response.uncertainty = [];
+    response.evidence_gaps = [];
+    response.next_actions = [];
+    response.stages = response.stages.map((stage) => ({ ...stage, evidence: [], findings: [], uncertainty: [], open_questions: [] }));
+    response.domain_details = Object.fromEntries(contract.domain_fields.map((field) => [field, []]));
+    return { structured: response };
+  });
+  const candidate = { ...model(), provider: "durable-cross-weak", model: "durable-cross-weak-model" };
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate);
+  const store = new InMemoryAutonomousCrossDomainCheckpointStore();
+  const executor = new AutonomousCrossDomainExecutor(agent, store);
+  const options = {
+    candidates: [candidate],
+    subtasks,
+    structuredDomainResponse: true,
+    approveProviderCall: true,
+    maxSteps: 2,
+    jobId: "durable-cross-weak-gate-1",
+  };
+
+  const first = await executor.start(task, options);
+  assert.equal(first.status, "paused");
+  assert.equal(first.completed_children, 2);
+  assert.ok(first.step_results.filter((step) => step.phase === "child").every((step) => step.run.status === "completed"));
+  const children = new Map(first.step_results.filter((step) => step.phase === "child").map((step) => [step.item_id, step.run]));
+
+  const review = await executor.resume("durable-cross-weak-gate-1", task, {
+    ...options,
+    jobId: undefined,
+    maxSteps: 1,
+    resolveChildResult: (id) => children.get(id) ?? null,
+  });
+  assert.equal(review.status, "response_review_required");
+  assert.equal(review.synthesis, null);
+  assert.equal(review.checkpoint.status, "response_review_required");
+  assert.ok(review.response_assessment?.gate_reasons.includes("domain_response_integrity_below_threshold"));
+});
+
 test("durable cross-domain execution re-admits synthesis responses and requires explicit retry", async () => {
   const profiles = await builtinAutonomousDomainProfiles();
   const contracts = new Map();

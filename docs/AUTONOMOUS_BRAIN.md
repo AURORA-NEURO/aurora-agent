@@ -2695,6 +2695,12 @@ compatibility opt-out that restores the `completed` projection without turning t
 into task-quality credit. Cross-domain fan-out passes this option as false for nested calls and
 lets the parent structural assessment gate synthesis.
 
+The TypeScript restart-safe cross-domain executor preserves the same invariant. It explicitly
+defers the direct status for specialist and synthesis provider calls, then records the parent
+response assessment and its digest in the checkpoint. A weak specialist therefore becomes a
+reviewable fan-in decision rather than a false child failure, and restart resumes the assessment
+without replaying completed provider work.
+
 ### Provider-free model-selection preview
 
 Applications that need to show an operator what the brain would choose before requesting approval

@@ -787,6 +787,12 @@ the same deterministic gate. When pairwise alignment is not required, structural
 specialists may proceed and the post-synthesis assessment includes the synthesis row. Python
 `require_response_alignment` and threshold options implement the same contract.
 
+The restart-safe `AutonomousCrossDomainExecutor` preserves this boundary as well: specialist and
+synthesis calls explicitly defer the single-run `response_review_required` projection, so weak
+structured output reaches the parent digest-bound fan-in assessment instead of being misclassified
+as a child execution failure. The checkpoint stores only the assessment/result digests and can
+resume the same review decision without replaying completed specialists.
+
 The composed execution wrappers preserve these options instead of rebuilding a weaker request:
 decision-cycle attempts and replans forward the cost, latency, quality, JSON, and schema policy;
 cross-domain cycles apply it to every specialist and synthesis call; and workflow stages apply it
