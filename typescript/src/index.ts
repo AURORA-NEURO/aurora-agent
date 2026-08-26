@@ -966,6 +966,13 @@ export type { BrainMultimodalKnowledgeRepresentationInferenceEngineReceipt } fro
 export type { BrainThroughputKnowledgeRepresentationInferenceEngineReceipt } from "./research-contracts.js";
 export type { BrainFederatedContinualKnowledgeRepresentationInferenceEngineReceipt } from "./research-contracts.js";
 export type { BrainLocalKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
+export {
+  MULTIMODAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+  MULTIMODAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainMultimodalKnowledgeRepresentationContractModelReceiptDigest,
+  validateBrainMultimodalKnowledgeRepresentationContractModelReceipt,
+} from "./research-contracts.js";
+export type { BrainMultimodalKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
 export type { BrainFederatedContextCompilationReceipt } from "./research-contracts.js";
 export type { BrainContextOmissionAdjudicationReceipt } from "./research-contracts.js";
 export type { BrainContextReleaseAdmissionReceipt } from "./research-contracts.js";
