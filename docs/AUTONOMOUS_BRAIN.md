@@ -1763,6 +1763,46 @@ The projection remains value-only evaluator/bandit/replay metadata, so a stale w
 overwrite a newer reward update and no provider prompt, response, credential, header, tool
 argument, or raw evidence is transported by this boundary.
 
+The Python `AutonomousAgent` can own this lifecycle without taking ownership of the storage
+backend. Bind the coordinator to the exact ledger used by the façade, restore it at worker
+startup, and flush it after an evaluator settlement or application transaction:
+
+```python
+from prism_sdk import (
+    AutonomousAgent,
+    BrainLearningLedger,
+    BrainLearningPersistenceCoordinator,
+    LLMRuntime,
+    TransactionalJsonBrainLearningSnapshotPersistence,
+)
+
+ledger = BrainLearningLedger("state/agent-learning.jsonl")
+learning_persistence = BrainLearningPersistenceCoordinator(
+    ledger,
+    TransactionalJsonBrainLearningSnapshotPersistence(caller_owned_text_store),
+)
+agent = AutonomousAgent(
+    workspace,
+    LLMRuntime(),
+    ledger=ledger,
+    learning_persistence=learning_persistence,
+)
+
+agent.restore_learning()
+# All direct, adaptive, workflow, goal, mission, and cross-domain runs use this ledger.
+agent.flush_learning()
+```
+
+`restore_online_learning()` and `flush_online_learning()` are equivalent aliases for hosts that
+describe the ledger as their online-learning state. Both names remain explicit and fail closed
+when no ledger or persistence coordinator is configured. Construction rejects a coordinator
+bound to another ledger, preventing model-selection state from being restored into an object the
+agent does not query. The agent does not restore or flush implicitly during `run`; deployments
+therefore retain control over evaluator ordering, CAS conflicts, and feedback transactions. The
+snapshot remains metadata-only across all twelve built-in domains: arm statistics, evaluator
+identity, stable context digests, and replay metadata are retained, while task text, prompts,
+provider responses, credentials, tool arguments, and raw evidence are excluded.
+
 ### Evaluator-gated memory consolidation
 
 Episodic recall and durable learning answer different questions. Recall can show that a similar

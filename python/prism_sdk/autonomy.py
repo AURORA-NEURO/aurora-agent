@@ -89,6 +89,7 @@ from .brain import (
     BrainLearningEpisode,
     BrainLearningCycleResult,
     BrainLearningLedger,
+    BrainLearningPersistenceCoordinator,
     BrainLearningTrajectory,
     BrainLearningTrajectoryResult,
     BrainJobRunResult,
@@ -14662,6 +14663,7 @@ class AutonomousAgent:
         router: AutonomousTaskRouter | None = None,
         pack_registry: AutonomousDomainPackRegistry | None = None,
         ledger: BrainLearningLedger | None = None,
+        learning_persistence: BrainLearningPersistenceCoordinator | None = None,
         memory: BrainEpisodicMemory | None = None,
         memory_persistence: BrainMemoryPersistenceCoordinator | None = None,
         memory_consolidator: AutonomousMemoryConsolidator | None = None,
@@ -14689,6 +14691,15 @@ class AutonomousAgent:
             raise BrainRunError("model_catalogue must be a ModelCatalogue or None")
         if ledger is not None and not isinstance(ledger, BrainLearningLedger):
             raise BrainRunError("ledger must be a BrainLearningLedger or None")
+        if learning_persistence is not None and not isinstance(
+            learning_persistence,
+            BrainLearningPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "learning_persistence must be a BrainLearningPersistenceCoordinator or None"
+            )
+        if learning_persistence is not None and learning_persistence.store is not ledger:
+            raise BrainRunError("learning_persistence must be bound to the supplied ledger")
         if memory is not None and not isinstance(memory, BrainEpisodicMemory):
             raise BrainRunError("memory must be a BrainEpisodicMemory or None")
         if memory_persistence is not None and not isinstance(
@@ -14770,6 +14781,7 @@ class AutonomousAgent:
         self.model_inventory = AutonomousModelInventoryCoordinator(runtime, self.catalogue)
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
+        self.learning_persistence = learning_persistence
         self.memory = memory
         self.memory_persistence = memory_persistence
         self.memory_consolidator = memory_consolidator
@@ -20510,6 +20522,36 @@ class AutonomousAgent:
         if coordinator is None:
             raise BrainRunError("prompt learning coordinator is not configured")
         return coordinator.flush()
+
+    def restore_learning(self) -> Any:
+        """Restore the evaluator/bandit ledger from its caller-owned persistence boundary."""
+
+        if self.ledger is None:
+            raise BrainRunError("AutonomousAgent has no learning ledger")
+        coordinator = self.learning_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent learning persistence is not configured")
+        return coordinator.restore()
+
+    def flush_learning(self) -> Any:
+        """Flush evaluator/bandit state through its caller-owned CAS boundary."""
+
+        if self.ledger is None:
+            raise BrainRunError("AutonomousAgent has no learning ledger")
+        coordinator = self.learning_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent learning persistence is not configured")
+        return coordinator.flush()
+
+    def restore_online_learning(self) -> Any:
+        """Compatibility alias for restoring the agent's value-only online-learning ledger."""
+
+        return self.restore_learning()
+
+    def flush_online_learning(self) -> Any:
+        """Compatibility alias for flushing the agent's value-only online-learning ledger."""
+
+        return self.flush_learning()
 
     def restore_memory(self) -> Any:
         """Restore episodic memory from its caller-owned persistence boundary."""
