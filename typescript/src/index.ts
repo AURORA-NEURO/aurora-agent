@@ -3667,6 +3667,8 @@ export {
   validateAdapterMultimodalRetrievalSynthesisResearchWorkbenchReceipt,
 } from "./research-contracts.js";
 export type { AdapterMultimodalRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export { ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION, adapterThroughputRetrievalSynthesisResearchWorkbenchReceiptDigest, validateAdapterThroughputRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
 export {
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,

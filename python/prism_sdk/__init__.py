@@ -243,6 +243,8 @@ from .research_contracts import (
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
@@ -6750,6 +6752,10 @@ from .adapter_multimodal_retrieval_synthesis_research_workbench import (
     MultimodalRetrievalSynthesisResearchWorkbenchReceipt,
     render_multimodal_retrieval_synthesis_research_workbench,
 )
+from .adapter_throughput_retrieval_synthesis_research_workbench import (
+    ThroughputRetrievalSynthesisResearchWorkbenchReceipt,
+    render_throughput_retrieval_synthesis_research_workbench,
+)
 from .adapter_multimodal_retrieval_synthesis_inference_engine import (
     MultimodalRetrievalSynthesisCandidate,
     MultimodalRetrievalSynthesisInferenceEngineReceipt,
@@ -6810,6 +6816,8 @@ __all__ += [
     "render_local_retrieval_synthesis_research_workbench",
     "MultimodalRetrievalSynthesisResearchWorkbenchReceipt",
     "render_multimodal_retrieval_synthesis_research_workbench",
+    "ThroughputRetrievalSynthesisResearchWorkbenchReceipt",
+    "render_throughput_retrieval_synthesis_research_workbench",
     "MultimodalRetrievalSynthesisCandidate",
     "MultimodalRetrievalSynthesisInferenceEngineReceipt",
     "run_multimodal_retrieval_synthesis_inference_engine",
