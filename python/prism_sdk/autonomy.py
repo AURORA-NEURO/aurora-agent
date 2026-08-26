@@ -219,6 +219,7 @@ from .llm_runtime import (
     ProviderError,
     ProviderInvocationObserver,
     ProviderTool,
+    ProviderHealthPersistenceCoordinator,
     normalize_provider_content_parts,
 )
 from .memory import (
@@ -14668,6 +14669,7 @@ class AutonomousAgent:
         memory_persistence: BrainMemoryPersistenceCoordinator | None = None,
         memory_consolidator: AutonomousMemoryConsolidator | None = None,
         health_ledger: ProviderHealthLedger | None = None,
+        health_persistence: ProviderHealthPersistenceCoordinator | None = None,
         tool_registry: AutonomousDomainToolRegistry | None = None,
         tool_runtime: AutonomousDomainToolRuntime | None = None,
         effect_boundary: AutonomousEffectBoundary | None = None,
@@ -14715,6 +14717,15 @@ class AutonomousAgent:
             raise BrainRunError("memory_consolidator must be an AutonomousMemoryConsolidator or None")
         if health_ledger is not None and not isinstance(health_ledger, ProviderHealthLedger):
             raise BrainRunError("health_ledger must be a ProviderHealthLedger or None")
+        if health_persistence is not None and not isinstance(
+            health_persistence,
+            ProviderHealthPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "health_persistence must be a ProviderHealthPersistenceCoordinator or None"
+            )
+        if health_persistence is not None and health_persistence.store is not health_ledger:
+            raise BrainRunError("health_persistence must be bound to the supplied health_ledger")
         if tool_registry is not None and not isinstance(tool_registry, AutonomousDomainToolRegistry):
             raise BrainRunError("tool_registry must be an AutonomousDomainToolRegistry or None")
         if tool_runtime is not None and not isinstance(tool_runtime, AutonomousDomainToolRuntime):
@@ -14786,6 +14797,7 @@ class AutonomousAgent:
         self.memory_persistence = memory_persistence
         self.memory_consolidator = memory_consolidator
         self.health_ledger = health_ledger
+        self.health_persistence = health_persistence
         self.tool_registry = tool_registry
         self.activation = activation or AutonomousCapabilityActivation()
         self.selection_promotion = selection_promotion
@@ -20542,6 +20554,36 @@ class AutonomousAgent:
         if coordinator is None:
             raise BrainRunError("AutonomousAgent learning persistence is not configured")
         return coordinator.flush()
+
+    def restore_health(self) -> Any:
+        """Restore provider/model health priors from the caller-owned persistence boundary."""
+
+        if self.health_ledger is None:
+            raise BrainRunError("AutonomousAgent has no provider health ledger")
+        coordinator = self.health_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent health persistence is not configured")
+        return coordinator.restore()
+
+    def flush_health(self) -> Any:
+        """Flush provider/model health observations through their caller-owned CAS boundary."""
+
+        if self.health_ledger is None:
+            raise BrainRunError("AutonomousAgent has no provider health ledger")
+        coordinator = self.health_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent health persistence is not configured")
+        return coordinator.flush()
+
+    def restore_provider_health(self) -> Any:
+        """Compatibility alias for restoring the agent's provider/model health ledger."""
+
+        return self.restore_health()
+
+    def flush_provider_health(self) -> Any:
+        """Compatibility alias for flushing the agent's provider/model health ledger."""
+
+        return self.flush_health()
 
     def restore_online_learning(self) -> Any:
         """Compatibility alias for restoring the agent's value-only online-learning ledger."""

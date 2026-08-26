@@ -1803,6 +1803,45 @@ snapshot remains metadata-only across all twelve built-in domains: arm statistic
 identity, stable context digests, and replay metadata are retained, while task text, prompts,
 provider responses, credentials, tool arguments, and raw evidence are excluded.
 
+Provider/model transport health has the same high-level restart seam. The Python agent accepts a
+`ProviderHealthPersistenceCoordinator` bound to its exact `ProviderHealthLedger`, so historical
+success, failure, latency, circuit, and model-quality projections are restored before the next
+selection and flushed after the deployment's chosen observation boundary:
+
+```python
+from prism_sdk import (
+    AutonomousAgent,
+    LLMRuntime,
+    ProviderHealthLedger,
+    ProviderHealthPersistenceCoordinator,
+    TransactionalJsonProviderHealthSnapshotPersistence,
+)
+
+health_ledger = ProviderHealthLedger("state/agent-health.jsonl")
+health_persistence = ProviderHealthPersistenceCoordinator(
+    health_ledger,
+    TransactionalJsonProviderHealthSnapshotPersistence(caller_owned_text_store),
+)
+agent = AutonomousAgent(
+    workspace,
+    LLMRuntime(),
+    health_ledger=health_ledger,
+    health_persistence=health_persistence,
+)
+
+agent.restore_health()
+# Direct, adaptive, workflow, mission, goal, and cross-domain selection now see the prior.
+agent.flush_health()
+```
+
+`restore_provider_health()` and `flush_provider_health()` are equivalent aliases. The methods
+remain explicit: they refuse when the ledger or coordinator is absent, and construction rejects a
+coordinator bound to another ledger. This historical ledger is a selection prior and diagnostic
+projection, not an authorization gate or task-correctness oracle; the live runtime still owns
+its process-local transport circuit. Snapshots retain only bounded provider/model outcomes,
+latency, evaluator metadata, and digests—never prompts, responses, credentials, headers, tool
+arguments, or raw evidence—and the CAS boundary rejects stale writers across every domain.
+
 ### Evaluator-gated memory consolidation
 
 Episodic recall and durable learning answer different questions. Recall can show that a similar
