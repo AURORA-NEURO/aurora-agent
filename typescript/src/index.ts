@@ -3605,13 +3605,6 @@ export {
 } from "./research-contracts.js";
 export type { AdapterMultimodalRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
 export {
-  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
-  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
-  adapterMultimodalRetrievalSynthesisContractModelReceiptDigest,
-  validateAdapterMultimodalRetrievalSynthesisContractModelReceipt,
-} from "./research-contracts.js";
-export type { AdapterMultimodalRetrievalSynthesisContractModelReceipt } from "./research-contracts.js";
-export {
   ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
   adapterThroughputRetrievalSynthesisInferenceEngineReceiptDigest,
