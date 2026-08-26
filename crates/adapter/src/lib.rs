@@ -169,6 +169,7 @@ pub mod throughput_retrieval_synthesis_assurance_harness;
 pub mod federated_continual_retrieval_synthesis_assurance_harness;
 pub mod local_retrieval_synthesis_federated_control_plane;
 pub mod multimodal_retrieval_synthesis_federated_control_plane;
+pub mod throughput_retrieval_synthesis_federated_control_plane;
 pub mod multimodal_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_contract_model;
@@ -799,6 +800,15 @@ pub use multimodal_retrieval_synthesis_federated_control_plane::{
     MultimodalRetrievalSynthesisFederatedControlPlaneRequest,
     CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_federated_control_plane::{
+    throughput_retrieval_synthesis_federated_control_plane_manifest,
+    operate_throughput_retrieval_synthesis_federated_control_plane,
+    ThroughputRetrievalSynthesisFederatedControlPlaneError,
+    ThroughputRetrievalSynthesisFederatedControlPlaneReceipt,
+    ThroughputRetrievalSynthesisFederatedControlPlaneRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
 };
 pub use multimodal_retrieval_synthesis_inference_engine::{
     multimodal_retrieval_synthesis_inference_engine_manifest,
