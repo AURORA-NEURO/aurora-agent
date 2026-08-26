@@ -1945,6 +1945,9 @@ impl Server {
             "adapter_throughput_retrieval_synthesis_federated_control_plane" => {
                 self.adapter_throughput_retrieval_synthesis_federated_control_plane(&arguments)
             },
+            "adapter_federated_continual_retrieval_synthesis_federated_control_plane" => {
+                self.adapter_federated_continual_retrieval_synthesis_federated_control_plane(&arguments)
+            },
             "adapter_multimodal_retrieval_synthesis_inference_engine" => {
                 self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
             },
@@ -25437,6 +25440,12 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits prospective high-throughput retrieval/synthesis only under purpose-bound peer quorum, queue/checkpoint continuity, capacity, health, policy, federation, signed approval, and protected-closure gates", "aggregate-only federation keeps raw preclinical data institution-local while overflow, omissions, uncertainty, counterexamples, degraded, approval-required, and blocked states remain explicit", "content-addressed queue, checkpoint, workbench, health, replay, and control digests support deterministic audit and recovery"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for queue policy, peer trust, checkpoint retention, health attestations, signed authorization, and independent replication"]}))
     }
 
+    fn adapter_federated_continual_retrieval_synthesis_federated_control_plane(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisFederatedControlPlaneRequest")?;
+        let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_federated_control_plane_json(request)?;
+        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits federated continual retrieval/synthesis only under purpose-bound peer quorum, checkpoint continuity, capacity, health, policy, federation, signed approval, and protected-closure gates", "aggregate-only locality keeps raw preclinical observations institution-local and preserves omissions, uncertainty, counterexamples, negative evidence, degraded, approval-required, and blocked states", "content-addressed workflow, workbench, health, replay, and control receipts support deterministic audit and bounded autonomy"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for consortium governance, peer trust, checkpoint retention, health attestations, signed authorization, and independent replication"]}))
+    }
+
     fn adapter_multimodal_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(request)?;
@@ -37748,6 +37757,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "adapter_federated_continual_retrieval_synthesis_federated_control_plane",
+            "domains": ["federated continual retrieval synthesis operations", "purpose-bound control plane", "checkpoint continuity", "peer quorum", "aggregate-only locality", "bounded autonomy"],
+            "crates": ["bioprism-adapter", "bioprism-mcp"],
+            "mcp_tools": ["adapter_federated_continual_retrieval_synthesis_federated_control_plane"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
@@ -40542,6 +40559,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "adapter_throughput_retrieval_synthesis_federated_control_plane",
             "description": "Operate an A2 prospective high-throughput retrieval and synthesis federated control plane with purpose-bound peer quorum, queue/checkpoint continuity, capacity, health, signed approval, protected-closure, replay, and aggregate-only locality gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisFederatedControlPlaneRequest with throughput workbench request, service/federation/purpose/peer quorum, batch/checkpoint/capacity, queue/health/replay digests, policy/federation permissions, signed approval, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "adapter_federated_continual_retrieval_synthesis_federated_control_plane",
+            "description": "Operate an A2 federated continual retrieval and synthesis control plane with purpose-bound peer quorum, checkpoint continuity, capacity, health, signed approval, protected-closure, replay, and aggregate-only locality gates.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisFederatedControlPlaneRequest with continual workbench request, service/federation/purpose/peer quorum, checkpoint/capacity, health/replay digests, policy/federation permissions, signed approval, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "adapter_multimodal_retrieval_synthesis_inference_engine",

@@ -269,6 +269,8 @@ from .research_contracts import (
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
@@ -6828,6 +6830,10 @@ from .adapter_throughput_retrieval_synthesis_federated_control_plane import (
     ThroughputRetrievalSynthesisFederatedControlPlaneReceipt,
     operate_throughput_retrieval_synthesis_federated_control_plane,
 )
+from .adapter_federated_continual_retrieval_synthesis_federated_control_plane import (
+    FederatedContinualRetrievalSynthesisFederatedControlPlaneReceipt,
+    operate_federated_continual_retrieval_synthesis_federated_control_plane,
+)
 from .adapter_multimodal_retrieval_synthesis_inference_engine import (
     MultimodalRetrievalSynthesisCandidate,
     MultimodalRetrievalSynthesisInferenceEngineReceipt,
@@ -6914,6 +6920,8 @@ __all__ += [
     "operate_multimodal_retrieval_synthesis_federated_control_plane",
     "ThroughputRetrievalSynthesisFederatedControlPlaneReceipt",
     "operate_throughput_retrieval_synthesis_federated_control_plane",
+    "FederatedContinualRetrievalSynthesisFederatedControlPlaneReceipt",
+    "operate_federated_continual_retrieval_synthesis_federated_control_plane",
     "MultimodalRetrievalSynthesisCandidate",
     "MultimodalRetrievalSynthesisInferenceEngineReceipt",
     "run_multimodal_retrieval_synthesis_inference_engine",
