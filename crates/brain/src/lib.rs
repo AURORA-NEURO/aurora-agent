@@ -103,6 +103,7 @@ pub mod multimodal_context_protocol;
 pub mod throughput_context_protocol;
 pub mod federated_context_protocol;
 pub mod context_compilation_assurance;
+pub mod multimodal_context_compilation_assurance;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
@@ -628,6 +629,14 @@ pub use context_compilation_assurance::{
     ContextCompilationAssuranceReceipt, ContextCompilationAssuranceRequest,
     CONTRACT_VERSION as CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
+pub use multimodal_context_compilation_assurance::{
+    assure_multimodal_context_compilation, multimodal_context_compilation_assurance_manifest,
+    MultimodalContextAssuranceCell, MultimodalContextAssuranceError,
+    MultimodalContextAssuranceReceipt, MultimodalContextAssuranceRequest,
+    MultimodalContextAssuranceVerdict,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
 };
 pub use throughput_contract_model::{
     model_throughput_contract, throughput_contract_model_manifest, ThroughputContractDisposition,
