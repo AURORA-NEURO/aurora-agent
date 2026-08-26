@@ -10,6 +10,9 @@ from prism_sdk import (
     AutonomousAgentPersistenceLifecycleCoordinator,
     AutonomousAgentPersistenceLifecycleError,
     AutonomousAgent,
+    AutonomousCapabilityActivationStore,
+    AutonomousSelectionPromotionLifecycle,
+    AutonomousSelectionPromotionLifecycleStore,
     AutonomousModelInventoryStore,
     LLMRuntime,
     ModelCatalogue,
@@ -20,6 +23,7 @@ class _LifecycleAgent:
     def __init__(self, calls: list[str], *, fail: str | None = None) -> None:
         self.calls = calls
         self.fail = fail
+        self.selection_promotion = object()
         for component in (
             "runtime_health",
             "health",
@@ -48,10 +52,12 @@ class _LifecycleAgent:
         return self._value("model_inventory", "flush")
 
     def __getattr__(self, name: str):
-        if name.startswith("restore_") or name.startswith("flush_"):
+        if name.startswith("restore_") or name.startswith("flush_") or name.startswith("save_"):
             operation, component = name.split("_", 1)
+            if operation == "save":
+                operation = "flush"
 
-            def invoke() -> dict[str, object]:
+            def invoke(*args: object) -> dict[str, object]:
                 self.calls.append(f"{operation}:{component}")
                 if component == self.fail:
                     raise ValueError("private task/prompt/provider payload must not escape")
@@ -64,7 +70,13 @@ class _LifecycleAgent:
 def test_lifecycle_restores_and_flushes_in_explicit_dependency_order() -> None:
     calls: list[str] = []
     agent = _LifecycleAgent(calls)
-    coordinator = AutonomousAgentPersistenceLifecycleCoordinator(agent, model_inventory_store=object(), require_all=True)
+    coordinator = AutonomousAgentPersistenceLifecycleCoordinator(
+        agent,
+        model_inventory_store=object(),
+        activation_store=object(),
+        selection_promotion_store=object(),
+        require_all=True,
+    )
 
     restored = coordinator.restore().to_dict()
     assert restored["status"] == "completed"
@@ -86,6 +98,8 @@ def test_lifecycle_strict_failure_keeps_redacted_report_and_not_attempted_rows()
     coordinator = AutonomousAgentPersistenceLifecycleCoordinator(
         agent,
         model_inventory_store=object(),
+        activation_store=object(),
+        selection_promotion_store=object(),
         require_all=True,
     )
 
@@ -95,7 +109,7 @@ def test_lifecycle_strict_failure_keeps_redacted_report_and_not_attempted_rows()
     assert report["failed_component_id"] == "health"
     assert report["components"][2]["status"] == "failed"
     assert report["components"][2]["error_class"] == "ValueError"
-    assert report["components"][3]["status"] == "not_attempted"
+    assert report["components"][5]["status"] == "not_attempted"
     assert "private task/prompt/provider payload" not in json.dumps(report)
     assert coordinator.last_report is raised.value.report
 
@@ -146,14 +160,36 @@ def test_agent_persisted_state_composes_inventory_restore_and_flush_without_prov
         snapshot_store=store,
         refresh_id="lifecycle-inventory",
     )
+    activation_store = AutonomousCapabilityActivationStore(tmp_path / "lifecycle-activation.json")
+    selection_store = AutonomousSelectionPromotionLifecycleStore()
+    agent.selection_promotion = AutonomousSelectionPromotionLifecycle()
+    agent.save_activation(activation_store)
+    agent.save_selection_promotion(selection_store)
 
-    restarted = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
-    restored = restarted.restore_persisted_state(model_inventory_store=store, strict=False)
+    restarted = AutonomousAgent(
+        object(),
+        runtime,
+        model_catalogue=ModelCatalogue(),
+        selection_promotion=AutonomousSelectionPromotionLifecycle(),
+    )
+    restored = restarted.restore_persisted_state(
+        model_inventory_store=store,
+        activation_store=activation_store,
+        selection_promotion_store=selection_store,
+        strict=False,
+    )
     assert restored["components"][0]["status"] == "restored"
+    assert restored["components"][3]["status"] == "restored"
+    assert restored["components"][4]["status"] == "restored"
     assert restored["components"][0]["snapshot_digest"]
     assert [row["model"] for row in restarted.models()] == ["lifecycle-model"]
 
-    flushed = restarted.flush_persisted_state(model_inventory_store=store, strict=False)
-    assert flushed["components"][6]["status"] == "flushed"
-    assert flushed["components"][6]["snapshot_digest"] == restored["components"][0]["snapshot_digest"]
+    flushed = restarted.flush_persisted_state(
+        model_inventory_store=store,
+        activation_store=activation_store,
+        selection_promotion_store=selection_store,
+        strict=False,
+    )
+    assert flushed["components"][8]["status"] == "flushed"
+    assert flushed["components"][8]["snapshot_digest"] == restored["components"][0]["snapshot_digest"]
     assert "credentials" not in json.dumps(restored)

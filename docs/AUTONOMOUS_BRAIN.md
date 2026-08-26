@@ -11454,9 +11454,10 @@ The high-level brain now has one explicit startup/shutdown seam in both SDKs:
 `flush_persisted_state()` / `flushPersistedState()`. These methods compose the already configured
 caller-owned coordinators instead of introducing a second persistence implementation. Restore
 order is deterministic: model inventory, runtime transport health, provider/model health when
-available, evaluator calibration, episodic memory, online learning, and prompt learning. Flush
-uses the reverse order so the learner and prompt state settle before the process-level availability
-images are finalized. TypeScript reports the provider/model health slot as explicitly
+available, redacted capability activation, learned-selection promotion authority, evaluator
+calibration, episodic memory, online learning, and prompt learning. Flush uses the reverse order
+so learned selection and activation state settle before process-level availability images are
+finalized. TypeScript reports the provider/model health slot as explicitly
 `unconfigured` unless the embedding supplies an equivalent coordinator; it never infers one from
 the live health controller.
 
@@ -11469,6 +11470,13 @@ want to inspect all independent stores can use `strict: false` plus `continue_on
 `continueOnError`; `require_all` / `requireAll` turns missing optional coordinators into a
 fail-closed lifecycle failure. Unconfigured components remain visible in non-strict reports rather
 than being mistaken for restored state.
+
+Activation and selection-promotion stores are optional lifecycle inputs because they are
+caller-owned approval boundaries. When supplied, activation restore preserves revocation,
+identity, and monotonic revision fences; selection-promotion restore preserves its admitted/held
+authority state. Neither component contains provider credentials, prompts, tasks, learner
+parameters, rewards, tool arguments, or provider payloads. A missing selection-promotion object
+with a supplied store is rejected as a configuration error rather than silently ignored.
 
 Model inventory now has an explicit flush operation as well. It re-commits only the last validated
 inventory snapshot after checking that the live catalogue still matches its catalogue digest; it

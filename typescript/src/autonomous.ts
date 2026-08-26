@@ -4893,6 +4893,8 @@ export class AutonomousAgent {
   private modelInventoryCoordinator?: import("./autonomous-model-inventory.js").AutonomousModelInventoryCoordinator;
   private persistenceLifecycleCoordinator?: import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleCoordinator;
   private persistenceLifecycleModelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+  private persistenceLifecycleActivationStore?: AutonomousCapabilityActivationSnapshotStore;
+  private persistenceLifecycleSelectionPromotionStore?: AutonomousSelectionLifecycleStore;
   private persistenceLifecycleRequireAll?: boolean;
   private persistenceLifecycleContinueOnError?: boolean;
 
@@ -5239,10 +5241,11 @@ export class AutonomousAgent {
   }
 
   /** Persist only the digest-bound learned-selection authority state through a caller-owned store. */
-  async saveSelectionPromotion(store: AutonomousSelectionLifecycleStore): Promise<void> {
+  async saveSelectionPromotion(store: AutonomousSelectionLifecycleStore): Promise<AutonomousSelectionLifecycleState> {
     if (!store || typeof store.save !== "function" || typeof store.load !== "function") throw new ArgumentError("selection promotion store is malformed");
     if (!this.selectionPromotion) throw new ArgumentError("selection promotion lifecycle is not configured");
     await store.save(this.selectionPromotion.state);
+    return this.selectionPromotion.state;
   }
 
   /** Restore learned-selection authority state after validating identity, revision, and digests. */
@@ -5283,9 +5286,10 @@ export class AutonomousAgent {
   }
 
   /** Persist the redacted activation state through a caller-owned store. */
-  async saveActivation(store: AutonomousCapabilityActivationSnapshotStore): Promise<void> {
+  async saveActivation(store: AutonomousCapabilityActivationSnapshotStore): Promise<AutonomousCapabilityActivationState> {
     if (!store || typeof store.save !== "function") throw new ArgumentError("activation store must implement save");
     await store.save(this.activation.state);
+    return this.activation.state;
   }
 
   /** Restore redacted activation state through a caller-owned store; null means no state existed. */
@@ -5644,6 +5648,8 @@ export class AutonomousAgent {
 
   private async persistenceLifecycleFor(options: {
     modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+    activationStore?: AutonomousCapabilityActivationSnapshotStore;
+    selectionPromotionStore?: AutonomousSelectionLifecycleStore;
     requireAll?: boolean;
     continueOnError?: boolean;
   } = {}): Promise<import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleCoordinator> {
@@ -5653,15 +5659,21 @@ export class AutonomousAgent {
     if (
       this.persistenceLifecycleCoordinator === undefined
       || this.persistenceLifecycleModelInventoryPersistence !== options.modelInventoryPersistence
+      || this.persistenceLifecycleActivationStore !== options.activationStore
+      || this.persistenceLifecycleSelectionPromotionStore !== options.selectionPromotionStore
       || this.persistenceLifecycleRequireAll !== requireAll
       || this.persistenceLifecycleContinueOnError !== continueOnError
     ) {
       this.persistenceLifecycleCoordinator = new AutonomousAgentPersistenceLifecycleCoordinator(this, {
         modelInventoryPersistence: options.modelInventoryPersistence,
+        activationStore: options.activationStore,
+        selectionPromotionStore: options.selectionPromotionStore,
         requireAll,
         continueOnError,
       });
       this.persistenceLifecycleModelInventoryPersistence = options.modelInventoryPersistence;
+      this.persistenceLifecycleActivationStore = options.activationStore;
+      this.persistenceLifecycleSelectionPromotionStore = options.selectionPromotionStore;
       this.persistenceLifecycleRequireAll = requireAll;
       this.persistenceLifecycleContinueOnError = continueOnError;
     }
@@ -5671,6 +5683,8 @@ export class AutonomousAgent {
   /** Restore all configured metadata coordinators in the reviewed dependency order. */
   async restorePersistedState(options: {
     modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+    activationStore?: AutonomousCapabilityActivationSnapshotStore;
+    selectionPromotionStore?: AutonomousSelectionLifecycleStore;
     strict?: boolean;
     requireAll?: boolean;
     continueOnError?: boolean;
@@ -5682,6 +5696,8 @@ export class AutonomousAgent {
   /** Flush all configured metadata coordinators in reverse dependency order. */
   async flushPersistedState(options: {
     modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
+    activationStore?: AutonomousCapabilityActivationSnapshotStore;
+    selectionPromotionStore?: AutonomousSelectionLifecycleStore;
     strict?: boolean;
     requireAll?: boolean;
     continueOnError?: boolean;

@@ -7,6 +7,9 @@ import {
   AutonomousAgent,
   AutonomousAgentPersistenceLifecycleCoordinator,
   AutonomousAgentPersistenceLifecycleError,
+  AutonomousCapabilityActivationStore,
+  AutonomousSelectionPromotionLifecycle,
+  AutonomousSelectionPromotionLifecycleStore,
   LLMRuntime,
 } from "../dist/index.js";
 
@@ -21,6 +24,7 @@ function value(component, operation) {
 
 function fakeAgent(calls, failure = null) {
   const agent = {
+    selectionPromotion: {},
     runtimeHealthPersistence: {},
     healthPersistence: {},
     evaluatorCalibrationPersistence: {},
@@ -29,6 +33,10 @@ function fakeAgent(calls, failure = null) {
     promptLearningCoordinator: {},
     restoreModelInventory: async () => { calls.push("restore:model_inventory"); return value("model_inventory", "restore"); },
     flushModelInventory: async () => { calls.push("flush:model_inventory"); return value("model_inventory", "flush"); },
+    restoreActivation: async () => { calls.push("restore:activation"); return value("activation", "restore"); },
+    saveActivation: async () => { calls.push("flush:activation"); return value("activation", "flush"); },
+    restoreSelectionPromotion: async () => { calls.push("restore:selection_promotion"); return value("selection_promotion", "restore"); },
+    saveSelectionPromotion: async () => { calls.push("flush:selection_promotion"); return value("selection_promotion", "flush"); },
   };
   for (const component of ["runtime_health", "health", "evaluator_calibration", "memory", "learning", "prompt_learning"]) {
     const suffix = component === "learning" ? "OnlineLearning" : component.replace(/(^|_)([a-z])/g, (_, prefix, letter) => letter.toUpperCase());
@@ -64,6 +72,8 @@ test("agent persistence lifecycle restores and flushes in explicit dependency or
   const calls = [];
   const coordinator = new AutonomousAgentPersistenceLifecycleCoordinator(fakeAgent(calls), {
     modelInventoryPersistence: { read: () => null, write: () => {} },
+    activationStore: { load: () => null, save: () => {} },
+    selectionPromotionStore: { load: () => null, save: () => {} },
     requireAll: true,
   });
   const restored = await coordinator.restore();
@@ -82,6 +92,8 @@ test("strict lifecycle failure preserves a redacted report and stops after the f
   const calls = [];
   const coordinator = new AutonomousAgentPersistenceLifecycleCoordinator(fakeAgent(calls, "health"), {
     modelInventoryPersistence: { read: () => null, write: () => {} },
+    activationStore: { load: () => null, save: () => {} },
+    selectionPromotionStore: { load: () => null, save: () => {} },
     requireAll: true,
   });
   await assert.rejects(
@@ -91,7 +103,7 @@ test("strict lifecycle failure preserves a redacted report and stops after the f
       assert.equal(error.report.failed_component_id, "health");
       assert.equal(error.report.components[2].status, "failed");
       assert.equal(error.report.components[2].error_class, "Error");
-      assert.equal(error.report.components[3].status, "not_attempted");
+      assert.equal(error.report.components[5].status, "not_attempted");
       assert.doesNotMatch(JSON.stringify(error.report), /private task\/prompt\/provider payload/);
       return true;
     },
@@ -105,18 +117,34 @@ test("high-level agent lifecycle composes model inventory restart and flush with
     discoverModels: async () => ({ data: [{ id: "lifecycle-model", active: true, context_window: 16_000, max_output_tokens: 1_000, capabilities: ["reasoning", "structured_output", "code", "web", "data", "science", "biomedical", "operations", "enterprise", "coordination", "multimodal", "evaluation"] }] }),
   });
   const store = persistence();
-  const agent = new AutonomousAgent(llm);
+  const activationStore = new AutonomousCapabilityActivationStore();
+  const selectionStore = new AutonomousSelectionPromotionLifecycleStore();
+  const agent = new AutonomousAgent(llm, { selectionPromotion: new AutonomousSelectionPromotionLifecycle() });
   const snapshot = await agent.refreshModelInventory([{
     provider: "offline",
     defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 0, reliability: 0.9 },
   }], { persistence: store, refreshId: "lifecycle-inventory" });
-  const restarted = new AutonomousAgent(llm);
-  const restored = await restarted.restorePersistedState({ modelInventoryPersistence: store, strict: false });
+  await agent.saveActivation(activationStore);
+  await agent.saveSelectionPromotion(selectionStore);
+  const restarted = new AutonomousAgent(llm, { selectionPromotion: new AutonomousSelectionPromotionLifecycle() });
+  const restored = await restarted.restorePersistedState({
+    modelInventoryPersistence: store,
+    activationStore,
+    selectionPromotionStore: selectionStore,
+    strict: false,
+  });
   assert.equal(restored.components[0].status, "restored");
+  assert.equal(restored.components[3].status, "restored");
+  assert.equal(restored.components[4].status, "restored");
   assert.equal(restored.components[0].snapshot_digest, snapshot.inventory_digest);
   assert.equal(restarted.models()[0].model, "lifecycle-model");
-  const flushed = await restarted.flushPersistedState({ modelInventoryPersistence: store, strict: false });
-  assert.equal(flushed.components[6].status, "flushed");
-  assert.equal(flushed.components[6].snapshot_digest, snapshot.inventory_digest);
+  const flushed = await restarted.flushPersistedState({
+    modelInventoryPersistence: store,
+    activationStore,
+    selectionPromotionStore: selectionStore,
+    strict: false,
+  });
+  assert.equal(flushed.components[8].status, "flushed");
+  assert.equal(flushed.components[8].snapshot_digest, snapshot.inventory_digest);
   assert.doesNotMatch(JSON.stringify(restored), /credentials|lifecycle-model/);
 });

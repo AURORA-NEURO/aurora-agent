@@ -14834,6 +14834,8 @@ class AutonomousAgent:
         self.model_inventory = AutonomousModelInventoryCoordinator(runtime, self.catalogue)
         self.model_inventory_persistence: AutonomousModelInventoryPersistenceCoordinator | None = None
         self._persistence_lifecycle_coordinator: AutonomousAgentPersistenceLifecycleCoordinator | None = None
+        self._persistence_lifecycle_activation_store: AutonomousCapabilityActivationStore | None = None
+        self._persistence_lifecycle_selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
         self.learning_persistence = learning_persistence
@@ -15154,6 +15156,8 @@ class AutonomousAgent:
         self,
         model_inventory_store: AutonomousModelInventoryStore | None = None,
         *,
+        activation_store: AutonomousCapabilityActivationStore | None = None,
+        selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
         require_all: bool = False,
         continue_on_error: bool = False,
     ) -> AutonomousAgentPersistenceLifecycleCoordinator:
@@ -15161,22 +15165,30 @@ class AutonomousAgent:
         if (
             coordinator is None
             or coordinator.model_inventory_store is not model_inventory_store
+            or coordinator.activation_store is not activation_store
+            or coordinator.selection_promotion_store is not selection_promotion_store
             or coordinator.require_all != require_all
             or coordinator.continue_on_error != continue_on_error
         ):
             coordinator = AutonomousAgentPersistenceLifecycleCoordinator(
                 self,
                 model_inventory_store=model_inventory_store,
+                activation_store=activation_store,
+                selection_promotion_store=selection_promotion_store,
                 require_all=require_all,
                 continue_on_error=continue_on_error,
             )
             self._persistence_lifecycle_coordinator = coordinator
+            self._persistence_lifecycle_activation_store = activation_store
+            self._persistence_lifecycle_selection_promotion_store = selection_promotion_store
         return coordinator
 
     def restore_persisted_state(
         self,
         *,
         model_inventory_store: AutonomousModelInventoryStore | None = None,
+        activation_store: AutonomousCapabilityActivationStore | None = None,
+        selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
         strict: bool = True,
         require_all: bool = False,
         continue_on_error: bool = False,
@@ -15185,6 +15197,8 @@ class AutonomousAgent:
 
         report = self._persistence_lifecycle_for(
             model_inventory_store,
+            activation_store=activation_store,
+            selection_promotion_store=selection_promotion_store,
             require_all=require_all,
             continue_on_error=continue_on_error,
         ).restore(strict=strict, continue_on_error=continue_on_error)
@@ -15194,6 +15208,8 @@ class AutonomousAgent:
         self,
         *,
         model_inventory_store: AutonomousModelInventoryStore | None = None,
+        activation_store: AutonomousCapabilityActivationStore | None = None,
+        selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
         strict: bool = True,
         require_all: bool = False,
         continue_on_error: bool = False,
@@ -15202,6 +15218,8 @@ class AutonomousAgent:
 
         report = self._persistence_lifecycle_for(
             model_inventory_store,
+            activation_store=activation_store,
+            selection_promotion_store=selection_promotion_store,
             require_all=require_all,
             continue_on_error=continue_on_error,
         ).flush(strict=strict, continue_on_error=continue_on_error)
@@ -15788,6 +15806,20 @@ class AutonomousAgent:
             return store.save(self.activation)
         except AutonomousActivationError as error:
             raise BrainRunError("activation state could not be persisted") from error
+
+    def restore_activation(
+        self,
+        store: AutonomousCapabilityActivationStore,
+    ) -> dict[str, Any] | None:
+        """Restore redacted activation state while preserving revocation and identity fences."""
+
+        if not isinstance(store, AutonomousCapabilityActivationStore):
+            raise BrainRunError("restore_activation requires an AutonomousCapabilityActivationStore")
+        try:
+            state = store.load()
+            return None if state is None else self.activation.restore(state).to_dict()
+        except AutonomousActivationError as error:
+            raise BrainRunError("activation state could not be restored") from error
 
     def revoke_activation(self, *, reason: str = "activation_revoked") -> dict[str, Any]:
         """Revoke the activation snapshot without pretending to revoke provider credentials."""

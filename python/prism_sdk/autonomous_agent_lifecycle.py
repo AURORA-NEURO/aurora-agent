@@ -28,6 +28,8 @@ AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS = (
     "model_inventory",
     "runtime_health",
     "health",
+    "activation",
+    "selection_promotion",
     "evaluator_calibration",
     "memory",
     "learning",
@@ -236,6 +238,8 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
         agent: Any,
         *,
         model_inventory_store: Any | None = None,
+        activation_store: Any | None = None,
+        selection_promotion_store: Any | None = None,
         require_all: bool = False,
         continue_on_error: bool = False,
     ) -> None:
@@ -247,6 +251,10 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
             raise ArgumentError("agent persistence lifecycle options must be boolean")
         self.agent = agent
         self.model_inventory_store = model_inventory_store
+        self.activation_store = activation_store
+        self.selection_promotion_store = selection_promotion_store
+        if selection_promotion_store is not None and getattr(agent, "selection_promotion", None) is None:
+            raise ArgumentError("selection promotion persistence requires a configured selection lifecycle")
         self.require_all = require_all
         self.continue_on_error = continue_on_error
         self._lock = threading.RLock()
@@ -259,6 +267,10 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
     def _coordinator_for(self, component_id: str) -> Any | None:
         if component_id == "model_inventory":
             return self.model_inventory_store
+        if component_id == "activation":
+            return self.activation_store
+        if component_id == "selection_promotion":
+            return self.selection_promotion_store
         return getattr(self.agent, f"{component_id}_persistence", None)
 
     def _invoke(self, component_id: str, operation: str) -> Any:
@@ -266,6 +278,14 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
             if operation == "restore":
                 return self.agent.restore_model_inventory(self.model_inventory_store)
             return self.agent.flush_model_inventory(self.model_inventory_store)
+        if component_id == "activation":
+            if operation == "restore":
+                return self.agent.restore_activation(self.activation_store)
+            return self.agent.save_activation(self.activation_store)
+        if component_id == "selection_promotion":
+            if operation == "restore":
+                return self.agent.restore_selection_promotion(self.selection_promotion_store)
+            return self.agent.save_selection_promotion(self.selection_promotion_store)
         method = getattr(self.agent, f"{operation}_{component_id}", None)
         if not callable(method):
             raise ArgumentError(f"agent does not expose {operation}_{component_id}")

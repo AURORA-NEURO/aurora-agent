@@ -442,6 +442,20 @@ class AutonomousCapabilityActivation:
     def to_dict(self) -> dict[str, Any]:
         return self.state.to_dict()
 
+    def restore(self, state: "AutonomousCapabilityActivationState | Mapping[str, Any]") -> "AutonomousCapabilityActivationState":
+        """Replace local activation with a validated restart image without accepting secrets."""
+
+        normalized = state if isinstance(state, AutonomousCapabilityActivationState) else AutonomousCapabilityActivationState.from_mapping(state)
+        with self._lock:
+            if self._state.status == "revoked" and normalized.status != "revoked":
+                raise AutonomousActivationError("a revoked activation cannot be restored to an active state")
+            if self._state.revision > 0 and normalized.activation_id != self._state.activation_id:
+                raise AutonomousActivationError("activation identity cannot change after initialization")
+            if normalized.revision < self._state.revision:
+                raise AutonomousActivationError("activation revision cannot move backwards")
+            self._state = normalized
+            return self._state
+
     def record_provider_statuses(self, statuses: Sequence[Mapping[str, Any]]) -> AutonomousCapabilityActivationState:
         if not isinstance(statuses, Sequence) or isinstance(statuses, (str, bytes)):
             raise AutonomousActivationError("provider statuses must be a sequence")

@@ -1562,7 +1562,7 @@ export class AutonomousBrainFacade {
   }
 
   /** Persist activation metadata through a caller-owned store; credentials remain outside it. */
-  async saveActivation(store: AutonomousBrainActivationSnapshotStore): Promise<void> {
+  async saveActivation(store: AutonomousBrainActivationSnapshotStore): Promise<AutonomousBrainActivationState> {
     return this.agent.saveActivation(store);
   }
 
