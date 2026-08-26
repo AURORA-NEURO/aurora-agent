@@ -2761,6 +2761,76 @@ class AutonomousBrain:
 
         return AutonomousTaskOrchestrator(self).prepare_cross_domain(**kwargs)
 
+    def select_execution_policy(
+        self,
+        *,
+        task: str,
+        candidates: Sequence[Mapping[str, Any] | Any],
+        domain: str | None = None,
+        hints: Sequence[str] = (),
+        allow_cross_domain: bool = True,
+        policy: Any | None = None,
+        required_capabilities: Sequence[str] = (),
+        preferred_capabilities: Sequence[str] = (),
+        required_path: str | None = None,
+        evidence_required: bool | None = None,
+        structured_output_required: bool | None = None,
+        effects_requested: bool = False,
+        effects_approved: bool = False,
+        approval_granted: bool = False,
+        max_cost_units: float | None = None,
+        max_latency_ms: float | None = None,
+        max_risk: float | None = None,
+        min_score: float | None = None,
+    ) -> dict[str, Any]:
+        """Choose a joint execution arm after route admission, without dispatching anything.
+
+        The returned route and policy decision contain only digests and bounded candidate
+        metadata. The caller keeps the policy instance, executes the selected arm through its
+        existing approval boundary, and later settles explicit evaluator credit with that same
+        policy instance. Provider success is never inferred as reward.
+        """
+
+        from .autonomous_execution_policy import AutonomousExecutionPolicy
+        from .autonomy import AutonomousTaskOrchestrator
+
+        orchestrator = AutonomousTaskOrchestrator(self)
+        route = orchestrator.route_task(task=task, hints=tuple(hints) + ((domain,) if domain is not None else ()), allow_cross_domain=False if domain is not None else allow_cross_domain)
+        if route.abstained or not route.selected_domains:
+            raise BrainRunError("execution policy selection requires an admitted route")
+        if domain is not None and route.primary_domain != domain:
+            raise BrainRunError("execution policy explicit domain did not win deterministic route admission")
+        selected_policy = policy if isinstance(policy, AutonomousExecutionPolicy) else AutonomousExecutionPolicy()
+        domain_policy = orchestrator.domain_policy(route.primary_domain or route.selected_domains[0])
+        decision = selected_policy.select(
+            {
+                "context_digest": route.task_digest,
+                "requested_domains": list(route.selected_domains),
+                "required_capabilities": list(required_capabilities),
+                "preferred_capabilities": list(preferred_capabilities),
+                "required_path": required_path,
+                "evidence_required": domain_policy.evidence_mode == "required_before_provider" if evidence_required is None else evidence_required,
+                "structured_output_required": domain_policy.response_mode == "structured_required" if structured_output_required is None else structured_output_required,
+                "effects_requested": effects_requested,
+                "effects_approved": effects_approved,
+                "approval_granted": approval_granted,
+                "max_cost_units": domain_policy.max_total_cost_units if max_cost_units is None else max_cost_units,
+                "max_latency_ms": 86_400_000 if max_latency_ms is None else max_latency_ms,
+                "max_risk": 1.0 if max_risk is None else max_risk,
+                "min_score": 0.0 if min_score is None else min_score,
+            },
+            candidates,
+        )
+        descriptor = {"schema": "bioprism-python-autonomous-brain-execution-policy/0.1", "route_digest": route.route_digest, "decision_digest": decision.decision_digest}
+        return {
+            "schema": "bioprism-python-autonomous-brain-execution-policy/0.1",
+            "route": route.to_dict(),
+            "decision": decision.to_dict(),
+            "policy_plan_digest": _json_digest(descriptor),
+            "retention": "route_and_policy_metadata_only;task_prompt_response_tool_and_credential_values_not_retained",
+            "secret_material": "never_returned",
+        }
+
     def run_autonomous(self, **kwargs: Any) -> Any:
         """Run a domain-aware task through adaptive selection and bounded provider execution.
 

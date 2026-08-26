@@ -60,6 +60,11 @@ import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type { ProviderInvocationObserver } from "./llm.js";
 import { AutonomousCostBudget } from "./llm.js";
 import type { JsonObject, JsonValue } from "./types.js";
+import {
+  AutonomousJointExecutionPolicy,
+  type AutonomousExecutionPolicyCandidateInput,
+  type AutonomousExecutionPolicyDecision,
+} from "./autonomous-execution-policy.js";
 import type { AutonomousMemorySnapshot } from "./autonomous-memory.js";
 import type {
   AutonomousWorkflowPortfolioAdmission,
@@ -116,6 +121,7 @@ export const AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA = "bioprism-typescript-aut
 export const AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-cycle-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-adaptive-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
+export const AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomous-brain-execution-policy/0.1" as const;
 export const MAX_AUTONOMOUS_BRAIN_BATCH = 64;
 export const MAX_AUTONOMOUS_BRAIN_PARALLELISM = 8;
 export const MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES = 128_000;
@@ -135,6 +141,32 @@ export interface AutonomousBrainRequest {
   context?: readonly AutonomousPromptChunk[];
   /** Optional caller-owned evidence operation to run before provider invocation. */
   connector?: AutonomousConnectorOperationInput;
+}
+
+export interface AutonomousBrainExecutionPolicyOptions {
+  candidates: readonly AutonomousExecutionPolicyCandidateInput[];
+  policy?: AutonomousJointExecutionPolicy;
+  requiredCapabilities?: readonly string[];
+  preferredCapabilities?: readonly string[];
+  requiredPath?: AutonomousExecutionPolicyCandidateInput["path"] | null;
+  evidenceRequired?: boolean;
+  structuredOutputRequired?: boolean;
+  effectsRequested?: boolean;
+  effectsApproved?: boolean;
+  approvalGranted?: boolean;
+  maxCostUnits?: number;
+  maxLatencyMs?: number;
+  maxRisk?: number;
+  minScore?: number;
+}
+
+export interface AutonomousBrainExecutionPolicyPlan extends JsonObject {
+  schema: typeof AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA;
+  route: AutonomousRouteProposal;
+  decision: AutonomousExecutionPolicyDecision;
+  policy_plan_digest: string;
+  retention: "route_and_policy_metadata_only;task_prompt_response_tool_and_credential_values_not_retained";
+  secret_material: "never_returned";
 }
 
 export interface AutonomousActionPlanExecutionOptions extends AutonomousAutoRunOptions {
@@ -1105,6 +1137,46 @@ export class AutonomousBrainFacade {
     const request = validateRequest(input);
     const route = await this.agent.route(request.task, { domain: request.domain, hints: request.hints, allowCrossDomain: request.allow_cross_domain ?? true });
     return this.buildPlanForRoute(request, route, null);
+  }
+
+  /**
+   * Select a bounded execution strategy after deterministic routing and before provider/tool
+   * dispatch. This composes route identity with the joint policy, but keeps evaluator settlement
+   * and every external authorization boundary with the caller-owned policy and run APIs.
+   */
+  async selectExecutionPolicy(input: AutonomousBrainRequest, options: AutonomousBrainExecutionPolicyOptions): Promise<AutonomousBrainExecutionPolicyPlan> {
+    const request = validateRequest(input);
+    if (!options || !Array.isArray(options.candidates) || options.candidates.length === 0) throw new ArgumentError("autonomous brain execution policy requires candidates");
+    const route = await this.agent.route(request.task, { domain: request.domain, hints: request.hints, allowCrossDomain: request.allow_cross_domain ?? true });
+    if (route.abstained || route.selected_domains.length === 0) throw new ArgumentError("autonomous brain execution policy requires an admitted route");
+    const primaryDomain = route.primary_domain ?? route.selected_domains[0]!;
+    const domainPolicy = this.agent.domainPolicy(primaryDomain);
+    const policy = options.policy ?? new AutonomousJointExecutionPolicy();
+    const decision = policy.select({
+      context_digest: route.task_digest,
+      requested_domains: route.selected_domains,
+      required_capabilities: options.requiredCapabilities ?? [],
+      preferred_capabilities: options.preferredCapabilities ?? [],
+      required_path: options.requiredPath ?? null,
+      evidence_required: options.evidenceRequired ?? domainPolicy.evidence_mode === "required_before_provider",
+      structured_output_required: options.structuredOutputRequired ?? domainPolicy.response_mode === "structured_required",
+      effects_requested: options.effectsRequested ?? false,
+      effects_approved: options.effectsApproved ?? false,
+      approval_granted: options.approvalGranted ?? false,
+      max_cost_units: options.maxCostUnits ?? domainPolicy.max_total_cost_units,
+      max_latency_ms: options.maxLatencyMs,
+      max_risk: options.maxRisk,
+      min_score: options.minScore,
+    }, options.candidates);
+    const descriptor = { schema: AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA, route_digest: route.route_digest, decision_digest: decision.decision_digest };
+    return {
+      schema: AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA,
+      route,
+      decision,
+      policy_plan_digest: digestJsonSync(descriptor),
+      retention: "route_and_policy_metadata_only;task_prompt_response_tool_and_credential_values_not_retained",
+      secret_material: "never_returned",
+    };
   }
 
   /**

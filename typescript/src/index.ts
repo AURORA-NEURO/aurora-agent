@@ -138,6 +138,39 @@ export {
   inferAutonomousTaskDecision,
 } from "./autonomous-task-decision.js";
 export type { AutonomousTaskDecision } from "./autonomous-task-decision.js";
+export {
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_SCHEMA,
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_STATE_SCHEMA,
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_SETTLEMENT_SCHEMA,
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_PATHS,
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_POSTURES,
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_DOMAINS,
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_CANDIDATES,
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_ARMS,
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_SETTLEMENTS,
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_ITEMS,
+  AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_BYTES,
+  AutonomousJointExecutionPolicy,
+  selectAutonomousJointExecutionPolicy,
+  validateAutonomousJointExecutionPolicyState,
+  validateAutonomousJointExecutionPolicyDecision,
+} from "./autonomous-execution-policy.js";
+export type {
+  AutonomousJointExecutionPolicyPath,
+  AutonomousJointExecutionPolicyPosture,
+  AutonomousJointExecutionPolicyDomain,
+  AutonomousJointExecutionPolicyCandidateInput,
+  AutonomousJointExecutionPolicyCandidate,
+  AutonomousJointExecutionPolicyContextInput,
+  AutonomousJointExecutionPolicyContext,
+  AutonomousJointExecutionPolicyArmState,
+  AutonomousJointExecutionPolicySettlementRecord,
+  AutonomousJointExecutionPolicyState,
+  AutonomousJointExecutionPolicyRanking,
+  AutonomousJointExecutionPolicyDecision,
+  AutonomousJointExecutionPolicySettlementInput,
+  AutonomousJointExecutionPolicySettlement,
+} from "./autonomous-execution-policy.js";
 export { parseSse } from "./sse.js";
 export {
   CREDENTIAL_ONBOARDING_SCHEMA,
@@ -1865,6 +1898,7 @@ export {
   AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA,
   AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA,
   AUTONOMOUS_BRAIN_SUMMARY_SCHEMA,
+  AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA,
   MAX_AUTONOMOUS_BRAIN_BATCH,
   MAX_AUTONOMOUS_BRAIN_PARALLELISM,
   MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES,
@@ -1884,6 +1918,8 @@ export type {
   AutonomousActionHandoffExecutionOptions,
   AutonomousActionPlanExecution,
   AutonomousBrainRequest,
+  AutonomousBrainExecutionPolicyOptions,
+  AutonomousBrainExecutionPolicyPlan,
   AutonomousBrainDomainPlanSummary,
   AutonomousBrainCrossDomainPlanSummary,
   AutonomousBrainPlanJSON,
