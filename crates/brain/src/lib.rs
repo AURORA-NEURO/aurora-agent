@@ -107,6 +107,7 @@ pub mod multimodal_context_compilation_assurance;
 pub mod throughput_context_compilation_assurance;
 pub mod federated_continual_context_compilation_assurance;
 pub mod local_context_compilation_federated_control_plane;
+pub mod multimodal_context_compilation_federated_control_plane;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
@@ -665,6 +666,14 @@ pub use local_context_compilation_federated_control_plane::{
     LocalContextControlStage,
     CONTRACT_VERSION as LOCAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
     FEATURE_ID as LOCAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+pub use multimodal_context_compilation_federated_control_plane::{
+    multimodal_context_compilation_federated_control_plane_manifest,
+    operate_multimodal_context_compilation, MultimodalContextControlCell,
+    MultimodalContextControlDisposition, MultimodalContextControlError,
+    MultimodalContextControlReceipt, MultimodalContextControlRequest,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_FEATURE_ID,
 };
 pub use throughput_contract_model::{
     model_throughput_contract, throughput_contract_model_manifest, ThroughputContractDisposition,
