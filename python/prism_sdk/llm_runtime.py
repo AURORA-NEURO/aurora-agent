@@ -1127,6 +1127,25 @@ class ModelCatalogue:
             raise ProviderError("model catalogue candidate count is invalid")
         return cls(tuple(ModelCandidate.from_mapping(candidate) for candidate in candidates))
 
+    def restore(self, value: "ModelCatalogue" | Mapping[str, Any]) -> None:
+        """Atomically replace this catalogue with a validated metadata-only image.
+
+        The object identity is preserved so an already-composed autonomous agent and its
+        inventory coordinator continue to observe the restored candidates. Provider registration,
+        credentials, health circuits, and evaluator evidence remain outside this catalogue image.
+        """
+
+        replacement = value if isinstance(value, ModelCatalogue) else ModelCatalogue.from_mapping(value)
+        candidates = tuple(
+            ModelCandidate.from_mapping(candidate)
+            for candidate in replacement.candidates()
+        )
+        with self._lock:
+            self._candidates = {
+                (candidate.provider, candidate.model): candidate
+                for candidate in candidates
+            }
+
     def register(
         self,
         candidate: ModelCandidate | Mapping[str, Any],

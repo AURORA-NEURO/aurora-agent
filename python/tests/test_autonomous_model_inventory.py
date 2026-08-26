@@ -7,6 +7,7 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     AutonomousAgent,
+    BrainRunError,
     AutonomousModelInventoryError,
     AutonomousModelInventoryStore,
     LLMRuntime,
@@ -109,6 +110,62 @@ def test_inventory_retires_stale_models_only_after_successful_authoritative_refr
     )
     assert second["providers"][0]["removed_model_ids"] == ["offline/old-model"]
     assert [row["model"] for row in agent.models()] == ["new-model"]
+
+
+def test_agent_inventory_restore_retains_cas_fence_and_rolls_back_stale_refresh(tmp_path):
+    rows = [{"id": "old-model", "context_length": 16_000, "max_output_tokens": 1_000, "capabilities": ["reasoning"]}]
+    runtime = _runtime(rows)
+    store = AutonomousModelInventoryStore(tmp_path / "inventory-agent-cas.json")
+    primary = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    first = primary.refresh_model_inventory(
+        providers=("offline",),
+        priors=_prior("offline/old-model"),
+        domain_requirements={"coding": ("reasoning",)},
+        snapshot_store=store,
+        refresh_id="inventory-agent-old",
+    )
+
+    restarted = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    restored = restarted.restore_model_inventory(store)
+    assert restored is not None
+    assert restored["snapshot_digest"] == first["snapshot_digest"]
+    assert [row["model"] for row in restarted.models()] == ["old-model"]
+
+    rows[:] = [{"id": "new-model", "context_length": 16_000, "max_output_tokens": 1_000, "capabilities": ["reasoning"]}]
+    second = primary.refresh_model_inventory(
+        providers=("offline",),
+        priors=_prior("offline/new-model"),
+        domain_requirements={"coding": ("reasoning",)},
+        snapshot_store=store,
+        refresh_id="inventory-agent-new",
+    )
+    assert second["snapshot_digest"] != first["snapshot_digest"]
+
+    with pytest.raises(BrainRunError, match="model inventory refresh failed"):
+        restarted.refresh_model_inventory(
+            providers=("offline",),
+            priors=_prior("offline/new-model"),
+            domain_requirements={"coding": ("reasoning",)},
+            snapshot_store=store,
+            refresh_id="inventory-agent-stale",
+        )
+    assert [row["model"] for row in restarted.models()] == ["old-model"]
+
+
+def test_agent_inventory_restore_rejects_snapshot_without_bound_catalogue(tmp_path):
+    runtime = _runtime([{"id": "offline-model", "context_length": 16_000, "max_output_tokens": 1_000, "capabilities": ["reasoning"]}])
+    source = AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue())
+    snapshot = source.model_inventory.refresh(
+        providers=("offline",),
+        priors=_prior("offline/offline-model"),
+        domain_requirements={"coding": ("reasoning",)},
+        refresh_id="inventory-unbound-catalogue",
+    )
+    store = AutonomousModelInventoryStore(tmp_path / "inventory-unbound-catalogue.json")
+    store.save(snapshot)
+
+    with pytest.raises(BrainRunError, match="model inventory restore failed"):
+        AutonomousAgent(object(), runtime, model_catalogue=ModelCatalogue()).restore_model_inventory(store)
 
 
 def test_inventory_prior_factory_derives_explicit_metadata_without_second_discovery():

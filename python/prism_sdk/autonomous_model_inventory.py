@@ -808,6 +808,87 @@ class AutonomousModelInventoryCoordinator:
         )
 
 
+class AutonomousModelInventoryPersistenceCoordinator:
+    """Serialize inventory refresh/restore operations with a retained CAS fence.
+
+    The discovery coordinator owns live runtime/catalogue mutation; this companion owns the
+    caller-provided metadata store. A successful restore establishes the expected snapshot digest
+    for the next refresh. If a refresh loses a compare-and-swap race, the in-memory catalogue is
+    rolled back to its pre-refresh image so a failed durable write cannot leave routing metadata
+    claiming a state that was not committed.
+    """
+
+    def __init__(
+        self,
+        inventory: AutonomousModelInventoryCoordinator,
+        store: AutonomousModelInventoryStore,
+    ) -> None:
+        if not isinstance(inventory, AutonomousModelInventoryCoordinator):
+            raise AutonomousModelInventoryError("inventory persistence coordinator requires an inventory coordinator")
+        if not isinstance(store, AutonomousModelInventoryStore):
+            raise AutonomousModelInventoryError("inventory persistence coordinator requires an inventory store")
+        self.inventory = inventory
+        self.store = store
+        self._expected_snapshot_digest: str | None = None
+        self._lock = threading.RLock()
+
+    def refresh(
+        self,
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession | None = None,
+        providers: Sequence[str] | None = None,
+        priors: Mapping[str, Mapping[str, Any]] | None = None,
+        prior_factory: Callable[[ProviderModelDescriptor], Mapping[str, Any]] | None = None,
+        domain_requirements: Mapping[str, Sequence[str]] = {},
+        limit: int = MAX_AUTONOMOUS_MODEL_INVENTORY_MODELS_PER_PROVIDER,
+        refresh_id: str | None = None,
+        raise_on_error: bool = False,
+    ) -> AutonomousModelInventorySnapshot:
+        with self._lock:
+            before = self.inventory.catalogue.to_dict()
+            try:
+                snapshot = self.inventory.refresh(
+                    credentials=credentials,
+                    providers=providers,
+                    priors=priors,
+                    prior_factory=prior_factory,
+                    domain_requirements=domain_requirements,
+                    limit=limit,
+                    refresh_id=refresh_id,
+                    raise_on_error=raise_on_error,
+                )
+                committed = self.store.save_if_unchanged(
+                    snapshot,
+                    self._expected_snapshot_digest,
+                    catalogue=self.inventory.catalogue,
+                )
+            except Exception:
+                self.inventory.catalogue.restore(before)
+                raise
+            if not committed:
+                self.inventory.catalogue.restore(before)
+                raise AutonomousModelInventoryError("inventory persistence compare-and-swap conflict")
+            self._expected_snapshot_digest = snapshot.digest
+            return snapshot
+
+    def restore(self) -> AutonomousModelInventorySnapshot | None:
+        """Restore the validated catalogue image and establish its next-write CAS expectation."""
+
+        with self._lock:
+            snapshot = self.store.load()
+            if snapshot is None:
+                self._expected_snapshot_digest = None
+                return None
+            catalogue = self.store.load_catalogue()
+            if catalogue is None:
+                raise AutonomousModelInventoryError(
+                    "inventory persistence snapshot does not contain a bound model catalogue"
+                )
+            self.inventory.catalogue.restore(catalogue)
+            self._expected_snapshot_digest = snapshot.digest
+            return snapshot
+
+
 __all__ = [
     "AUTONOMOUS_MODEL_INVENTORY_SCHEMA",
     "AUTONOMOUS_MODEL_INVENTORY_PROVIDER_SCHEMA",
@@ -827,4 +908,5 @@ __all__ = [
     "AutonomousModelInventorySnapshot",
     "AutonomousModelInventoryStore",
     "AutonomousModelInventoryCoordinator",
+    "AutonomousModelInventoryPersistenceCoordinator",
 ]

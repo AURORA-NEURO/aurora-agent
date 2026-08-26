@@ -2592,6 +2592,16 @@ validated metadata-only catalogue into the agent, and leaves the recovered diges
 next refresh. This serialization covers concurrent discovery calls at the agent boundary while
 keeping provider registration, credential resolution, and discovery approval caller-owned.
 
+The Python `AutonomousAgent` now has the same restart-safe composition. Passing an
+`AutonomousModelInventoryStore` to `agent.refresh_model_inventory(..., snapshot_store=store)`
+creates and retains one `AutonomousModelInventoryPersistenceCoordinator` for that store;
+`agent.restore_model_inventory(store)` rehydrates the validated catalogue in place and retains the
+last snapshot digest for the next refresh. A stale compare-and-swap failure rolls the live
+catalogue back to its pre-refresh image, so an unsuccessful durable write cannot silently change
+the models presented to selection. The restore path is provider-free and requires a catalogue
+bound to the persisted snapshot; provider registrations, credentials, circuits, and evaluator
+quality remain live caller-owned gates.
+
 `refresh()` is the only operation that performs provider model discovery. Persistence and
 `restore()` are provider-free, digest-bound catalogue rehydration. Discovery can establish that
 an arm exists and declares a capability, but it never supplies quality, cost, reliability, task

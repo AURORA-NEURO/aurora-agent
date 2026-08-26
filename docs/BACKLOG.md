@@ -1926,3 +1926,11 @@ inline/digest inputs, and cross-registry persistence bindings. The lifecycle del
 only evaluator metrics, report digests, and registry metadata; calibration cases, labels, evidence,
 prompts, responses, credentials, and evaluator authority remain caller-owned. Learning admission
 continues to fail closed until the explicitly selected report is validated and admitted.
+
+Python model inventory now matches the TypeScript restart lifecycle. The high-level agent lazily
+retains one store-bound persistence coordinator, persists refreshes with the last successful
+snapshot digest, restores the metadata-only catalogue in place, and fences stale writers with
+compare-and-swap. A failed refresh persistence operation rolls the live catalogue back to its
+pre-refresh image. All-domain coverage remains provider-discovery metadata only: credentials,
+circuits, quality priors, evaluator evidence, and selection authority are not restored from the
+inventory snapshot.

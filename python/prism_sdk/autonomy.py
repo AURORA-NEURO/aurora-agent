@@ -185,6 +185,8 @@ from .autonomous_decision_persistence import (
 )
 from .autonomous_model_inventory import (
     AutonomousModelInventoryCoordinator,
+    AutonomousModelInventoryError,
+    AutonomousModelInventoryPersistenceCoordinator,
     AutonomousModelInventorySnapshot,
     AutonomousModelInventoryStore,
 )
@@ -14827,6 +14829,7 @@ class AutonomousAgent:
         self.credential_provisioner = credential_provisioner or CredentialProvisioner(self.onboarding)
         self.catalogue = model_catalogue or ModelCatalogue()
         self.model_inventory = AutonomousModelInventoryCoordinator(runtime, self.catalogue)
+        self.model_inventory_persistence: AutonomousModelInventoryPersistenceCoordinator | None = None
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
         self.learning_persistence = learning_persistence
@@ -15043,6 +15046,19 @@ class AutonomousAgent:
             providers=providers,
         )
 
+    def _model_inventory_persistence_for(
+        self,
+        snapshot_store: AutonomousModelInventoryStore,
+    ) -> AutonomousModelInventoryPersistenceCoordinator:
+        coordinator = self.model_inventory_persistence
+        if coordinator is None or coordinator.store is not snapshot_store:
+            coordinator = AutonomousModelInventoryPersistenceCoordinator(
+                self.model_inventory,
+                snapshot_store,
+            )
+            self.model_inventory_persistence = coordinator
+        return coordinator
+
     def refresh_model_inventory(
         self,
         *,
@@ -15076,17 +15092,28 @@ class AutonomousAgent:
                 and isinstance(row.get("model_capabilities"), Sequence)
             }
         try:
-            snapshot = self.model_inventory.refresh(
-                credentials=credentials,
-                providers=providers,
-                priors=priors,
-                prior_factory=prior_factory,
-                domain_requirements=domain_requirements,
-                limit=limit,
-                snapshot_store=snapshot_store,
-                refresh_id=refresh_id,
-                raise_on_error=raise_on_error,
-            )
+            if snapshot_store is None:
+                snapshot = self.model_inventory.refresh(
+                    credentials=credentials,
+                    providers=providers,
+                    priors=priors,
+                    prior_factory=prior_factory,
+                    domain_requirements=domain_requirements,
+                    limit=limit,
+                    refresh_id=refresh_id,
+                    raise_on_error=raise_on_error,
+                )
+            else:
+                snapshot = self._model_inventory_persistence_for(snapshot_store).refresh(
+                    credentials=credentials,
+                    providers=providers,
+                    priors=priors,
+                    prior_factory=prior_factory,
+                    domain_requirements=domain_requirements,
+                    limit=limit,
+                    refresh_id=refresh_id,
+                    raise_on_error=raise_on_error,
+                )
         except Exception as error:
             if isinstance(error, BrainRunError):
                 raise
@@ -15094,6 +15121,18 @@ class AutonomousAgent:
         if not isinstance(snapshot, AutonomousModelInventorySnapshot):
             raise BrainRunError("model inventory coordinator returned an invalid snapshot")
         return snapshot.to_dict()
+
+    def restore_model_inventory(
+        self,
+        snapshot_store: AutonomousModelInventoryStore,
+    ) -> dict[str, Any] | None:
+        """Restore a metadata-only model catalogue and retain its next inventory CAS fence."""
+
+        try:
+            snapshot = self._model_inventory_persistence_for(snapshot_store).restore()
+        except AutonomousModelInventoryError as error:
+            raise BrainRunError("model inventory restore failed") from error
+        return None if snapshot is None else snapshot.to_dict()
 
     def register_provider(self, config: ProviderConfig) -> None:
         """Register non-secret provider transport metadata for the key-entry flow."""
