@@ -101,6 +101,7 @@ pub mod throughput_evidence_surveillance_contract_model;
 pub mod federated_continual_evidence_surveillance_contract_model;
 pub mod local_evidence_surveillance_research_copilot;
 pub mod multimodal_evidence_surveillance_research_copilot;
+pub mod throughput_evidence_surveillance_research_copilot;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
@@ -299,6 +300,16 @@ pub use execution_control::{
     ComputationalExecutionRequest, ExecutionAdmissionMode, ExecutionControlDecision,
     ExecutionControlError, CONTRACT_VERSION as EXECUTION_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as EXECUTION_CONTROL_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_research_copilot::{
+    run_throughput_evidence_surveillance_research_copilot,
+    throughput_evidence_surveillance_research_copilot_manifest,
+    ThroughputCopilotEvidenceObservation, ThroughputCopilotQualifiedEvidenceSet,
+    ThroughputEvidenceSurveillanceResearchCopilotError,
+    ThroughputEvidenceSurveillanceResearchCopilotReceipt,
+    ThroughputEvidenceSurveillanceResearchCopilotRequest, ThroughputResearchCopilotDisposition,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
 };
 pub use experiment_design_control::{
     compile_experiment_design, DesignDecision, DesignSite, ExperimentAssignment,

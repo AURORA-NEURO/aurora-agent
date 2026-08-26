@@ -144,6 +144,11 @@ use bioprism_adapter::{
     INGESTION_GATEWAY_FEATURE_ID,
 };
 use bioprism_adapter::{
+    run_throughput_evidence_surveillance_research_copilot,
+    ThroughputEvidenceSurveillanceResearchCopilotReceipt,
+    ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_knowledge_workflow, ClaimsWorkflowRequest, KnowledgeWorkflowReceipt,
     KNOWLEDGE_WORKFLOW_FEATURE_ID,
 };
@@ -278,6 +283,7 @@ pub const MECHANISM_GATEWAY_TOOL: &str = "federated_mechanism_gateway";
 pub const EVIDENCE_SURVEILLANCE_TOOL: &str = "evidence_surveillance_copilot";
 pub const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str = "adapter_local_evidence_surveillance_research_copilot";
 pub const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str = "adapter_multimodal_evidence_surveillance_research_copilot";
+pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str = "adapter_throughput_evidence_surveillance_research_copilot";
 pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
@@ -1012,6 +1018,19 @@ pub fn validate_evidence_synthesis_json(
     if receipt.feature_id != RETRIEVAL_SYNTHESIS_FEATURE_ID {
         return Err("retrieval synthesis feature id mismatch".into());
     }
+    Ok(receipt)
+}
+
+pub fn run_throughput_evidence_surveillance_research_copilot_json(value: &Value) -> Result<Value, String> {
+    let request = serde_json::from_value(value.clone()).map_err(|error| format!("invalid throughput research copilot request: {error}"))?;
+    let receipt = run_throughput_evidence_surveillance_research_copilot(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize throughput research copilot receipt: {error}"))
+}
+
+pub fn validate_throughput_evidence_surveillance_research_copilot_json(value: &Value) -> Result<ThroughputEvidenceSurveillanceResearchCopilotReceipt, String> {
+    let receipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid throughput research copilot receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID { return Err("throughput research copilot feature id mismatch".into()); }
     Ok(receipt)
 }
 

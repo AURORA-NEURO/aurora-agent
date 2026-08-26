@@ -6654,9 +6654,17 @@ from .adapter_multimodal_evidence_surveillance_research_copilot import (
     MultimodalEvidenceSurveillanceResearchCopilotReceipt,
     run_multimodal_evidence_surveillance_research_copilot,
 )
+from .adapter_throughput_evidence_surveillance_research_copilot import (
+    ThroughputCopilotEvidenceObservation,
+    ThroughputEvidenceSurveillanceResearchCopilotReceipt,
+    run_throughput_evidence_surveillance_research_copilot,
+)
 
 __all__ += [
     "MultimodalCopilotEvidenceObservation",
     "MultimodalEvidenceSurveillanceResearchCopilotReceipt",
     "run_multimodal_evidence_surveillance_research_copilot",
+    "ThroughputCopilotEvidenceObservation",
+    "ThroughputEvidenceSurveillanceResearchCopilotReceipt",
+    "run_throughput_evidence_surveillance_research_copilot",
 ]
