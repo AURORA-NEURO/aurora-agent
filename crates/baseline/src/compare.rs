@@ -46,6 +46,7 @@
 //! out of the shipped fixture by deleting one subject's split arm. Leaving the state out would make
 //! the old swallow reappear silently the day any of those moves.
 
+use crate::directed::ScreenedDependencyWalk;
 use crate::index::PanelIndex;
 use crate::strategy::{ContextStrategy, Selection};
 use bioprism_fiber::{oracle, FiberError, Query};
@@ -587,4 +588,31 @@ pub fn default_panel() -> Vec<Box<dyn ContextStrategy>> {
         Box::new(crate::directed::DirectedDependencyWalk::unbounded()),
         Box::new(crate::strategy::FiberCompiled),
     ]
+}
+
+/// [`default_panel`] plus the three counter-baselines that carry FIBER's subtractive passes.
+///
+/// # Why a second panel rather than a wider default
+///
+/// The counter-baselines belong in every comparison on the merits — a panel in which only one
+/// competitor holds the temporal cut and the policy screen measures those passes and calls the
+/// result a property of the compiler. They are nonetheless kept out of [`default_panel`], because
+/// that panel's output is pinned byte-identically in three places that are themselves the
+/// repository's evidence: `crates/baseline/tests/sweep_grid.rs` reproduces a 36-cell table,
+/// `crates/baseline/tests/equal_engineering.rs` counts the serialised rows, and `docs/FINDINGS.md`
+/// §1, §3 and §6 transcribe tables from it. Widening the default would rewrite those numbers in
+/// the same commit that adds the strategies whose job is to test them, leaving no before-and-after
+/// a reader could check. The numbers stay where they are and the new rows arrive beside them.
+///
+/// No `default_panel` row is displaced or reordered relative to another: the three counter-
+/// baselines are inserted beside the walk they extend, so the default table survives inside the
+/// extended one as a subsequence and the two can be read against each other row by row.
+pub fn extended_panel() -> Vec<Box<dyn ContextStrategy>> {
+    let mut panel = default_panel();
+    let fiber = panel.pop().expect("the default panel ends with fiber");
+    panel.push(Box::new(ScreenedDependencyWalk::cut()));
+    panel.push(Box::new(ScreenedDependencyWalk::screened()));
+    panel.push(Box::new(ScreenedDependencyWalk::compiled()));
+    panel.push(fiber);
+    panel
 }

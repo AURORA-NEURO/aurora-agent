@@ -29,6 +29,26 @@
 //! `OmissionGroup` values all arrive through serde. A gate that covered only the compiler would
 //! have left the verification path — the one facing untrusted bytes — completely open.
 //!
+//! ## Why `Zero` is gated too, and why its gate is a different shape
+//!
+//! `Zero` is the stronger claim of the two — a proof rather than a ceiling — so leaving it
+//! ungated while `Bounded` was checked had the gates in the wrong order of severity. The gate
+//! cannot be the same shape, though, because the two classes carry different evidence. A
+//! `Bounded` group carries a number, and a number can be re-checked from the group's own bytes.
+//! A `Zero` group carries a claim *about a population*, and no group in isolation can re-derive
+//! it; [`ProvenUnreachable`] is where that obligation is discharged, at the point the count is
+//! minted, and it does not survive serialisation.
+//!
+//! What a verifier holding only the bytes can still check is coherence. `Zero` says no dependency
+//! path reaches the target, and a `bound` is a measurement of what a perturbation did travelling
+//! down such a path. A `Zero` group carrying a bound other than `0.0` therefore asserts both that
+//! no path exists and that something was measured along one, and [`OmissionGroup::admitted`]
+//! refuses it into [`InfluenceClass::Unknown`] on every path a group can enter a manifest by —
+//! including serde, which is how a verifier's groups arrive. The `Some(0.0)` that
+//! [`OmissionGroup::structurally_zero`] writes is admitted because it restates the class rather
+//! than reporting a measurement, which is the distinction
+//! [`OmissionGroup::has_informative_bound`] already draws.
+//!
 //! The fold itself is left alone: [`OmissionManifest::supports_sufficiency_claim`] still reads the
 //! class and nothing else, which is what makes it auditable.
 //!
@@ -40,19 +60,30 @@
 //! can travel *into* a manifest through this module's own API, and on no other.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InfluenceClass {
-    /// No dependency path reaches the target; excluding it cannot move the decision.
+    /// No dependency path reaches the target, under the dependency relation the producer searched.
     ///
-    /// This is a *proof*, and the two ways of arriving at it are not equally good. A group whose
-    /// members were each shown to provide no variable the slice needs has earned the class. A group
-    /// arrived at by subtracting every other group's cardinality from a total has earned it only if
-    /// the other groups are exhaustive, and a population nobody thought of lands here silently and
-    /// with a bound of zero. [`ProvenUnreachable`] is where that obligation is discharged; a caller
-    /// that cannot discharge it belongs in [`InfluenceClass::Unknown`], which costs the sufficiency
-    /// claim and is the honest price.
+    /// That is the whole of what the class asserts. "Excluding it cannot move the decision" is the
+    /// reading a consumer wants and it is a *conditional*, not a corollary: it follows only where
+    /// the searched relation is at least as wide as the one the decision travels, and where the
+    /// declared dependency structure carries every dependency the decision has. Both can fail
+    /// quietly. A producer that searches only along directed factor input→output edges returns "no
+    /// path" for a variable that merely shares a multi-output factor's scope with a needed one,
+    /// which `bioprism_influence` would have accepted as a perturbable subject; a declared graph
+    /// missing an edge returns "no path" for a fact that moves the answer. A producer that cannot
+    /// vouch for its own preconditions owes the consumer that caveat in the group's `reason`.
+    ///
+    /// The two ways of arriving at the class are not equally good either. A group whose members
+    /// were each shown to provide no variable the search reached has earned what the search can
+    /// give. A group arrived at by subtracting every other group's cardinality from a total has
+    /// earned it only if the other groups are exhaustive, and a population nobody thought of lands
+    /// here silently and with a bound of zero. [`ProvenUnreachable`] is where that second
+    /// obligation is discharged; a caller that cannot discharge it belongs in
+    /// [`InfluenceClass::Unknown`], which costs the sufficiency claim and is the honest price.
     Zero,
     /// Influence is non-zero but bounded by a stated quantity that excludes something.
     ///
@@ -111,9 +142,48 @@ impl InformativeBound {
     }
 }
 
+/// Why an omission accounting could not mint a zero-influence count.
+///
+/// An error rather than a saturated number, and returned rather than logged, because the caller's
+/// honest alternatives both need to know which way the books failed to balance: publish the
+/// remainder under a class that claims nothing, or publish no group at all. The one option this
+/// type exists to remove is the third — quietly rounding the disagreement away and publishing the
+/// result as a proof.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OmissionAccountingError {
+    /// One fact was named under two structural reasons.
+    ///
+    /// Refused rather than deduplicated. A fact with two reasons means the caller's classification
+    /// disagrees with itself, and either reading of it puts the wrong count under the strongest
+    /// class available; deduplicating would pick one silently.
+    NamedTwice { fact: String },
+    /// More omitted facts were classified than the corpus reports omitted.
+    ///
+    /// The subtraction underflows, and a saturated zero here would read as "every omission is
+    /// accounted for elsewhere" — a reassuring rendering of an accounting that is provably wrong.
+    ExceedsOmitted { omitted: usize, classified: usize },
+}
+
+impl std::fmt::Display for OmissionAccountingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OmissionAccountingError::NamedTwice { fact } => write!(
+                f,
+                "omitted fact {fact:?} was classified under two structural reasons, so no zero-influence remainder follows from this accounting"
+            ),
+            OmissionAccountingError::ExceedsOmitted { omitted, classified } => write!(
+                f,
+                "{classified} omitted fact(s) were classified but the corpus reports only {omitted} omitted"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for OmissionAccountingError {}
+
 /// A count of omissions each of which has been shown to reach no target.
 ///
-/// The field is private and [`ProvenUnreachable::remainder`] is the only constructor, so a
+/// The field is private and [`ProvenUnreachable::from_classified`] is the only constructor, so a
 /// [`InfluenceClass::Zero`] count cannot be a bare `usize` a caller arrived at by whatever
 /// arithmetic was to hand.
 ///
@@ -122,22 +192,44 @@ impl InformativeBound {
 /// (43.34), and materialising the complement would reintroduce the whole-world traversal the design
 /// rejects. So the zero-influence count *is* a remainder, and the only question that matters is
 /// whether everything that is not provably zero has been taken out of it first. This constructor
-/// makes that question unavoidable by taking `still_reaching` — the number of omitted facts that do
-/// provide a variable the slice needs — as a separate argument and doing the subtraction itself. A
-/// caller who has not computed that population cannot pass it, and a caller who passes one larger
-/// than the total gets `None` rather than a saturated zero, because an accounting error that
-/// silently becomes "everything is provably irrelevant" is the worst available failure.
+/// makes that question unavoidable by taking the classified populations themselves and doing every
+/// subtraction itself, so the caller has no arithmetic left to get wrong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProvenUnreachable(usize);
 
 impl ProvenUnreachable {
-    /// The omitted facts left once every fact still reaching a needed variable is removed.
+    /// The omitted facts left once every omission classified for some other reason is named.
     ///
-    /// `None` on underflow. Facts withheld by policy or by the temporal cut must already have been
-    /// removed from `omitted` by the caller: they have their own classes, and they are omissions
-    /// nobody proved irrelevant either.
-    pub fn remainder(omitted: usize, still_reaching: usize) -> Option<ProvenUnreachable> {
-        omitted.checked_sub(still_reaching).map(ProvenUnreachable)
+    /// Takes the populations rather than their cardinalities, which is the whole difference
+    /// between this and a subtraction. A cardinality is a number any caller can produce; a
+    /// population is evidence, and a caller that has not enumerated the facts it classified
+    /// elsewhere has nothing to pass. It also makes double-counting detectable, which a sum of
+    /// counts cannot be: two groups naming the same fact arrive here as
+    /// [`OmissionAccountingError::NamedTwice`] instead of removing that fact from the proven
+    /// remainder twice over.
+    ///
+    /// Every classified population goes in — policy-withheld, temporally withheld and
+    /// still-reaching alike. Splitting them across separate arguments would leave the caller
+    /// summing them, and a caller that sums is a caller that can saturate.
+    pub fn from_classified<'a>(
+        omitted: usize,
+        classified: impl IntoIterator<Item = &'a str>,
+    ) -> Result<ProvenUnreachable, OmissionAccountingError> {
+        let mut named: BTreeSet<&str> = BTreeSet::new();
+        for fact in classified {
+            if !named.insert(fact) {
+                return Err(OmissionAccountingError::NamedTwice {
+                    fact: fact.to_string(),
+                });
+            }
+        }
+        omitted
+            .checked_sub(named.len())
+            .map(ProvenUnreachable)
+            .ok_or(OmissionAccountingError::ExceedsOmitted {
+                omitted,
+                classified: named.len(),
+            })
     }
 
     pub fn count(self) -> usize {
@@ -156,8 +248,17 @@ pub struct OmissionGroup {
     /// [`InfluenceClass::Bounded`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bound: Option<f64>,
-    /// Representative members, for a human reading the receipt. Never the whole list: large
-    /// manifests are content-addressed rather than inlined.
+    /// Identifiers of representative members, for a human reading the receipt. Never the whole
+    /// list: large manifests are content-addressed rather than inlined.
+    ///
+    /// Members of the population `count` counts, and identified the way the rest of the receipt
+    /// identifies them — omitted facts by fact id where the manifest is over facts, unmeasured
+    /// capabilities by capability id where it is over capabilities. Not a description of *why* the
+    /// group was omitted: that is `reason`, and a consumer cannot tell the two apart from the
+    /// bytes. `bioprism_devx`'s `why_omitted` looks its subject up here after failing to find it in
+    /// the selected set, so anything in this list that is not a member answers a question about
+    /// something else. A group whose members exist but cannot be named leaves this empty and says
+    /// so in `reason`; that is a weaker receipt than naming them and a truthful one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub examples: Vec<String>,
 }
@@ -214,22 +315,39 @@ impl OmissionGroup {
 
     /// The group as a manifest is willing to hold it.
     ///
-    /// A `Bounded` claim without an informative bound is downgraded to [`InfluenceClass::Unknown`]
-    /// and the refused value is written into the reason, so the certificate says a bound was
-    /// offered and refused rather than silently losing it. Nothing else is rewritten: this is an
-    /// admission check on one claim, not a normalisation pass over the manifest.
+    /// Both sufficiency-supporting classes are checked, each against what its own bytes can be
+    /// held to. A `Bounded` claim without an informative bound is downgraded to
+    /// [`InfluenceClass::Unknown`]; a `Zero` claim carrying a bound that is not `0.0` is
+    /// incoherent — it asserts that no dependency path exists and that a perturbation measured
+    /// something travelling down one — and is downgraded on the same terms. In both cases the
+    /// refused value is written into the reason, so the certificate says a claim was offered and
+    /// refused rather than silently losing it. Nothing else is rewritten: this is an admission
+    /// check on one claim, not a normalisation pass over the manifest.
     pub fn admitted(mut self) -> OmissionGroup {
-        if self.influence != InfluenceClass::Bounded || self.has_informative_bound() {
-            return self;
+        match self.influence {
+            InfluenceClass::Bounded if !self.has_informative_bound() => {
+                let refused = match self.bound {
+                    Some(value) => format!("a bound of {value} permits every answer"),
+                    None => "a bounded class was claimed with no bound at all".to_string(),
+                };
+                self.reason = format!(
+                    "{}; refused as a sufficiency-supporting bound because {refused}",
+                    self.reason
+                );
+            }
+            InfluenceClass::Zero => match self.bound {
+                Some(value) if value != 0.0 => {
+                    self.reason = format!(
+                        "{}; refused as a sufficiency-supporting proof because a group with no \
+                         dependency path to the target cannot also carry the measurement {value}, \
+                         which only a path could have produced",
+                        self.reason
+                    );
+                }
+                _ => return self,
+            },
+            _ => return self,
         }
-        let refused = match self.bound {
-            Some(value) => format!("a bound of {value} permits every answer"),
-            None => "a bounded class was claimed with no bound at all".to_string(),
-        };
-        self.reason = format!(
-            "{}; refused as a sufficiency-supporting bound because {refused}",
-            self.reason
-        );
         self.influence = InfluenceClass::Unknown;
         self.bound = None;
         self

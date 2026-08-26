@@ -412,4 +412,10 @@ fn the_v0_1_classification_string_is_a_constant_and_not_a_verdict_about_the_omis
         !shadowed.certificate.manifest.supports_sufficiency_claim(),
         "the manifest, unlike the string, distinguishes the two worlds"
     );
+    assert_eq!(
+        shadowed.trace.unproven_remainder, None,
+        "the shadowed world loses its sufficiency claim because a displaced fact was classified \
+         unproven, not because the accounting was refused; a refusal would fail the assertion \
+         above for an unrelated reason"
+    );
 }

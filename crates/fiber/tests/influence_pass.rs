@@ -354,4 +354,14 @@ fn a_world_with_no_shadowed_variable_keeps_every_omission_in_the_proven_zero_gro
         0
     );
     assert!(out.certificate.manifest.supports_sufficiency_claim());
+    assert_eq!(
+        out.trace.unproven_remainder, None,
+        "the headline group is minted from a balanced accounting, not from a refusal that \
+         happened to leave the count alone"
+    );
+    assert_eq!(
+        out.certificate.manifest.total_omitted(),
+        out.certificate.omissions.total_facts,
+        "all 750 omissions are in the manifest, so the proven group is a remainder over a partition"
+    );
 }

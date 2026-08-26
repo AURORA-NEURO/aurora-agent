@@ -13,6 +13,13 @@
 //! other way: the directed dependency walk selects the identical facts FIBER does on every world
 //! in the shipped sweep. See `docs/FINDINGS.md`.
 //!
+//! That tie is *entailed* by the two strategies' selection algebra rather than discovered by the
+//! sweep — [`directed`] states the subset relation and its three escape hatches, and
+//! `tests/selection_equivalence.rs` asserts them — so the sweep, which varies none of the three,
+//! could not have separated them whatever it had measured. [`compare::extended_panel`] adds the
+//! counter-baselines that carry FIBER's own passes, and `docs/DISCRIMINATING_COMPARISON.md`
+//! reports them on the two worlds where the hatches fire.
+//!
 //! # Not implemented
 //!
 //! - **A learned or neural retriever.** [`LexicalTopK`] is a BM25 proxy and [`EmbeddingTopK`] a
@@ -36,10 +43,10 @@ pub mod strategy;
 pub mod sweep;
 
 pub use compare::{
-    compare, default_panel, CompareError, Comparison, Judgement, RowRefusal, RowVerdict,
-    StrategyResult,
+    compare, default_panel, extended_panel, CompareError, Comparison, Judgement, RowRefusal,
+    RowVerdict, StrategyResult,
 };
-pub use directed::DirectedDependencyWalk;
+pub use directed::{DirectedDependencyWalk, EngineeredPasses, ScreenedDependencyWalk};
 pub use embedding::EmbeddingTopK;
 pub use incidence::{ConnectedComponent, KHopIncidence, QueryGraph};
 pub use index::PanelIndex;

@@ -24,11 +24,59 @@
 //! walk does not reproduce is the rest of the compiler's contract — the temporal cut, the policy
 //! screen and the certificate stating what was omitted and why — none of which these worlds'
 //! verdicts exercise.
+//!
+//! # The tie is entailed, not observed
+//!
+//! That 36-of-36 tie was reported as a measurement. It is a theorem, and stating it as one is what
+//! makes the benchmark's limit visible.
+//!
+//! [`DirectedDependencyWalk`] selects `closure ∪ slice`. FIBER selects
+//! `(closure ∪ slice') ∖ withheld_by_policy ∖ inaccessible_at_cut`, where `slice'` is this walk's
+//! `slice` with at most one provider kept per needed variable
+//! (`bioprism_world::WorldSource::fact_providing` returns the last in document order). Both
+//! fixpoints are the same: [`crate::directed::DirectedDependencyWalk::slice`] and
+//! [`bioprism_fiber::backward_slice`] step needed variable → producing factor → factor input over
+//! the same directed edges, each expanding a factor at most once, so they agree on
+//! `needed_variables` exactly. Union is monotone and set difference only removes, so
+//!
+//! ```text
+//! fiber(world, query) ⊆ directed-walk-full(world, query)     for every world and query
+//! ```
+//!
+//! holds unconditionally, and equality holds **exactly** when all three of the following are true.
+//! Each is an escape hatch — a knob that, if moved, separates the two strategies:
+//!
+//! 1. **No policy withholding lands on the selection.** Fired by a fact binding the `policy` scope
+//!    dimension to a clause the query does not accept — `WorldSpec::policy_restricted`.
+//! 2. **No selected fact is temporally inaccessible at the decision time.** Fired by an event
+//!    releasing a needed variable after the cut — `WorldSpec::external_confirmation`, or any
+//!    `events × decision_time` pair that puts a release on the far side of the cut.
+//! 3. **No needed variable has a shadowed provider outside the closure.** Fired by two facts
+//!    providing one variable, where FIBER keeps the document-order winner and the walk keeps both.
+//!
+//! Two further conditions are refusals rather than divergences, and are named so nobody reads an
+//! empty selection as a small one: a FIBER compile that errors (a policy conflict, a withheld
+//! protected fact, an exceeded budget) yields an empty selection, which is a subset of everything
+//! and equal to nothing; and the screen can reject a malformed policy requirement carried by a
+//! fact only the walk holds.
+//!
+//! `crates/baseline/tests/selection_equivalence.rs` asserts the subset relation and the equality
+//! condition over the sweep's own specs and over the two presets that fire the hatches. The
+//! consequence for the shipped sweep is stated in `docs/FINDINGS.md` §7: the grid varies
+//! attachment, relay depth, tag style and distractor count, none of which appear above, so the
+//! sweep could not have separated these two strategies whatever it measured.
+//!
+//! # The counter-baselines
+//!
+//! [`ScreenedDependencyWalk`] closes the gap the entailment names by handing the walk the passes
+//! it was never given. A comparison in which only one competitor carries the temporal cut and the
+//! policy screen measures the passes, not the compiler, and reporting it as a win for the compiler
+//! would be `compare_baselines.py`'s own mistake one level up.
 
 use crate::index::PanelIndex;
 use crate::strategy::{ContextStrategy, Selection};
-use bioprism_fiber::Query;
-use bioprism_world::World;
+use bioprism_fiber::{policy, temporal_cut, PolicyEnvelope, Query};
+use bioprism_world::{Fact, World};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 pub struct DirectedDependencyWalk {
@@ -115,12 +163,7 @@ impl ContextStrategy for DirectedDependencyWalk {
 
     fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
         let (world, query) = (index.world(), index.query());
-        let closure: BTreeSet<String> = world
-            .facts
-            .iter()
-            .filter(|fact| fact.has_any_tag(&query.protected_tags))
-            .map(|fact| fact.id.as_str().to_string())
-            .collect();
+        let closure = protected_closure(world, query);
         let slice = self.slice(world, query);
 
         let sliced_beyond_closure = slice.difference(&closure).count();
@@ -134,4 +177,193 @@ impl ContextStrategy for DirectedDependencyWalk {
 
         Selection::new(closure.union(&slice).cloned().collect()).noting(note)
     }
+}
+
+/// Facts carrying a protected tag, computed the way 43.13 orders it: before any relevance step.
+///
+/// Shared by every walk in this module so that no counter-baseline can accidentally be handed a
+/// different mandatory closure from the one the naive walk takes, which would make the panel
+/// unequal in the direction the module documentation warns about.
+fn protected_closure(world: &World, query: &Query) -> BTreeSet<String> {
+    world
+        .facts
+        .iter()
+        .filter(|fact| fact.has_any_tag(&query.protected_tags))
+        .map(|fact| fact.id.as_str().to_string())
+        .collect()
+}
+
+/// Which of FIBER's subtractive passes a walk carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineeredPasses {
+    /// The temporal cut of 43.09 only: evidence an event had not released by the decision time is
+    /// dropped. Isolates the release schedule from the access-control question.
+    TemporalCut,
+    /// The policy screen of 43.33 only: evidence whose `policy` scope names a clause the query did
+    /// not accept is dropped. Isolates access control from the release schedule.
+    PolicyScreen,
+    /// Both, in FIBER's own order — screen first over the materialised candidates, then the cut.
+    ///
+    /// This is FIBER's selection algebra with no certificate attached, and it is the baseline the
+    /// honesty argument turns on: if it ties FIBER, the compiler's measurable selection advantage
+    /// is exactly the two passes and not the compiler.
+    Both,
+}
+
+impl EngineeredPasses {
+    fn screens_policy(self) -> bool {
+        matches!(
+            self,
+            EngineeredPasses::PolicyScreen | EngineeredPasses::Both
+        )
+    }
+
+    fn applies_cut(self) -> bool {
+        matches!(self, EngineeredPasses::TemporalCut | EngineeredPasses::Both)
+    }
+}
+
+/// The full backward walk, carrying FIBER's subtractive passes.
+///
+/// The panel's obligation under 43.38 is that "no baseline receives less data access or weaker
+/// tools", and [`DirectedDependencyWalk`] receives strictly weaker tools than the compiler it is
+/// compared against: it is handed the mandatory closure and the directed slice and then denied the
+/// two passes that are the only reason FIBER's selection can differ from it at all. Any world on
+/// which those passes fire scores the walk down for equipment it was never issued.
+///
+/// Every pass here is the *same code* FIBER runs — [`bioprism_fiber::temporal_cut`] and
+/// [`bioprism_fiber::policy::screen`] — rather than a re-implementation, so a divergence between
+/// this walk and the compiler cannot be an artefact of two authors reading one specification
+/// differently.
+///
+/// What this still does not carry, and what therefore remains genuinely FIBER-only: the Context
+/// Certificate, its influence manifest, the omission classes that name *why* each dropped fact was
+/// dropped, and the refinement frontier. Those are not selections and no admissibility column can
+/// see them.
+pub struct ScreenedDependencyWalk {
+    pub passes: EngineeredPasses,
+}
+
+impl ScreenedDependencyWalk {
+    /// The walk plus the temporal cut.
+    pub fn cut() -> Self {
+        ScreenedDependencyWalk {
+            passes: EngineeredPasses::TemporalCut,
+        }
+    }
+
+    /// The walk plus the policy screen.
+    pub fn screened() -> Self {
+        ScreenedDependencyWalk {
+            passes: EngineeredPasses::PolicyScreen,
+        }
+    }
+
+    /// The walk plus both passes: FIBER's selection algebra, no certificate.
+    pub fn compiled() -> Self {
+        ScreenedDependencyWalk {
+            passes: EngineeredPasses::Both,
+        }
+    }
+}
+
+impl ContextStrategy for ScreenedDependencyWalk {
+    fn name(&self) -> String {
+        match self.passes {
+            EngineeredPasses::TemporalCut => "directed-walk-cut".into(),
+            EngineeredPasses::PolicyScreen => "directed-walk-screened".into(),
+            EngineeredPasses::Both => "directed-walk-compiled".into(),
+        }
+    }
+
+    fn method(&self) -> String {
+        let carried = match self.passes {
+            EngineeredPasses::TemporalCut => "then the temporal cut of 43.09",
+            EngineeredPasses::PolicyScreen => "then the policy screen of 43.33",
+            EngineeredPasses::Both => {
+                "then the policy screen of 43.33 and the temporal cut of 43.09"
+            }
+        };
+        format!(
+            "protected closure first (mandatory, as 43.13 orders it), then the unbounded backward \
+             walk of the directed factor graph, {carried} — the compiler's own pass code, run over \
+             the walk's selection; no certificate is produced"
+        )
+    }
+
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
+        let (world, query) = (index.world(), index.query());
+        let closure = protected_closure(world, query);
+        let slice = DirectedDependencyWalk::unbounded().slice(world, query);
+        let mut selected: BTreeSet<String> = closure.union(&slice).cloned().collect();
+        let walked = selected.len();
+        let mut notes = Vec::new();
+
+        if self.passes.screens_policy() {
+            let envelope = match PolicyEnvelope::resolve(world, query) {
+                Ok(envelope) => envelope,
+                Err(violation) => return refused(format!("policy envelope refused: {violation}")),
+            };
+            let candidates: BTreeMap<String, Fact> = selected
+                .iter()
+                .filter_map(|id| world.fact(id).map(|fact| (id.clone(), fact.clone())))
+                .collect();
+            let screen = match policy::screen(&envelope, &candidates, &closure) {
+                Ok(screen) => screen,
+                Err(violation) => return refused(format!("policy screen refused: {violation}")),
+            };
+            let withheld = screen.withheld_ids();
+            for id in &withheld {
+                selected.remove(id);
+            }
+            notes.push(format!(
+                "policy screen: {} candidate(s) declared a requirement, {} withheld",
+                screen.requirements_seen(),
+                withheld.len()
+            ));
+        }
+
+        if self.passes.applies_cut() {
+            let cut = temporal_cut(world, query.decision_time);
+            let inaccessible: Vec<String> = selected
+                .iter()
+                .filter(|id| {
+                    world
+                        .fact(id)
+                        .is_some_and(|fact| !cut.is_accessible(fact.provides.as_str()))
+                })
+                .cloned()
+                .collect();
+            for id in &inaccessible {
+                selected.remove(id);
+            }
+            notes.push(format!(
+                "temporal cut: {} fact(s) withheld at the decision time",
+                inaccessible.len()
+            ));
+        }
+
+        notes.insert(
+            0,
+            format!(
+                "the walk selected {walked} fact(s) before the carried pass(es), {} after",
+                selected.len()
+            ),
+        );
+
+        notes
+            .into_iter()
+            .fold(Selection::new(selected), |selection, note| {
+                selection.noting(note)
+            })
+    }
+}
+
+/// A refusal, reported the way [`crate::strategy::FiberCompiled`] reports a failed compile.
+///
+/// An empty selection is not a compact one, and the note is the only place a reader learns which
+/// of the two it was. `crate::compare` will judge the empty selection and mark the row unsound,
+/// which is the same treatment FIBER's own refusal receives — matching them is the point.
+fn refused(reason: String) -> Selection {
+    Selection::new(BTreeSet::new()).noting(format!("{reason}; selection is empty"))
 }

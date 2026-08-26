@@ -20,7 +20,8 @@ pub use certificate::{
 };
 pub use layers::{Layer, RenderContext};
 pub use omission::{
-    InfluenceClass, InformativeBound, OmissionGroup, OmissionManifest, ProvenUnreachable,
+    InfluenceClass, InformativeBound, OmissionAccountingError, OmissionGroup, OmissionManifest,
+    ProvenUnreachable,
 };
 pub use plan::{Backend, Fallback, FallbackReason, PlanDescriptor};
 pub use section::{

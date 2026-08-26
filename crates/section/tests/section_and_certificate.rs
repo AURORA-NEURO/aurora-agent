@@ -1,8 +1,8 @@
 use bioprism_section::{
     Backend, CertificateProfile, CertificateVerification, ContextCertificate, DecisionSection,
-    EvidenceCapsule, InfluenceClass, InformativeBound, LeakageWitness, OmissionGroup,
-    OmissionManifest, OracleStatus, OracleVerdict, PlanDescriptor, ReferenceOmissions,
-    RefinementOption, SourceHashes, UnresolvedObligation,
+    EvidenceCapsule, InfluenceClass, InformativeBound, LeakageWitness, OmissionAccountingError,
+    OmissionGroup, OmissionManifest, OracleStatus, OracleVerdict, PlanDescriptor,
+    ProvenUnreachable, ReferenceOmissions, RefinementOption, SourceHashes, UnresolvedObligation,
 };
 use serde_json::{json, Value};
 
@@ -471,4 +471,125 @@ fn a_domain_check_witness_round_trips_and_is_a_violation_not_a_score() {
     let verdict = OracleVerdict::new("rule/trade-surveillance-v1", vec![witness]);
     assert_eq!(verdict.status, OracleStatus::Invalid);
     assert_eq!(verdict.witness_kinds(), vec!["domain_check"]);
+}
+
+/// A proof that no dependency path exists cannot also report what travelled down one.
+///
+/// `Zero` is the stronger of the two sufficiency-supporting claims and was the ungated one. A group
+/// in isolation cannot re-derive the population argument behind it — that obligation belongs to
+/// [`ProvenUnreachable`] and does not survive serialisation — but it can be held to its own
+/// coherence, and a bound is a measurement of a perturbation travelling a path this class says does
+/// not exist. The `Some(0.0)` a structural group carries is admitted because it restates the class
+/// rather than reporting a measurement.
+#[test]
+fn a_zero_influence_group_carrying_a_measured_bound_is_refused_admission() {
+    let mut manifest = OmissionManifest::default();
+    manifest.push(OmissionGroup {
+        reason: "no backward dependency path to any target".into(),
+        influence: InfluenceClass::Zero,
+        count: 12,
+        bound: Some(0.4),
+        examples: vec![],
+    });
+
+    let group = &manifest.groups[0];
+    assert_eq!(group.influence, InfluenceClass::Unknown);
+    assert_eq!(group.bound, None);
+    assert!(
+        group.reason.contains("0.4"),
+        "the refused value stays on the record"
+    );
+    assert!(!manifest.supports_sufficiency_claim());
+    assert_eq!(
+        manifest.total_omitted(),
+        12,
+        "refusing the claim must not discard the omissions it covered"
+    );
+}
+
+/// The refusal reaches a verifier holding only bytes, which is the path that matters most.
+#[test]
+fn a_zero_influence_group_with_a_measured_bound_is_refused_when_parsed_from_a_document() {
+    let manifest: OmissionManifest = serde_json::from_value(json!({
+        "groups": [{
+            "reason": "no backward dependency path to any target",
+            "influence": "zero",
+            "count": 12,
+            "bound": 0.9
+        }]
+    }))
+    .expect("the document parses");
+
+    assert_eq!(manifest.groups[0].influence, InfluenceClass::Unknown);
+    assert!(!manifest.supports_sufficiency_claim());
+}
+
+/// The structural zero the compiler mints survives every gate unchanged.
+#[test]
+fn a_structural_zero_keeps_its_class_and_its_restating_bound() {
+    let proven = ProvenUnreachable::from_classified(750, ["fact.shadowed"])
+        .expect("one classified omission out of 750");
+    assert_eq!(proven.count(), 749);
+
+    let mut manifest = OmissionManifest::default();
+    manifest.push(OmissionGroup::structurally_zero(
+        "no backward dependency path to any target",
+        proven,
+        Vec::new(),
+    ));
+
+    let group = &manifest.groups[0];
+    assert_eq!(group.influence, InfluenceClass::Zero);
+    assert_eq!(group.bound, Some(0.0));
+    assert!(
+        !group.has_informative_bound(),
+        "the zero restates the class and is not a measurement"
+    );
+    assert!(manifest.supports_sufficiency_claim());
+}
+
+/// The count is minted from the populations, so a fact classified twice is a refusal not a number.
+///
+/// A sum of cardinalities cannot see this: two groups each reporting one omission look exactly like
+/// two omissions. Taking the populations themselves is what makes the collision observable, and the
+/// direction of the error is what makes refusing it worth the trouble — subtracting one fact twice
+/// leaves the proven group one fact larger than the evidence supports.
+#[test]
+fn a_fact_classified_under_two_reasons_refuses_the_proven_count_rather_than_shrinking_it() {
+    let error =
+        ProvenUnreachable::from_classified(10, ["fact.withheld", "fact.shadowed", "fact.withheld"])
+            .expect_err("the same fact appears under two reasons");
+
+    assert_eq!(
+        error,
+        OmissionAccountingError::NamedTwice {
+            fact: "fact.withheld".to_string()
+        }
+    );
+    assert!(error.to_string().contains("fact.withheld"));
+}
+
+/// Classifying more omissions than the corpus reports is a refusal, never a saturated zero.
+///
+/// The saturating reading of this arithmetic renders as "every omission is accounted for
+/// elsewhere", which is the most reassuring possible presentation of an accounting that is provably
+/// wrong.
+#[test]
+fn classifying_more_omissions_than_the_corpus_holds_refuses_rather_than_saturating() {
+    let error = ProvenUnreachable::from_classified(1, ["fact.a", "fact.b"])
+        .expect_err("two classified omissions cannot come out of one");
+
+    assert_eq!(
+        error,
+        OmissionAccountingError::ExceedsOmitted {
+            omitted: 1,
+            classified: 2
+        }
+    );
+    assert_eq!(
+        ProvenUnreachable::from_classified(2, ["fact.a", "fact.b"])
+            .expect("an exact accounting leaves nothing proven")
+            .count(),
+        0
+    );
 }

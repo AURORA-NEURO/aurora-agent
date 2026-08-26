@@ -21,6 +21,26 @@
 //! reporting it as unsound would restate the refusal-as-refutation defect [`crate::compare`] was
 //! fixed for. No generated world in the default grid produces a refusal — the state exists here so
 //! that a grid over caller-supplied specs cannot silently coerce one.
+//!
+//! # What this grid provably cannot measure
+//!
+//! The sweep reports `fiber` and `directed-walk-full` tied in all 36 cells. That is not a finding
+//! this grid could have come out of differently. [`crate::directed`] states the entailment:
+//! FIBER's selection is a subset of the directed walk's on every world, with equality exactly when
+//! the policy screen withholds nothing, the temporal cut withholds nothing, and no needed variable
+//! has a shadowed provider. The knobs below — attachment, relay depth, tag style, distractor count
+//! — move none of the three, so every cell in the grid sits on the equality side by construction.
+//!
+//! The knobs that *do* move them are named in [`SweepGrid`] and are exactly the ones the default
+//! grid holds fixed: `events × decision_time` fires the cut, `policy` fires the screen, and a
+//! second fact providing an already-needed variable fires the shadowing hatch. `skeleton` and
+//! `declared_absent` change the decisive structure and so can move which variables are needed,
+//! but neither fires a hatch on its own.
+//!
+//! Separating the two strategies therefore needs a different experiment, not more cells — and once
+//! the experiment exists, it must be run against a walk that carries the same passes, which is
+//! [`crate::directed::ScreenedDependencyWalk`] and [`crate::compare::extended_panel`].
+//! `docs/DISCRIMINATING_COMPARISON.md` is that measurement.
 
 use crate::compare::{compare, CompareError};
 use crate::strategy::ContextStrategy;
@@ -34,6 +54,14 @@ use std::fmt::Write as _;
 /// The other [`WorldSpec`] knobs — skeleton, events, protected set, decision time, policy — are
 /// deliberately *not* swept: they change what the decision is, not the structure around it, and a
 /// sweep that varied them would be comparing strategies across different questions.
+///
+/// That exclusion has a cost this type is the right place to state, because the excluded set and
+/// the discriminating set are the same set. The four knobs below are provably inert for the
+/// `fiber` / `directed-walk-full` comparison — neither the policy screen nor the temporal cut nor
+/// the shadowing tiebreak of [`crate::directed`] can fire on any value of any of them — so a grid
+/// built from them can only ever report those two strategies tied. `events`, `decision_time` and
+/// `policy` are the live knobs, and `WorldSpec::external_confirmation` and
+/// `WorldSpec::policy_restricted` are the presets that move them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SweepGrid {
     pub attachments: Vec<DistractorAttachment>,
@@ -262,7 +290,10 @@ impl SweepTable {
         );
 
         let _ = writeln!(text, "\n## Admissibility summary\n");
-        let _ = writeln!(text, "| Strategy | Admissible cells | Mean facts when admissible |");
+        let _ = writeln!(
+            text,
+            "| Strategy | Admissible cells | Mean facts when admissible |"
+        );
         let _ = writeln!(text, "|---|---:|---:|");
         for strategy in self.strategies() {
             let admissible: Vec<usize> = self

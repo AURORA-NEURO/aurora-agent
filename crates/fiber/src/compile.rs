@@ -38,9 +38,9 @@ use bioprism_epistemic::{
 use bioprism_ids::ContentHash;
 use bioprism_influence::summarise;
 use bioprism_section::{
-    ContextCertificate, DecisionSection, EvidenceCapsule, InfluenceClass, OmissionGroup,
-    OmissionManifest, ProvenUnreachable, ReferenceOmissions, RefinementOption, SourceHashes,
-    UnresolvedObligation,
+    ContextCertificate, DecisionSection, EvidenceCapsule, InfluenceClass, OmissionAccountingError,
+    OmissionGroup, OmissionManifest, ProvenUnreachable, ReferenceOmissions, RefinementOption,
+    SourceHashes, UnresolvedObligation,
 };
 use bioprism_world::{Fact, WorldSource};
 use serde::{Deserialize, Serialize};
@@ -99,6 +99,12 @@ pub struct CompileTrace {
     pub plan: PlanEvaluation,
     /// Influence bounds on the temporally withheld facts, and the split they license (43.28).
     pub withheld_influence: WithheldSplit,
+    /// Why the omitted remainder carries no zero-influence proof, when it carries none.
+    ///
+    /// `None` is the ordinary case and means the accounting balanced: either a proven group is on
+    /// the manifest or every omission was classified elsewhere. `Some` means the compiler declined
+    /// to mint the proof and says which check declined it.
+    pub unproven_remainder: Option<UnprovenRemainder>,
     /// The exact 43.10 quotient when the query supplied a `fiber-query/0.3` decision contract.
     /// `None` is meaningful: older wire versions remain executable but cannot claim this pass.
     pub decision_quotient: Option<DecisionEquivalenceQuotient>,
@@ -579,7 +585,7 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
 
     let withheld_influence =
         influence::split_withheld(source, region.as_ref().ok(), &inaccessible, &cut);
-    let manifest = build_manifest(
+    let (manifest, unproven_remainder) = build_manifest(
         omitted_total,
         &withheld_influence,
         &withheld_by_policy,
@@ -643,6 +649,7 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
             policy: PolicyOutcome::new(&envelope, &screen),
             plan: evaluation,
             withheld_influence,
+            unproven_remainder,
             decision_quotient,
             rate_distortion,
             adaptive_acquisition,
@@ -673,26 +680,91 @@ pub fn compile_with_oracle<S: WorldSource + ?Sized>(
 /// Output-sensitive: one lookup per needed variable, and no traversal of the omitted population.
 /// Enumerated rather than counted, because unlike the unreachable group this one is bounded by the
 /// compiled region and its members can therefore be named on the certificate.
+///
+/// Sorted rather than set-collected, and the difference is the whole point. A `BTreeSet` here
+/// would collapse an identifier reported for two needed variables into one entry before
+/// [`ProvenUnreachable::from_classified`] could see it — and one identifier standing for two facts
+/// is precisely the [`OmissionAccountingError::NamedTwice`] condition that constructor exists to
+/// refuse. Deduplicating would answer the question on the constructor's behalf, and answer it the
+/// reassuring way: the second fact would vanish from the classified population and reappear in the
+/// remainder, published as provably unable to matter.
 fn reachable_but_unselected<S: WorldSource + ?Sized>(
     source: &S,
     needed: &BTreeSet<String>,
     selected: &BTreeSet<String>,
     withheld_by_policy: &[String],
     inaccessible: &[String],
-) -> Vec<String> {
-    let mut unselected: BTreeSet<String> = BTreeSet::new();
+) -> ReachingOmissions {
+    let mut reaching = ReachingOmissions::default();
+    let mut unselected: Vec<String> = Vec::new();
+    let mut ambiguous: BTreeSet<String> = BTreeSet::new();
     for variable in needed {
+        let winner = source.fact_providing(variable);
         for id in source.shadowed_provider_ids(variable) {
+            if winner
+                .as_ref()
+                .is_some_and(|fact| fact.id.as_str() == id.as_str())
+            {
+                ambiguous.insert(variable.clone());
+                continue;
+            }
             if selected.contains(&id)
                 || withheld_by_policy.contains(&id)
                 || inaccessible.contains(&id)
             {
                 continue;
             }
-            unselected.insert(id);
+            unselected.push(id);
         }
     }
-    unselected.into_iter().collect()
+    unselected.sort();
+    reaching.unselected = unselected;
+    reaching.ambiguous_variables = ambiguous.into_iter().collect();
+    reaching
+}
+
+/// The omitted facts that still reach a needed variable, and whether the corpus could name them.
+///
+/// Two outputs rather than one because the second is the precondition of the first. Everything
+/// downstream of the slice is keyed by fact identifier — the selection, the policy screen, the
+/// withheld list — so the classification is a partition of *identifiers*. When two facts providing
+/// the same needed variable carry the same identifier, that partition is not a partition of facts:
+/// the shadowed one is indistinguishable from the selected one at every lookup, so it is filtered
+/// out of [`Self::unselected`] as though it had been delivered, and the remainder absorbs it
+/// silently under the strongest class on the manifest. Recording the variable is what lets
+/// [`build_manifest`] decline to mint a proof over a corpus that cannot tell the two apart.
+///
+/// [`bioprism_world::validate`] reports a shadowed variable as an error, but it is advisory by
+/// construction and no compile runs it, so this pass cannot assume it did.
+#[derive(Debug, Clone, Default)]
+struct ReachingOmissions {
+    /// Omitted facts providing a needed variable that nothing else accounts for, in certificate
+    /// order, duplicates kept.
+    unselected: Vec<String>,
+    /// Needed variables whose shadowed provider carries the winning fact's own identifier.
+    ambiguous_variables: Vec<String>,
+}
+
+/// Why this compile's omitted remainder carries no proof, when it carries none.
+///
+/// On [`CompileTrace`] rather than only in the manifest's reason string because a certificate with
+/// no [`InfluenceClass::Zero`] group looks exactly like one whose corpus had nothing to prove, and
+/// those are different facts about the compile. A caller replaying a compile needs to tell "every
+/// omission was classified elsewhere" from "the proof was refused".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnprovenRemainder {
+    /// A needed variable has two providers carrying one identifier, so no identifier-keyed
+    /// accounting over this corpus is a partition of its facts.
+    AmbiguousIdentifier { variables: Vec<String> },
+    /// The classified populations did not partition the omitted corpus.
+    ///
+    /// The four populations are disjoint by construction on any world [`bioprism_world::World`] can
+    /// load, so on that path this stays an invariant check rather than a reachable branch. It is
+    /// reachable through [`bioprism_world::WorldSource`]: a source reporting one identifier for two
+    /// displaced providers of two needed variables lands here as
+    /// [`OmissionAccountingError::NamedTwice`], which is why the displaced population is handed to
+    /// the constructor with its duplicates intact instead of collapsed into a set first.
+    Accounting(OmissionAccountingError),
 }
 
 /// Groups omissions by structural reason and assigns each an influence class.
@@ -705,6 +777,28 @@ fn reachable_but_unselected<S: WorldSource + ?Sized>(
 /// zero-influence count can exist at all. Those facts get [`InfluenceClass::Unknown`], which voids
 /// the sufficiency claim, and that is the correct verdict: a decision compiled while a competing
 /// value for a needed variable sat unexamined in the corpus is not one the compiler can certify.
+///
+/// Every classified population is handed to [`ProvenUnreachable::from_classified`] by name and the
+/// subtraction happens there. The arithmetic used to be four `saturating_sub` calls here, which
+/// defeated the one guarantee that constructor was built to give: it refuses to underflow into a
+/// count precisely because "everything is provably irrelevant" is the worst way for an accounting
+/// error to render, and a caller that saturates first hands it a number that has already been
+/// rounded up to that answer. Saturation can only shrink the proven group, so no certificate ever
+/// overstated a proof through it, but it made the disagreement invisible — and an invariant that
+/// cannot be observed failing is not being checked.
+///
+/// Whether a refusal keeps the remainder depends on which check declined, and the two arms differ.
+/// [`UnprovenRemainder::AmbiguousIdentifier`] arrives with the subtraction already done, so those
+/// facts are still pushed under [`InfluenceClass::Unknown`] with the refusal in the reason and
+/// [`OmissionManifest::total_omitted`] stays equal to the corpus count. On
+/// [`UnprovenRemainder::Accounting`] the subtraction itself is what declined: there is no remainder
+/// count to publish, the group carries a count of zero, and `total_omitted` therefore does *not*
+/// equal the corpus count — under [`OmissionAccountingError::ExceedsOmitted`] it falls short by
+/// however many the remainder would have held, and under [`OmissionAccountingError::NamedTwice`]
+/// the classified groups that caused the refusal are themselves naming a fact twice. What both arms
+/// do guarantee is that the certificate says the proof was declined rather than quietly not
+/// offering one; a count over books that do not balance is the thing this arm cannot also promise,
+/// and inventing one is how the disagreement would become invisible again.
 ///
 /// Temporally withheld facts are [`InfluenceClass::DeferredAcquisition`], never zero: they might
 /// well change the decision, they are simply not readable yet.
@@ -726,35 +820,70 @@ fn build_manifest(
     omitted_total: usize,
     withheld: &WithheldSplit,
     withheld_by_policy: &[String],
-    reachable_but_unselected: &[String],
+    reaching: &ReachingOmissions,
     exploratory: usize,
-) -> OmissionManifest {
+) -> (OmissionManifest, Option<UnprovenRemainder>) {
     let mut manifest = OmissionManifest::default();
-    let accounted_for = omitted_total
-        .saturating_sub(withheld.bounded.len())
-        .saturating_sub(withheld.deferred.len())
-        .saturating_sub(withheld_by_policy.len());
+    let classified = withheld
+        .bounded
+        .iter()
+        .chain(withheld.deferred.iter())
+        .chain(withheld_by_policy.iter())
+        .chain(reaching.unselected.iter())
+        .map(String::as_str);
 
-    if let Some(proven) =
-        ProvenUnreachable::remainder(accounted_for, reachable_but_unselected.len())
-            .filter(|proven| proven.count() > 0)
-    {
-        manifest.push(OmissionGroup::structurally_zero(
-            "no backward dependency path to any target under the declared factor graph",
-            proven,
-            Vec::new(),
-        ));
+    let mut refused = None;
+    match ProvenUnreachable::from_classified(omitted_total, classified) {
+        Ok(proven) if proven.count() == 0 => {}
+        Ok(proven) if reaching.ambiguous_variables.is_empty() => {
+            manifest.push(OmissionGroup::structurally_zero(
+                "no backward dependency path to any target under the declared factor graph",
+                proven,
+                Vec::new(),
+            ));
+        }
+        Ok(proven) => {
+            let variables = reaching.ambiguous_variables.clone();
+            manifest.push(OmissionGroup {
+                reason: format!(
+                    "left over once every other omission was classified, but no proof follows: \
+                     {} needed variable(s) have two providers under one identifier, so the \
+                     classification cannot tell a delivered fact from a displaced one; the \
+                     collision is on {}",
+                    variables.len(),
+                    named_variables(&variables)
+                ),
+                influence: InfluenceClass::Unknown,
+                count: proven.count(),
+                bound: None,
+                examples: Vec::new(),
+            });
+            refused = Some(UnprovenRemainder::AmbiguousIdentifier { variables });
+        }
+        Err(error) => {
+            manifest.push(OmissionGroup {
+                reason: format!(
+                    "the classified omissions do not partition the omitted corpus, so no \
+                     zero-influence remainder follows from them: {error}"
+                ),
+                influence: InfluenceClass::Unknown,
+                count: 0,
+                bound: None,
+                examples: Vec::new(),
+            });
+            refused = Some(UnprovenRemainder::Accounting(error));
+        }
     }
-    if !reachable_but_unselected.is_empty() {
+    if !reaching.unselected.is_empty() {
         manifest.push(OmissionGroup {
             reason: "provides a variable the slice needs but was shadowed by a later fact \
                      providing the same variable; the omission has a backward dependency path to \
                      the target and no bound on it was computed"
                 .into(),
             influence: InfluenceClass::Unknown,
-            count: reachable_but_unselected.len(),
+            count: reaching.unselected.len(),
             bound: None,
-            examples: reachable_but_unselected.iter().take(3).cloned().collect(),
+            examples: reaching.unselected.iter().take(3).cloned().collect(),
         });
     }
     if !withheld_by_policy.is_empty() {
@@ -780,7 +909,29 @@ fn build_manifest(
         });
     }
     let _ = exploratory;
-    manifest
+    (manifest, refused)
+}
+
+/// The first few of `variables`, rendered for a reason string.
+///
+/// The ambiguous-identifier group has no members it is allowed to name — that a fact cannot be
+/// named is the refusal — so the variables that refused it go in the reason rather than in
+/// [`OmissionGroup::examples`], which names members of the population the group counts, and on this
+/// manifest that population is omitted facts: `bioprism_devx`'s `why_omitted` matches its subject
+/// against `examples` after failing to find it in the selected fact set, so a variable name there
+/// answers a question about a fact. [`UnprovenRemainder::AmbiguousIdentifier`] on the trace carries
+/// the full list.
+fn named_variables(variables: &[String]) -> String {
+    let shown: Vec<&str> = variables.iter().take(3).map(String::as_str).collect();
+    if variables.len() > shown.len() {
+        format!(
+            "{} and {} more",
+            shown.join(", "),
+            variables.len() - shown.len()
+        )
+    } else {
+        shown.join(", ")
+    }
 }
 
 /// Passes the wire formats cannot support, each with the field that is missing.
