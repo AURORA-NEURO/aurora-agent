@@ -168,6 +168,10 @@ from .autonomous_run_analytics import (
     AutonomousRunTraceAnalyticsReport,
     analyze_autonomous_run_trace,
 )
+from .autonomous_run_analytics_ledger import (
+    AutonomousRunAnalyticsLedger,
+    AutonomousRunAnalyticsLedgerPolicy,
+)
 from .autonomous_decision_persistence import (
     AutonomousDecisionCycle,
     AutonomousDecisionCycleRehydrationContext,
@@ -20670,6 +20674,28 @@ class AutonomousAgent:
         """
 
         return analyze_autonomous_run_trace(snapshot, policy)
+
+    @staticmethod
+    def create_run_analytics_ledger(
+        policy: AutonomousRunAnalyticsLedgerPolicy | Mapping[str, Any] | None = None,
+        *,
+        clock: Callable[[], float] | None = None,
+    ) -> AutonomousRunAnalyticsLedger:
+        """Create a bounded longitudinal ledger for already-verified trace reports.
+
+        The ledger is deliberately analytics-only: it never invokes a provider, reads a
+        credential, or retains prompts, responses, tool payloads, or cost claims.  Callers own
+        persistence and may pass a mapping when restoring configuration from JSON.
+        """
+
+        if isinstance(policy, AutonomousRunAnalyticsLedgerPolicy) or policy is None:
+            normalized_policy = policy
+        else:
+            policy_mapping = dict(policy)
+            policy_mapping.setdefault("expected_domains", list(AUTONOMOUS_DOMAIN_NAMES))
+            policy_mapping.setdefault("max_reports", AutonomousRunAnalyticsLedgerPolicy().max_reports)
+            normalized_policy = AutonomousRunAnalyticsLedgerPolicy.from_dict(policy_mapping)
+        return AutonomousRunAnalyticsLedger(normalized_policy) if clock is None else AutonomousRunAnalyticsLedger(normalized_policy, clock=clock)
 
     def run_cross_domain_with_trace(
         self,

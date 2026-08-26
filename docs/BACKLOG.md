@@ -1767,9 +1767,14 @@ coverage, status/phase counts, failure codes, measured latency quantiles, token 
 counts, tool-call counts, attribution gaps, and deterministic threshold alerts. Missing metrics
 remain explicitly `null`/`unmeasured`; the layer does not infer cost, provider health, task
 correctness, or domain truth. Reports retain only metadata and carry explicit authority and
-retention markers. Remaining deployment work is to connect these reports to caller-owned tenant
-authorization, durable analytics storage, alert routing, evaluator settlement, provider billing,
-and external health sources without weakening the value-free boundary.
+retention markers. A bounded `AutonomousRunAnalyticsLedger` now provides longitudinal ingestion,
+retained-window deduplication/conflict classification, all-domain/provider/model rollups,
+eviction accounting, digest-verified restore, canonical JSON persistence, and optional CAS
+fencing in both SDKs. It still does not become an evaluator, provider-health oracle, billing
+ledger, or alert delivery service. Remaining deployment work is to connect the ledger to
+caller-owned tenant authorization, durable placement/backup, alert routing, evaluator
+settlement, provider billing, and external health sources without weakening the value-free
+boundary.
 
 The Python SDK now closes the corresponding effect-safety gap. `AutonomousEffectBoundary` gives
 approved non-read-only domain tools a deterministic effect identity, caller-visible idempotency

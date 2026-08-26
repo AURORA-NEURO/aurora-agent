@@ -9027,6 +9027,51 @@ observation about the verified trace boundary—not evidence that a scientific, 
 clinical, browser, coding, enterprise, or other domain claim is correct. Persistence, tenant
 authorization, encryption, alert delivery, and retention remain caller-owned deployment policy.
 
+### Longitudinal run-analytics ledger
+
+For deployments that need more than one snapshot, both SDKs expose a bounded
+`AutonomousRunAnalyticsLedger` plus JSON and optional compare-and-swap persistence. The ledger
+accepts only reports that pass the existing trace-analytics validator; it never accepts a trace,
+prompt, provider response, tool payload, credential, raw exception, or cost claim. Each retained
+entry stores the validated metadata report, its source-snapshot/report digests, an ingestion
+timestamp, and an entry digest. `accepted`, `duplicate`, and `conflict` results make replay and
+interpretation drift explicit without silently adding a second interpretation of a retained
+source snapshot.
+
+Retention is intentionally bounded by `max_reports` (up to 256) and the serialized snapshot is
+size-capped. Eviction is reported in the summary and snapshot, so an operator can distinguish a
+complete retained window from a partial historical view. Deduplication is guaranteed within the
+retained window; deployments requiring an all-time idempotency guarantee must add a caller-owned
+source identity index. Restore verifies every nested report and entry digest, exact field sets,
+deterministic ordering, generation/predecessor lineage, accepted-versus-evicted accounting, and
+the outer snapshot digest before changing live state. Transactional persistence fences stale
+workers with the previous snapshot digest.
+
+The summary emits all twelve configured domain rows even when no report measured a domain, along
+with observed provider and `provider/model` dimensions. Counts and means are additive/weighted;
+`latency_p50_ms` and `latency_p95_ms` remain `null` because quantiles cannot be reconstructed from
+per-report quantiles. The explicit `latency_quantile_posture` is
+`not_aggregated_from_report_quantiles`. Alert counts and grouped alert occurrences are useful for
+operator triage, but the ledger authority remains
+`verified_report_aggregation_only;not_task_correctness_or_external_health`.
+
+```python
+from prism_sdk import AutonomousRunAnalyticsLedger, AutonomousRunAnalyticsLedgerPolicy
+
+ledger = AutonomousRunAnalyticsLedger(
+    AutonomousRunAnalyticsLedgerPolicy(max_reports=128),
+)
+result = ledger.ingest(report)
+if result.status == "accepted":
+    summary = ledger.summary()
+    snapshot = ledger.snapshot()  # caller-owned canonical JSON/CAS persistence
+```
+
+The TypeScript facade provides the equivalent `createRunAnalyticsLedger()` factory. The ledger
+is an aggregation and restart boundary, not an evaluator, model-health oracle, billing ledger,
+alert delivery system, tenant authorization authority, or external-effect reconciler; those
+deployment responsibilities remain explicit.
+
 Run-trace snapshots in both SDKs use a versioned lineage envelope. Current `0.2` snapshots carry
 an explicit generation and predecessor snapshot digest, are cached byte-for-byte when the event
 journal has not changed, and advance the lineage only after a new event is appended. The stores

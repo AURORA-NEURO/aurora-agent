@@ -47,6 +47,10 @@ import {
   type AutonomousRunTraceAnalyticsReport,
 } from "./autonomous-run-analytics.js";
 import {
+  AutonomousRunAnalyticsLedger,
+  type AutonomousRunAnalyticsLedgerPolicy,
+} from "./autonomous-run-analytics-ledger.js";
+import {
   AutonomousConnectorRegistry,
   AutonomousConnectorRuntime,
   type AutonomousConnectorDispatchRequest,
@@ -7246,6 +7250,12 @@ export class AutonomousAgent {
   analyzeRunTrace(snapshot: unknown, options: { policy?: Partial<AutonomousRunTraceAnalyticsPolicy> } = {}): AutonomousRunTraceAnalyticsReport {
     if (!options || typeof options !== "object") throw new ArgumentError("autonomous analyzeRunTrace options must be an object");
     return analyzeAutonomousRunTrace(snapshot, options);
+  }
+
+  /** Create bounded restart-safe storage for already-verified trace analytics reports. */
+  createRunAnalyticsLedger(options: { policy?: Partial<AutonomousRunAnalyticsLedgerPolicy>; clock?: () => number } = {}): AutonomousRunAnalyticsLedger {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous createRunAnalyticsLedger options must be an object");
+    return new AutonomousRunAnalyticsLedger(options);
   }
 
   /** Cross-domain variant of runWithTrace; the same trace contains specialist and synthesis turns. */

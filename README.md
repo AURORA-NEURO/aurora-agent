@@ -94,7 +94,9 @@ For post-run operations, both SDKs expose digest-bound, metadata-only trace anal
 `analyze_autonomous_run_trace()` / `analyzeAutonomousRunTrace()` and the corresponding agent
 facade methods. The report separates measured values from unmeasured domains, aggregates
 provider/model failure and latency observations, and emits conservative threshold alerts; it does
-not infer cost, task correctness, provider health, or domain truth. See the [analytics section](docs/AUTONOMOUS_BRAIN.md#conservative-run-trace-analytics).
+not infer cost, task correctness, provider health, or domain truth. Longitudinal deployments can
+retain validated reports through the bounded `AutonomousRunAnalyticsLedger` with digest-checked
+restore and optional CAS persistence. See the [analytics section](docs/AUTONOMOUS_BRAIN.md#conservative-run-trace-analytics).
 
 ## Status
 
