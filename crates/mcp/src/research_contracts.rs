@@ -81,6 +81,12 @@ use bioprism_adapter::{
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    run_multimodal_retrieval_synthesis_contract_model,
+    MultimodalRetrievalSynthesisContractModelReceipt,
+    MultimodalRetrievalSynthesisContractModelRequest,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_throughput_retrieval_synthesis_inference_engine,
     ThroughputRetrievalSynthesisInferenceEngineReceipt,
     ThroughputRetrievalSynthesisInferenceEngineRequest,
@@ -376,6 +382,7 @@ pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
 pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_local_retrieval_synthesis_inference_engine";
 pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_local_retrieval_synthesis_contract_model";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
+pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_multimodal_retrieval_synthesis_contract_model";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_federated_retrieval_synthesis_inference_engine";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
@@ -1173,6 +1180,27 @@ pub fn validate_multimodal_retrieval_synthesis_inference_engine_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID {
         return Err("multimodal retrieval synthesis engine feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_retrieval_synthesis_contract_model_json(value: &Value) -> Result<Value, String> {
+    let request: MultimodalRetrievalSynthesisContractModelRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid multimodal retrieval contract model request: {error}"))?;
+    let receipt = run_multimodal_retrieval_synthesis_contract_model(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize multimodal retrieval contract model receipt: {error}"))
+}
+
+pub fn validate_multimodal_retrieval_synthesis_contract_model_json(
+    value: &Value,
+) -> Result<MultimodalRetrievalSynthesisContractModelReceipt, String> {
+    let receipt: MultimodalRetrievalSynthesisContractModelReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid multimodal retrieval contract model receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID {
+        return Err("multimodal retrieval contract model feature id mismatch".into());
     }
     Ok(receipt)
 }
