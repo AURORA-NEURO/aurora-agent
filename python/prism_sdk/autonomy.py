@@ -236,6 +236,28 @@ from .goals import (
     goal_task_digest,
 )
 from .mission import MissionPolicy
+from .autonomous_mission_replan import (
+    AUTONOMOUS_MISSION_REPLAN_CHECKPOINT_SCHEMA,
+    AUTONOMOUS_MISSION_REPLAN_MAX_ATTEMPTS,
+    AUTONOMOUS_MISSION_REPLAN_MAX_INSTRUCTION_BYTES,
+    AUTONOMOUS_MISSION_REPLAN_MAX_REPLANS,
+    AUTONOMOUS_MISSION_REPLAN_SCHEMA,
+    AUTONOMOUS_MISSION_REPLAN_SNAPSHOT_SCHEMA,
+    AUTONOMOUS_MISSION_REPLAN_STATE_SCHEMA,
+    AutonomousMissionReplanAttempt,
+    AutonomousMissionReplanCheckpoint,
+    AutonomousMissionReplanPersistenceCoordinator,
+    AutonomousMissionReplanRehydrationContext,
+    AutonomousMissionReplanResult,
+    AutonomousMissionReplanSnapshot,
+    AutonomousMissionReplanSnapshotPersistence,
+    AutonomousMissionReplanState,
+    AutonomousMissionReplanStateStore,
+    AutonomousMissionReplanTextStore,
+    InMemoryAutonomousMissionReplanStateStore,
+    JsonAutonomousMissionReplanSnapshotPersistence,
+    run_autonomous_mission_replan_cycle,
+)
 from .tooling import ToolCatalogue, ToolDefinition
 
 
@@ -20516,6 +20538,154 @@ class AutonomousAgent:
         self._finish_execution(execution_controller, result=result)
         return result
 
+    def run_mission_replan_cycle(
+        self,
+        *,
+        task: str,
+        domain: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        mission_policy: MissionPolicy | Mapping[str, Any],
+        evaluator: BrainOutcomeEvaluator,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        bandit_state: Mapping[str, Any] | None = None,
+        evidence: Mapping[str, Any] | None = None,
+        max_replans: int = 1,
+        root_mission_id: str | None = None,
+        state_store: AutonomousMissionReplanStateStore | None = None,
+        resume: bool = False,
+        rehydrate_result: Callable[[AutonomousMissionReplanRehydrationContext], BrainMissionResult] | None = None,
+        rehydrate_instruction: Callable[[AutonomousMissionReplanRehydrationContext], str] | None = None,
+        checkpoint_sink: Callable[[AutonomousMissionReplanCheckpoint], Any] | None = None,
+        mission_options: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousMissionReplanResult:
+        """Run a domain mission through evaluator-guided, restart-safe replanning.
+
+        This is the application façade for the durable mission kernel.  It compiles the reviewed
+        domain prompt and plan without contacting a provider, resolves only caller-owned opaque
+        credential handles, then delegates provider selection, invocation, mission authorization,
+        evaluator credit, and metadata checkpointing to the existing brain boundaries.  Retry
+        feedback is transient prompt context; it cannot grant tools, credentials, dispatch, or
+        external effects.
+        """
+
+        if not isinstance(evaluator, BrainOutcomeEvaluator):
+            raise BrainRunError("mission replan evaluator must be a BrainOutcomeEvaluator")
+        if mission_options is not None and not isinstance(mission_options, Mapping):
+            raise BrainRunError("mission_options must be a mapping or None")
+        options = dict(kwargs)
+        if mission_options is not None:
+            overlap = sorted(set(options).intersection(mission_options))
+            if overlap:
+                raise BrainRunError("mission_options duplicates runtime options: " + ", ".join(overlap))
+            options.update(dict(mission_options))
+        supplied_execution_mode = options.get("execution_mode")
+        if supplied_execution_mode not in (None, "mission"):
+            raise BrainRunError("run_mission_replan_cycle requires execution_mode='mission'")
+        options["execution_mode"] = "mission"
+        resolved_bandit_state = self.learning_state() if bandit_state is None else bandit_state
+
+        candidates, resolved_credentials, resolved_options, execution_controller = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=options,
+            tool_domains=(domain,),
+            task=task,
+            resume_learning=False,
+        )
+        prepare_options = {
+            key: resolved_options[key]
+            for key in (
+                "capability",
+                "risk_class",
+                "constraints",
+                "desired_outputs",
+                "context",
+                "max_steps",
+                "require_json",
+                "structured_domain_response",
+                "response_schema",
+                "required_model_capabilities",
+                "memory_episodes",
+                "memory_lesson_references",
+            )
+            if key in resolved_options
+        }
+        prepare_options["execution_mode"] = "mission"
+        blueprint = self.orchestrator.prepare(task=task, domain=domain, **prepare_options)
+
+        # `_execution_inputs` enriches the ordinary agent request with reviewed tool/catalogue
+        # context. Filter that request down to the explicit adaptive-mission kernel contract so
+        # orchestration-only keys can never leak into a lower-level call as an implicit override.
+        adaptive_keys = {
+            "context",
+            "content_parts",
+            "contextual_observations",
+            "input_tokens",
+            "requested_output_tokens",
+            "max_cost_per_million_tokens",
+            "max_latency_ms",
+            "min_quality",
+            "selection_overrides",
+            "approve_provider_call",
+            "approve_mission_dispatch",
+            "run_id",
+            "max_output_tokens",
+            "temperature",
+            "response_schema",
+            "idempotency_key",
+            "claim_requests",
+            "evaluator_review",
+            "workflow_binding",
+            "route_review",
+            "operations_gate_acceptance",
+            "route_request",
+            "enforce_route_tools",
+            "require_resolved_route",
+            "provider_tools",
+            "tool_choice",
+            "max_provider_failovers",
+        }
+        adaptive_options = {
+            key: resolved_options[key]
+            for key in adaptive_keys
+            if key in resolved_options
+        }
+        adaptive_options["required_capabilities"] = blueprint.required_capabilities
+        adaptive_options["response_schema"] = (
+            adaptive_options.get("response_schema") or blueprint.spec.response_schema
+        )
+        try:
+            result = run_autonomous_mission_replan_cycle(
+                self.brain,
+                task=task,
+                model_candidates=candidates,
+                prompt=blueprint.prompt,
+                plan=blueprint.plan,
+                credentials=resolved_credentials,
+                mission_policy=mission_policy,
+                evaluator=evaluator,
+                bandit_state=resolved_bandit_state,
+                evidence=evidence,
+                ledger=self.ledger,
+                mission_options=adaptive_options,
+                max_replans=max_replans,
+                root_mission_id=root_mission_id,
+                state_store=state_store,
+                resume=resume,
+                rehydrate_result=rehydrate_result,
+                rehydrate_instruction=rehydrate_instruction,
+                checkpoint_sink=checkpoint_sink,
+                execution_controller=execution_controller,
+                invocation_observer=resolved_options.get("invocation_observer"),
+                trace_event_callback=resolved_options.get("trace_event_callback"),
+            )
+        except Exception as error:
+            self._finish_execution(execution_controller, error=error)
+            raise
+        self._finish_execution(execution_controller, result=result)
+        return result
+
     def run_with_launch_admission(
         self,
         *,
@@ -23996,6 +24166,26 @@ __all__ = [
     "AutonomousAutoBlueprint",
     "AutonomousAutoResult",
     "AutonomousAutoReplanResult",
+    "AUTONOMOUS_MISSION_REPLAN_SCHEMA",
+    "AUTONOMOUS_MISSION_REPLAN_CHECKPOINT_SCHEMA",
+    "AUTONOMOUS_MISSION_REPLAN_STATE_SCHEMA",
+    "AUTONOMOUS_MISSION_REPLAN_SNAPSHOT_SCHEMA",
+    "AUTONOMOUS_MISSION_REPLAN_MAX_REPLANS",
+    "AUTONOMOUS_MISSION_REPLAN_MAX_ATTEMPTS",
+    "AUTONOMOUS_MISSION_REPLAN_MAX_INSTRUCTION_BYTES",
+    "AutonomousMissionReplanAttempt",
+    "AutonomousMissionReplanCheckpoint",
+    "AutonomousMissionReplanState",
+    "AutonomousMissionReplanSnapshot",
+    "AutonomousMissionReplanStateStore",
+    "AutonomousMissionReplanSnapshotPersistence",
+    "AutonomousMissionReplanTextStore",
+    "InMemoryAutonomousMissionReplanStateStore",
+    "JsonAutonomousMissionReplanSnapshotPersistence",
+    "AutonomousMissionReplanPersistenceCoordinator",
+    "AutonomousMissionReplanResult",
+    "AutonomousMissionReplanRehydrationContext",
+    "run_autonomous_mission_replan_cycle",
     "AutonomousProvisionedRun",
     "AutonomousBatchItem",
     "AutonomousBatchResult",

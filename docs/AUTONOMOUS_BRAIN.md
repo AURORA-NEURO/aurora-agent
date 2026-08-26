@@ -6080,6 +6080,68 @@ dispatch; after `execute=true` has been sent, the cycle returns
 `max_replans` bound is capped by the SDK, and memory retrieval cannot widen tools, budgets,
 claims, route candidates, credentials, or approval gates.
 
+#### Durable mission replanning from the Python agent façade
+
+`AutonomousAgent.run_mission_replan_cycle(...)` adds a restart-safe mission boundary around the
+existing `AutonomousBrain.run_adaptive_mission(...)` kernel. It is the recommended Python entry
+point when a host wants all twelve built-in domains to share one process-level contract for model
+selection, provider invocation, evaluator credit, bounded retry, and restart reconciliation:
+
+```python
+from prism_sdk import (
+    AutonomousAgent,
+    BrainOutcomeEvaluator,
+    InMemoryAutonomousMissionReplanStateStore,
+    MissionPolicy,
+)
+
+state_store = InMemoryAutonomousMissionReplanStateStore()
+cycle = agent.run_mission_replan_cycle(
+    task="prepare a bounded evidence review",
+    domain="science",
+    credentials={"openai": openai_handle},
+    model_candidates=model_catalogue,
+    mission_policy=MissionPolicy(
+        allowed_tools=("read_only_source",),
+        max_steps=8,
+        max_step_output_bytes=200_000,
+        max_total_output_bytes=1_000_000,
+    ),
+    evaluator=held_out_evaluator,
+    bandit_state=bandit_state,
+    evidence={"review_id": "review-42", "signals": {"coverage": 0.8}},
+    max_replans=2,
+    state_store=state_store,
+    approve_provider_call=True,
+    approve_mission_dispatch=False,
+)
+```
+
+The façade performs the provider-free domain blueprint first, resolves model candidates through
+the registered catalogue, accepts only runtime-owned opaque credential handles, and forwards the
+same reviewed provider/tool/effect controls used by ordinary `agent.run(...)`. The evaluator sees
+the existing value-only brain projection. A requested replan can append only a screened,
+transient developer context chunk; it cannot add a tool, credential, route, budget, mission
+permission, or external effect. The hard SDK limit is three replans, for at most four proposal
+attempts.
+
+The optional `state_store` persists a hash-chained metadata cursor with phases
+`execution_pending`, `evaluation_pending`, `replan_handoff`, and `terminal`. It contains attempt
+and evaluation projections, protected-contract and outcome digests, the bandit-state digest, and
+bounded counts; it never contains task text, prompt messages, provider output, credentials, tool
+arguments, raw evidence, or the retry instruction. `JsonAutonomousMissionReplanSnapshotPersistence`
+and `AutonomousMissionReplanPersistenceCoordinator` provide a canonical caller-owned snapshot
+adapter for SQLite, object storage, browser storage, or another transactional backend.
+
+After a process stop, call the same method with `resume=True`. At `replan_handoff`, provide
+`rehydrate_instruction(context)` to return the caller-retained instruction whose digest is in the
+checkpoint. At `evaluation_pending`, provide `rehydrate_result(context)` to return the caller-
+retained private mission result whose outcome digest is in the checkpoint. The SDK verifies the
+protected task/prompt/plan/policy/model-catalogue contract and current bandit digest before
+continuing; it never silently replays an uncertain provider boundary or evaluator callback.
+Provider dispatch after a confirmed replan handoff happens exactly once for the next attempt,
+while a dispatched mission always terminates as `replan_blocked_after_dispatch`.
+
 Memory can be independently inspected with `memory.retrieve(...)`, `memory.get(episode_id)`,
 `memory.stats()`, and `memory.verify_integrity()`. `task_facet_digests(task)` exposes the same
 deterministic digest projection for an explicit `MemoryQuery(task_facets=...)`; the original task
