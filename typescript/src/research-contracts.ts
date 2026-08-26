@@ -4628,3 +4628,26 @@ export function validateAdapterThroughputEvidenceSurveillanceContractModelReceip
 }
 
 export function adapterThroughputEvidenceSurveillanceContractModelReceiptDigest(receipt: AdapterThroughputEvidenceSurveillanceContractModelReceipt): string { validateAdapterThroughputEvidenceSurveillanceContractModelReceipt(receipt); return digestJsonSync(receipt); }
+
+export const ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID = "AFA-adapter-P01-F08" as const;
+export const ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION = "adapter-federated-continual-evidence-surveillance-contract-model/1.0" as const;
+
+export interface AdapterFederatedContinualEvidenceSurveillanceContractModelReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; input_schema: string; output_schema: string;
+  federation_id: string; purpose: string; endpoint: string; semantic_profile: string;
+  compatibility: "compatible" | "additive_migration" | "breaking" | "incompatible"; disposition: "compatible" | "partial" | "unknown" | "blocked";
+  peer_order: string[]; candidate_order: string[]; retained_order: string[]; unknown_order: string[]; denied_order: string[]; aggregate_order: string[]; migration_order: string[]; semantic_loss: string[];
+  federation_digest: string; envelope_digest: string; contract_digest: string; canonical_digest: string; provenance_digest: string; replay_identity: string; effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateAdapterFederatedContinualEvidenceSurveillanceContractModelReceipt(receipt: AdapterFederatedContinualEvidenceSurveillanceContractModelReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID || receipt.contract_version !== ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION) throw new Error("federated continual contract schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || receipt.input_schema !== "EvidenceFeed4@1" || receipt.output_schema !== "QualifiedEvidenceSet2@1" || !receipt.federation_id.trim() || !receipt.purpose.trim() || !receipt.endpoint.trim() || !receipt.semantic_profile.trim() || !receipt.candidate_order.length || !receipt.effect_receipts.length) throw new Error("federated contract identity, schema, locality, candidates, or effects are incomplete");
+  for (const values of [receipt.peer_order, receipt.candidate_order, receipt.retained_order, receipt.unknown_order, receipt.denied_order, receipt.aggregate_order, receipt.migration_order, receipt.semantic_loss, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("federated contract ordering is invalid");
+  if (JSON.stringify([...receipt.retained_order, ...receipt.unknown_order, ...receipt.denied_order].sort()) !== JSON.stringify([...receipt.candidate_order].sort()) || receipt.aggregate_order.some((value) => !receipt.retained_order.includes(value))) throw new Error("federated contract states do not partition candidates");
+  for (const value of [receipt.federation_digest, receipt.envelope_digest, receipt.contract_digest, receipt.canonical_digest, receipt.provenance_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("federated contract digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:aggregate-evidence-contract:") && effect !== "block:unsafe-release")) throw new Error("federated contract effect is outside aggregate exchange gate");
+  if (receipt.disposition === "blocked" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("blocked federated contract must be explicitly blocked");
+}
+
+export function adapterFederatedContinualEvidenceSurveillanceContractModelReceiptDigest(receipt: AdapterFederatedContinualEvidenceSurveillanceContractModelReceipt): string { validateAdapterFederatedContinualEvidenceSurveillanceContractModelReceipt(receipt); return digestJsonSync(receipt); }

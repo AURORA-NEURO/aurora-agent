@@ -6624,3 +6624,15 @@ __all__ += [
     "ThroughputEvidenceSurveillanceContractReceipt",
     "model_throughput_evidence_surveillance_contract",
 ]
+
+from .adapter_federated_continual_evidence_surveillance_contract_model import (
+    FederatedContinualContractClaim,
+    FederatedContinualEvidenceSurveillanceContractReceipt,
+    model_federated_continual_evidence_surveillance_contract,
+)
+
+__all__ += [
+    "FederatedContinualContractClaim",
+    "FederatedContinualEvidenceSurveillanceContractReceipt",
+    "model_federated_continual_evidence_surveillance_contract",
+]
