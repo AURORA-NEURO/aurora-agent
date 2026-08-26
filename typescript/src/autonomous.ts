@@ -91,6 +91,10 @@ import {
   AutonomousPromptLearningPersistenceCoordinator,
   extractAutonomousPromptLearningSelections,
 } from "./autonomous-prompt-learning-persistence.js";
+import type {
+  AutonomousOnlineLearnerPersistenceCoordinator,
+  AutonomousOnlineLearnerSnapshot,
+} from "./autonomous-online-learner-persistence.js";
 import { buildAutonomousEvidencePlan, type AutonomousEvidencePlan, type AutonomousEvidencePlanJSON } from "./autonomous-evidence.js";
 import {
   AutonomousEvidenceRuntime,
@@ -1311,6 +1315,8 @@ export interface AutonomousAgentOptions {
   /** Optional caller-owned durable replay barrier for capability evaluator settlements. */
   capabilityLearningSettlementStore?: AutonomousCapabilityLearningSettlementStore;
   learner?: AutonomousOnlineLearner;
+  /** Optional CAS-fenced persistence coordinator bound to `learner` for restart-safe bandit state. */
+  learnerPersistence?: AutonomousOnlineLearnerPersistenceCoordinator;
   /** Optional digest-only lifecycle that gates learned model selection until replay admission. */
   selectionPromotion?: AutonomousSelectionPromotionLifecycle;
   /** Optional caller-owned episodic memory used for bounded retrieval and value-only run recording. */
@@ -4828,6 +4834,8 @@ export class AutonomousAgent {
   readonly modelHealthController?: AutonomousModelHealthController;
   readonly modelHealthBridge?: AutonomousBrainControlPlaneBridge;
   readonly learner?: AutonomousOnlineLearner;
+  /** Caller-owned persistence for the online learner; no state is written implicitly. */
+  readonly learnerPersistence?: AutonomousOnlineLearnerPersistenceCoordinator;
   readonly selectionPromotion?: AutonomousSelectionPromotionLifecycle;
   private readonly apiClient?: ApiClient;
   private readonly modelsById = new Map<string, AutonomousModelCandidate>();
@@ -4861,9 +4869,15 @@ export class AutonomousAgent {
     if (options.connectorRegistry !== undefined && !(options.connectorRegistry instanceof AutonomousConnectorRegistry)) throw new ArgumentError("AutonomousAgent connectorRegistry must be an AutonomousConnectorRegistry");
     if (options.connectorRuntime !== undefined && !(options.connectorRuntime instanceof AutonomousConnectorRuntime)) throw new ArgumentError("AutonomousAgent connectorRuntime must be an AutonomousConnectorRuntime");
     if (options.connectorRegistry !== undefined && options.connectorRuntime !== undefined && options.connectorRuntime.registry !== options.connectorRegistry) throw new ArgumentError("AutonomousAgent connectorRegistry and connectorRuntime must reference the same catalogue");
+    if (options.learnerPersistence !== undefined && (
+      typeof options.learnerPersistence.restore !== "function"
+      || typeof options.learnerPersistence.flush !== "function"
+      || options.learnerPersistence.learner !== options.learner
+    )) throw new ArgumentError("AutonomousAgent learnerPersistence must be bound to the supplied learner");
     this.llm = llm;
     this.apiClient = options.apiClient;
     this.learner = options.learner;
+    this.learnerPersistence = options.learnerPersistence;
     this.selectionPromotion = options.selectionPromotion;
     if (options.memoryStore !== undefined && (
       typeof options.memoryStore.retrieve !== "function"
@@ -4942,6 +4956,33 @@ export class AutonomousAgent {
       }
       : baseSelector;
     this.runtime = new AutonomousRuntime(llm, { selector });
+  }
+
+  /**
+   * Restore the digest-bound online bandit before the agent accepts evaluator feedback.
+   *
+   * Restoring is intentionally explicit: a missing coordinator is a configuration error rather
+   * than an invitation to silently start a fresh learner, because that would discard the model
+   * and domain history that the caller believed was being used for adaptation.
+   */
+  async restoreOnlineLearning(): Promise<AutonomousOnlineLearnerSnapshot | null> {
+    if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
+    if (!this.learnerPersistence) throw new ArgumentError("AutonomousAgent online learner persistence is not configured");
+    return this.learnerPersistence.restore();
+  }
+
+  /**
+   * Flush the current bandit state through its caller-owned CAS boundary.
+   *
+   * The snapshot contains arm statistics, bounded evaluator digests, and contextual metadata
+   * only. Prompts, provider responses, credentials, task text, and live tool values never enter
+   * this persistence path. Callers choose when to flush so an application can coordinate the
+   * write with its own transaction or feedback outbox.
+   */
+  async flushOnlineLearning(): Promise<AutonomousOnlineLearnerSnapshot> {
+    if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
+    if (!this.learnerPersistence) throw new ArgumentError("AutonomousAgent online learner persistence is not configured");
+    return this.learnerPersistence.flush();
   }
 
   /** Consolidate explicit evaluator observations through the configured lesson index. */

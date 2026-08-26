@@ -7836,6 +7836,35 @@ provides the browser seam; HTTP/object-store adapters can implement the same tex
 The snapshot remains metadata-only and never contains prompts, responses, credentials, or raw
 evaluator evidence.
 
+### Agent-owned online learner persistence
+
+The online bandit has a parallel CAS-fenced persistence coordinator. It can be attached to
+`AutonomousAgent` itself, closing the integration gap between evaluator settlement and the
+cross-domain execution façade:
+
+```ts
+const learner = new AutonomousOnlineLearner({
+  policy: { strategy: "ucb1", exploration: 0.4, seed: 19 },
+});
+const learnerPersistence = new AutonomousOnlineLearnerPersistenceCoordinator(
+  learner,
+  new TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence(learnerStore),
+);
+const agent = new AutonomousAgent(runtime, { learner, learnerPersistence });
+
+await agent.restoreOnlineLearning();
+// Explicit evaluator settlement may now adapt any built-in domain or cross-domain route.
+await agent.flushOnlineLearning();
+```
+
+`restoreOnlineLearning()` and `flushOnlineLearning()` require the exact learner instance used by
+the coordinator. The agent does not implicitly reset or write learning state: deployments choose
+whether to restore at worker startup and when to flush alongside their own feedback transaction.
+The persisted image contains only bounded arm statistics, contextual domain/capability identity,
+and evaluator/outcome digests. Prompt text, task text, provider responses, credentials, tool
+arguments, and live results remain outside the snapshot. This gives all twelve built-in domains
+the same restart-safe contextual adaptation path without weakening the explicit evaluator gate.
+
 The server-visible equivalent is `AutonomousDurableJobWorker` over
 `AutonomousDurableJobController`. It atomically pulls `brain_job_claim_next`, hands only the
 metadata projection to a caller-owned resolver, recomputes the deterministic route/task digest,

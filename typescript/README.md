@@ -1258,6 +1258,28 @@ JSON persistence, digest chaining, strict bounds, and optional `write_if_unchang
 tampering, stale writers, identity drift, and non-contiguous recovery before another provider or
 executor call is admitted.
 
+For direct agent embeddings, bind the same persistence coordinator to the `AutonomousAgent` so
+restart-safe learning is part of the model-selection façade:
+
+```typescript
+const learner = new AutonomousOnlineLearner({
+  policy: { strategy: "ucb1", exploration: 0.4, seed: 19 },
+});
+const learnerPersistence = new AutonomousOnlineLearnerPersistenceCoordinator(
+  learner,
+  new TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence(learnerStore),
+);
+const agent = new AutonomousAgent(runtime, { learner, learnerPersistence });
+
+await agent.restoreOnlineLearning(); // before accepting evaluator feedback
+// Run any built-in domain or cross-domain route through the agent.
+await agent.flushOnlineLearning(); // explicit CAS-fenced metadata-only checkpoint
+```
+
+The coordinator must reference the exact learner instance supplied to the agent. Restore and
+flush are explicit lifecycle operations: a missing binding never silently resets adaptation, and
+no prompt, task, provider response, credential, or tool value can enter the learner snapshot.
+
 `InMemoryAutonomousModelHealthStore` adds the restart-safe selection feedback plane. It records
 separate value-only invocation and evaluator-quality observations, aggregates success/failure,
 latency, quality, and circuit projections per provider/model arm, and exposes a deterministic
