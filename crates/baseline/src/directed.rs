@@ -25,6 +25,7 @@
 //! screen and the certificate stating what was omitted and why — none of which these worlds'
 //! verdicts exercise.
 
+use crate::index::PanelIndex;
 use crate::strategy::{ContextStrategy, Selection};
 use bioprism_fiber::Query;
 use bioprism_world::World;
@@ -60,8 +61,11 @@ impl DirectedDependencyWalk {
             .iter()
             .map(|target| target.as_str().to_string())
             .collect();
-        let mut frontier: VecDeque<(String, usize)> =
-            needed.iter().cloned().map(|variable| (variable, 0)).collect();
+        let mut frontier: VecDeque<(String, usize)> = needed
+            .iter()
+            .cloned()
+            .map(|variable| (variable, 0))
+            .collect();
 
         while let Some((variable, hops)) = frontier.pop_front() {
             if self.depth.is_some_and(|limit| hops >= limit) {
@@ -109,7 +113,8 @@ impl ContextStrategy for DirectedDependencyWalk {
         )
     }
 
-    fn select(&self, world: &World, query: &Query) -> Selection {
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
+        let (world, query) = (index.world(), index.query());
         let closure: BTreeSet<String> = world
             .facts
             .iter()

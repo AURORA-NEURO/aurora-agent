@@ -7,9 +7,11 @@
 //! Two properties are structural, not documented conventions:
 //!
 //! 1. **A view cannot exist without provenance.** [`View`] has private fields and one
-//!    constructor, `seal`, which is crate-private. The only route to a `View` from outside this
-//!    crate is [`Projection::project`], which takes a [`ProjectionSource`] by value. An external
-//!    implementor may override `project`, but cannot construct the type it would have to return.
+//!    constructor, `seal`, which is crate-private. The only routes to a `View` from outside this
+//!    crate are [`ProjectRegion::project`], which takes a [`ProjectionSource`] by value, and
+//!    [`crate::BoundSection::project`], which holds one. Neither can be overridden: `project`
+//!    lives on an extension trait whose blanket implementation covers every [`Projection`], so a
+//!    renderer supplies [`Projection::render`] and nothing else.
 //! 2. **A projection takes no relevance parameter.** `project` receives a Decision Section and
 //!    provenance — nothing else. 43.01 defines completeness "against query obligations and
 //!    protected closure, not neighborhood radius", so there is no `k_hop`, `depth`, `radius` or
@@ -142,11 +144,11 @@ impl<B: ProjectedBody> View<B> {
 /// A functorial view over a compiled decision region.
 ///
 /// Implementors supply [`Projection::render`], which builds the body and writes to the loss
-/// ledger. They never touch provenance and never seal the view: [`Projection::project`] threads
-/// the source through, guards that the section has not drifted since binding, and refuses to
-/// close a ledger that dropped an obstruction. Forgetting any of those three is therefore not
-/// possible by omission — it would take deliberately reimplementing `project`, which cannot
-/// produce a `View` anyway.
+/// ledger, and nothing else. They never touch provenance and never seal the view:
+/// [`ProjectRegion::project`] threads the source through, guards that the section has not drifted
+/// since binding, and refuses to close a ledger that dropped an obstruction. Forgetting any of
+/// those three is not possible by omission *or* by intent — `project` is not a method of this
+/// trait, so there is nothing here to override.
 pub trait Projection {
     /// The rendered body. Serialisable because the whole point of a view is to leave the process.
     type Body: ProjectedBody + Serialize;
@@ -160,20 +162,67 @@ pub trait Projection {
         section: &DecisionSection,
         ledger: &mut FidelityLedger,
     ) -> Result<Self::Body, ProjectionError>;
+}
 
+/// The guarded entry point, on a trait an implementor cannot reach.
+///
+/// [`Projection`] is the interface a renderer writes. This is the one a caller invokes, and the
+/// separation is what makes the drift guard unskippable rather than merely provided: the single
+/// blanket implementation below covers every `Projection` there will ever be, so a second
+/// implementation of `project` for any concrete renderer is a coherence error rather than an
+/// override. The guard is not a default an implementor may decline; it is the only body that
+/// exists.
+///
+/// It was a provided method on `Projection` before. Nothing in the crate overrode it and nothing
+/// outside could produce the [`View`] such an override would have to return, so the hazard was
+/// latent rather than live — but "latent" is the state a guard is in right before it stops
+/// running, and the fix costs one import at each call site.
+///
+/// Sealed by construction rather than by convention: `Projection` is this trait's supertrait and
+/// the blanket impl is unconditional, so implementing `ProjectRegion` directly is impossible and
+/// there is nothing to seal against.
+pub trait ProjectRegion: Projection {
     /// Projects a compiled region into a view bound to the provenance it came from.
     ///
     /// Note the argument list: a section and its provenance. There is no relevance knob, because
     /// relevance was already decided by the compiler under protected closure.
+    ///
+    /// The section is re-hashed here and compared against the digest the source was bound with,
+    /// because a detached [`ProjectionSource`] carries no evidence that the section still holds the
+    /// bytes that produced it. A caller taking several views of one region pays that once by
+    /// holding a [`crate::BoundSection`] instead.
+    fn project(
+        &self,
+        section: &DecisionSection,
+        source: ProjectionSource,
+    ) -> Result<View<Self::Body>, ProjectionError>;
+}
+
+impl<P: Projection + ?Sized> ProjectRegion for P {
     fn project(
         &self,
         section: &DecisionSection,
         source: ProjectionSource,
     ) -> Result<View<Self::Body>, ProjectionError> {
         source.guard_unchanged(section)?;
-        let mut ledger = FidelityLedger::default();
-        let body = self.render(section, &mut ledger)?;
-        let fidelity = ledger.seal(Self::KIND, section)?;
-        Ok(View::seal(Self::KIND, source, fidelity, body))
+        render_sealed(self, section, source)
     }
+}
+
+/// The half of `project` that runs once the binding is established: render, close, seal.
+///
+/// Crate-private, and it must stay that way. Publishing it would hand callers a route to a sealed
+/// [`View`] whose source was never checked against the section it claims — the exact state
+/// [`ProjectionSource`] exists to make unreachable. It has two callers, and each has already
+/// discharged that obligation in its own way: [`ProjectRegion::project`] by running the guard, and
+/// [`crate::BoundSection`] by holding a borrow that makes drift impossible.
+pub(crate) fn render_sealed<P: Projection + ?Sized>(
+    projection: &P,
+    section: &DecisionSection,
+    source: ProjectionSource,
+) -> Result<View<P::Body>, ProjectionError> {
+    let mut ledger = FidelityLedger::default();
+    let body = projection.render(section, &mut ledger)?;
+    let fidelity = ledger.seal(P::KIND, section)?;
+    Ok(View::seal(P::KIND, source, fidelity, body))
 }

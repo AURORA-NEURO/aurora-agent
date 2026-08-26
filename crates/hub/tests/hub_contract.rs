@@ -7,12 +7,12 @@
 use bioprism_hub::{
     accept, lint_claim, AccessTier, Ancestor, Attribution, BioAtlasCard, Board, BoardId,
     BudgetEnvelope, BuildProvenance, ComparabilityConditions, ContaminationKind,
-    ContaminationWitness, DeclaredScope, Decision, DisclosureLedger, Entry, Epoch, EvidenceScale,
+    ContaminationWitness, Decision, DeclaredScope, DisclosureLedger, Entry, Epoch, EvidenceScale,
     HubError, Licence, ModerationLedger, ModerationState, NonClaim, Provenance, PublicationState,
     Redistribution, Score, Submission, SubmissionDraft, SubmissionId, Submitter, SubmitterId,
     UnrankableReason, VerificationStatus,
 };
-use bioprism_ids::ContentHash;
+use bioprism_ids::{ContentHash, IdError};
 
 fn pack() -> ContentHash {
     ContentHash::of_bytes(b"glioma-holdout-v3")
@@ -157,7 +157,11 @@ fn entries_from_two_splits_form_two_boards_and_are_never_ordered_against_each_ot
     public_split.conditions.split = "public".into();
 
     let classes = bioprism_hub::partition(&[hidden.clone(), public_split.clone()]);
-    assert_eq!(classes.len(), 2, "two splits must not collapse into one board");
+    assert_eq!(
+        classes.len(),
+        2,
+        "two splits must not collapse into one board"
+    );
 
     let err = bioprism_hub::rank_order(&public_split, &hidden).expect_err("different splits");
     assert!(matches!(err, HubError::NotComparable { .. }));
@@ -193,10 +197,17 @@ fn publishing_against_a_held_out_pack_discloses_it_and_later_scores_must_say_so(
 
     let early = entry("sub-1", 0.30, Epoch(2));
     let late = entry("sub-2", 0.05, Epoch(9));
-    let rendered =
-        board(VerificationStatus::SelfReported).rank(&[early, late.clone()], &moderation, &disclosure);
+    let rendered = board(VerificationStatus::SelfReported).rank(
+        &[early, late.clone()],
+        &moderation,
+        &disclosure,
+    );
 
-    assert_eq!(rendered.ranked.len(), 1, "the post-disclosure score is not ranked");
+    assert_eq!(
+        rendered.ranked.len(),
+        1,
+        "the post-disclosure score is not ranked"
+    );
     assert_eq!(rendered.ranked[0].entry.submission.as_str(), "sub-1");
     assert!(matches!(
         rendered.unranked[0].reason,
@@ -213,7 +224,10 @@ fn publishing_against_a_held_out_pack_discloses_it_and_later_scores_must_say_so(
     assert_eq!(rendered.ranked.len(), 2);
     let leader = &rendered.leaders()[0];
     assert_eq!(leader.entry.submission.as_str(), "sub-2");
-    assert!(leader.label.caveat().contains("not evidence of generalisation"));
+    assert!(leader
+        .label
+        .caveat()
+        .contains("not evidence of generalisation"));
 }
 
 #[test]
@@ -239,10 +253,17 @@ fn contaminating_a_pack_empties_its_board_without_deleting_any_entry() {
         )
         .unwrap();
 
-    let rendered =
-        board(VerificationStatus::SelfReported).rank(&[entry("sub-1", 0.14, Epoch(2))], &moderation, &disclosure);
+    let rendered = board(VerificationStatus::SelfReported).rank(
+        &[entry("sub-1", 0.14, Epoch(2))],
+        &moderation,
+        &disclosure,
+    );
     assert!(rendered.ranked.is_empty());
-    assert_eq!(rendered.unranked.len(), 1, "the entry is shown, not dropped");
+    assert_eq!(
+        rendered.unranked.len(),
+        1,
+        "the entry is shown, not dropped"
+    );
     let headline = rendered.headline();
     assert!(headline.contains("No entry on this board is currently rankable"));
     lint_claim(&headline).unwrap();
@@ -321,7 +342,10 @@ fn withdrawing_a_published_entry_removes_its_rank_and_its_score_but_not_its_reco
         4,
     );
 
-    let entries = [entry("sub-1", 0.05, Epoch(2)), entry("sub-2", 0.40, Epoch(2))];
+    let entries = [
+        entry("sub-1", 0.05, Epoch(2)),
+        entry("sub-2", 0.40, Epoch(2)),
+    ];
     let before = board(VerificationStatus::SelfReported).rank(&entries, &moderation, &disclosure);
     assert_eq!(before.leaders()[0].entry.submission.as_str(), "sub-1");
 
@@ -364,10 +388,16 @@ fn the_whole_hub_state_survives_a_json_round_trip() {
         .attest(&id, VerificationStatus::Reproduced, "reviewer-2", Epoch(4))
         .unwrap();
 
-    let rendered =
-        board(VerificationStatus::SelfReported).rank(&[entry("sub-1", 0.14, Epoch(2))], &moderation, &disclosure);
+    let rendered = board(VerificationStatus::SelfReported).rank(
+        &[entry("sub-1", 0.14, Epoch(2))],
+        &moderation,
+        &disclosure,
+    );
     let card = BioAtlasCard::render(moderation.record(&id).unwrap(), "1.0.0")
-        .with_score(rendered.ranked[0].entry.score, rendered.ranked[0].label.clone())
+        .with_score(
+            rendered.ranked[0].entry.score,
+            rendered.ranked[0].label.clone(),
+        )
         .unwrap();
 
     for encoded in [
@@ -379,10 +409,53 @@ fn the_whole_hub_state_survives_a_json_round_trip() {
         assert!(!encoded.is_empty());
     }
 
-    let decoded: ModerationLedger = serde_json::from_str(&serde_json::to_string(&moderation).unwrap()).unwrap();
+    let decoded: ModerationLedger =
+        serde_json::from_str(&serde_json::to_string(&moderation).unwrap()).unwrap();
     assert_eq!(decoded, moderation);
-    let decoded: DisclosureLedger = serde_json::from_str(&serde_json::to_string(&disclosure).unwrap()).unwrap();
+    let decoded: DisclosureLedger =
+        serde_json::from_str(&serde_json::to_string(&disclosure).unwrap()).unwrap();
     assert_eq!(decoded, disclosure);
-    let decoded: BioAtlasCard = serde_json::from_str(&serde_json::to_string(&card).unwrap()).unwrap();
+    let decoded: BioAtlasCard =
+        serde_json::from_str(&serde_json::to_string(&card).unwrap()).unwrap();
     assert_eq!(decoded, card);
+}
+
+/// Asserts the six observable properties of one `bioprism_ids::validated_string_id!` expansion.
+///
+/// The hub's identifiers are generated by the same macro as `bioprism-ids`' and
+/// `bioprism-bioir`', so one edit to that expansion changes the wire form of all three crates at
+/// once. Every identifier below appears verbatim in a published submission record, which makes
+/// its serialised bytes part of the hub's contract rather than an implementation detail: a
+/// submission archived as `"sub-1"` must not come back as `{"value": "sub-1"}` after a refactor
+/// that still round-trips.
+macro_rules! assert_shared_identifier_contract {
+    ($ty:ty, $kind:literal) => {{
+        let id = <$ty>::parse("sample-1").expect("well-formed identifier");
+        assert_eq!(id.as_str(), "sample-1");
+        assert_eq!(id.to_string(), "sample-1");
+        assert_eq!(
+            serde_json::to_string(&id).expect("identifier serialises"),
+            "\"sample-1\""
+        );
+        let decoded: $ty = serde_json::from_str("\"sample-1\"").expect("identifier deserialises");
+        assert_eq!(decoded, id);
+        assert_eq!(String::from(id), "sample-1");
+
+        assert_eq!(<$ty>::KIND, $kind);
+        assert_eq!(<$ty>::parse(""), Err(IdError::Empty { kind: $kind }));
+        assert_eq!(
+            <$ty>::parse("a\u{7}b"),
+            Err(IdError::ControlCharacter {
+                kind: $kind,
+                value: "a\u{7}b".to_string(),
+            })
+        );
+    }};
+}
+
+#[test]
+fn every_hub_identifier_serialises_as_a_bare_json_string_and_names_its_own_kind() {
+    assert_shared_identifier_contract!(SubmissionId, "submission");
+    assert_shared_identifier_contract!(SubmitterId, "submitter");
+    assert_shared_identifier_contract!(BoardId, "board");
 }

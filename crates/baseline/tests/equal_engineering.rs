@@ -7,8 +7,8 @@
 
 use bioprism_baseline::{
     compare, default_panel, CompareError, Comparison, ConnectedComponent, ContextStrategy,
-    FiberCompiled, Judgement, KHopIncidence, LexicalTopK, QueryGraph, RowRefusal, RowVerdict,
-    Selection,
+    FiberCompiled, Judgement, KHopIncidence, LexicalTopK, PanelIndex, QueryGraph, RowRefusal,
+    RowVerdict, Selection,
 };
 use bioprism_fiber::{FiberError, Query};
 use bioprism_section::OracleStatus;
@@ -121,7 +121,13 @@ fn a_correctly_tuned_graph_walk_matches_fiber_exactly() {
     let compact_and_sound: Vec<usize> = sound_depths
         .iter()
         .copied()
-        .filter(|depth| KHopIncidence { depth: *depth }.select(&world, &query).facts.len() < 761)
+        .filter(|depth| {
+            KHopIncidence { depth: *depth }
+                .select(&world, &query)
+                .facts
+                .len()
+                < 761
+        })
         .collect();
     assert_eq!(
         compact_and_sound,
@@ -148,7 +154,11 @@ fn shallow_graph_selections_are_unsound_not_merely_small() {
     assert_eq!(graph.judgement().unwrap().missing_witnesses.len(), 4);
     assert_eq!(graph.protected_recall, 0.0);
 
-    let fiber = comparison.results.iter().find(|r| r.name == "fiber").unwrap();
+    let fiber = comparison
+        .results
+        .iter()
+        .find(|r| r.name == "fiber")
+        .unwrap();
     assert_eq!(fiber.verdict_preserving(), Some(true));
     assert_eq!(fiber.protected_recall, 1.0);
 
@@ -213,7 +223,11 @@ fn lexical_retrieval_cannot_tell_when_to_stop() {
         .iter()
         .find(|r| r.name == "lexical-top-50")
         .unwrap();
-    let fiber = comparison.results.iter().find(|r| r.name == "fiber").unwrap();
+    let fiber = comparison
+        .results
+        .iter()
+        .find(|r| r.name == "fiber")
+        .unwrap();
 
     assert_eq!(lexical.verdict_preserving(), Some(true));
     assert_eq!(fiber.verdict_preserving(), Some(true));
@@ -294,7 +308,7 @@ impl ContextStrategy for Fixed {
         "a fixed selection supplied by the test".into()
     }
 
-    fn select(&self, _world: &World, _query: &Query) -> Selection {
+    fn select_indexed(&self, _index: &PanelIndex<'_>) -> Selection {
         Selection::new(self.facts.clone())
     }
 }
@@ -438,7 +452,9 @@ fn a_refused_row_renders_as_refused_in_both_the_table_and_the_json() {
     assert!(markdown.contains("cannot be admissible"));
 
     let document = comparison.to_json();
-    let rows = document["results"].as_array().expect("results are an array");
+    let rows = document["results"]
+        .as_array()
+        .expect("results are an array");
     let refused = rows
         .iter()
         .find(|row| row["name"] == "broken-split")

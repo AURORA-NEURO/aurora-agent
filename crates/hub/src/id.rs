@@ -6,76 +6,29 @@
 //! because conflating "this run happened" with "this person claims this run happened" is the
 //! specific mistake a public hub exists to prevent.
 //!
-//! Validation matches `bioprism_ids`: non-empty, no control characters. The hub is not an
-//! identity provider and cannot check that a `SubmitterId` corresponds to a real person, an
-//! institution, or a held key. It only guarantees that whatever string was presented is the same
-//! string on every subsequent record, so an audit can follow it.
+//! Validation is [`bioprism_ids::validated_string_id`], the same macro the engine identifiers
+//! are built from: non-empty, no control characters, failing as [`bioprism_ids::IdError`]. The
+//! hub is not an identity provider and cannot check that a `SubmitterId` corresponds to a real
+//! person, an institution, or a held key. It only guarantees that whatever string was presented
+//! is the same string on every subsequent record, so an audit can follow it.
 
-use bioprism_ids::IdError;
+use bioprism_ids::validated_string_id;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-macro_rules! hub_id {
-    ($(#[$meta:meta])* $name:ident, $kind:literal) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        #[serde(try_from = "String", into = "String")]
-        pub struct $name(String);
-
-        impl $name {
-            pub const KIND: &'static str = $kind;
-
-            pub fn parse(value: impl Into<String>) -> Result<Self, IdError> {
-                let value = value.into();
-                if value.is_empty() {
-                    return Err(IdError::Empty { kind: $kind });
-                }
-                if value.chars().any(|c| c.is_control()) {
-                    return Err(IdError::ControlCharacter { kind: $kind, value });
-                }
-                Ok($name(value))
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(&self.0)
-            }
-        }
-
-        impl From<$name> for String {
-            fn from(value: $name) -> Self {
-                value.0
-            }
-        }
-
-        impl TryFrom<String> for $name {
-            type Error = IdError;
-
-            fn try_from(value: String) -> Result<Self, Self::Error> {
-                $name::parse(value)
-            }
-        }
-    };
-}
-
-hub_id!(
+validated_string_id!(
     /// Identifies one public submission. Immutable: a corrected artifact is a new submission that
     /// supersedes the old one, because 34.15 requires that "corrections preserve prior versions".
     SubmissionId,
     "submission"
 );
-hub_id!(
+validated_string_id!(
     /// Identifies whoever presented a submission. Opaque to the hub; see the module note on why
     /// this is not an authenticated principal.
     SubmitterId,
     "submitter"
 );
-hub_id!(
+validated_string_id!(
     /// Identifies a leaderboard. A board is defined by its comparability conditions, so its
     /// identifier is a label for humans, not the thing that makes entries comparable.
     BoardId,

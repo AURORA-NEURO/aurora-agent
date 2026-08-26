@@ -57,3 +57,46 @@ fn every_compiler_identifier_reports_its_own_kind_when_it_refuses_a_value() {
     assert_kind_and_validation!(VariableName, "variable");
     assert_kind_and_validation!(RunId, "run");
 }
+
+/// A module that shadows every prelude name the macro expansion reaches for.
+///
+/// `macro_rules!` is hygienic for local bindings and not for paths: whatever `String`, `Result`,
+/// `Ok`, `Err`, `str`, `Into`, `From` and `TryFrom` mean *here* is what they would mean inside an
+/// expansion that named them bare. Each is bound to an unrelated unit struct, so a bare path in
+/// the expansion cannot compile — `Result<Self, IdError>` would be a unit struct given two type
+/// arguments, `Ok(..)` a call to a struct that takes none.
+///
+/// The identifier is declared here and asserted from outside, because assertions written in this
+/// scope could not name `String` either.
+mod a_scope_that_shadows_every_prelude_name_the_expansion_uses {
+    #![allow(non_camel_case_types, dead_code)]
+
+    pub struct String;
+    pub struct str;
+    pub struct Result;
+    pub struct Ok;
+    pub struct Err;
+    pub struct Into;
+    pub struct From;
+    pub struct TryFrom;
+
+    bioprism_ids::validated_string_id!(
+        /// Exists only to be generated in hostile scope.
+        ShadowedId,
+        "shadowed"
+    );
+}
+
+/// The macro's path-hygiene claim, made falsifiable.
+///
+/// Not a compile test alone: an expansion could resolve and still misbehave, so the generated type
+/// is put through the same wire-format and validation assertions every shipped identifier answers.
+/// Remove one `::std::` or `::core::` prefix from the expansion and this file stops compiling,
+/// which is what makes the doc comment on `validated_string_id!` a claim rather than a hope.
+#[test]
+fn an_identifier_generated_where_the_prelude_is_shadowed_behaves_like_every_other_one() {
+    use a_scope_that_shadows_every_prelude_name_the_expansion_uses::ShadowedId;
+
+    assert_bare_string_wire_form!(ShadowedId);
+    assert_kind_and_validation!(ShadowedId, "shadowed");
+}

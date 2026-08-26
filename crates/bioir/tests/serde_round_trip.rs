@@ -6,13 +6,15 @@
 //! in Rust-only tests — nothing errors, the value is simply gone.
 
 use bioprism_bioir::{
-    AssayLens, Calibration, CalibrationKind, ComparabilityRule, ConsumptionEvent, ErrorModel,
-    Identifiability, IdentityAssertion, IdentityConfidence, LensId, LineageGraph,
-    MaterialRequirement, MeasurementScale, MeasurementTarget, MissingnessClass, ObservationId,
-    Origin, Predicate, ProcessKind, ProcessingStep, ProtocolChain, QcContract, QcMetric, Quantity,
-    Representation, ReviewerAssessment, ReviewerDistribution, Specimen, SpecimenId, SplitPlan,
-    SplitUnit, SubjectId, UncertaintyBudget, UncertaintyComponent, UncertaintyKind,
+    AssayLens, Calibration, CalibrationKind, CohortId, ComparabilityRule, ConsumptionEvent,
+    ErrorModel, EvidenceId, Identifiability, IdentityAssertion, IdentityConfidence, LensId,
+    LineageGraph, MaterialRequirement, MeasurementScale, MeasurementTarget, MissingnessClass,
+    ObservationId, Origin, Predicate, ProcessKind, ProcessingStep, ProtocolChain, QcContract,
+    QcMetric, Quantity, Representation, ReviewerAssessment, ReviewerDistribution, Specimen,
+    SpecimenId, SplitPlan, SplitUnit, SubjectId, UncertaintyBudget, UncertaintyComponent,
+    UncertaintyKind,
 };
+use bioprism_ids::IdError;
 use bioprism_scope::{Interval, Timestamp};
 use std::collections::BTreeSet;
 
@@ -125,7 +127,10 @@ fn a_split_plan_round_trips_with_its_chronological_boundary() {
         ObservationId::parse("obs-1").expect("observation id"),
         "train",
     )
-    .assign(ObservationId::parse("obs-2").expect("observation id"), "test")
+    .assign(
+        ObservationId::parse("obs-2").expect("observation id"),
+        "test",
+    )
     .with_boundary(bioprism_bioir::ChronologicalBoundary {
         earlier: bioprism_bioir::Fold::new("train"),
         later: bioprism_bioir::Fold::new("test"),
@@ -251,4 +256,50 @@ fn an_uncertainty_budget_round_trips_with_every_kind_kept_apart() {
     assert_eq!(restored, budget);
     assert_eq!(restored.kinds().len(), 3);
     assert!(restored.component(UncertaintyKind::Epistemic).is_none());
+}
+
+/// Asserts the six observable properties of one `bioprism_ids::validated_string_id!` expansion.
+///
+/// The macro is shared with `bioprism-ids` and `bioprism-hub` and the wire form it produces is
+/// published surface in all three, so a change to the expansion is a wire-format change in three
+/// crates at once. `bioprism-ids` asserts these bytes for its own identifiers; without the same
+/// assertion here, a divergence introduced in the expansion would be caught for `WorldId` and
+/// missed for `SpecimenId`.
+///
+/// `round_trip` above cannot stand in for this. Rewriting both halves of
+/// `#[serde(try_from, into)]` to an object form still round-trips cleanly; only a literal
+/// assertion on the emitted bytes pins the shape.
+macro_rules! assert_shared_identifier_contract {
+    ($ty:ty, $kind:literal) => {{
+        let id = <$ty>::parse("sample-1").expect("well-formed identifier");
+        assert_eq!(id.as_str(), "sample-1");
+        assert_eq!(id.to_string(), "sample-1");
+        assert_eq!(
+            serde_json::to_string(&id).expect("identifier serialises"),
+            "\"sample-1\""
+        );
+        let decoded: $ty = serde_json::from_str("\"sample-1\"").expect("identifier deserialises");
+        assert_eq!(decoded, id);
+        assert_eq!(String::from(id), "sample-1");
+
+        assert_eq!(<$ty>::KIND, $kind);
+        assert_eq!(<$ty>::parse(""), Err(IdError::Empty { kind: $kind }));
+        assert_eq!(
+            <$ty>::parse("a\u{7}b"),
+            Err(IdError::ControlCharacter {
+                kind: $kind,
+                value: "a\u{7}b".to_string(),
+            })
+        );
+    }};
+}
+
+#[test]
+fn every_biological_identifier_serialises_as_a_bare_json_string_and_names_its_own_kind() {
+    assert_shared_identifier_contract!(SubjectId, "subject");
+    assert_shared_identifier_contract!(SpecimenId, "specimen");
+    assert_shared_identifier_contract!(LensId, "lens");
+    assert_shared_identifier_contract!(CohortId, "cohort");
+    assert_shared_identifier_contract!(ObservationId, "observation");
+    assert_shared_identifier_contract!(EvidenceId, "evidence");
 }

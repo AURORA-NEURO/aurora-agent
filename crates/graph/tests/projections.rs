@@ -5,10 +5,10 @@
 //! vocabulary), 43.09 (event time is not availability time) and 40.29 (the table fallback).
 
 use bioprism_graph::{
-    evidence_survives, lint_graph, obstructions_survive, project_all, Availability, ClockAnomaly,
-    DropReason, EdgeType, FidelityLedger, GraphBody, GraphEdge, GraphLint, GraphNode,
-    GraphProjection, HypergraphProjection, NodeKind, NodeStatus, Projection, ProjectionError,
-    OrderJustification, ProjectionKind, ProjectionSource, TableProjection, TimelineAxis,
+    evidence_survives, lint_graph, obstructions_survive, project_all, Availability, BoundSection,
+    ClockAnomaly, DropReason, EdgeType, FidelityLedger, GraphBody, GraphEdge, GraphLint, GraphNode,
+    GraphProjection, HypergraphProjection, NodeKind, NodeStatus, OrderJustification, ProjectRegion,
+    Projection, ProjectionError, ProjectionKind, ProjectionSource, TableProjection, TimelineAxis,
     TimelineProjection, COLUMNS, RENDERING_NOTE,
 };
 use bioprism_section::{
@@ -95,7 +95,11 @@ fn certificate_for(section: &DecisionSection) -> ContextCertificate {
     ContextCertificate {
         world_id: section.world_id.clone(),
         query_id: section.query_id.clone(),
-        selected_facts: section.evidence_ids().iter().map(|id| id.to_string()).collect(),
+        selected_facts: section
+            .evidence_ids()
+            .iter()
+            .map(|id| id.to_string())
+            .collect(),
         selected_factors: vec!["factor.identity_check".into(), "factor.policy_check".into()],
         protected_closure: vec!["fact.split_assignment".into()],
         omissions: ReferenceOmissions {
@@ -136,7 +140,13 @@ fn bound() -> (DecisionSection, ContextCertificate, ProjectionSource) {
     (section, certificate, source)
 }
 
-fn event(id: &str, event_time: &str, availability_time: &str, produces: &[&str], parents: &[&str]) -> CausalEvent {
+fn event(
+    id: &str,
+    event_time: &str,
+    availability_time: &str,
+    produces: &[&str],
+    parents: &[&str],
+) -> CausalEvent {
     CausalEvent::from_json(&json!({
         "id": id,
         "event_time": event_time,
@@ -383,12 +393,14 @@ fn evidence_handles_survive_the_graph_hypergraph_and_table_round_trip() {
     // id, and its loss ledger says so rather than the view implying coverage it does not have.
     let timeline = evidence_survives(&section, &bundle.timeline);
     assert!(!timeline.is_complete());
-    assert!(bundle
-        .timeline
-        .fidelity()
-        .dropped_for(DropReason::ValuesElided)
-        .count()
-        > 0);
+    assert!(
+        bundle
+            .timeline
+            .fidelity()
+            .dropped_for(DropReason::ValuesElided)
+            .count()
+            > 0
+    );
 }
 
 #[test]
@@ -410,7 +422,10 @@ fn the_edge_vocabulary_reproduces_the_normative_glosses_verbatim() {
     }
     assert_eq!(EdgeType::ALL.len(), 10);
     assert_eq!(
-        EdgeType::ALL.into_iter().filter(|e| !e.is_normative()).count(),
+        EdgeType::ALL
+            .into_iter()
+            .filter(|e| !e.is_normative())
+            .count(),
         1
     );
 }
@@ -566,7 +581,10 @@ fn a_requires_cycle_in_an_assembled_view_is_linted_rather_than_hidden() {
     };
 
     let findings = lint_graph(&body);
-    match findings.iter().find(|f| matches!(f, GraphLint::RequiresCycle { .. })) {
+    match findings
+        .iter()
+        .find(|f| matches!(f, GraphLint::RequiresCycle { .. }))
+    {
         Some(GraphLint::RequiresCycle { members }) => {
             assert_eq!(members, &vec!["a".to_string(), "b".to_string()]);
         }
@@ -619,7 +637,10 @@ fn the_hypergraph_keeps_whole_the_factor_the_graph_had_to_split() {
         .find(|vertex| vertex.variable == "split_assignment")
         .expect("present");
     assert_eq!(split.supplied_by, vec!["fact.split_assignment".to_string()]);
-    assert_eq!(split.incident_edges, vec!["factor.identity_check".to_string()]);
+    assert_eq!(
+        split.incident_edges,
+        vec!["factor.identity_check".to_string()]
+    );
 }
 
 #[test]
@@ -754,8 +775,20 @@ fn changing_the_timeline_axis_changes_the_order_and_not_the_membership() {
 fn a_causal_cycle_is_named_rather_than_silently_ordered() {
     let (section, _certificate, source) = bound();
     let cyclic = vec![
-        event("event.a", "2025-01-01T00:00:00Z", "2025-01-01T00:00:00Z", &[], &["event.b"]),
-        event("event.b", "2025-01-02T00:00:00Z", "2025-01-02T00:00:00Z", &[], &["event.a"]),
+        event(
+            "event.a",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T00:00:00Z",
+            &[],
+            &["event.b"],
+        ),
+        event(
+            "event.b",
+            "2025-01-02T00:00:00Z",
+            "2025-01-02T00:00:00Z",
+            &[],
+            &["event.a"],
+        ),
     ];
     let view = TimelineProjection::new(&cyclic)
         .project(&section, source)
@@ -778,7 +811,10 @@ fn the_timeline_renders_events_that_produced_nothing_the_region_selected() {
     let scan = body.entry("event.scan").expect("rendered anyway");
     assert!(scan.produces_selected.is_empty());
     let training = body.entry("event.training").expect("rendered");
-    assert_eq!(training.produces_selected, vec!["split_assignment".to_string()]);
+    assert_eq!(
+        training.produces_selected,
+        vec!["split_assignment".to_string()]
+    );
 }
 
 #[test]
@@ -808,7 +844,10 @@ fn the_table_lists_obligations_and_conflicts_before_any_evidence_row() {
 
     assert_eq!(body.obstruction_rows, 3);
     for row in &body.rows[..body.obstruction_rows] {
-        assert!(matches!(row.kind, NodeKind::Obligation | NodeKind::Conflict));
+        assert!(matches!(
+            row.kind,
+            NodeKind::Obligation | NodeKind::Conflict
+        ));
     }
     let first_evidence = body
         .rows
@@ -904,7 +943,10 @@ fn a_serialised_view_carries_its_provenance_and_its_loss_ledger() {
     assert!(wire["source"]["certificate_sha256"].is_string());
     assert!(wire["fidelity"]["dropped"].as_array().unwrap().len() >= 2);
     assert_eq!(
-        wire["fidelity"]["carried_obligations"].as_array().unwrap().len(),
+        wire["fidelity"]["carried_obligations"]
+            .as_array()
+            .unwrap()
+            .len(),
         2
     );
     assert!(wire["body"]["nodes"].is_array());
@@ -954,7 +996,9 @@ fn the_timeline_projects_the_event_structure_of_a_generated_world() {
         "the label was generated before the cut but released after it"
     );
     assert_eq!(
-        body.entry("event.future_label").unwrap().order_justification,
+        body.entry("event.future_label")
+            .unwrap()
+            .order_justification,
         OrderJustification::CausalPrecedence
     );
 }
@@ -973,4 +1017,100 @@ fn a_region_with_no_obstructions_still_reports_its_flattening() {
     assert_eq!(bundle.table.body().obstruction_rows, 0);
     assert!(bundle.graph.fidelity().has_semantic_loss());
     assert_eq!(bundle.graph.fidelity().carried_obligations.len(), 0);
+}
+
+#[test]
+fn a_bundle_refuses_to_render_when_the_section_changed_after_provenance_was_bound() {
+    let (mut section, _certificate, source) = bound();
+    section.goal = "quietly repurposed after the certificate was issued".into();
+
+    let error = project_all(&section, &events(), source).expect_err("the section drifted");
+    assert!(matches!(
+        error,
+        ProjectionError::SectionMutatedAfterBinding { .. }
+    ));
+}
+
+#[test]
+fn re_establishing_a_lapsed_binding_refuses_a_section_that_changed_in_the_meantime() {
+    let (mut section, _certificate, source) = bound();
+    section.decision_time = "2099-01-01T00:00:00Z".into();
+
+    let error = BoundSection::rebind(&section, source).expect_err("the section drifted");
+    match error {
+        ProjectionError::SectionMutatedAfterBinding { bound, actual } => {
+            assert_ne!(bound, actual);
+            assert_eq!(
+                actual,
+                section.content_hash().expect("section digests").as_str()
+            );
+        }
+        other => panic!("expected a mutation refusal, got {other}"),
+    }
+}
+
+#[test]
+fn a_live_binding_projects_exactly_what_a_detached_source_projects() {
+    // The optimisation is only sound if skipping the per-projection guard changes nothing about
+    // what is rendered or what provenance is sealed into it. Compare the whole bundle, including
+    // every view's `ProjectionSource`, rather than a summary of it.
+    let section = section();
+    let certificate = certificate_for(&section);
+
+    let detached = ProjectionSource::bind(&section, &certificate, CertificateProfile::Extended)
+        .expect("certificate attests this section");
+    let by_source = project_all(&section, &events(), detached).expect("projects four ways");
+
+    let bound = BoundSection::bind(&section, &certificate, CertificateProfile::Extended)
+        .expect("certificate attests this section");
+    assert_eq!(bound.section().query_id, section.query_id);
+    assert_eq!(
+        bound.source().section_sha256(),
+        by_source.graph.source().section_sha256()
+    );
+    let by_binding = bound.project_all(&events()).expect("projects four ways");
+
+    assert_eq!(by_binding, by_source);
+    assert_eq!(
+        serde_json::to_string(&by_binding).unwrap(),
+        serde_json::to_string(&by_source).unwrap()
+    );
+}
+
+#[test]
+fn a_live_binding_refuses_a_certificate_that_attests_a_different_section() {
+    // `BoundSection` is a cheaper way to hold a binding, never a laxer way to make one: it
+    // delegates to the same constructor, so the forgery guard is the same guard.
+    let section = section();
+    let mut other = section.clone();
+    other.goal = "a different decision entirely".into();
+    let certificate = certificate_for(&other);
+
+    let error = BoundSection::bind(&section, &certificate, CertificateProfile::Reference)
+        .expect_err("the certificate attests another section");
+    assert!(matches!(
+        error,
+        ProjectionError::CertificateAttestsAnotherSection { .. }
+    ));
+}
+
+#[test]
+fn a_binding_released_back_into_a_detached_source_is_guarded_again() {
+    // `into_source` hands back the weaker object on purpose. Once the borrow is gone the section
+    // can move again, so the runtime guard has to take over from the type system — and does.
+    let mut section = section();
+    let certificate = certificate_for(&section);
+    let released = BoundSection::bind(&section, &certificate, CertificateProfile::Extended)
+        .expect("certificate attests this section")
+        .into_source();
+
+    section.goal = "changed once the borrow was gone".into();
+
+    let error = GraphProjection::new()
+        .project(&section, released)
+        .expect_err("the section drifted after the binding was released");
+    assert!(matches!(
+        error,
+        ProjectionError::SectionMutatedAfterBinding { .. }
+    ));
 }

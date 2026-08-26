@@ -92,10 +92,6 @@ impl ContextStrategy for LexicalTopK {
         )
     }
 
-    fn select(&self, world: &World, query: &Query) -> Selection {
-        self.select_indexed(&PanelIndex::new(world, query))
-    }
-
     fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
         let world = index.world();
         let scored = index.lexical_ranking();

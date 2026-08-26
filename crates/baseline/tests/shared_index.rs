@@ -11,11 +11,14 @@
 //! strategy in turn. These tests run the shipped panels both ways and require the selections to
 //! agree fact for fact and note for note.
 
-use bioprism_baseline::{compare, default_panel, sweep_panel, ContextStrategy, PanelIndex};
+use bioprism_baseline::{
+    compare, default_panel, sweep_panel, ContextStrategy, PanelIndex, Selection,
+};
 use bioprism_fiber::Query;
 use bioprism_world::World;
 use bioprism_worldgen::{generate, TagStyle, WorldSpec};
 use serde_json::Value;
+use std::cell::Cell;
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> Value {
@@ -164,4 +167,66 @@ fn a_panel_of_one_reaches_the_same_row_it_reaches_inside_the_full_panel() {
             row.name
         );
     }
+}
+
+/// A strategy written the only way the trait allows: one method, the indexed one.
+///
+/// It counts its own invocations so a test can tell "reached the same answer twice" from "reached
+/// it once and echoed it".
+struct CountsItsOwnCalls {
+    calls: Cell<usize>,
+}
+
+impl ContextStrategy for CountsItsOwnCalls {
+    fn name(&self) -> String {
+        "counts-its-own-calls".into()
+    }
+
+    fn method(&self) -> String {
+        "selects the first fact in world order; exists to exercise the trait, not to compete".into()
+    }
+
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
+        self.calls.set(self.calls.get() + 1);
+        Selection::new(
+            index
+                .world()
+                .facts
+                .iter()
+                .take(1)
+                .map(|fact| fact.id.as_str().to_string())
+                .collect(),
+        )
+        .noting("the first fact in world order")
+    }
+}
+
+/// A strategy that writes only the required method is reachable through both entry points.
+///
+/// The pair was briefly defaulted in terms of each other — `select_indexed` fell back to `select`,
+/// and every shipped strategy defined `select` as `select_indexed` over a private index of one.
+/// An implementor who wrote only `select_indexed` under that arrangement, exactly as this one
+/// does, would still compile and then recurse until the stack ran out on the first call to
+/// `select`. Now `select_indexed` is the sole required method: writing neither is a compile error
+/// rather than a run-time hang, and `select` has nowhere to recurse to.
+#[test]
+fn a_strategy_defining_only_the_required_method_answers_through_both_entry_points() {
+    let (world, query) = reference_world();
+    let strategy = CountsItsOwnCalls {
+        calls: Cell::new(0),
+    };
+
+    let direct = strategy.select(&world, &query);
+    assert_eq!(
+        strategy.calls.get(),
+        1,
+        "select must run the body exactly once"
+    );
+
+    let indexed = strategy.select_indexed(&PanelIndex::new(&world, &query));
+    assert_eq!(strategy.calls.get(), 2);
+
+    assert_eq!(direct.facts, indexed.facts);
+    assert_eq!(direct.notes, indexed.notes);
+    assert_eq!(direct.facts.len(), 1);
 }

@@ -102,10 +102,6 @@ impl ContextStrategy for KHopIncidence {
         )
     }
 
-    fn select(&self, world: &World, query: &Query) -> Selection {
-        self.select_indexed(&PanelIndex::new(world, query))
-    }
-
     fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
         Selection::new(reachable(
             index.incidence(),
@@ -126,10 +122,6 @@ impl ContextStrategy for ConnectedComponent {
 
     fn method(&self) -> String {
         "unbounded breadth-first walk of the incidence graph from the query targets".into()
-    }
-
-    fn select(&self, world: &World, query: &Query) -> Selection {
-        self.select_indexed(&PanelIndex::new(world, query))
     }
 
     fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
@@ -153,8 +145,9 @@ impl ContextStrategy for QueryGraph {
         "facts feeding any factor incident to a query target variable".into()
     }
 
-    fn select(&self, world: &World, query: &Query) -> Selection {
-        let targets: BTreeSet<&str> = query.targets.iter().map(|t| t.as_str()).collect();
+    fn select_indexed(&self, index: &PanelIndex<'_>) -> Selection {
+        let world = index.world();
+        let targets: BTreeSet<&str> = index.query().targets.iter().map(|t| t.as_str()).collect();
         let mut variables: BTreeSet<&str> = targets.clone();
 
         for factor in &world.factors {
