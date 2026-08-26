@@ -6636,3 +6636,15 @@ __all__ += [
     "FederatedContinualEvidenceSurveillanceContractReceipt",
     "model_federated_continual_evidence_surveillance_contract",
 ]
+
+from .adapter_local_evidence_surveillance_research_copilot import (
+    CopilotEvidenceObservation,
+    LocalEvidenceSurveillanceResearchCopilotReceipt,
+    run_local_evidence_surveillance_research_copilot,
+)
+
+__all__ += [
+    "CopilotEvidenceObservation",
+    "LocalEvidenceSurveillanceResearchCopilotReceipt",
+    "run_local_evidence_surveillance_research_copilot",
+]
