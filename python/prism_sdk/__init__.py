@@ -6588,3 +6588,15 @@ __all__ += [
     "FederatedEvidenceSurveillanceReceipt",
     "run_federated_evidence_surveillance",
 ]
+
+from .adapter_local_evidence_surveillance_contract_model import (
+    ContractModelClaim,
+    LocalEvidenceSurveillanceContractReceipt,
+    model_local_evidence_surveillance_contract,
+)
+
+__all__ += [
+    "ContractModelClaim",
+    "LocalEvidenceSurveillanceContractReceipt",
+    "model_local_evidence_surveillance_contract",
+]

@@ -4562,3 +4562,25 @@ export function validateAdapterFederatedEvidenceSurveillanceInferenceEngineRecei
 }
 
 export function adapterFederatedEvidenceSurveillanceInferenceEngineReceiptDigest(receipt: AdapterFederatedEvidenceSurveillanceInferenceEngineReceipt): string { validateAdapterFederatedEvidenceSurveillanceInferenceEngineReceipt(receipt); return digestJsonSync(receipt); }
+
+export const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID = "AFA-adapter-P01-F05" as const;
+export const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION = "adapter-local-evidence-surveillance-contract-model/1.0" as const;
+
+export interface AdapterLocalEvidenceSurveillanceContractModelReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; input_schema: string; output_schema: string;
+  compatibility: "compatible" | "additive_migration" | "breaking" | "incompatible"; disposition: "compatible" | "partial" | "unknown" | "blocked";
+  candidate_order: string[]; retained_order: string[]; unknown_order: string[]; denied_order: string[]; migration_order: string[]; semantic_loss: string[]; required_order: string[];
+  contract_digest: string; canonical_digest: string; provenance_digest: string; replay_identity: string; effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateAdapterLocalEvidenceSurveillanceContractModelReceipt(receipt: AdapterLocalEvidenceSurveillanceContractModelReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID || receipt.contract_version !== ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION) throw new Error("contract model schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || receipt.input_schema !== "EvidenceFeed1@1" || receipt.output_schema !== "QualifiedEvidenceSet2@1" || !receipt.candidate_order.length || !receipt.effect_receipts.length) throw new Error("contract identity, schemas, locality, candidates, or effects are incomplete");
+  for (const values of [receipt.candidate_order, receipt.retained_order, receipt.unknown_order, receipt.denied_order, receipt.migration_order, receipt.semantic_loss, receipt.required_order, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("contract ordering is invalid");
+  if (JSON.stringify([...receipt.retained_order, ...receipt.unknown_order, ...receipt.denied_order].sort()) !== JSON.stringify([...receipt.candidate_order].sort())) throw new Error("contract state partition is incomplete");
+  for (const value of [receipt.contract_digest, receipt.canonical_digest, receipt.provenance_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("contract digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-contract:") && effect !== "block:unsafe-release")) throw new Error("contract effect is outside local-read gate");
+  if (receipt.disposition === "blocked" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("blocked contract must be explicitly blocked");
+}
+
+export function adapterLocalEvidenceSurveillanceContractModelReceiptDigest(receipt: AdapterLocalEvidenceSurveillanceContractModelReceipt): string { validateAdapterLocalEvidenceSurveillanceContractModelReceipt(receipt); return digestJsonSync(receipt); }

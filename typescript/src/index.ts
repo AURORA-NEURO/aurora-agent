@@ -3486,6 +3486,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterFederatedEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceContractModelReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,
   AUTONOMOUS_GOAL_MAX_CRITERIA,

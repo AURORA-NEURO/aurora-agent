@@ -95,6 +95,7 @@ pub mod local_evidence_surveillance_inference_engine;
 pub mod multimodal_evidence_surveillance_inference_engine;
 pub mod throughput_evidence_surveillance_inference_engine;
 pub mod federated_evidence_surveillance_inference_engine;
+pub mod local_evidence_surveillance_contract_model;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
@@ -227,6 +228,14 @@ pub use federated_evidence_surveillance_inference_engine::{
     FederatedQualifiedEvidenceSet,
     CONTRACT_VERSION as ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use local_evidence_surveillance_contract_model::{
+    local_evidence_surveillance_contract_model_manifest,
+    model_local_evidence_surveillance_contract, ContractCompatibilityDisposition,
+    ContractModelClaim, ContractModelDisposition, LocalEvidenceSurveillanceContractError,
+    LocalEvidenceSurveillanceContractReceipt, LocalEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
 };
 pub use execution_control::{
     admit_computational_execution, AuthorizedExecutionEffect, ComputationalExecutionReceipt,
