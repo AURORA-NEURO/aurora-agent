@@ -86,6 +86,10 @@ from .autonomous_domain_response import (
     validate_autonomous_domain_response_evaluation,
     validate_autonomous_provider_domain_response,
 )
+from .autonomous_cross_domain_response import (
+    AutonomousCrossDomainResponseAssessment,
+    assess_autonomous_cross_domain_response_set,
+)
 from .autonomous_workflow_response import (
     evaluate_autonomous_workflow_stage_response,
     replay_autonomous_workflow_stage_response_evaluation,
@@ -16021,6 +16025,46 @@ class AutonomousAgent:
             candidates=candidates,
             policy=policy,
             requested_domains=requested_domains,
+        )
+
+    def assess_cross_domain_responses(
+        self,
+        responses: Sequence[Mapping[str, Any]],
+        *,
+        task: str | None = None,
+        context_digest: str | None = None,
+        requested_domains: Sequence[str] | None = None,
+        alignments: Sequence[Mapping[str, Any]] = (),
+        require_synthesis: bool = False,
+        require_complete_alignment: bool = True,
+        minimum_reward: float = 0.8,
+        minimum_alignment_confidence: float = 0.75,
+        contradiction_confidence_threshold: float = 0.75,
+    ) -> AutonomousCrossDomainResponseAssessment:
+        """Gate structured specialist outputs before cross-domain synthesis.
+
+        ``responses`` are transient caller/provider values.  The returned assessment keeps only
+        response/evaluation digests, bounded scores, explicit alignment metadata, and next
+        actions.  Supplying ``task`` creates a digest-only context binding; its text is never
+        retained by this façade.
+        """
+
+        if task is not None:
+            if context_digest is not None:
+                raise BrainRunError("cross-domain response assessment accepts task or context_digest, not both")
+            if not isinstance(task, str) or not task.strip() or "\x00" in task or len(task.encode("utf-8")) > 32_000:
+                raise BrainRunError("cross-domain response assessment task is outside its bound")
+            context_digest = content_digest({"task": task})
+        return assess_autonomous_cross_domain_response_set(
+            responses,
+            requested_domains=requested_domains,
+            context_digest=context_digest,
+            alignments=alignments,
+            require_synthesis=require_synthesis,
+            require_complete_alignment=require_complete_alignment,
+            minimum_reward=minimum_reward,
+            minimum_alignment_confidence=minimum_alignment_confidence,
+            contradiction_confidence_threshold=contradiction_confidence_threshold,
         )
 
     def evidence_plan(

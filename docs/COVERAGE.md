@@ -772,3 +772,9 @@ stamped many times, and the distinct-string count sees that directly.
 
 Use the distinguishing-lines-per-module column, and treat every percentage as a band with its method
 attached.
+
+The cross-domain structured-response gate is covered in both SDKs. It validates every built-in
+specialist contract, computes digest-only response rows, requires explicit pairwise alignment by
+default, blocks missing/weak/contradictory responses, accepts an optional validated synthesis row,
+and supports metadata validation plus replay drift detection. The gate is provider-free and its
+next actions remain review proposals rather than dispatch authority.

@@ -1334,6 +1334,35 @@ export {
   evaluateAutonomousDomainResponse,
   replayAutonomousDomainResponseEvaluation,
 } from "./autonomous-domain-response.js";
+export {
+  AUTONOMOUS_CROSS_DOMAIN_RESPONSE_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_RESPONSE_ROW_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_RESPONSE_ALIGNMENT_SCHEMA,
+  AUTONOMOUS_CROSS_DOMAIN_RESPONSE_STATUSES,
+  AUTONOMOUS_CROSS_DOMAIN_RESPONSE_ROLES,
+  AUTONOMOUS_CROSS_DOMAIN_RESPONSE_ALIGNMENT_STANCES,
+  MAX_AUTONOMOUS_CROSS_DOMAIN_RESPONSE_ENTRIES,
+  MAX_AUTONOMOUS_CROSS_DOMAIN_RESPONSE_ALIGNMENTS,
+  MAX_AUTONOMOUS_CROSS_DOMAIN_RESPONSE_ACTIONS,
+  MAX_AUTONOMOUS_CROSS_DOMAIN_RESPONSE_REASONS,
+  MAX_AUTONOMOUS_CROSS_DOMAIN_RESPONSE_BYTES,
+  AUTONOMOUS_CROSS_DOMAIN_RESPONSE_MIN_REWARD,
+  AUTONOMOUS_CROSS_DOMAIN_RESPONSE_MIN_ALIGNMENT_CONFIDENCE,
+  AUTONOMOUS_CROSS_DOMAIN_RESPONSE_CONTRADICTION_CONFIDENCE,
+  assessAutonomousCrossDomainResponseSet,
+  validateAutonomousCrossDomainResponseAssessment,
+  replayAutonomousCrossDomainResponseAssessment,
+} from "./autonomous-cross-domain-response.js";
+export type {
+  AutonomousCrossDomainResponseStatus,
+  AutonomousCrossDomainResponseRole,
+  AutonomousCrossDomainResponseAlignmentStance,
+  AutonomousCrossDomainResponseEntry,
+  AutonomousCrossDomainResponseAlignmentInput,
+  AutonomousCrossDomainResponseAlignment,
+  AutonomousCrossDomainResponseRow,
+  AutonomousCrossDomainResponseAssessment,
+} from "./autonomous-cross-domain-response.js";
 export type {
   AutonomousDomainResponseStatus,
   AutonomousDomainStageResponseStatus,

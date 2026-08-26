@@ -11632,3 +11632,46 @@ case fabricates a source or silently invokes anything. A `planned` bridge is sti
 must be handed to the existing evidence adapter/execution boundary. This makes the autonomous loop
 closed at the decision layer—integrity finding -> acquisition priority -> reviewed queue—without
 collapsing source truth or authorization into the planner.
+
+## Cross-domain response integrity and alignment gating
+
+Cross-domain fan-out now has a provider-free gate between specialist completion and synthesis.
+`assess_autonomous_cross_domain_response_set()` / `assessAutonomousCrossDomainResponseSet()`
+accept transient structured responses together with their reviewed domain contracts. Every row is
+validated and passed through the existing deterministic domain-response evaluator, so the gate can
+see missing domains, blocked or incomplete stages, weak structural reward, uncertainty disclosure,
+evidence gaps, and next-action coverage across all built-in domains. The returned assessment keeps
+only response, contract, evaluator, and answer digests plus bounded counts and scores.
+
+Semantic alignment is explicit rather than guessed from text. A caller-owned alignment row binds a
+pair of exact response digests to a topic digest, stance (`support`, `contradict`, `neutral`, or
+`unresolved`), and confidence. The SDK canonicalizes pair ordering, rejects stale or swapped
+response digests, and fails closed on duplicate or malformed alignment IDs. With the default strict
+gate, every pair among the present specialist domains must be reviewed; high-confidence
+contradictions and unresolved alignments require review before synthesis.
+
+The status is one of `ready_to_synthesize`, `needs_alignment_review`, `partial`, `blocked`, or
+`completed` when a validated synthesis response is present. `next_actions` are bounded proposals
+such as `acquire_missing_domain_responses`, `repair_domain_response_integrity`,
+`perform_pairwise_cross_domain_alignment`, and `resolve_cross_domain_contradiction`. They never
+authorize a provider, tool, source, credential, or external effect. `validate_...` and
+`replay_...` reject tampered metadata projections and make the gate safe to carry through durable
+learning or worker restart boundaries.
+
+```python
+assessment = agent.assess_cross_domain_responses(
+    specialist_entries,
+    task="compare the coding, data, and science findings",
+    requested_domains=("coding", "data", "science"),
+    alignments=reviewed_pairwise_alignments,
+)
+if assessment.ready_to_synthesize:
+    # The caller still performs the separate provider approval and synthesis call.
+    proceed_to_reviewed_synthesis(assessment)
+else:
+    inspect(assessment.next_actions, assessment.gate_reasons)
+```
+
+The same contract is available in TypeScript. This closes the response-level seam for all twelve
+domain contracts, including the `cross_domain` synthesis contract, without claiming that a
+structural response score or caller alignment record establishes external-world truth.

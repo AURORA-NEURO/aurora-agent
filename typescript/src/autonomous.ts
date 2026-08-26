@@ -166,6 +166,12 @@ import {
   type AutonomousClaimIntegrityPolicyInput,
 } from "./autonomous-claim-integrity.js";
 import type { PlanAutonomousClaimIntegrityAcquisitionOptions } from "./autonomous-claim-integrity.js";
+import {
+  assessAutonomousCrossDomainResponseSet,
+  type AutonomousCrossDomainResponseAssessment,
+  type AutonomousCrossDomainResponseAlignmentInput,
+  type AutonomousCrossDomainResponseEntry,
+} from "./autonomous-cross-domain-response.js";
 import type {
   AutonomousDomainEvidenceBrainRunOptions,
   AutonomousDomainEvidenceBrainRunResult,
@@ -6432,6 +6438,36 @@ export class AutonomousAgent {
     options: PlanAutonomousClaimIntegrityAcquisitionOptions,
   ) {
     return planAutonomousClaimIntegrityAcquisition(assessment, options);
+  }
+
+  /** Gate structured specialist outputs before cross-domain synthesis. */
+  assessCrossDomainResponses(
+    responses: readonly AutonomousCrossDomainResponseEntry[],
+    options: {
+      task?: string;
+      contextDigest?: string | null;
+      requestedDomains?: readonly AutonomousDomainName[];
+      alignments?: readonly AutonomousCrossDomainResponseAlignmentInput[];
+      requireSynthesis?: boolean;
+      requireCompleteAlignment?: boolean;
+      minimumReward?: number;
+      minimumAlignmentConfidence?: number;
+      contradictionConfidenceThreshold?: number;
+    } = {},
+  ): AutonomousCrossDomainResponseAssessment {
+    if (options.task !== undefined && options.contextDigest !== undefined && options.contextDigest !== null) throw new ArgumentError("cross-domain response assessment accepts task or contextDigest, not both");
+    if (options.task !== undefined && (typeof options.task !== "string" || options.task.trim().length === 0 || options.task.includes("\u0000") || new TextEncoder().encode(options.task).byteLength > 32_000)) throw new ArgumentError("cross-domain response assessment task is outside its bound");
+    const contextDigest = options.task === undefined ? options.contextDigest : digestJsonSync({ task: options.task });
+    return assessAutonomousCrossDomainResponseSet(responses, {
+      requestedDomains: options.requestedDomains,
+      contextDigest,
+      alignments: options.alignments,
+      requireSynthesis: options.requireSynthesis,
+      requireCompleteAlignment: options.requireCompleteAlignment,
+      minimumReward: options.minimumReward,
+      minimumAlignmentConfidence: options.minimumAlignmentConfidence,
+      contradictionConfidenceThreshold: options.contradictionConfidenceThreshold,
+    });
   }
 
   /** Resolve the bounded policy for a domain without provider, tool, or source activity. */
