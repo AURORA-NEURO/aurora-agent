@@ -3619,6 +3619,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterThroughputRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterFederatedContinualRetrievalSynthesisResearchCopilotReceiptDigest,
+  validateAdapterFederatedContinualRetrievalSynthesisResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
+export {
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
   adapterMultimodalRetrievalSynthesisInferenceEngineReceiptDigest,

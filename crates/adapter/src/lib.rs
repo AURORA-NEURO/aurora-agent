@@ -78,6 +78,8 @@
 //! # let _ = ColumnRole::Provenance;
 //! ```
 
+#![recursion_limit = "256"]
+
 pub mod adapter;
 pub mod adversarial_recovery;
 pub mod analysis_portfolio;
@@ -148,6 +150,7 @@ pub mod local_retrieval_synthesis_contract_model;
 pub mod local_retrieval_synthesis_research_copilot;
 pub mod multimodal_retrieval_synthesis_research_copilot;
 pub mod throughput_retrieval_synthesis_research_copilot;
+pub mod federated_continual_retrieval_synthesis_research_copilot;
 pub mod multimodal_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_contract_model;
@@ -607,6 +610,15 @@ pub use throughput_retrieval_synthesis_research_copilot::{
     ThroughputRetrievalSynthesisResearchCopilotRequest,
     CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use federated_continual_retrieval_synthesis_research_copilot::{
+    federated_continual_retrieval_synthesis_research_copilot_manifest,
+    run_federated_continual_retrieval_synthesis_research_copilot,
+    FederatedContinualRetrievalSynthesisResearchCopilotError,
+    FederatedContinualRetrievalSynthesisResearchCopilotReceipt,
+    FederatedContinualRetrievalSynthesisResearchCopilotRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
 };
 pub use multimodal_retrieval_synthesis_inference_engine::{
     multimodal_retrieval_synthesis_inference_engine_manifest,
