@@ -7,6 +7,7 @@ import {
   AutonomousAgent,
   AutonomousBrainFacade,
   CredentialError,
+  CredentialStore,
   LLMRuntime,
   ProviderSetup,
   builtinAutonomousDomainProfiles,
@@ -213,6 +214,81 @@ test("provisioned brain facade rejects nested credential injection before openin
       cycle: { providerPlanning: { credential: { provider: "offline" } } },
     }),
     (error) => error instanceof CredentialError && /owns credentials/.test(error.message),
+  );
+  assert.equal(runtime.credentials.status("offline").active_handles, 0);
+  assert.equal(runtime.providerStatus("offline").attempts, 0);
+});
+
+test("launch-admitted provisioned execution refuses before credential provisioning across every brain entrypoint", async () => {
+  const fixture = await (async () => {
+    const runtime = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { throw new Error("launch admission must not dispatch"); } });
+    const setup = new ProviderSetup(runtime);
+    setup.registerProvider("openai", { baseUrl: "https://launch-admission-provisioned.invalid" });
+    const session = setup.startSession({ ttlMs: 60_000, sessionId: "launch-admitted-provisioned-preflight" });
+    setup.collectUserCredential(session, "openai", "unit-test-only-not-a-provider-key");
+    const profiles = await builtinAutonomousDomainProfiles();
+    const modelCapabilities = [...new Set(profiles.flatMap((profile) => profile.required_model_capabilities))];
+    const agent = new AutonomousAgent(runtime);
+    agent.registerModel({ provider: "openai", model: "admission-provisioned-model", capabilities: modelCapabilities, context_window_tokens: 32_000, max_output_tokens: 2_000, quality: 0.9, latency_ms: 100, cost_per_million_tokens: 10, reliability: 0.95 });
+    const brain = new AutonomousBrainFacade({ agent });
+    const tools = profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => binding.name));
+    const evidence = profiles.flatMap((profile) => profile.workflow.stages.flatMap((stage) => stage.evidence_outputs.map((label) => `${profile.domain}:${stage.id}:${label}`)));
+    const capabilities = {
+      persistence: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      queue: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      approval_authority: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      external_auth: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      telemetry: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+    };
+    const preflight = await brain.launchPreflight({ availableToolNames: tools, availableEvidence: evidence, deploymentCapabilities: capabilities });
+    const admission = brain.admitLaunchPreflight(preflight, { decision: "hold", reason: "operator review is pending" });
+    session.close();
+    return { runtime, setup: new ProviderSetup(runtime), agent, brain, admission };
+  })();
+
+  let resolverCalls = 0;
+  await fixture.setup.provisioner.registerResolver("openai", "launch-admitted-provisioned-secret", async () => {
+    resolverCalls += 1;
+    return "unit-test-only-not-a-provider-key";
+  });
+
+  await assert.rejects(
+    () => fixture.setup.runWithProvisionedCredentialsWithLaunchAdmission(fixture.agent, "write a small function", fixture.admission, { domain: "coding", credentialProviders: ["openai"], approveProviderCall: false }),
+    /not approved/,
+  );
+  await assert.rejects(
+    () => fixture.setup.runAutoWithProvisionedCredentialsWithLaunchAdmission(fixture.agent, "write a small function", fixture.admission, { credentialProviders: ["openai"], approveProviderCall: false }),
+    /not approved/,
+  );
+  await assert.rejects(
+    () => fixture.setup.runBrainWithProvisionedCredentialsWithLaunchAdmission(fixture.brain, { task: "write a small function", domain: "coding" }, fixture.admission, { credentialProviders: ["openai"], approveProviderCall: false }),
+    /not approved/,
+  );
+  await assert.rejects(
+    () => fixture.setup.runBrainCycleWithProvisionedCredentialsWithLaunchAdmission(fixture.brain, { task: "write a small function", domain: "coding" }, fixture.admission, { credentialProviders: ["openai"], approveProviderCall: false }),
+    /not approved/,
+  );
+  await assert.rejects(
+    () => fixture.setup.runBrainAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmission(fixture.brain, { task: "write a small function", domain: "coding" }, fixture.admission, { credentialProviders: ["openai"], approveProviderCall: false, adaptive: { maxReplans: 0, evaluate: () => ({ evaluator_id: "unused", evaluator_version: "1", reward: 0, passed: false, replan_requested: false }) } }),
+    /not approved/,
+  );
+
+  assert.equal(resolverCalls, 0, "held launch admission must be checked before resolving a credential");
+  assert.equal(fixture.runtime.credentials.status("openai").active_handles, 0, "held launch admission must not open a session");
+  assert.equal(fixture.runtime.providerStatus("openai").attempts, 0, "held launch admission must not reach a provider");
+});
+
+test("launch-admitted automatic provisioning rejects provider-assisted routing before credential resolution", async () => {
+  const runtime = localRuntime("offline");
+  const setup = new ProviderSetup(runtime);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(candidate("offline", ["reasoning", "code"]));
+  const brain = new AutonomousBrainFacade({ agent });
+  const preflight = await brain.launchPreflight();
+  const admission = brain.admitLaunchPreflight(preflight, { decision: "hold", reason: "not used" });
+  await assert.rejects(
+    () => setup.runAutoWithProvisionedCredentialsWithLaunchAdmission(agent, "write a small function", admission, { semanticRouting: true }),
+    /requires provider-free routing/,
   );
   assert.equal(runtime.credentials.status("offline").active_handles, 0);
   assert.equal(runtime.providerStatus("offline").attempts, 0);

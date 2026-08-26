@@ -1722,6 +1722,17 @@ rejects partial/failed requested discovery before dispatch, and returns an
 `AutonomousProvisionedRun` whose `toJSON()` is metadata-only. This keeps the Python and
 TypeScript embedding surfaces aligned without making either runtime persist or serialize a key.
 
+Launch admission is now composed into that same TypeScript boundary. The explicit
+`...WithLaunchAdmission()` helper validates the requested domain before opening a session. The
+automatic helper first recompiles the same provider-free route used by `runAuto()`, verifies that
+all selected domains are approved, and rejects provider-assisted semantic routing because a
+classifier call cannot precede the launch gate. The brain, cycle, and adaptive wrappers apply
+the check before credential provisioning and call the facade's independent admission-aware
+execution method again at the final dispatch boundary. Consequently a held or domain-mismatched
+admission causes zero source resolution, zero inventory discovery, and zero provider attempts;
+provider approval, effect approval, evidence acceptance, evaluator settlement, and credential
+authority remain separate gates.
+
 The same setup boundary now wraps the application-facing TypeScript brain facade through
 `setup.runBrainWithProvisionedCredentials(brain, request, options)`,
 `runBrainCycleWithProvisionedCredentials()`, and

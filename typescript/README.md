@@ -98,6 +98,16 @@ partial or failed discovery throws before the task executes, so stale inventory 
 treated as current. The wrapper preserves the normal routing, approval, workflow, cross-domain,
 learning, evaluator, budget, and checkpoint options of `AutonomousAgent.run()`.
 
+When deployment approval must happen before any key is opened, use the matching
+`...WithLaunchAdmission()` methods. `runWithProvisionedCredentialsWithLaunchAdmission()` checks
+the requested domain synchronously against the validated admission; the automatic variant first
+recompiles the provider-free deterministic route and checks every selected domain. Both checks
+run before source resolution, session creation, or inventory discovery. Provider-assisted
+semantic routing is refused by the automatic pre-admission helper because its classifier would
+otherwise be a provider call before the launch gate. The brain-facade variants apply the same
+pre-session check to direct, closed-loop, and adaptive execution and then invoke the facade's
+second admission check immediately before connector/provider dispatch.
+
 Applications using the higher-level `AutonomousBrainFacade` can keep the same credential
 boundary across planning, connector observation, direct invocation, closed-loop evaluation, and
 bounded adaptive replanning:
