@@ -105,6 +105,7 @@ pub mod federated_context_protocol;
 pub mod context_compilation_assurance;
 pub mod multimodal_context_compilation_assurance;
 pub mod throughput_context_compilation_assurance;
+pub mod federated_continual_context_compilation_assurance;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
@@ -646,6 +647,15 @@ pub use throughput_context_compilation_assurance::{
     ThroughputContextAssuranceVerdict,
     CONTRACT_VERSION as THROUGHPUT_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
+pub use federated_continual_context_compilation_assurance::{
+    assure_federated_continual_context_compilation,
+    federated_continual_context_compilation_assurance_manifest,
+    FederatedContextAssuranceError, FederatedContextAssurancePeer,
+    FederatedContextAssuranceReceipt, FederatedContextAssuranceRequest,
+    FederatedContextAssuranceVerdict,
+    CONTRACT_VERSION as FEDERATED_CONTINUAL_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTINUAL_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
 };
 pub use throughput_contract_model::{
     model_throughput_contract, throughput_contract_model_manifest, ThroughputContractDisposition,
