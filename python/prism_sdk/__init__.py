@@ -6648,3 +6648,15 @@ __all__ += [
     "LocalEvidenceSurveillanceResearchCopilotReceipt",
     "run_local_evidence_surveillance_research_copilot",
 ]
+
+from .adapter_multimodal_evidence_surveillance_research_copilot import (
+    MultimodalCopilotEvidenceObservation,
+    MultimodalEvidenceSurveillanceResearchCopilotReceipt,
+    run_multimodal_evidence_surveillance_research_copilot,
+)
+
+__all__ += [
+    "MultimodalCopilotEvidenceObservation",
+    "MultimodalEvidenceSurveillanceResearchCopilotReceipt",
+    "run_multimodal_evidence_surveillance_research_copilot",
+]

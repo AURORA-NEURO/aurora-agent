@@ -100,6 +100,7 @@ pub mod multimodal_evidence_surveillance_contract_model;
 pub mod throughput_evidence_surveillance_contract_model;
 pub mod federated_continual_evidence_surveillance_contract_model;
 pub mod local_evidence_surveillance_research_copilot;
+pub mod multimodal_evidence_surveillance_research_copilot;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
@@ -281,6 +282,17 @@ pub use local_evidence_surveillance_research_copilot::{
     LocalEvidenceSurveillanceResearchCopilotRequest, ResearchCopilotDisposition,
     CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_research_copilot::{
+    multimodal_evidence_surveillance_research_copilot_manifest,
+    run_multimodal_evidence_surveillance_research_copilot,
+    MultimodalCopilotEvidenceObservation, MultimodalCopilotQualifiedEvidenceSet,
+    MultimodalEvidenceSurveillanceResearchCopilotError,
+    MultimodalEvidenceSurveillanceResearchCopilotReceipt,
+    MultimodalEvidenceSurveillanceResearchCopilotRequest,
+    MultimodalResearchCopilotDisposition,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
 };
 pub use execution_control::{
     admit_computational_execution, AuthorizedExecutionEffect, ComputationalExecutionReceipt,

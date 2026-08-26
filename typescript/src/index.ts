@@ -3521,6 +3521,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterLocalEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterMultimodalEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateAdapterMultimodalEvidenceSurveillanceResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,
   AUTONOMOUS_GOAL_MAX_CRITERIA,

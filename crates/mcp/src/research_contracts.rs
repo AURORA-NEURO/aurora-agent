@@ -135,6 +135,11 @@ use bioprism_adapter::{
     ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
 };
 use bioprism_adapter::{
+    run_multimodal_evidence_surveillance_research_copilot,
+    MultimodalEvidenceSurveillanceResearchCopilotReceipt,
+    ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_ingestion_gateway, IngestionGatewayReceipt, IngestionGatewayRequest,
     INGESTION_GATEWAY_FEATURE_ID,
 };
@@ -272,6 +277,7 @@ pub const MECHANISM_CONTROL_PLANE_TOOL: &str = "federated_mechanism_control_plan
 pub const MECHANISM_GATEWAY_TOOL: &str = "federated_mechanism_gateway";
 pub const EVIDENCE_SURVEILLANCE_TOOL: &str = "evidence_surveillance_copilot";
 pub const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str = "adapter_local_evidence_surveillance_research_copilot";
+pub const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str = "adapter_multimodal_evidence_surveillance_research_copilot";
 pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
@@ -961,6 +967,30 @@ pub fn validate_evidence_surveillance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != EVIDENCE_SURVEILLANCE_FEATURE_ID {
         return Err("evidence surveillance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_evidence_surveillance_research_copilot_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid multimodal research copilot request: {error}"))?;
+    let receipt = run_multimodal_evidence_surveillance_research_copilot(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize multimodal research copilot receipt: {error}")
+    })
+}
+
+pub fn validate_multimodal_evidence_surveillance_research_copilot_json(
+    value: &Value,
+) -> Result<MultimodalEvidenceSurveillanceResearchCopilotReceipt, String> {
+    let receipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid multimodal research copilot receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID {
+        return Err("multimodal research copilot feature id mismatch".into());
     }
     Ok(receipt)
 }
