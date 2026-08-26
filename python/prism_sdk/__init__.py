@@ -219,6 +219,8 @@ from .research_contracts import (
     FEDERATED_RETRIEVAL_WORKBENCH_FEATURE_ID,
     FEDERATED_RETRIEVAL_WORKBENCH_CONTRACT_VERSION,
     RetrievalSynthesisReceipt,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_CONTEXT_COMPILATION_FEATURE_ID,
     ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION,
     AdapterContextCompilationReceipt,
@@ -6665,6 +6667,11 @@ from .adapter_federated_continual_evidence_surveillance_research_workbench impor
     FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
     render_federated_continual_evidence_surveillance_research_workbench,
 )
+from .adapter_local_retrieval_synthesis_inference_engine import (
+    LocalRetrievalSynthesisCandidate,
+    LocalRetrievalSynthesisInferenceEngineReceipt,
+    run_local_retrieval_synthesis_inference_engine,
+)
 
 __all__ += [
     "LocalEvidenceSurveillanceResearchWorkbenchReceipt",
@@ -6675,6 +6682,9 @@ __all__ += [
     "render_throughput_evidence_surveillance_research_workbench",
     "FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt",
     "render_federated_continual_evidence_surveillance_research_workbench",
+    "LocalRetrievalSynthesisCandidate",
+    "LocalRetrievalSynthesisInferenceEngineReceipt",
+    "run_local_retrieval_synthesis_inference_engine",
 ]
 
 from .adapter_multimodal_evidence_surveillance_research_copilot import (

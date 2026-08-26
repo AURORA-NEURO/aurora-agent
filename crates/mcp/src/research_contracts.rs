@@ -63,6 +63,12 @@ use bioprism_adapter::{
     RETRIEVAL_SYNTHESIS_FEATURE_ID,
 };
 use bioprism_adapter::{
+    run_local_retrieval_synthesis_inference_engine,
+    LocalRetrievalSynthesisInferenceEngineReceipt,
+    LocalRetrievalSynthesisInferenceEngineRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+use bioprism_adapter::{
     compile_experiment_design, ExperimentDesignReceipt, FederatedExperimentDesignRequest,
     EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
 };
@@ -343,6 +349,7 @@ pub const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str
 pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str = "adapter_throughput_evidence_surveillance_research_workbench";
 pub const ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str = "adapter_federated_continual_evidence_surveillance_research_workbench";
 pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_local_retrieval_synthesis_inference_engine";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
 pub const ADAPTER_RESOURCE_WORKBENCH_TOOL: &str = "adapter_resource_workbench";
@@ -1075,6 +1082,27 @@ pub fn validate_evidence_synthesis_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != RETRIEVAL_SYNTHESIS_FEATURE_ID {
         return Err("retrieval synthesis feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_inference_engine_json(value: &Value) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisInferenceEngineRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid local retrieval synthesis engine request: {error}"))?;
+    let receipt = run_local_retrieval_synthesis_inference_engine(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize local retrieval synthesis engine receipt: {error}"))
+}
+
+pub fn validate_local_retrieval_synthesis_inference_engine_json(
+    value: &Value,
+) -> Result<LocalRetrievalSynthesisInferenceEngineReceipt, String> {
+    let receipt: LocalRetrievalSynthesisInferenceEngineReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid local retrieval synthesis engine receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID {
+        return Err("local retrieval synthesis engine feature id mismatch".into());
     }
     Ok(receipt)
 }

@@ -3584,6 +3584,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterFederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisInferenceEngineReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
+export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,
   AUTONOMOUS_GOAL_MAX_CRITERIA,

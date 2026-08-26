@@ -143,6 +143,7 @@ pub mod research_ingest;
 pub mod research_workbench;
 pub mod resource_workbench;
 pub mod retrieval_synthesis;
+pub mod local_retrieval_synthesis_inference_engine;
 pub mod scale_frontier;
 pub mod semantic_parity;
 pub mod source;
@@ -552,6 +553,15 @@ pub use retrieval_synthesis::{
     RetrievalSynthesisReceipt, ScopedRetrievalQuery, SynthesisEffectReceipt,
     CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_SYNTHESIS_FEATURE_ID,
+};
+pub use local_retrieval_synthesis_inference_engine::{
+    local_retrieval_synthesis_inference_engine_manifest,
+    run_local_retrieval_synthesis_inference_engine,
+    LocalRetrievalSynthesisInferenceEngineError,
+    LocalRetrievalSynthesisInferenceEngineReceipt,
+    LocalRetrievalSynthesisInferenceEngineRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
 };
 pub use scale_frontier::{
     plan_adapter_scale_frontier, ScaleDisposition, ScaleFrontierError, ScaleFrontierReceipt,

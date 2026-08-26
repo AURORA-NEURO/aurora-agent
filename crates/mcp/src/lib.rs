@@ -44,6 +44,8 @@ pub use research_contracts::{
     plan_adapter_scale_frontier_json, plan_reliable_capability_json, qualify_analysis_json,
     qualify_analysis_portfolio_json, recover_adversarial_events_json,
     resource_discovery_contract_v2_json, run_evidence_surveillance_json,
+    run_local_retrieval_synthesis_inference_engine_json,
+    validate_local_retrieval_synthesis_inference_engine_json,
     run_local_evidence_surveillance_research_copilot_json,
     validate_local_evidence_surveillance_research_copilot_json,
     run_multimodal_evidence_surveillance_research_copilot_json,
