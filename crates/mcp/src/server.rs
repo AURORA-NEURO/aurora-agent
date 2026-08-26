@@ -1921,6 +1921,9 @@ impl Server {
             "adapter_throughput_retrieval_synthesis_interoperability_gateway" => {
                 self.adapter_throughput_retrieval_synthesis_interoperability_gateway(&arguments)
             },
+            "adapter_federated_continual_retrieval_synthesis_interoperability_gateway" => {
+                self.adapter_federated_continual_retrieval_synthesis_interoperability_gateway(&arguments)
+            },
             "adapter_multimodal_retrieval_synthesis_inference_engine" => {
                 self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
             },
@@ -25365,6 +25368,12 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput gateway negotiates pinned retrieval/synthesis protocol versions with bounded batch and checkpoint receipts", "capacity, migration loss, omissions, protected-closure gaps, and policy denials fail closed", "raw preclinical data remains institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for queue capacity, endpoint trust, migration review, and independent replication"]}))
     }
 
+    fn adapter_federated_continual_retrieval_synthesis_interoperability_gateway(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest")?;
+        let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_interoperability_gateway_json(request)?;
+        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual gateway negotiates purpose-bound pinned retrieval/synthesis schemas with quorum and aggregate-only controls", "peer capability gaps, semantic loss, quorum failures, protected-closure gaps, and policy denials fail closed", "raw preclinical observations remain institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for consortium membership, purpose policy, endpoint trust, migration review, and independent replication"]}))
+    }
+
     fn adapter_multimodal_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(request)?;
@@ -37612,6 +37621,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "adapter_federated_continual_retrieval_synthesis_interoperability_gateway",
+            "domains": ["federated continual retrieval synthesis interoperability", "purpose-bound quorum", "aggregate-only exchange", "semantic-loss receipts"],
+            "crates": ["bioprism-adapter", "bioprism-mcp"],
+            "mcp_tools": ["adapter_federated_continual_retrieval_synthesis_interoperability_gateway"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
@@ -40366,6 +40383,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "adapter_throughput_retrieval_synthesis_interoperability_gateway",
             "description": "Negotiate a pinned throughput retrieval and synthesis protocol with batch/checkpoint admission, capability and semantic-loss receipts, omission preservation, and content-addressed artifact exchange.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisInteroperabilityGatewayRequest with endpoint capability versions, throughput workbench request, batch/checkpoint/capacity admission, migration policy, semantic-loss budget, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "adapter_federated_continual_retrieval_synthesis_interoperability_gateway",
+            "description": "Negotiate a purpose-bound federated continual retrieval and synthesis protocol with peer quorum, aggregate-only locality, capability and semantic-loss receipts, omission preservation, and content-addressed artifact exchange.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest with federation purpose/peer quorum, aggregate-only policy, federated workbench request, pinned schemas, migration policy, semantic-loss budget, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "adapter_multimodal_retrieval_synthesis_inference_engine",

@@ -162,6 +162,7 @@ pub mod federated_continual_retrieval_synthesis_research_workbench;
 pub mod local_retrieval_synthesis_interoperability_gateway;
 pub mod multimodal_retrieval_synthesis_interoperability_gateway;
 pub mod throughput_retrieval_synthesis_interoperability_gateway;
+pub mod federated_continual_retrieval_synthesis_interoperability_gateway;
 pub mod multimodal_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_contract_model;
@@ -729,6 +730,15 @@ pub use throughput_retrieval_synthesis_interoperability_gateway::{
     ThroughputRetrievalSynthesisInteroperabilityGatewayRequest,
     CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+pub use federated_continual_retrieval_synthesis_interoperability_gateway::{
+    federated_continual_retrieval_synthesis_interoperability_gateway_manifest,
+    render_federated_continual_retrieval_synthesis_interoperability_gateway,
+    FederatedContinualRetrievalSynthesisInteroperabilityGatewayError,
+    FederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt,
+    FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
 };
 pub use multimodal_retrieval_synthesis_inference_engine::{
     multimodal_retrieval_synthesis_inference_engine_manifest,
