@@ -425,6 +425,14 @@ is available when a caller-owned adapter or audit store needs to reproduce the e
 Legacy domain-only `authorizeAndExecute()` calls remain available for direct integrations, but
 durable workflow execution always uses the stricter stage-bound path.
 
+After review, `AutonomousToolOutcomeEvaluator` and `agent.evaluateToolReceipts()` connect these
+receipts to adaptive tool selection. The evaluator sees only bounded identity/status metadata,
+digests, duration, and explicitly supplied safe evidence; it must return the reward and pass/fail
+decision. `executed` transport status never becomes reward. Execution/call identity fencing,
+bounded evidence checks, and idempotent replay prevent duplicate or unsafe credit, and the report
+contains no raw tool payloads, prompts, provider messages, credentials, or evaluator evidence
+bodies.
+
 For an evaluator-ready adapter result, use `executeCapability()` or
 `AutonomousCapabilityRuntime` above the same runtime. The capability envelope requires an
 input digest, preserves workflow/stage identity, hashes arguments and transient output, and lets

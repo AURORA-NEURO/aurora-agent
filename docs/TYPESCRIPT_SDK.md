@@ -1862,6 +1862,15 @@ arguments/results and do not claim that a domain task succeeded or that an exter
 The stage contract digest can be independently reproduced with
 `autonomousWorkflowStageContractDigest()` for caller-owned audit and replay stores.
 
+The ordinary receipt path can now feed the adaptive tool selector after independent review:
+`AutonomousToolOutcomeEvaluator` receives only the receipt's bounded metadata and caller-owned
+safe evidence, and `agent.evaluateToolReceipts()` returns a value-only learning report plus the
+next `toolSelectionState`. The evaluator must explicitly provide the reward; an executed
+transport call is never implicitly successful learning. Receipt `execution_id`/`call_id` pairs
+make duplicate batch identities fail closed, and replaying an already credited outcome is an
+idempotent selector no-op. Reports exclude raw tool arguments/results, prompts, provider messages,
+credentials, and evaluator evidence bodies.
+
 For a stronger adapter/evaluator boundary, `AutonomousAgent.executeCapability()` composes the
 same stage admission with `AutonomousCapabilityRuntime`. It requires a caller-declared input
 digest, retains only argument/output/evidence digests in the durable

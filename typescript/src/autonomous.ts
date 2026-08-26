@@ -42,6 +42,10 @@ import type {
   AutonomousCapabilityJournalPersistenceCoordinator,
   AutonomousCapabilityJournalStore,
 } from "./autonomous-capability-persistence.js";
+import {
+  AutonomousToolOutcomeEvaluator,
+  type AutonomousToolLearningReport,
+} from "./autonomous-tool-evaluation.js";
 import type { AutonomousDecisionCyclePersistenceCoordinator } from "./autonomous-decision-persistence.js";
 import {
   autonomousRunTraceStatus,
@@ -508,6 +512,12 @@ export interface AutonomousDomainToolBinding extends JsonObject {
 export interface AutonomousDomainToolExecutionReceipt extends JsonObject {
   schema: typeof AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA;
   receipt_kind: "tool_execution_receipt";
+  /** Provider call identity; retained so evaluator batches can reject ambiguous replays. */
+  call_id?: string;
+  /** Caller execution identity; null means the receipt was not attached to an execution journal. */
+  execution_id?: string | null;
+  /** Digest of the bounded arguments accepted by the catalogue; arguments themselves never persist. */
+  arguments_digest?: string;
   domain: AutonomousDomainName | null;
   workflow_id: string | null;
   workflow_digest: string | null;
@@ -4486,6 +4496,8 @@ export class AutonomousDomainToolRuntime {
       const makeReceipt = (extra: JsonObject = {}): AutonomousDomainToolExecutionReceipt => ({
         schema: AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA,
         receipt_kind: "tool_execution_receipt",
+        call_id: call.id,
+        execution_id: options.execution?.state.execution_id ?? null,
         domain: workflowContext?.domain ?? (planned && "binding" in planned ? planned.binding.domains[0] ?? null : null),
         workflow_id: workflowContext?.workflow_id ?? null,
         workflow_digest: workflowContext?.workflow_digest ?? null,
@@ -4518,7 +4530,7 @@ export class AutonomousDomainToolRuntime {
         let approved = executable.binding.read_only && !executable.binding.approval_required && !stageApprovalRequired;
         if (!approved && options.approveEffects === true) approved = this.approver ? await this.approver(executable.binding, call) : true;
         if (!approved) {
-          const receipt = makeReceipt({ status: "approval_required", schema_digest: executable.schemaDigest, effect: executable.binding.risk_class });
+          const receipt = makeReceipt({ status: "approval_required", schema_digest: executable.schemaDigest, arguments_digest: await digestJson(executable.arguments), effect: executable.binding.risk_class });
           this.receipts.push(receipt);
           results.push({ callId: call.id, approved: false, isError: true, content: { status: "approval_required", tool: call.name, receipt_digest: await digestJson(receipt) } });
           continue;
@@ -4530,7 +4542,7 @@ export class AutonomousDomainToolRuntime {
         assertSafeToolArguments(value);
         const encoded = canonicalJson(value);
         if (bytes(encoded) > 1_000_000) throw new ProviderRuntimeError("autonomous tool result exceeds its bounded size");
-        const receipt = makeReceipt({ status: "executed", schema_digest: executable.schemaDigest, result_digest: await digestJson(value), effect: executable.binding.risk_class });
+        const receipt = makeReceipt({ status: "executed", schema_digest: executable.schemaDigest, arguments_digest: await digestJson(executable.arguments), result_digest: await digestJson(value), effect: executable.binding.risk_class });
         this.receipts.push(receipt);
         results.push({ callId: call.id, approved: true, content: value });
       } catch (unknownError) {
@@ -5668,6 +5680,29 @@ export class AutonomousAgent {
   /** Return metadata-only adapter evidence collected by this agent; raw arguments/results are never exposed here. */
   toolExecutionEvidence(): AutonomousDomainToolExecutionReceipt[] {
     return this.domainToolRuntime?.receiptsSnapshot() ?? [];
+  }
+
+  /**
+   * Evaluate live tool receipts through an independent value-only evaluator and advance the
+   * caller-owned adaptive tool-selection state. Provider/tool transport status is deliberately
+   * not converted into reward; only the evaluator assessment can create bandit credit.
+   */
+  async evaluateToolReceipts(
+    options: {
+      evaluator: AutonomousToolOutcomeEvaluator;
+      receipts?: readonly AutonomousDomainToolExecutionReceipt[];
+      evidence?: Readonly<Record<string, JsonObject>>;
+      toolSelectionState?: AutonomousToolSelectionState | null;
+    },
+  ): Promise<AutonomousToolLearningReport> {
+    if (!this.domainToolRuntime) throw new ArgumentError("evaluateToolReceipts requires a configured domain tool runtime");
+    if (!(options?.evaluator instanceof AutonomousToolOutcomeEvaluator)) throw new ArgumentError("evaluateToolReceipts requires an AutonomousToolOutcomeEvaluator");
+    const receipts = options.receipts === undefined ? this.domainToolRuntime.receiptsSnapshot() : [...options.receipts];
+    return options.evaluator.evaluateReceipts(receipts, {
+      evidence: options.evidence,
+      toolSelectionState: options.toolSelectionState,
+      toolSelectionUpdater: settleAutonomousToolSelectionOutcome,
+    });
   }
 
   /** Discover live provider model metadata and atomically reconcile it into this agent's catalogue. */

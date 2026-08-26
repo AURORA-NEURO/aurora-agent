@@ -9922,6 +9922,38 @@ stage compilation. A disabled learned arm is reported as `learning_disabled` and
 the already reviewed live set; it cannot authorize an effect or make a missing tool available.
 Malformed, duplicate, out-of-range, or secret-shaped state is rejected before provider planning.
 
+TypeScript now also closes the ordinary provider tool-loop feedback handoff with
+`AutonomousToolOutcomeEvaluator` and `agent.evaluateToolReceipts(...)`. The runtime receipts carry
+the bounded `execution_id`/`call_id` pair needed to reject ambiguous batches; the evaluator input
+contains only domain, capability, risk, workflow/stage identity, status, schema/argument/output
+digests, bounded duration, and caller-owned safe evidence. The evaluator must explicitly return a
+bounded reward and pass/fail decision. `status: "executed"` is never treated as quality by the
+SDK. The returned report includes a deterministic per-domain/status projection and an updated
+`next_tool_selection_state` that can be fed directly into the next `planForTask()` or `run()`:
+
+```typescript
+const evaluator = new AutonomousToolOutcomeEvaluator({
+  evaluator_id: "tool-quality",
+  evaluator_version: "2026-08-26",
+  evaluate: (input) => ({
+    reward: input.evidence.quality_gate === "passed" ? 1 : -1,
+    passed: input.evidence.quality_gate === "passed",
+  }),
+});
+const learning = await agent.evaluateToolReceipts({
+  evaluator,
+  evidence: Object.fromEntries(receipts.map((receipt) => [receipt.call_id, { quality_gate: "passed" }])),
+});
+const nextToolSelectionState = learning.next_tool_selection_state;
+```
+
+Replaying the same receipt/evaluator/evidence identity is an idempotent selector no-op, while
+contradictory digest metadata, duplicate execution/call identities, unsafe evidence fields, and
+out-of-range evaluator rewards fail closed. The report and its learning digest exclude evaluator
+evidence bodies, tool payloads, prompts, provider messages, credentials, and transient adapter
+values. This is caller-owned feedback state: persistence, evaluator provenance, and promotion
+remain separate review responsibilities.
+
 Coverage explicitly distinguishes `selected`, `activation_required`, `catalogue_missing`,
 `provider_only`, `capacity_limited`, and `learning_disabled`. `run()`, workflow execution, and cross-domain façade
 paths use this portfolio when the caller has not supplied explicit provider tools; a caller-owned

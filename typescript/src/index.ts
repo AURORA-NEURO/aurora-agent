@@ -486,6 +486,23 @@ export {
   validateAutonomousModelCatalogueSnapshot,
 } from "./autonomous.js";
 export {
+  AUTONOMOUS_TOOL_EVALUATION_SCHEMA,
+  AUTONOMOUS_TOOL_LEARNING_SCHEMA,
+  MAX_AUTONOMOUS_TOOL_EVALUATION_EVIDENCE_BYTES,
+  MAX_AUTONOMOUS_TOOL_EVALUATION_RECEIPTS,
+  AutonomousToolOutcomeEvaluator,
+  autonomousToolOutcomeEvaluationInput,
+} from "./autonomous-tool-evaluation.js";
+export type {
+  AutonomousToolOutcomeEvaluationInput,
+  AutonomousToolEvaluatorAssessment,
+  AutonomousToolEvaluation,
+  AutonomousToolOutcomeEvaluatorOptions,
+  AutonomousToolSelectionUpdater,
+  AutonomousToolLearningEvaluation,
+  AutonomousToolLearningReport,
+} from "./autonomous-tool-evaluation.js";
+export {
   AUTONOMOUS_RUN_TRACE_SCHEMA,
   AUTONOMOUS_RUN_TRACE_EVENT_SCHEMA,
   AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA,
