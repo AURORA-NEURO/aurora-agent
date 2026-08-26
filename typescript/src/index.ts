@@ -3547,6 +3547,7 @@ export type { AdapterThroughputEvidenceSurveillanceResearchCopilotReceipt } from
 export type { AdapterFederatedContinualEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
 export type { AdapterLocalEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
 export type { AdapterMultimodalEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
+export type { AdapterThroughputEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
 export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,

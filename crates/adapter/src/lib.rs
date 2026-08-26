@@ -105,6 +105,7 @@ pub mod throughput_evidence_surveillance_research_copilot;
 pub mod federated_continual_evidence_surveillance_research_copilot;
 pub mod local_evidence_surveillance_workflow_fabric;
 pub mod multimodal_evidence_surveillance_workflow_fabric;
+pub mod throughput_evidence_surveillance_workflow_fabric;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
@@ -355,6 +356,13 @@ pub use multimodal_evidence_surveillance_workflow_fabric::{
     MultimodalEvidenceSurveillanceWorkflowRequest,
     CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_workflow_fabric::{
+    schedule_throughput_evidence_surveillance_workflow,
+    throughput_evidence_surveillance_workflow_fabric_manifest,
+    ThroughputEvidenceSurveillanceWorkflowError,
+    ThroughputEvidenceSurveillanceWorkflowReceipt,
+    ThroughputEvidenceSurveillanceWorkflowRequest,
 };
 pub use federation_workflow::{
     schedule_federation_workflow, FederationRequest, FederationTask, FederationWorkflowDecision,

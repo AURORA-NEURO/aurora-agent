@@ -172,6 +172,11 @@ use bioprism_adapter::{
     ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
 use bioprism_adapter::{
+    schedule_throughput_evidence_surveillance_workflow,
+    ThroughputEvidenceSurveillanceWorkflowReceipt,
+    ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+use bioprism_adapter::{
     simulate_protocol_draft, ProtocolDraft, ProtocolSimulationReceipt,
     PROTOCOL_SIMULATION_FEATURE_ID,
 };
@@ -302,6 +307,7 @@ pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str =
 pub const ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str = "adapter_federated_continual_evidence_surveillance_research_copilot";
 pub const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str = "adapter_local_evidence_surveillance_workflow_fabric";
 pub const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str = "adapter_multimodal_evidence_surveillance_workflow_fabric";
+pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str = "adapter_throughput_evidence_surveillance_workflow_fabric";
 pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
@@ -1109,6 +1115,19 @@ pub fn validate_multimodal_evidence_surveillance_workflow_fabric_json(value: &Va
     let receipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid multimodal evidence workflow receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID { return Err("multimodal evidence workflow feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub fn run_throughput_evidence_surveillance_workflow_fabric_json(value: &Value) -> Result<Value, String> {
+    let request = serde_json::from_value(value.clone()).map_err(|error| format!("invalid throughput evidence workflow request: {error}"))?;
+    let receipt = schedule_throughput_evidence_surveillance_workflow(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize throughput evidence workflow receipt: {error}"))
+}
+
+pub fn validate_throughput_evidence_surveillance_workflow_fabric_json(value: &Value) -> Result<ThroughputEvidenceSurveillanceWorkflowReceipt, String> {
+    let receipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid throughput evidence workflow receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID { return Err("throughput evidence workflow feature id mismatch".into()); }
     Ok(receipt)
 }
 
