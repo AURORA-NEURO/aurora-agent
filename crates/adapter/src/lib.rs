@@ -146,6 +146,7 @@ pub mod retrieval_synthesis;
 pub mod local_retrieval_synthesis_inference_engine;
 pub mod local_retrieval_synthesis_contract_model;
 pub mod local_retrieval_synthesis_research_copilot;
+pub mod multimodal_retrieval_synthesis_research_copilot;
 pub mod multimodal_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_contract_model;
@@ -587,6 +588,15 @@ pub use local_retrieval_synthesis_research_copilot::{
     LocalRetrievalSynthesisResearchCopilotRequest,
     CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use multimodal_retrieval_synthesis_research_copilot::{
+    multimodal_retrieval_synthesis_research_copilot_manifest,
+    run_multimodal_retrieval_synthesis_research_copilot,
+    MultimodalRetrievalSynthesisResearchCopilotError,
+    MultimodalRetrievalSynthesisResearchCopilotReceipt,
+    MultimodalRetrievalSynthesisResearchCopilotRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
 };
 pub use multimodal_retrieval_synthesis_inference_engine::{
     multimodal_retrieval_synthesis_inference_engine_manifest,
