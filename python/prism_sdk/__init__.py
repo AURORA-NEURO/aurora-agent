@@ -6612,3 +6612,15 @@ __all__ += [
     "MultimodalEvidenceSurveillanceContractReceipt",
     "model_multimodal_evidence_surveillance_contract",
 ]
+
+from .adapter_throughput_evidence_surveillance_contract_model import (
+    ThroughputContractClaim,
+    ThroughputEvidenceSurveillanceContractReceipt,
+    model_throughput_evidence_surveillance_contract,
+)
+
+__all__ += [
+    "ThroughputContractClaim",
+    "ThroughputEvidenceSurveillanceContractReceipt",
+    "model_throughput_evidence_surveillance_contract",
+]

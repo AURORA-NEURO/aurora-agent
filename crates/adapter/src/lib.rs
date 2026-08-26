@@ -97,6 +97,7 @@ pub mod throughput_evidence_surveillance_inference_engine;
 pub mod federated_evidence_surveillance_inference_engine;
 pub mod local_evidence_surveillance_contract_model;
 pub mod multimodal_evidence_surveillance_contract_model;
+pub mod throughput_evidence_surveillance_contract_model;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
@@ -247,6 +248,16 @@ pub use multimodal_evidence_surveillance_contract_model::{
     MultimodalEvidenceSurveillanceContractRequest,
     CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_contract_model::{
+    model_throughput_evidence_surveillance_contract,
+    throughput_evidence_surveillance_contract_model_manifest,
+    ThroughputContractClaim, ThroughputContractCompatibility,
+    ThroughputContractDisposition, ThroughputEvidenceSurveillanceContractError,
+    ThroughputEvidenceSurveillanceContractReceipt,
+    ThroughputEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
 };
 pub use execution_control::{
     admit_computational_execution, AuthorizedExecutionEffect, ComputationalExecutionReceipt,
