@@ -1909,3 +1909,11 @@ restore and CAS-flush provider/model counters and circuit continuity. This keeps
 availability recovery aligned across SDKs without restoring credentials, prompts, responses,
 evaluator rewards, or authorization; provider registration and deployment checkpoint ordering
 remain caller-owned.
+
+The TypeScript `AutonomousAgent` now also retains one lazy, serialized
+`AutonomousModelInventoryCoordinator` for its lifetime. Repeated high-level inventory refreshes
+reuse the last successful CAS expectation, and `restoreModelInventory()` rehydrates the validated
+metadata-only catalogue while preserving that fence for the next refresh. This removes the false
+stale-writer failure caused by constructing a fresh coordinator for every refresh and covers the
+same all-domain model-discovery/restart boundary without restoring credentials, provider payloads,
+or evaluator quality claims.

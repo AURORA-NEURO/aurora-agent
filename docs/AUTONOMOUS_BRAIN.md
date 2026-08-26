@@ -2571,6 +2571,14 @@ requires an explicit restore before a new coordinator can refresh an already-pop
 That prevents a process with no restart image from treating its empty local expectation as
 create-if-absent and erasing a newer provider catalogue.
 
+The high-level TypeScript `AutonomousAgent` now owns one lazy inventory coordinator for its whole
+process lifetime. Repeated `agent.refreshModelInventory(specs, { persistence, ... })` calls therefore
+retain the last successful CAS expectation instead of recreating an empty coordinator on every
+refresh. `agent.restoreModelInventory(persistence)` uses the same coordinator, restores the
+validated metadata-only catalogue into the agent, and leaves the recovered digest fenced for the
+next refresh. This serialization covers concurrent discovery calls at the agent boundary while
+keeping provider registration, credential resolution, and discovery approval caller-owned.
+
 `refresh()` is the only operation that performs provider model discovery. Persistence and
 `restore()` are provider-free, digest-bound catalogue rehydration. Discovery can establish that
 an arm exists and declares a capability, but it never supplies quality, cost, reliability, task

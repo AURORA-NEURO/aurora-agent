@@ -102,6 +102,37 @@ test("model inventory JSON persistence fences stale refresh writers", async () =
   assert.notEqual(next.inventory_digest, first.inventory_digest);
 });
 
+test("AutonomousAgent reuses its inventory coordinator across refreshes and restore", async () => {
+  let stored = null;
+  const persistence = {
+    read: () => stored,
+    write: (snapshot) => { stored = structuredClone(snapshot); },
+    writeIfUnchanged: (expected, snapshot) => {
+      const observed = stored?.inventory_digest ?? null;
+      if (observed !== expected) return false;
+      stored = structuredClone(snapshot);
+      return true;
+    },
+  };
+  const specs = [{
+    provider: "offline",
+    defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 0, reliability: 0.95 },
+  }];
+  const agent = new AutonomousAgent(runtime());
+  const first = await agent.refreshModelInventory(specs, { persistence, refreshId: "agent-inventory-1" });
+  const second = await agent.refreshModelInventory(specs, { persistence, replaceExisting: true, refreshId: "agent-inventory-2" });
+  assert.notEqual(second.inventory_digest, first.inventory_digest);
+  assert.equal(stored.inventory_digest, second.inventory_digest);
+
+  const restarted = new AutonomousAgent(runtime());
+  const restored = await restarted.restoreModelInventory(persistence);
+  assert.equal(restored.inventory_digest, second.inventory_digest);
+  assert.equal(restarted.models()[0].model, "discovered-model");
+  const resumed = await restarted.refreshModelInventory(specs, { persistence, replaceExisting: true, refreshId: "agent-inventory-3" });
+  assert.notEqual(resumed.inventory_digest, second.inventory_digest);
+  assert.equal(stored.inventory_digest, resumed.inventory_digest);
+});
+
 test("provider setup bridges an opaque session into agent inventory refresh", async () => {
   const llm = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
   const setup = new ProviderSetup(llm);

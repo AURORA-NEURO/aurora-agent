@@ -4868,6 +4868,15 @@ export class AutonomousAgent {
   private domainToolRegistry?: AutonomousDomainToolRegistry;
   private domainToolRuntime?: AutonomousDomainToolRuntime;
   private capabilityRuntime?: AutonomousCapabilityRuntime;
+  /**
+   * One serialized model-inventory coordinator per agent lifecycle.
+   *
+   * Inventory refreshes may use a caller-owned CAS store. Recreating the coordinator for each
+   * refresh would discard the last observed inventory digest and turn a legitimate sequential
+   * refresh into a false stale-writer conflict. Keep the coordinator lazy so lightweight agents do
+   * not load the optional inventory module until discovery or restore is requested.
+   */
+  private modelInventoryCoordinator?: import("./autonomous-model-inventory.js").AutonomousModelInventoryCoordinator;
 
   constructor(llm: LLMRuntime, options: AutonomousAgentOptions = {}) {
     if (!(llm instanceof LLMRuntime)) throw new ProviderRuntimeError("AutonomousAgent requires an LLMRuntime");
@@ -5543,7 +5552,21 @@ export class AutonomousAgent {
     options: AutonomousModelInventoryRefreshOptions = {},
   ): Promise<AutonomousModelInventorySnapshot> {
     const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
-    return new AutonomousModelInventoryCoordinator(this).refresh(specs, options);
+    const coordinator = this.modelInventoryCoordinator ??= new AutonomousModelInventoryCoordinator(this);
+    return coordinator.refresh(specs, options);
+  }
+
+  /**
+   * Restore the last validated model inventory into this agent and retain its CAS fence for the
+   * next refresh. Provider registrations and credential handles are intentionally not restored;
+   * the snapshot contains only model metadata and redacted all-domain coverage.
+   */
+  async restoreModelInventory(
+    persistence: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence,
+  ): Promise<AutonomousModelInventorySnapshot | null> {
+    const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
+    const coordinator = this.modelInventoryCoordinator ??= new AutonomousModelInventoryCoordinator(this);
+    return coordinator.restore(persistence);
   }
 
   async profiles(): Promise<AutonomousDomainProfile[]> {
