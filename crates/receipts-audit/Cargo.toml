@@ -17,3 +17,16 @@ bioprism-section = { workspace = true }
 bioprism-autopilot = { workspace = true }
 bioprism-research = { workspace = true }
 bioprism-devplat = { workspace = true }
+bioprism-bioworlds = { workspace = true }
+bioprism-conformance = { workspace = true }
+bioprism-cookbook = { workspace = true }
+bioprism-domain = { workspace = true }
+bioprism-examples = { workspace = true }
+bioprism-fiber = { workspace = true }
+bioprism-mutation = { workspace = true }
+bioprism-prism = { workspace = true }
+bioprism-project = { workspace = true }
+bioprism-registry = { workspace = true }
+bioprism-repair = { workspace = true }
+bioprism-world = { workspace = true }
+bioprism-worldgen = { workspace = true }

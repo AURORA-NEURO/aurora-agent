@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 /// A quotation together with the file it must still appear in.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PinnedQuote {
     /// Workspace-relative, forward-slashed.
     pub source: String,

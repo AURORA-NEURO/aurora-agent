@@ -14,7 +14,11 @@
 //! 2. the latest attempt's own mission report has `mission_status == "succeeded"`;
 //! 3. when the grant requires reconciliation: the latest attempt carries a reconciliation record
 //!    whose completion is `complete` **and** whose integrity is valid, in that attempt's own
-//!    scope — the full plan for a full dispatch, the re-dispatched subset for a repair.
+//!    scope — the full plan for a full dispatch, the re-dispatched subset for a repair;
+//! 4. no retained `succeeded` result contradicts the mission's own output budgets. The executor
+//!    refuses an over-budget reply instead of truncating it, so a success row measured above the
+//!    per-step budget — or a report whose accumulated bytes exceed the total budget — describes
+//!    an outcome the mission contract excludes, and success is never read out of it.
 //!
 //! Nothing is inferred: each requirement reads a retained record.
 //!
@@ -43,12 +47,15 @@
 //! let forged = bioprism_autopilot::DispatchAuthorization { attempt_index: 99 };
 //! ```
 
-use crate::classify::{classify_step_result, RetryClass, StepClass, StepClassification};
+use crate::classify::{
+    classify_missing_step_result, classify_step_result, RetryClass, StepClass, StepClassification,
+};
 use crate::error::AutopilotError;
 use crate::grant::AutonomyGrant;
 use crate::history::DriveHistory;
 use bioprism_devplat::{
-    apply_binding, plan_mission, MissionError, MissionRequest, MissionStepResult,
+    apply_binding, plan_mission, MissionError, MissionPolicy, MissionReport, MissionRequest,
+    MissionStepResult,
 };
 use bioprism_ids::ContentHash;
 use serde_json::{json, Map, Value};
@@ -126,15 +133,7 @@ fn merged_dispositions<'h>(history: &'h DriveHistory) -> BTreeMap<String, Dispos
                 },
                 None => Disposition {
                     attempt_index,
-                    classification: StepClassification {
-                        step_id: step_id.clone(),
-                        status: "missing".into(),
-                        class: StepClass::Failed(RetryClass::Unknown),
-                        signal: "unrecognised_status",
-                        reason: "the attempt dispatched this step but its report holds no result \
-                                 row for it"
-                            .into(),
-                    },
+                    classification: classify_missing_step_result(&step_id),
                     result: None,
                 },
             };
@@ -338,12 +337,11 @@ fn repair_binding(
         .ok_or_else(|| AutopilotError::InvalidMission {
             reason: "workflow_binding.evidence_plan must be an object".into(),
         })?;
-    let steps = plan
-        .get("steps")
-        .and_then(Value::as_array)
-        .ok_or_else(|| AutopilotError::InvalidMission {
+    let steps = plan.get("steps").and_then(Value::as_array).ok_or_else(|| {
+        AutopilotError::InvalidMission {
             reason: "workflow_binding.evidence_plan.steps must be an array".into(),
-        })?;
+        }
+    })?;
     let mut covered = BTreeSet::new();
     let filtered = steps
         .iter()
@@ -383,6 +381,49 @@ fn repair_binding(
     new_binding.insert("evidence_plan".into(), new_plan);
     new_binding.insert("evidence_plan_digest".into(), Value::String(digest));
     Ok(Some(Value::Object(new_binding)))
+}
+
+/// Rows describing retained results that contradict the mission's own output budgets.
+///
+/// The mission executor measures every nested reply and refuses the step when the reply exceeds
+/// the per-step budget, so a retained `succeeded` row whose byte count is above that budget
+/// describes an outcome the mission contract says cannot exist. The same holds for a report whose
+/// accumulated `returned_bytes` is above the total budget. Either shape is what a truncating or
+/// budget-ignoring executor would produce while still reporting success, and success claimed from
+/// it would be success inferred rather than read. The grant does not carry output budgets, so the
+/// mission's own policy is the authority these rows are checked against.
+fn output_budget_contradictions(
+    policy: &MissionPolicy,
+    merged: &BTreeMap<String, Disposition<'_>>,
+    latest_report: &MissionReport,
+) -> Vec<Value> {
+    let mut rows = Vec::new();
+    for (step_id, disposition) in merged {
+        if !matches!(disposition.classification.class, StepClass::Succeeded) {
+            continue;
+        }
+        let Some(result) = disposition.result else {
+            continue;
+        };
+        if result.bytes > policy.max_step_output_bytes {
+            rows.push(json!({
+                "step_id": step_id,
+                "attempt_index": disposition.attempt_index,
+                "kind": "step_output_budget",
+                "recorded_bytes": result.bytes,
+                "budget": policy.max_step_output_bytes,
+            }));
+        }
+    }
+    if latest_report.returned_bytes > policy.max_total_output_bytes {
+        rows.push(json!({
+            "step_id": Value::Null,
+            "kind": "total_output_budget",
+            "recorded_bytes": latest_report.returned_bytes,
+            "budget": policy.max_total_output_bytes,
+        }));
+    }
+    rows
 }
 
 /// Decide the next action. Pure and deterministic; see the module documentation for the success,
@@ -440,6 +481,24 @@ pub fn plan_next_action(
     });
 
     if all_succeeded && latest_report.mission_status == "succeeded" {
+        let contradictions =
+            output_budget_contradictions(&history.parsed_base().policy, &merged, latest_report);
+        if !contradictions.is_empty() {
+            return Ok(exhausted(
+                grant,
+                history,
+                "output_budget_contradiction",
+                format!(
+                    "{} retained result(s) claim success while breaching the mission's own \
+                     output budgets, which the executor refuses rather than truncates; a report \
+                     that reports success over a budget it did not honour is not evidence of \
+                     success: {}",
+                    contradictions.len(),
+                    Value::Array(contradictions.clone())
+                ),
+                contradictions,
+            ));
+        }
         let reconciliation_ok = if grant.require_reconciliation_complete() {
             matches!(
                 latest.reconciliation_summary(),
@@ -491,9 +550,7 @@ pub fn plan_next_action(
             disposition.classification.class,
             StepClass::Failed(RetryClass::Terminal)
         ) {
-            let error = disposition
-                .result
-                .and_then(|result| result.error.clone());
+            let error = disposition.result.and_then(|result| result.error.clone());
             let tool = disposition
                 .result
                 .map(|result| result.tool.clone())
@@ -550,8 +607,7 @@ pub fn plan_next_action(
         ));
     }
 
-    if grant.require_reconciliation_complete() && history.parsed_base().workflow_binding.is_none()
-    {
+    if grant.require_reconciliation_complete() && history.parsed_base().workflow_binding.is_none() {
         let rows = unresolved_rows(&plan.ordered_steps, &merged, &BTreeMap::new());
         return Ok(exhausted(
             grant,
@@ -701,8 +757,7 @@ pub fn plan_next_action(
                 .and_then(|result| result.wire.as_ref())
                 .expect("materializability was proven during inclusion");
             let payload = binding_payload(wire);
-            apply_binding(&mut new_step.arguments, binding, &payload)
-                .map_err(map_mission_error)?;
+            apply_binding(&mut new_step.arguments, binding, &payload).map_err(map_mission_error)?;
             rematerialized += 1;
         }
         new_step.bindings = kept_bindings;

@@ -324,7 +324,10 @@ impl BenchmarkPack {
     }
 
     /// Recomputes an attested document's digest, the way a third party must before trusting a pack
-    /// it did not build. Mirrors [`bioprism_prism::ResultBundle::verify`].
+    /// it did not build. Mirrors [`bioprism_prism::ResultBundle::verify`], including its
+    /// separation of a shape defect in the claimed digest from a disagreement with the
+    /// recomputation: a publisher whose digest field holds a typo has not been shown to have
+    /// edited the pack, and a registry that said so would be accusing the wrong party.
     pub fn verify(document: &Value) -> Attestation {
         let Some(map) = document.as_object() else {
             return Attestation::Malformed("not an object".into());
@@ -332,6 +335,11 @@ impl BenchmarkPack {
         let Some(claimed) = map.get(PACK_DIGEST_FIELD).and_then(Value::as_str) else {
             return Attestation::Malformed(format!("missing {PACK_DIGEST_FIELD}"));
         };
+        if ContentHash::parse(claimed.to_string()).is_err() {
+            return Attestation::Malformed(format!(
+                "{PACK_DIGEST_FIELD} {claimed:?} is not a 64-character lowercase hex digest"
+            ));
+        }
         let mut body = map.clone();
         body.remove(PACK_DIGEST_FIELD);
         match ContentHash::of_value(&Value::Object(body)) {

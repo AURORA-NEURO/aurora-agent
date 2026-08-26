@@ -41,6 +41,9 @@ use serde_json::Value;
 /// Each variant is phrased as the claim it asserts, so a failing check reads as a falsified
 /// sentence rather than as an assertion number.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+// `deny_unknown_fields` is deliberately absent: `serde` cannot enforce it on an internally
+// tagged enum, because the tagged representation buffers the content before it knows the variant.
+// The mutation battery records the resulting gap rather than carrying a no-op attribute here.
 #[serde(rename_all = "snake_case", tag = "check")]
 pub enum StructuralCheck {
     /// The document is accepted by the reference runtime's acceptance rules.
@@ -163,6 +166,7 @@ impl StructuralCheck {
 /// `observed` carries the measurement even when the check passes, because a passing check whose
 /// number nobody can see is indistinguishable from a check that measured nothing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CheckOutcome {
     pub check: StructuralCheck,
     pub claim: String,
@@ -176,6 +180,7 @@ pub struct CheckOutcome {
 /// crate's dependency set. `tests/backlog_ids.rs` asserts they are the exact snake_case ids that
 /// crate's catalogue uses, so a rename there fails loudly here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BlockedProperty {
     pub property_id: String,
     pub reason: String,
@@ -377,7 +382,10 @@ impl VerticalSlice {
             }
             StructuralCheck::CohortIsAtBlueprintScale => {
                 let subjects = subject_count(&self.world);
-                ((80..=200).contains(&subjects), format!("{subjects} subjects"))
+                (
+                    (80..=200).contains(&subjects),
+                    format!("{subjects} subjects"),
+                )
             }
             StructuralCheck::AtLeastThisManyLiveHypotheses { count } => (
                 hypotheses.live_hypotheses.len() >= *count,
@@ -445,7 +453,9 @@ pub fn subject_count(world: &BioWorld) -> usize {
         .map(|map| {
             map.keys()
                 .filter(|key| {
-                    key.starts_with('S') && key.len() == 4 && key[1..].chars().all(|c| c.is_ascii_digit())
+                    key.starts_with('S')
+                        && key.len() == 4
+                        && key[1..].chars().all(|c| c.is_ascii_digit())
                 })
                 .count()
         })
@@ -455,6 +465,7 @@ pub fn subject_count(world: &BioWorld) -> usize {
 
 /// What a slice measured, as one serialisable artefact.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SliceReport {
     pub slice_id: String,
     pub title: String,

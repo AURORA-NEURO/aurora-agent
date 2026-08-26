@@ -33,6 +33,7 @@ use serde_json::Value;
 /// knows what to change. Where the obstacle is one another crate has already recorded, `evidence`
 /// pins that crate's own wording rather than paraphrasing it — see [`crate::quotes`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnwrittenRecipe {
     /// The goal, phrased the way the reader would have phrased it.
     pub goal: String,
@@ -124,6 +125,7 @@ pub fn unwritten_recipes() -> Vec<UnwrittenRecipe> {
 
 /// One recipe, flattened for the report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RecipeSummary {
     pub id: String,
     pub goal: String,
@@ -138,7 +140,15 @@ pub struct RecipeSummary {
 }
 
 /// What the catalogue contains, and what it does not.
+///
+/// Every struct the report is made of refuses a field it does not declare, and that is what makes
+/// [`CookbookReport::digest_is_intact`] mean anything. The digest is recomputed by re-serialising
+/// the *parsed* report, so a field a reader discarded is a field outside the seal: the
+/// recomputation never sees it, the claimed digest still agrees, and a report with content nobody
+/// hashed reads as intact. Refusing the unknown field is the only place that difference can be
+/// caught, because by the time the struct exists the evidence is gone.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CookbookReport {
     pub recipes: Vec<RecipeSummary>,
     pub anti_recipes: Vec<String>,
@@ -162,11 +172,7 @@ impl CookbookReport {
                 goal: recipe.goal().to_string(),
                 claim: recipe.claim().statement.clone(),
                 steps: recipe.steps().len(),
-                crates: recipe
-                    .crates()
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
+                crates: recipe.crates().iter().map(ToString::to_string).collect(),
                 entry_points: recipe.entry_points().len(),
                 enforced_checks: recipe.enforcing_tests().len(),
                 observable_checks: recipe.properties().len() - recipe.enforcing_tests().len(),

@@ -85,12 +85,14 @@ pub mod drive;
 pub mod error;
 pub mod grant;
 pub mod history;
-pub mod planner;
 pub mod persistence;
+pub mod planner;
 pub mod report;
 pub mod schedule;
 
-pub use classify::{classify_step_result, RetryClass, StepClass, StepClassification};
+pub use classify::{
+    classify_missing_step_result, classify_step_result, RetryClass, StepClass, StepClassification,
+};
 pub use drive::{
     drive_instantiation, drive_instantiation_with_checkpoint, drive_instantiation_with_schedule,
     drive_mission, drive_mission_with_checkpoint, drive_mission_with_schedule,
@@ -100,18 +102,17 @@ pub use drive::{
 pub use error::{AutopilotError, GrantError};
 pub use grant::{AutonomyGrant, AutonomyGrantDocument, RetryPolicy, RetryPolicyDocument};
 pub use history::{AttemptKind, AttemptRecord, DriveHistory};
-pub use planner::{plan_next_action, preview_first_action, DispatchAuthorization, NextAction};
 pub use persistence::{
     attempt_checkpoint_projection, restore_drive_history, seal_autopilot_checkpoint,
     validate_autopilot_checkpoint, AutopilotCheckpointPersistence,
     AutopilotCheckpointPersistenceCoordinator, AutopilotCheckpointStore,
     JsonAutopilotCheckpointPersistence, TransactionalAutopilotCheckpointPersistence,
-    TransactionalAutopilotCheckpointPersistenceCoordinator,
-    TransactionalAutopilotCheckpointStore, TransactionalJsonAutopilotCheckpointPersistence,
-    AUTOPILOT_CHECKPOINT_MAX_ATTEMPTS, AUTOPILOT_CHECKPOINT_MAX_BYTES,
-    AUTOPILOT_CHECKPOINT_MAX_STEP_IDS, AUTOPILOT_CHECKPOINT_RETENTION,
-    AUTOPILOT_CHECKPOINT_SCHEMA,
+    TransactionalAutopilotCheckpointPersistenceCoordinator, TransactionalAutopilotCheckpointStore,
+    TransactionalJsonAutopilotCheckpointPersistence, AUTOPILOT_CHECKPOINT_MAX_ATTEMPTS,
+    AUTOPILOT_CHECKPOINT_MAX_BYTES, AUTOPILOT_CHECKPOINT_MAX_STEP_IDS,
+    AUTOPILOT_CHECKPOINT_RETENTION, AUTOPILOT_CHECKPOINT_SCHEMA,
 };
+pub use planner::{plan_next_action, preview_first_action, DispatchAuthorization, NextAction};
 pub use report::{
     build_autopilot_report, verify_autopilot_report, FinalDisposition, FinalStatus,
     AUTOPILOT_REPORT_SCHEMA_VERSION, REQUIRED_LIMITATIONS,

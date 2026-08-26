@@ -342,6 +342,7 @@ impl SliceCatalog {
 
 /// Every slice's report, plus the two backlog columns.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CatalogReport {
     pub slices: Vec<SliceReport>,
     /// Property ids some world here makes exercisable.

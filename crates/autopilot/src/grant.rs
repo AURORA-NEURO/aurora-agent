@@ -135,6 +135,15 @@ fn valid_tool_name(name: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
+/// Recognise the mission tool itself under any ASCII casing.
+///
+/// Tool identifiers may legitimately carry uppercase letters, so an exact-string guard would let
+/// a grant authorise `Agent_Mission`. The grant is the drive's only source of authority and must
+/// deny recursion on its own terms rather than relying on a dispatch table's case sensitivity.
+fn is_mission_tool(name: &str) -> bool {
+    name.eq_ignore_ascii_case("agent_mission")
+}
+
 impl TryFrom<AutonomyGrantDocument> for AutonomyGrant {
     type Error = GrantError;
 
@@ -153,7 +162,7 @@ impl TryFrom<AutonomyGrantDocument> for AutonomyGrant {
             if !valid_tool_name(tool) {
                 return Err(GrantError::InvalidToolName { tool: tool.clone() });
             }
-            if tool == "agent_mission" {
+            if is_mission_tool(tool) {
                 return Err(GrantError::RecursiveTool);
             }
             if !seen.insert(tool.clone()) {

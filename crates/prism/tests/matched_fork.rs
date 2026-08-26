@@ -2,8 +2,8 @@
 
 use bioprism_fiber::Query;
 use bioprism_prism::{
-    matched_fork, minimize, minimize_world, preserves, render_table, Acceptance, Architecture,
-    Arm, ArmFailure, Attestation, DecisionCell, ForkResult, InputRef, MinimizeError, Minimization,
+    matched_fork, minimize, minimize_world, preserves, render_table, Acceptance, Architecture, Arm,
+    ArmFailure, Attestation, DecisionCell, ForkResult, InputRef, Minimization, MinimizeError,
     NotAttemptedReason, Preservation, ResultBundle, StrategySpec, UnjudgedRemoval,
 };
 use bioprism_section::OracleStatus;
@@ -206,11 +206,21 @@ fn an_arm_that_failed_is_not_reported_as_an_arm_that_never_ran() {
     let result = fork_over(world_json, query_json, &panel);
 
     match &result.arms[..] {
-        [Arm::Unjudged { architecture, reason }, Arm::Judged(trial), Arm::NotAttempted { reason: skipped, .. }] =>
-        {
+        [Arm::Unjudged {
+            architecture,
+            reason,
+        }, Arm::Judged(trial), Arm::NotAttempted {
+            reason: skipped, ..
+        }] => {
             assert_eq!(architecture, "full-context");
-            let ArmFailure::OracleRefused { facts_exposed, detail } = reason;
-            assert_eq!(*facts_exposed, 761, "the cost of the attempt is still reported");
+            let ArmFailure::OracleRefused {
+                facts_exposed,
+                detail,
+            } = reason;
+            assert_eq!(
+                *facts_exposed, 761,
+                "the cost of the attempt is still reported"
+            );
             assert!(
                 detail.contains("ALT-77"),
                 "the oracle's own refusal must survive: {detail}"
@@ -256,10 +266,18 @@ fn an_arm_that_never_ran_is_not_counted_towards_a_clean_panel() {
 
     let result = fork_over(world_json, query_json, &panel);
 
-    assert_eq!(result.arms.len(), 6, "every architecture asked for gets an arm");
+    assert_eq!(
+        result.arms.len(),
+        6,
+        "every architecture asked for gets an arm"
+    );
     assert_eq!(result.passing.len(), 5);
     assert_eq!(
-        result.passing.iter().filter(|name| *name == "fiber").count(),
+        result
+            .passing
+            .iter()
+            .filter(|name| *name == "fiber")
+            .count(),
         1,
         "a name cannot appear twice on the passing side"
     );
@@ -305,7 +323,10 @@ fn every_arm_state_survives_serialization_and_only_a_judged_arm_carries_numbers(
             arms[0].get(absent).is_none() && arms[2].get(absent).is_none(),
             "an arm with no verdict must not carry {absent} for a renderer to coerce"
         );
-        assert!(arms[1].get(absent).is_some(), "a judged arm carries {absent}");
+        assert!(
+            arms[1].get(absent).is_some(),
+            "a judged arm carries {absent}"
+        );
     }
 
     let decoded: ForkResult = serde_json::from_value(encoded).unwrap();
@@ -349,7 +370,10 @@ fn every_fact_in_the_minimal_set_is_load_bearing() {
         without.remove(id);
         let again = minimize(&world, &without).expect("the oracle judges every subset here");
         assert_ne!(
-            (again.preserved_status.as_str(), again.preserved_witnesses.len()),
+            (
+                again.preserved_status.as_str(),
+                again.preserved_witnesses.len()
+            ),
             ("invalid", 4),
             "removing {id} should have changed the signature, so it was not load-bearing"
         );
@@ -526,4 +550,49 @@ fn architectures_round_trip_through_their_specs() {
         assert_eq!(spec, decoded);
         assert!(!decoded.build().name().is_empty());
     }
+}
+
+/// A digest that is not a digest is a defect in the claim, never evidence that the body moved.
+///
+/// `Attestation::Mismatch` says the bundle was edited after it was attested; a `bundle_sha256`
+/// holding a typo, an uppercased digest, or a truncated one says nothing at all about the body.
+/// Reporting the second as the first accuses whoever published the bundle of rewriting it on the
+/// strength of a broken field beside it, and a third party reading that verdict has no way to see
+/// the difference.
+#[test]
+fn a_malformed_bundle_digest_is_reported_as_malformed_and_never_as_a_mismatch() {
+    let (world_json, query_json) = reference();
+    let cell = leakage_cell(&world_json, &query_json);
+    let world = World::from_json(world_json).unwrap();
+    let query = Query::from_json(query_json).unwrap();
+    let fork = matched_fork(&cell, &world, &query, &Architecture::default_panel());
+    let attested = ResultBundle::new(cell, fork).attest();
+    assert_eq!(ResultBundle::verify(&attested), Attestation::Valid);
+
+    let claimed = attested["bundle_sha256"]
+        .as_str()
+        .expect("a digest")
+        .to_string();
+    for broken in [
+        String::new(),
+        "not-a-digest".to_string(),
+        claimed.to_ascii_uppercase(),
+        claimed[..63].to_string(),
+        format!("{claimed}0"),
+    ] {
+        let mut document = attested.clone();
+        document["bundle_sha256"] = Value::String(broken.clone());
+        assert!(
+            matches!(ResultBundle::verify(&document), Attestation::Malformed(_)),
+            "bundle_sha256 = {broken:?} is a defect in the claimed digest, not evidence that the \
+             bundle body changed"
+        );
+    }
+
+    let mut edited = attested;
+    edited["limitations"] = serde_json::json!(["nothing to declare"]);
+    assert!(
+        matches!(ResultBundle::verify(&edited), Attestation::Mismatch { .. }),
+        "an edit to the body is the case Mismatch exists for, and it must still reach it"
+    );
 }

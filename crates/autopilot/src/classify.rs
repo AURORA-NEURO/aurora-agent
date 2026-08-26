@@ -137,6 +137,22 @@ fn declared_retryability(result: &MissionStepResult) -> Option<(RetryClass, &'st
     None
 }
 
+/// Classify a step an attempt dispatched but whose report carries no result row for it.
+///
+/// The absence is evidence in its own right: the drive asked for the step, so it may have run and
+/// may have had effects, while the report declares nothing about it. Treating that as `unknown`
+/// keeps it out of every default retry path and out of any success claim. Both the planner and
+/// the report reader use this so a dispatched step is never silently missing from either.
+pub fn classify_missing_step_result(step_id: &str) -> StepClassification {
+    StepClassification {
+        step_id: step_id.to_string(),
+        status: "missing".into(),
+        class: StepClass::Failed(RetryClass::Unknown),
+        signal: "unrecognised_status",
+        reason: "the attempt dispatched this step but its report holds no result row for it".into(),
+    }
+}
+
 /// Classify one recorded step result. Pure, total, and deterministic; the full mapping is the
 /// table in the module documentation.
 pub fn classify_step_result(result: &MissionStepResult) -> StepClassification {

@@ -37,7 +37,10 @@ fn the_catalogue_ships_four_slices_two_of_which_are_controls() {
         .iter()
         .filter(|id| id.contains("control"))
         .count();
-    assert_eq!(controls, 2, "the controls are what make the other two mean anything");
+    assert_eq!(
+        controls, 2,
+        "the controls are what make the other two mean anything"
+    );
 }
 
 #[test]
@@ -65,7 +68,11 @@ fn the_catalogue_report_recomputes_its_own_digest() {
         .expect("catalogue runs");
     assert!(report.digest_is_intact());
     for slice in &report.slices {
-        assert!(slice.digest_is_intact(), "{} digest is stale", slice.slice_id);
+        assert!(
+            slice.digest_is_intact(),
+            "{} digest is stale",
+            slice.slice_id
+        );
     }
 }
 
@@ -164,7 +171,8 @@ fn what_this_crate_still_cannot_do_is_now_done_by_a_crate_that_compiles() {
 
     assert!(
         source.contains("unprotected-temporal-withholding-v1"),
-        "the slice that answers this crate's still_blocked entry is gone; either the claim          regressed or the slice was renamed, and this crate's own account of the gap is now wrong"
+        "the slice that answers this crate's still_blocked entry is gone; either the claim \
+         regressed or the slice was renamed, and this crate's own account of the gap is now wrong"
     );
 }
 
@@ -186,7 +194,11 @@ fn the_unfavourable_control_ships_its_finding_rather_than_hiding_it() {
 #[test]
 fn neither_control_claims_to_make_any_property_exercisable() {
     let catalogue = SliceCatalog::standard().expect("builds");
-    for id in catalogue.ids().into_iter().filter(|id| id.contains("control")) {
+    for id in catalogue
+        .ids()
+        .into_iter()
+        .filter(|id| id.contains("control"))
+    {
         let control = catalogue.get(id).expect("registered");
         assert!(
             control.makes_exercisable.is_empty(),
@@ -246,4 +258,37 @@ fn the_underdetermination_slice_declares_the_hypotheses_it_leaves_live() {
     assert_eq!(report.hypotheses.live_hypotheses.len(), 3);
     assert!(report.hypotheses.is_underdetermined());
     assert!(report.holds());
+}
+
+/// A field the reader does not know is a field the digest cannot cover.
+///
+/// A catalogue report seals itself by re-serialising the parsed struct and hashing that, so
+/// anything a reader silently discards is outside the seal by construction: the recomputation
+/// cannot see it, the claimed digest still agrees, and a report carrying content nobody hashed
+/// reads as intact. The report's whole job is to say which properties these worlds make
+/// exercisable and which stay blocked, so an invisible field in it is the difference between
+/// "this is the backlog" and "somebody edited the backlog after it was sealed".
+#[test]
+fn a_catalogue_report_carrying_an_undeclared_field_is_refused_rather_than_silently_dropped() {
+    let report = Catalog::standard()
+        .expect("catalogue builds")
+        .run_all()
+        .expect("the catalogue runs");
+    assert!(report.digest_is_intact());
+    let sealed = serde_json::to_value(&report).expect("the report serialises");
+
+    for pointer in ["", "/slices/0"] {
+        let mut tampered = sealed.clone();
+        tampered
+            .pointer_mut(pointer)
+            .expect("the position exists")
+            .as_object_mut()
+            .expect("the position is an object")
+            .insert("injected".into(), serde_json::json!("added after sealing"));
+        assert!(
+            serde_json::from_value::<bioprism_bioworlds::CatalogReport>(tampered).is_err(),
+            "a key injected at {pointer:?} was read back into a report whose digest still verifies, \
+             so the digest names less than the document does"
+        );
+    }
 }

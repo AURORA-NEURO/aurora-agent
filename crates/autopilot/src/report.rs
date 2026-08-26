@@ -10,8 +10,18 @@
 //! `limitations` is always present and always contains at least [`REQUIRED_LIMITATIONS`]. A
 //! report that omitted them would imply capabilities — scheduling, MCP exposure, unrestricted
 //! resume, deadlines — that this crate deliberately does not have.
+//!
+//! # The classification table is keyed on the dispatch, not on the reply
+//!
+//! Each attempt's `classification_table` is built by walking the step ids that attempt actually
+//! dispatched and looking each one up in the returned report. A dispatched step the report says
+//! nothing about is classified as missing rather than dropped, and a result row naming a step the
+//! mission never carried is not admitted at all. Keying the table on `report.results` instead
+//! would let the answer decide what the question was: the table would understate a dispatch whose
+//! reply lost rows and overstate one whose reply invented them, and the planner — which does key
+//! on the dispatch — would silently disagree with the receipt describing it.
 
-use crate::classify::classify_step_result;
+use crate::classify::{classify_missing_step_result, classify_step_result};
 use crate::error::AutopilotError;
 use crate::grant::{AutonomyGrant, AutonomyGrantDocument};
 use crate::history::DriveHistory;
@@ -95,12 +105,15 @@ fn attempt_rows(history: &DriveHistory) -> Vec<Value> {
         .map(|(index, attempt)| {
             let classification_table = attempt
                 .parsed_report()
-                .map(|report| {
-                    report
-                        .results
+                .map(|_| {
+                    attempt
+                        .dispatched_step_ids()
                         .iter()
-                        .map(|result| {
-                            let row = classify_step_result(result);
+                        .map(|step_id| {
+                            let row = match attempt.step_result(step_id) {
+                                Some(result) => classify_step_result(result),
+                                None => classify_missing_step_result(step_id),
+                            };
                             json!({
                                 "step_id": row.step_id,
                                 "status": row.status,
@@ -220,9 +233,7 @@ pub fn verify_autopilot_report(report: &Value) -> Result<Value, AutopilotError> 
     let schema = object.get("schema").and_then(Value::as_str).unwrap_or("");
     if schema != AUTOPILOT_REPORT_SCHEMA_VERSION {
         return Err(AutopilotError::InvalidAutopilotReport {
-            reason: format!(
-                "schema is {schema:?}, expected {AUTOPILOT_REPORT_SCHEMA_VERSION:?}"
-            ),
+            reason: format!("schema is {schema:?}, expected {AUTOPILOT_REPORT_SCHEMA_VERSION:?}"),
         });
     }
     let claimed = object

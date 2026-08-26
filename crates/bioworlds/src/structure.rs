@@ -168,6 +168,7 @@ impl DependencyClosure {
 /// and the second is everything, which is precisely why an early cut there cannot withhold
 /// evidence without also breaking the closure.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TemporalSplit {
     pub decision_time: String,
     pub event_managed: Vec<String>,
@@ -194,6 +195,7 @@ impl TemporalSplit {
 
 /// Everything this crate can say about a world's structure without compiling anything.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StructuralProfile {
     pub world_id: String,
     pub target: String,

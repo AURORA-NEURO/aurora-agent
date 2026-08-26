@@ -229,7 +229,10 @@ fn the_suite_round_trips_through_json_so_a_third_party_can_run_it() {
     let suite = fiber_suite();
     let document = suite.to_json().expect("suite serialises");
     let restored = Suite::from_json(&document).expect("suite deserialises");
-    assert_eq!(restored, suite, "the suite is not faithfully representable as data");
+    assert_eq!(
+        restored, suite,
+        "the suite is not faithfully representable as data"
+    );
     assert_eq!(
         restored.digest().unwrap(),
         suite.digest().unwrap(),
@@ -250,7 +253,10 @@ fn the_published_wire_shape_still_reads_for_a_runner_that_predates_inserts() {
     };
 
     let inserting = case("fiber.conformance.an_undeclared_query_field_is_refused");
-    assert_eq!(inserting["input"]["query_overrides"][0]["op"], json!("insert"));
+    assert_eq!(
+        inserting["input"]["query_overrides"][0]["op"],
+        json!("insert")
+    );
     assert_eq!(
         inserting["expect"][0]["naming"],
         json!(["decision_loss"]),
@@ -336,7 +342,9 @@ fn fixture_drift_names_the_structural_change_not_only_the_digest() {
         .changes
         .contains(&ShapeChange::KeyRemoved("extra".to_string())));
     assert!(
-        drift.to_string().contains("top-level key \"extra\" removed"),
+        drift
+            .to_string()
+            .contains("top-level key \"extra\" removed"),
         "{drift}"
     );
     assert_ne!(drift.declared_sha256, drift.observed_sha256);
@@ -663,7 +671,12 @@ fn a_suite_that_is_only_end_to_end_is_reported_unbalanced_with_the_thin_layers_n
     let thin = balance.thin_layers();
     assert_eq!(
         thin,
-        vec![Layer::Unit, Layer::Property, Layer::Golden, Layer::Conformance],
+        vec![
+            Layer::Unit,
+            Layer::Property,
+            Layer::Golden,
+            Layer::Conformance
+        ],
         "an all-end-to-end suite must name every layer it is missing"
     );
     let rendered: Vec<String> = balance.findings().iter().map(ToString::to_string).collect();
@@ -688,7 +701,11 @@ fn an_inverted_pyramid_is_reported_even_when_no_layer_is_empty() {
     let balance = PyramidShape::from_layers(layers).balance();
     assert!(!balance.is_balanced());
     let rendered: Vec<String> = balance.findings().iter().map(ToString::to_string).collect();
-    assert_eq!(rendered.len(), 1, "only the inversion is wrong: {rendered:?}");
+    assert_eq!(
+        rendered.len(),
+        1,
+        "only the inversion is wrong: {rendered:?}"
+    );
     assert!(rendered[0].contains("4 end-to-end cases against 1 unit cases"));
 }
 
@@ -697,7 +714,11 @@ fn an_empty_suite_is_reported_as_having_no_cases_rather_than_as_balanced() {
     let balance = PyramidShape::from_layers([]).balance();
     assert!(!balance.is_balanced());
     assert_eq!(
-        balance.findings().iter().map(ToString::to_string).collect::<Vec<_>>(),
+        balance
+            .findings()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
         vec!["the suite contains no cases".to_string()]
     );
 }
@@ -734,7 +755,10 @@ fn generated_store(name: &str, documents: &[(&str, &str, &Value)]) -> (PathBuf, 
             }
         })
         .collect();
-    (root, FixtureManifest::new(format!("generated-{name}"), cards))
+    (
+        root,
+        FixtureManifest::new(format!("generated-{name}"), cards),
+    )
 }
 
 fn generated_profile(name: &str, spec: &WorldSpec) -> (Suite, FixtureStore) {
@@ -866,7 +890,9 @@ fn a_baseline_that_loses_the_decision_does_not_satisfy_the_comparator_gate() {
 
     assert!(decision.blocks_on(ReleaseGate::EqualEngineeringBaselineExists));
     assert!(
-        decision.unmet()[0].because.contains("does not preserve the decision"),
+        decision.unmet()[0]
+            .because
+            .contains("does not preserve the decision"),
         "{}",
         decision.explain()
     );
@@ -878,10 +904,9 @@ fn release_is_refused_when_a_case_was_retried_to_green() {
     let decision = assess(&report);
 
     assert!(decision.blocks_on(ReleaseGate::NoFlakyRetryToGreen));
-    assert!(decision
-        .unmet()
-        .iter()
-        .any(|u| u.evidence.contains(&"fiber.property.compilation_is_deterministic".to_string())));
+    assert!(decision.unmet().iter().any(|u| u
+        .evidence
+        .contains(&"fiber.property.compilation_is_deterministic".to_string())));
 }
 
 #[test]
@@ -996,7 +1021,10 @@ fn a_tampered_conformance_certificate_does_not_verify() {
     document["requirements"][0]["status"] = json!("passed-after-review");
 
     match ConformanceCertificate::verify(&document) {
-        Err(ConformanceError::CertificateDigestMismatch { claimed, recomputed }) => {
+        Err(ConformanceError::CertificateDigestMismatch {
+            claimed,
+            recomputed,
+        }) => {
             assert_ne!(claimed, recomputed)
         }
         other => panic!("a rewritten status must invalidate the certificate, got {other:?}"),
@@ -1005,7 +1033,9 @@ fn a_tampered_conformance_certificate_does_not_verify() {
 
 #[test]
 fn certification_is_refused_and_names_the_requirement_that_stopped_it() {
-    let report = fiber_suite().run(&DropsProtectedEvidence, &fixtures()).unwrap();
+    let report = fiber_suite()
+        .run(&DropsProtectedEvidence, &fixtures())
+        .unwrap();
 
     let unmet: Vec<&str> = report
         .unmet_requirements()
@@ -1099,5 +1129,55 @@ fn a_recommended_requirement_does_not_block_certification() {
             .iter()
             .all(|r| r.requirement == Requirement::Must),
         "a `should` failure must be disclosed but not counted against certification"
+    );
+}
+
+/// A registry ingesting a bundle must be able to tell a broken claim from a rewritten result.
+///
+/// `CertificateDigestMismatch` says a certified implementation edited its results after
+/// certification — a finding a registry acts on. A `certificate_sha256` that is not a digest says
+/// only that the field beside the results is broken. Until these two were separated, a typo in
+/// the digest field read to an operator as evidence of tampering by the implementation.
+#[test]
+fn a_malformed_certificate_digest_is_reported_as_malformed_and_never_as_a_mismatch() {
+    let document = certified_report()
+        .certify("2026-08-08T00:00:00Z", "2027-08-08T00:00:00Z")
+        .expect("a fully conformant run certifies")
+        .to_json()
+        .expect("the certificate serialises");
+    ConformanceCertificate::verify(&document).expect("its own digest verifies");
+
+    let claimed = document["certificate_sha256"]
+        .as_str()
+        .expect("a digest")
+        .to_string();
+    for broken in [
+        String::new(),
+        "not-a-digest".to_string(),
+        claimed.to_ascii_uppercase(),
+        claimed[..63].to_string(),
+        format!("{claimed}0"),
+    ] {
+        let mut candidate = document.clone();
+        candidate["certificate_sha256"] = json!(broken.clone());
+        match ConformanceCertificate::verify(&candidate) {
+            Err(ConformanceError::CertificateDigestMalformed { claimed }) => {
+                assert_eq!(claimed, broken)
+            }
+            other => panic!(
+                "certificate_sha256 = {broken:?} is a defect in the claimed digest, not evidence \
+                 that the certified results changed, and it was reported as {other:?}"
+            ),
+        }
+    }
+
+    let mut edited = document;
+    edited["issued_at"] = json!("2026-01-01T00:00:00Z");
+    assert!(
+        matches!(
+            ConformanceCertificate::verify(&edited),
+            Err(ConformanceError::CertificateDigestMismatch { .. })
+        ),
+        "an edit to the certified body is the case the mismatch exists for"
     );
 }

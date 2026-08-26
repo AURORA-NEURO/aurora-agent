@@ -423,9 +423,9 @@ impl SuiteReport {
     /// The release gates use this rather than trusting that a green suite covered what it should:
     /// a suite can be entirely green and never once have recomputed a digest.
     pub fn covers(&self, expectation_kind: &str) -> bool {
-        self.results.iter().any(|r| {
-            r.outcome.is_pass() && r.expectations.iter().any(|k| k == expectation_kind)
-        })
+        self.results
+            .iter()
+            .any(|r| r.outcome.is_pass() && r.expectations.iter().any(|k| k == expectation_kind))
     }
 
     /// Whether some passing case at this layer exists.
@@ -505,10 +505,16 @@ impl SuiteReport {
         }
         for result in self.unmet_requirements() {
             lines.push(match &result.outcome {
-                CaseOutcome::Failed { expectation, detail } => {
+                CaseOutcome::Failed {
+                    expectation,
+                    detail,
+                } => {
                     format!("  FAILED {} [{expectation}] {detail}", result.case_id)
                 }
-                CaseOutcome::Unsupported { expectation, reason } => {
+                CaseOutcome::Unsupported {
+                    expectation,
+                    reason,
+                } => {
                     format!("  UNSUPPORTED {} [{expectation}] {reason}", result.case_id)
                 }
                 CaseOutcome::Errored { reason } => {
@@ -562,15 +568,17 @@ impl ConformanceCertificate {
     pub fn to_json(&self) -> Result<Value, ConformanceError> {
         let body = self.body()?;
         let digest = self.digest()?;
-        let mut map = body
-            .as_object()
-            .cloned()
-            .unwrap_or_else(Map::new);
+        let mut map = body.as_object().cloned().unwrap_or_else(Map::new);
         map.insert("certificate_sha256".into(), json!(digest));
         Ok(Value::Object(map))
     }
 
     /// Recomputes the embedded digest, the way a registry ingesting a bundle must.
+    ///
+    /// The shape of the claimed digest is checked first and answered separately. A registry that
+    /// reported a malformed `certificate_sha256` as a mismatch would tell its operators that a
+    /// certified implementation had rewritten its results, when all it saw was a field that never
+    /// held a digest.
     pub fn verify(document: &Value) -> Result<(), ConformanceError> {
         let map = document.as_object().ok_or_else(|| {
             ConformanceError::MalformedSuite("certificate is not an object".to_string())
@@ -579,8 +587,15 @@ impl ConformanceCertificate {
             .get("certificate_sha256")
             .and_then(Value::as_str)
             .ok_or_else(|| {
-                ConformanceError::MalformedSuite("certificate has no certificate_sha256".to_string())
+                ConformanceError::MalformedSuite(
+                    "certificate has no certificate_sha256".to_string(),
+                )
             })?;
+        if ContentHash::parse(claimed.to_string()).is_err() {
+            return Err(ConformanceError::CertificateDigestMalformed {
+                claimed: claimed.to_string(),
+            });
+        }
         let mut body = map.clone();
         body.remove("certificate_sha256");
         let recomputed = ContentHash::of_value(&Value::Object(body))
@@ -708,7 +723,11 @@ fn check(
             pointer,
             values,
         } => {
-            let members = strings(array(doc(artifacts, artifact)?, artifact, pointer)?, artifact, pointer)?;
+            let members = strings(
+                array(doc(artifacts, artifact)?, artifact, pointer)?,
+                artifact,
+                pointer,
+            )?;
             let missing: Vec<&String> = values.iter().filter(|v| !members.contains(*v)).collect();
             if missing.is_empty() {
                 Ok(())
@@ -767,7 +786,11 @@ fn check(
             pointer,
             prefix,
         } => {
-            let members = strings(array(doc(artifacts, artifact)?, artifact, pointer)?, artifact, pointer)?;
+            let members = strings(
+                array(doc(artifacts, artifact)?, artifact, pointer)?,
+                artifact,
+                pointer,
+            )?;
             let offenders: Vec<&String> =
                 members.iter().filter(|m| m.starts_with(prefix)).collect();
             if offenders.is_empty() {
@@ -835,11 +858,14 @@ fn check(
                         "{artifact}{pointer}[{index}].{field} is {class:?}, outside {allowed:?}"
                     )));
                 }
-                let count = group.get(count_field).and_then(Value::as_i64).ok_or_else(|| {
-                    Check::Fail(format!(
-                        "{artifact}{pointer}[{index}] has no integer {count_field:?}"
-                    ))
-                })?;
+                let count = group
+                    .get(count_field)
+                    .and_then(Value::as_i64)
+                    .ok_or_else(|| {
+                        Check::Fail(format!(
+                            "{artifact}{pointer}[{index}] has no integer {count_field:?}"
+                        ))
+                    })?;
                 sum += count;
             }
             if sum == expected {
@@ -909,7 +935,8 @@ fn check(
             artifact,
             digest_field,
         } => {
-            let (claimed, recomputed) = embedded_digest(doc(artifacts, artifact)?, artifact, digest_field)?;
+            let (claimed, recomputed) =
+                embedded_digest(doc(artifacts, artifact)?, artifact, digest_field)?;
             if claimed == recomputed {
                 Ok(())
             } else {
@@ -928,9 +955,7 @@ fn check(
             let claimed = document
                 .get(digest_field)
                 .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    Check::Fail(format!("{artifact} has no string {digest_field:?}"))
-                })?;
+                .ok_or_else(|| Check::Fail(format!("{artifact} has no string {digest_field:?}")))?;
             if claimed == sha256 {
                 Ok(())
             } else {

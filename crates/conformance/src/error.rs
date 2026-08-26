@@ -124,9 +124,20 @@ pub enum ConformanceError {
     #[error("certification refused: {reason}")]
     CertificationRefused { reason: String },
 
-    #[error("conformance certificate digest mismatch: claims {claimed}, recomputes to {recomputed}")]
-    CertificateDigestMismatch {
-        claimed: String,
-        recomputed: String,
-    },
+    #[error(
+        "conformance certificate digest mismatch: claims {claimed}, recomputes to {recomputed}"
+    )]
+    CertificateDigestMismatch { claimed: String, recomputed: String },
+
+    /// The claimed digest is not a digest at all.
+    ///
+    /// Separate from [`ConformanceError::CertificateDigestMismatch`] because the two accuse
+    /// different parties. A mismatch says the certified body has been edited since it was signed;
+    /// this says the field beside the body does not hold a SHA-256 digest, which is a defect in
+    /// the claim and evidence of nothing about the body.
+    #[error(
+        "conformance certificate digest is malformed: {claimed:?} is not a 64-character lowercase \
+         hex digest"
+    )]
+    CertificateDigestMalformed { claimed: String },
 }

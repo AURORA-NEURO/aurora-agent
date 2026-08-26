@@ -284,11 +284,7 @@ fn recipe_ids_are_unique_across_recipes_and_anti_recipes() {
         .recipes()
         .iter()
         .map(|recipe| recipe.id().to_string())
-        .chain(
-            book.anti_recipes()
-                .iter()
-                .map(|anti| anti.id().to_string()),
-        )
+        .chain(book.anti_recipes().iter().map(|anti| anti.id().to_string()))
         .collect();
     let total = ids.len();
     ids.sort();
@@ -445,7 +441,10 @@ fn an_entry_point_naming_a_deleted_function_is_reported_rather_than_ignored() {
 #[test]
 fn an_entry_point_in_a_crate_that_does_not_exist_is_reported_as_such() {
     let status = workspace().resolve(&entry("bioprism_not_a_crate::anything"));
-    assert!(matches!(status, ReferenceStatus::CrateNotInWorkspace { .. }));
+    assert!(matches!(
+        status,
+        ReferenceStatus::CrateNotInWorkspace { .. }
+    ));
 }
 
 #[test]
@@ -589,11 +588,7 @@ fn every_recipe_route_passes_the_41_05_checks_without_a_defect() {
     for recipe in book.recipes() {
         let route = recipe_route(recipe).expect("a route builds");
         let defects = route.check(&graph);
-        assert!(
-            defects.is_empty(),
-            "{}: {defects:?}",
-            recipe.id()
-        );
+        assert!(defects.is_empty(), "{}: {defects:?}", recipe.id());
     }
 }
 
@@ -656,10 +651,14 @@ fn a_recipe_bundle_closes_over_the_dependencies_of_the_crates_it_names() {
     let recipe = book
         .recipe("fork-two-architectures-from-one-decision-cell")
         .expect("the recipe is registered");
-    let bundle = compile_recipe_route(&graph, recipe, &TraversalPolicy::exhaustive())
-        .expect("it compiles");
+    let bundle =
+        compile_recipe_route(&graph, recipe, &TraversalPolicy::exhaustive()).expect("it compiles");
     let mandatory: Vec<String> = bundle.mandatory_ids().map(ToString::to_string).collect();
-    for transitive in ["crate/bioprism-section", "crate/bioprism-world", "crate/bioprism-ids"] {
+    for transitive in [
+        "crate/bioprism-section",
+        "crate/bioprism-world",
+        "crate/bioprism-ids",
+    ] {
         assert!(
             mandatory.contains(&transitive.to_string()),
             "the prism recipe does not close over `{transitive}`"
@@ -734,9 +733,8 @@ fn a_capped_walk_never_licenses_a_sufficiency_claim_that_an_exhaustive_one_would
 fn the_token_cost_of_a_recipe_bundle_is_labelled_an_estimate() {
     let book = book();
     let graph = cookbook_doc_graph(&book).expect("the cookbook graph builds");
-    let bundle =
-        compile_recipe_route(&graph, &book.recipes()[0], &TraversalPolicy::exhaustive())
-            .expect("it compiles");
+    let bundle = compile_recipe_route(&graph, &book.recipes()[0], &TraversalPolicy::exhaustive())
+        .expect("it compiles");
     assert!(
         !bundle.cost.is_measurement(),
         "no tokenizer exists in this workspace, so no bundle cost may be a measurement"
@@ -788,7 +786,10 @@ fn the_cookbook_graph_lints_without_errors() {
         )
         .collect();
     let report = lint(&graph, &routes);
-    let errors: Vec<String> = report.errors().map(|finding| format!("{finding:?}")).collect();
+    let errors: Vec<String> = report
+        .errors()
+        .map(|finding| format!("{finding:?}"))
+        .collect();
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
 
@@ -1043,6 +1044,43 @@ fn the_rendered_report_leads_with_the_gaps_rather_than_the_contents() {
     let gaps = rendered
         .find("WANTED BUT NOT WRITTEN")
         .expect("the gap section is rendered");
-    let contents = rendered.find("\nRECIPES").expect("the recipe section is rendered");
-    assert!(gaps < contents, "a gap list printed last is a gap list nobody reads");
+    let contents = rendered
+        .find("\nRECIPES")
+        .expect("the recipe section is rendered");
+    assert!(
+        gaps < contents,
+        "a gap list printed last is a gap list nobody reads"
+    );
+}
+
+/// A field the reader does not know is a field the digest cannot cover.
+///
+/// `CookbookReport` seals itself by re-serialising the parsed struct and hashing that, so anything
+/// a reader silently discards is outside the seal by construction: the recomputation cannot see
+/// it, agrees with the claimed digest, and the report verifies with content in it that nobody
+/// hashed. The report is the artefact a newcomer trusts to say what the platform can do, so an
+/// invisible field in it is the difference between "these recipes exist" and "somebody wrote these
+/// recipes into the file after it was sealed".
+#[test]
+fn a_report_carrying_a_field_the_reader_does_not_know_is_refused_rather_than_silently_dropped() {
+    let report = CookbookReport::of(&book()).expect("the report builds");
+    assert!(report.digest_is_intact());
+    let sealed = serde_json::to_value(&report).expect("the report serialises");
+
+    for pointer in ["", "/recipes/0", "/unwritten/0"] {
+        let mut tampered = sealed.clone();
+        tampered
+            .pointer_mut(pointer)
+            .expect("the position exists")
+            .as_object_mut()
+            .expect("the position is an object")
+            .insert("injected".into(), serde_json::json!("added after sealing"));
+
+        let reread = serde_json::from_value::<CookbookReport>(tampered);
+        assert!(
+            reread.is_err(),
+            "a key injected at {pointer:?} was read back into a report that still verifies, so the \
+             digest names less than the document does"
+        );
+    }
 }

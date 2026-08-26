@@ -1377,6 +1377,50 @@ pub fn build_domain_workflow_portfolio(
 /// This kernel check is deliberately catalogue-bound but transport-independent. It does not
 /// perform authoritative MCP schema preflight (the MCP server adds that step), and it never
 /// dispatches, retries, resumes, or treats a digest match as semantic or operational validity.
+/// The identity fields a replay comparison has always named, in the order it named them.
+///
+/// Kept as a list so the mismatch rows a caller already parses keep their existing order; every
+/// other field is appended after them by [`replay_compared_fields`].
+const REPLAY_IDENTITY_FIELDS: [&str; 10] = [
+    "workflow_id",
+    "workflow_digest",
+    "catalog_digest",
+    "domain_contract",
+    "domain_contract_digest",
+    "execution_contract",
+    "evidence_plan",
+    "mission",
+    "selection",
+    "execution",
+];
+
+/// Every field a replay comparison must check: the identity fields, then everything else the
+/// replay itself produced.
+///
+/// The list is derived from the replay rather than written out, because a written-out list is a
+/// list that silently stops covering the fields an instantiation grows. Under the ten identity
+/// fields alone, a retained instantiation's `ok`, `schema`, `preflight`, `guarantees`,
+/// `limitations` and `links` could each be replaced outright and the replay still reported
+/// `matched` — and `limitations` is the field that says what the plan does *not* establish, so the
+/// one edit the comparison most needed to catch was the one it could not see.
+///
+/// Fields present in the retained document and absent from the replay stay uncompared, and that is
+/// deliberate: the transport writes `preflight_report` onto an instantiation after this kernel
+/// produced it, so treating a field the replay does not produce as tampering would refuse every
+/// workflow the server hands back. What that leaves uncovered is an *injected* key, which is
+/// recorded as a gap rather than closed here.
+fn replay_compared_fields(replayed: &Value) -> Vec<String> {
+    let mut fields: Vec<String> = REPLAY_IDENTITY_FIELDS.iter().map(|f| (*f).into()).collect();
+    if let Some(object) = replayed.as_object() {
+        for key in object.keys() {
+            if !fields.iter().any(|field| field == key) {
+                fields.push(key.clone());
+            }
+        }
+    }
+    fields
+}
+
 pub fn verify_domain_workflow(
     catalogue: &Value,
     tool_definitions: &Value,
@@ -1517,18 +1561,8 @@ pub fn verify_domain_workflow(
             };
         if replayed.is_object() {
             let mut replay_mismatches = Vec::new();
-            for field in [
-                "workflow_id",
-                "workflow_digest",
-                "catalog_digest",
-                "domain_contract",
-                "domain_contract_digest",
-                "execution_contract",
-                "evidence_plan",
-                "mission",
-                "selection",
-                "execution",
-            ] {
+            for field in replay_compared_fields(&replayed) {
+                let field = field.as_str();
                 if instantiation.get(field) != replayed.get(field) {
                     let expected = instantiation.get(field).cloned().unwrap_or(Value::Null);
                     let observed = replayed.get(field).cloned().unwrap_or(Value::Null);
@@ -1619,13 +1653,17 @@ pub fn verify_domain_workflow_portfolio(
             "portfolio.workflow must be domain_workflow_portfolio".into(),
         ));
     }
+    // A portfolio that carries no digest and one whose digest is the wrong shape are two different
+    // defects and are reported as two, the way `verify_domain_workflow` reports its own identity
+    // fields. Under one shared message a caller who forgot the field was told their digest was
+    // malformed, which sends them to inspect a value that is not there.
     let expected_portfolio_digest = portfolio
         .get("portfolio_digest")
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
             DomainWorkflowError::InvalidRequest(
-                "portfolio.portfolio_digest must be a 64-character hexadecimal digest".into(),
+                "portfolio.portfolio_digest must be a non-empty string".into(),
             )
         })?
         .to_owned();

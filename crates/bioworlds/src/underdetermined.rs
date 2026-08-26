@@ -329,9 +329,10 @@ pub fn build(spec: &PostTreatmentSpec) -> Result<BioWorld, BioWorldError> {
     builder.fact(
         "fact.confirmation",
         CONFIRMATION_MEASUREMENT,
-        per_subject(&subjects, |_, _| {
-            json!({ "scheduled": "2025-05-12", "bidimensional_product_mm2": null })
-        }),
+        per_subject(
+            &subjects,
+            |_, _| json!({ "scheduled": "2025-05-12", "bidimensional_product_mm2": null }),
+        ),
         &["confirmation"],
         &["imaging/confirmation_schedule.json"],
     );
@@ -581,6 +582,7 @@ pub fn query(spec: &PostTreatmentSpec) -> QueryShape {
 
 /// What the world's structure says about whether the verdict is settled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnderdeterminationProfile {
     pub world_id: String,
     pub hypothesis_variables: Vec<String>,
@@ -623,7 +625,10 @@ impl UnderdeterminationProfile {
 ///
 /// Generic over any world: it reads declared factor kinds and tags, not this module's constants
 /// applied by name, so a consumer can point it at a world this crate did not build.
-pub fn analyse(world: &BioWorld, query: &QueryShape) -> Result<UnderdeterminationProfile, BioWorldError> {
+pub fn analyse(
+    world: &BioWorld,
+    query: &QueryShape,
+) -> Result<UnderdeterminationProfile, BioWorldError> {
     let inner = world.world();
     let profile = crate::structure::profile(world, query, DISTRACTOR_TAG)?;
     let withheld: BTreeSet<&str> = profile
@@ -660,7 +665,11 @@ pub fn analyse(world: &BioWorld, query: &QueryShape) -> Result<Underdeterminatio
     let mut unresolvable = BTreeSet::new();
     let mut withheld_inputs = BTreeSet::new();
 
-    for factor in inner.factors.iter().filter(|f| f.kind == HYPOTHESIS_SUPPORT_RULE) {
+    for factor in inner
+        .factors
+        .iter()
+        .filter(|f| f.kind == HYPOTHESIS_SUPPORT_RULE)
+    {
         for output in &factor.outputs {
             hypothesis_variables.push(output.as_str().to_string());
             let is_settled = factor

@@ -31,6 +31,13 @@
 //! mistakes are first-class: an [`AntiRecipe`] cannot be constructed without the workspace test
 //! that already refutes it.
 //!
+//! # Reading a report back
+//!
+//! [`CookbookReport`], and every struct it is made of down to a [`PinnedQuote`], refuses a field it
+//! does not declare. The digest is recomputed by re-serialising the *parsed* report, so a key the
+//! reader dropped would be outside the seal by construction: the recomputation never sees it, the
+//! claimed digest still agrees, and a report carrying content nobody hashed reads as intact.
+//!
 //! # What this crate does not do, stated plainly
 //!
 //! **No recipe runs.** Nothing here compiles a context, generates a world or executes a pipeline. A

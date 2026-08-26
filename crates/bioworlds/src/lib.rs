@@ -73,6 +73,14 @@
 //! is used, and the RNG is `bioprism-worldgen`'s own `SplitMix64`. `fixtures/` holds each world as
 //! it is built, and `tests/fixtures_are_current.rs` fails if a rebuild disagrees byte for byte.
 //!
+//! # Reading a report back
+//!
+//! [`SliceReport`] and [`CatalogReport`], and every struct they are made of, refuse a field they
+//! do not declare. Both seal themselves by re-serialising the parsed struct and hashing that, so a
+//! key the reader dropped would be outside the seal by construction: the recomputation never sees
+//! it, the claimed digest still agrees, and a report carrying content nobody hashed reads as
+//! intact.
+//!
 //! # Not implemented
 //!
 //! * **No compiled verdicts.** See above. This is the load-bearing limitation.
@@ -104,9 +112,7 @@ pub use error::BioWorldError;
 pub use knobs::{MissingGeneratorKnob, REUSED_GENERATOR_KNOBS};
 pub use query::{QueryShape, QUERY_SCHEMA_VERSION};
 pub use slice::{BlockedProperty, CheckOutcome, SliceReport, StructuralCheck, VerticalSlice};
-pub use structure::{
-    profile, DependencyClosure, Neighbourhood, StructuralProfile, TemporalSplit,
-};
+pub use structure::{profile, DependencyClosure, Neighbourhood, StructuralProfile, TemporalSplit};
 pub use underdetermined::{AbstentionStep, UnderdeterminationProfile};
 
 /// The blueprint modules this crate implements.
