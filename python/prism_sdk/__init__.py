@@ -6657,12 +6657,18 @@ from .adapter_multimodal_evidence_surveillance_research_workbench import (
     MultimodalEvidenceSurveillanceResearchWorkbenchReceipt,
     render_multimodal_evidence_surveillance_research_workbench,
 )
+from .adapter_throughput_evidence_surveillance_research_workbench import (
+    ThroughputEvidenceSurveillanceResearchWorkbenchReceipt,
+    render_throughput_evidence_surveillance_research_workbench,
+)
 
 __all__ += [
     "LocalEvidenceSurveillanceResearchWorkbenchReceipt",
     "render_local_evidence_surveillance_research_workbench",
     "MultimodalEvidenceSurveillanceResearchWorkbenchReceipt",
     "render_multimodal_evidence_surveillance_research_workbench",
+    "ThroughputEvidenceSurveillanceResearchWorkbenchReceipt",
+    "render_throughput_evidence_surveillance_research_workbench",
 ]
 
 from .adapter_multimodal_evidence_surveillance_research_copilot import (

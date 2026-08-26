@@ -1863,6 +1863,9 @@ impl Server {
             "adapter_multimodal_evidence_surveillance_research_workbench" => {
                 self.adapter_multimodal_evidence_surveillance_research_workbench(&arguments)
             },
+            "adapter_throughput_evidence_surveillance_research_workbench" => {
+                self.adapter_throughput_evidence_surveillance_research_workbench(&arguments)
+            },
             "multimodal_retrieval_synthesis" => self.multimodal_retrieval_synthesis(&arguments),
             "adapter_context_compilation_assurance" => {
                 self.adapter_context_compilation_assurance(&arguments)
@@ -25156,6 +25159,12 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal workbench preserves study/modality comparability, qualified, unknown, incomparable, missing, negative, and provenance views", "canonical view and panel order is replayable across clients", "raw preclinical data remains institution-local and no external effect is scheduled"], "limitations": ["the workbench renders caller-supplied evidence metadata and does not make clinical decisions", "operators remain responsible for semantic-profile governance and independent replication"]}))
     }
 
+    fn adapter_throughput_evidence_surveillance_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a ThroughputEvidenceSurveillanceResearchWorkbenchRequest")?;
+        let receipt = crate::research_contracts::run_throughput_evidence_surveillance_research_workbench_json(request)?;
+        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput workbench preserves queue, capacity, checkpoint, qualified, unknown, overflow, negative, and provenance views", "canonical view and panel order is replayable across clients", "raw preclinical data remains institution-local and no external effect is scheduled"], "limitations": ["the workbench renders caller-supplied evidence metadata and does not make clinical decisions", "operators remain responsible for capacity policy, queue retention, and independent replication"]}))
+    }
+
     fn multimodal_retrieval_synthesis(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -40050,6 +40059,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "adapter_multimodal_evidence_surveillance_research_workbench",
             "description": "Render an A1 multimodal multi-study EvidenceFeed2 research workbench with canonical study, modality, comparability, missing, incomparable, negative, selected, and provenance panels; no external effects are scheduled.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalEvidenceSurveillanceResearchWorkbenchRequest with multimodal copilot request, workbench scope, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "adapter_throughput_evidence_surveillance_research_workbench",
+            "description": "Render an A1 prospective high-throughput EvidenceFeed3 research workbench with canonical queue, capacity, checkpoint, overflow, negative, qualified, unknown, and provenance panels; no external effects are scheduled.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputEvidenceSurveillanceResearchWorkbenchRequest with throughput copilot request, batch/checkpoint/capacity, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "multimodal_knowledge_workflow",

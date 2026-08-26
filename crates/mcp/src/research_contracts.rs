@@ -194,6 +194,12 @@ use bioprism_adapter::{
     ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 use bioprism_adapter::{
+    render_throughput_evidence_surveillance_research_workbench,
+    ThroughputEvidenceSurveillanceResearchWorkbenchReceipt,
+    ThroughputEvidenceSurveillanceResearchWorkbenchRequest,
+    ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+use bioprism_adapter::{
     simulate_protocol_draft, ProtocolDraft, ProtocolSimulationReceipt,
     PROTOCOL_SIMULATION_FEATURE_ID,
 };
@@ -328,6 +334,7 @@ pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str = 
 pub const ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str = "adapter_federated_continual_evidence_surveillance_workflow_fabric";
 pub const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str = "adapter_local_evidence_surveillance_research_workbench";
 pub const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str = "adapter_multimodal_evidence_surveillance_research_workbench";
+pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str = "adapter_throughput_evidence_surveillance_research_workbench";
 pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
@@ -1189,6 +1196,8 @@ pub fn validate_multimodal_evidence_surveillance_research_workbench_json(value: 
     if receipt.feature_id != ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID { return Err("multimodal evidence workbench feature id mismatch".into()); }
     Ok(receipt)
 }
+pub fn run_throughput_evidence_surveillance_research_workbench_json(value: &Value) -> Result<Value, String> { let request: ThroughputEvidenceSurveillanceResearchWorkbenchRequest = serde_json::from_value(value.clone()).map_err(|e| format!("invalid throughput evidence workbench request: {e}"))?; let receipt = render_throughput_evidence_surveillance_research_workbench(&request).map_err(|e| e.to_string())?; serde_json::to_value(receipt).map_err(|e| format!("cannot serialize throughput evidence workbench receipt: {e}")) }
+pub fn validate_throughput_evidence_surveillance_research_workbench_json(value: &Value) -> Result<ThroughputEvidenceSurveillanceResearchWorkbenchReceipt, String> { let receipt: ThroughputEvidenceSurveillanceResearchWorkbenchReceipt = serde_json::from_value(value.clone()).map_err(|e| format!("invalid throughput evidence workbench receipt: {e}"))?; receipt.validate().map_err(|e| e.to_string())?; if receipt.feature_id != ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID { return Err("throughput evidence workbench feature id mismatch".into()); } Ok(receipt) }
 
 pub fn run_knowledge_workflow_json(value: &Value) -> Result<Value, String> {
     let request: ClaimsWorkflowRequest = serde_json::from_value(value.clone())
