@@ -4584,3 +4584,25 @@ export function validateAdapterLocalEvidenceSurveillanceContractModelReceipt(rec
 }
 
 export function adapterLocalEvidenceSurveillanceContractModelReceiptDigest(receipt: AdapterLocalEvidenceSurveillanceContractModelReceipt): string { validateAdapterLocalEvidenceSurveillanceContractModelReceipt(receipt); return digestJsonSync(receipt); }
+
+export const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID = "AFA-adapter-P01-F06" as const;
+export const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION = "adapter-multimodal-evidence-surveillance-contract-model/1.0" as const;
+
+export interface AdapterMultimodalEvidenceSurveillanceContractModelReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; input_schema: string; output_schema: string; semantic_profile: string;
+  compatibility: "compatible" | "additive_migration" | "breaking" | "incompatible"; disposition: "compatible" | "partial" | "unknown" | "blocked";
+  study_order: string[]; modality_order: string[]; candidate_order: string[]; retained_order: string[]; unknown_order: string[]; denied_order: string[]; incomparable_order: string[]; migration_order: string[]; semantic_loss: string[];
+  comparability_digest: string; contract_digest: string; canonical_digest: string; provenance_digest: string; replay_identity: string; effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateAdapterMultimodalEvidenceSurveillanceContractModelReceipt(receipt: AdapterMultimodalEvidenceSurveillanceContractModelReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID || receipt.contract_version !== ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION) throw new Error("multimodal contract schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || receipt.input_schema !== "EvidenceFeed2@1" || receipt.output_schema !== "QualifiedEvidenceSet2@1" || !receipt.semantic_profile.trim() || receipt.study_order.length < 2 || receipt.modality_order.length < 2 || !receipt.candidate_order.length || !receipt.effect_receipts.length) throw new Error("multimodal contract identity, schemas, closure, locality, candidates, or effects are incomplete");
+  for (const values of [receipt.study_order, receipt.modality_order, receipt.candidate_order, receipt.retained_order, receipt.unknown_order, receipt.denied_order, receipt.incomparable_order, receipt.migration_order, receipt.semantic_loss, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("multimodal contract ordering is invalid");
+  if (JSON.stringify([...receipt.retained_order, ...receipt.unknown_order, ...receipt.denied_order].sort()) !== JSON.stringify([...receipt.candidate_order].sort())) throw new Error("multimodal contract state partition is incomplete");
+  for (const value of [receipt.comparability_digest, receipt.contract_digest, receipt.canonical_digest, receipt.provenance_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("multimodal contract digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-multimodal-contract:") && effect !== "block:unsafe-release")) throw new Error("multimodal contract effect is outside local-read gate");
+  if (receipt.disposition === "blocked" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("blocked multimodal contract must be explicitly blocked");
+}
+
+export function adapterMultimodalEvidenceSurveillanceContractModelReceiptDigest(receipt: AdapterMultimodalEvidenceSurveillanceContractModelReceipt): string { validateAdapterMultimodalEvidenceSurveillanceContractModelReceipt(receipt); return digestJsonSync(receipt); }

@@ -6600,3 +6600,15 @@ __all__ += [
     "LocalEvidenceSurveillanceContractReceipt",
     "model_local_evidence_surveillance_contract",
 ]
+
+from .adapter_multimodal_evidence_surveillance_contract_model import (
+    MultimodalContractClaim,
+    MultimodalEvidenceSurveillanceContractReceipt,
+    model_multimodal_evidence_surveillance_contract,
+)
+
+__all__ += [
+    "MultimodalContractClaim",
+    "MultimodalEvidenceSurveillanceContractReceipt",
+    "model_multimodal_evidence_surveillance_contract",
+]
