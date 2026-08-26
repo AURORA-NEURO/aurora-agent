@@ -12,8 +12,9 @@ uses. This file tracks *attention*, not completeness.
 
 Both high-level SDK agents now also expose a coordinated persistence lifecycle. Restore and flush
 compose model inventory, runtime health, provider/model health when a coordinator exists, redacted
-activation, selection-promotion authority, evaluator calibration, memory, online learning, and
-prompt learning in a fixed dependency order, then return one digest-bound component report. Strict
+activation, selection-promotion authority, evaluator calibration, memory, online learning, prompt
+learning, capability replay journals, and long-horizon execution checkpoints in a fixed dependency
+order, then return one digest-bound component report. Strict
 failures preserve the typed redacted report; non-strict passes expose unconfigured and
 not-attempted components, while `require_all`/`requireAll` makes missing coordinators fail closed.
 Activation restore preserves revocation, identity, and monotonic revision fences, while a supplied
@@ -21,7 +22,11 @@ selection store requires a configured selection lifecycle. Model inventory flush
 last validated image only after a live catalogue digest check and never rediscoveries a provider.
 The lifecycle explicitly retains per-component CAS/atomic-store semantics rather than claiming a
 distributed cross-store transaction; deployment identity, approval ordering, encryption, and crash
-recovery between independent writes remain caller-owned.
+recovery between independent writes remain caller-owned. Capability-journal restore also
+rehydrates only metadata-only replay identities, and execution restore precedes admission so a
+restarted worker cannot resume with its duplicate-call barrier empty. Neither checkpoint restores
+prompts, provider responses, credentials, tool arguments, effect authority, or raw values;
+cross-store interruption remains an explicit reconciliation case.
 
 The TypeScript workflow path now reaches stage-contract parity with Python through
 `AutonomousWorkflowStageExecutionPlan`: every blueprint carries digest-bound capability,

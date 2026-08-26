@@ -14,6 +14,12 @@ from prism_sdk import (
     AutonomousSelectionPromotionLifecycle,
     AutonomousSelectionPromotionLifecycleStore,
     AutonomousModelInventoryStore,
+    AutonomousCapabilityJournalPersistenceCoordinator,
+    InMemoryAutonomousCapabilityJournalStore,
+    AutonomousExecutionController,
+    AutonomousExecutionJournal,
+    AutonomousExecutionPersistenceCoordinator,
+    AutonomousExecutionPolicy,
     LLMRuntime,
     ModelCatalogue,
 )
@@ -31,6 +37,8 @@ class _LifecycleAgent:
             "memory",
             "learning",
             "prompt_learning",
+            "capability_journal",
+            "execution",
         ):
             setattr(self, f"{component}_persistence", object())
 
@@ -50,6 +58,22 @@ class _LifecycleAgent:
     def flush_model_inventory(self, store: object) -> dict[str, object]:
         self.calls.append("flush:model_inventory")
         return self._value("model_inventory", "flush")
+
+    def restore_capability_journal_persistence(self) -> dict[str, object]:
+        self.calls.append("restore:capability_journal")
+        return self._value("capability_journal", "restore")
+
+    def flush_capability_journal_persistence(self) -> dict[str, object]:
+        self.calls.append("flush:capability_journal")
+        return self._value("capability_journal", "flush")
+
+    def restore_execution_persistence(self) -> dict[str, object]:
+        self.calls.append("restore:execution")
+        return self._value("execution", "restore")
+
+    def flush_execution_persistence(self) -> dict[str, object]:
+        self.calls.append("flush:execution")
+        return self._value("execution", "flush")
 
     def __getattr__(self, name: str):
         if name.startswith("restore_") or name.startswith("flush_") or name.startswith("save_"):
@@ -75,6 +99,8 @@ def test_lifecycle_restores_and_flushes_in_explicit_dependency_order() -> None:
         model_inventory_store=object(),
         activation_store=object(),
         selection_promotion_store=object(),
+        capability_journal_persistence=object(),
+        execution_persistence=object(),
         require_all=True,
     )
 
@@ -190,6 +216,77 @@ def test_agent_persisted_state_composes_inventory_restore_and_flush_without_prov
         selection_promotion_store=selection_store,
         strict=False,
     )
-    assert flushed["components"][8]["status"] == "flushed"
-    assert flushed["components"][8]["snapshot_digest"] == restored["components"][0]["snapshot_digest"]
+    assert flushed["components"][10]["status"] == "flushed"
+    assert flushed["components"][10]["snapshot_digest"] == restored["components"][0]["snapshot_digest"]
     assert "credentials" not in json.dumps(restored)
+
+
+class _MetadataSnapshotStore:
+    def __init__(self) -> None:
+        self.value: dict[str, object] | None = None
+
+    def read(self) -> dict[str, object] | None:
+        return self.value
+
+    def write(self, value: dict[str, object]) -> None:
+        self.value = dict(value)
+
+
+def test_agent_lifecycle_restores_capability_barrier_before_execution_checkpoint(tmp_path) -> None:
+    runtime = _runtime()
+    capability_store = InMemoryAutonomousCapabilityJournalStore()
+    capability_persistence = AutonomousCapabilityJournalPersistenceCoordinator(
+        capability_store,
+        _MetadataSnapshotStore(),
+    )
+    execution_journal = AutonomousExecutionJournal(tmp_path / "source-execution.jsonl")
+    execution_persistence = AutonomousExecutionPersistenceCoordinator(
+        execution_journal,
+        _MetadataSnapshotStore(),
+    )
+    source = AutonomousAgent(
+        object(),
+        runtime,
+        capability_journal=capability_store,
+        capability_journal_persistence=capability_persistence,
+        execution_journal=execution_journal,
+        execution_persistence=execution_persistence,
+    )
+    controller = AutonomousExecutionController(
+        execution_id="lifecycle-recovery",
+        domain="coding",
+        capability="planning",
+        risk_class="read_only",
+        policy=AutonomousExecutionPolicy(max_steps=8, max_tool_calls=2),
+        journal=execution_journal,
+    )
+    controller.checkpoint(status="paused", reason="process_restart")
+    flushed = source.flush_persisted_state(strict=False)
+    assert flushed["ordered_component_ids"][:2] == ["execution", "capability_journal"]
+    assert flushed["components"][0]["status"] == "flushed"
+    assert flushed["components"][1]["status"] == "flushed"
+
+    restored_capability_store = InMemoryAutonomousCapabilityJournalStore()
+    restored_capability_persistence = AutonomousCapabilityJournalPersistenceCoordinator(
+        restored_capability_store,
+        capability_persistence.persistence,
+    )
+    restored_execution_journal = AutonomousExecutionJournal(tmp_path / "restored-execution.jsonl")
+    restored_execution_persistence = AutonomousExecutionPersistenceCoordinator(
+        restored_execution_journal,
+        execution_persistence.persistence,
+    )
+    restarted = AutonomousAgent(
+        object(),
+        runtime,
+        capability_journal=restored_capability_store,
+        capability_journal_persistence=restored_capability_persistence,
+        execution_journal=restored_execution_journal,
+        execution_persistence=restored_execution_persistence,
+    )
+    restored = restarted.restore_persisted_state(strict=False)
+    assert restored["components"][-2]["status"] == "restored"
+    assert restored["components"][-1]["status"] == "restored"
+    assert restored["components"][-2]["generation"] == 1
+    assert restarted.execution_state("lifecycle-recovery")["status"] == "paused"
+    assert "rows" not in json.dumps(restored)

@@ -143,7 +143,9 @@ from .autonomous_connectors import (
     AutonomousConnectorSelectionPlan,
 )
 from .autonomous_capabilities import (
+    AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
     AutonomousCapabilityExecutionResult,
+    AutonomousCapabilityJournalPersistenceCoordinator,
     AutonomousCapabilityJournalStore,
     AutonomousCapabilityRuntime,
 )
@@ -160,6 +162,7 @@ from .autonomous_selection_promotion import validate_autonomous_selection_promot
 from .autonomy_persistence import (
     AutonomousExecutionController,
     AutonomousExecutionJournal,
+    AutonomousExecutionPersistenceCoordinator,
     AutonomousExecutionPolicy,
     AutonomyPersistenceError,
 )
@@ -14686,8 +14689,10 @@ class AutonomousAgent:
         tool_runtime: AutonomousDomainToolRuntime | None = None,
         effect_boundary: AutonomousEffectBoundary | None = None,
         capability_journal: AutonomousCapabilityJournalStore | None = None,
+        capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
         activation: AutonomousCapabilityActivation | None = None,
         execution_journal: AutonomousExecutionJournal | None = None,
+        execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
         execution_policy: AutonomousExecutionPolicy | Mapping[str, Any] | None = None,
         credential_provisioner: CredentialProvisioner | None = None,
         connector_registry: AutonomousConnectorRegistry | None = None,
@@ -14764,12 +14769,30 @@ class AutonomousAgent:
             for method in ("append", "find", "records")
         ):
             raise BrainRunError("capability_journal must implement append, find, and records")
+        if capability_journal_persistence is not None and not isinstance(
+            capability_journal_persistence,
+            AutonomousCapabilityJournalPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "capability_journal_persistence must be an AutonomousCapabilityJournalPersistenceCoordinator or None"
+            )
+        if capability_journal_persistence is not None and capability_journal_persistence.store is not capability_journal:
+            raise BrainRunError("capability_journal_persistence must be bound to the supplied capability_journal")
         if activation is not None and not isinstance(activation, AutonomousCapabilityActivation):
             raise BrainRunError("activation must be an AutonomousCapabilityActivation or None")
         if pack_registry is not None and not isinstance(pack_registry, AutonomousDomainPackRegistry):
             raise BrainRunError("pack_registry must be an AutonomousDomainPackRegistry or None")
         if execution_journal is not None and not isinstance(execution_journal, AutonomousExecutionJournal):
             raise BrainRunError("execution_journal must be an AutonomousExecutionJournal or None")
+        if execution_persistence is not None and not isinstance(
+            execution_persistence,
+            AutonomousExecutionPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "execution_persistence must be an AutonomousExecutionPersistenceCoordinator or None"
+            )
+        if execution_persistence is not None and execution_persistence.journal is not execution_journal:
+            raise BrainRunError("execution_persistence must be bound to the supplied execution_journal")
         if credential_provisioner is not None and not isinstance(credential_provisioner, CredentialProvisioner):
             raise BrainRunError("credential_provisioner must be a CredentialProvisioner or None")
         if connector_registry is not None and not isinstance(connector_registry, AutonomousConnectorRegistry):
@@ -14836,6 +14859,8 @@ class AutonomousAgent:
         self._persistence_lifecycle_coordinator: AutonomousAgentPersistenceLifecycleCoordinator | None = None
         self._persistence_lifecycle_activation_store: AutonomousCapabilityActivationStore | None = None
         self._persistence_lifecycle_selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None
+        self._persistence_lifecycle_capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None
+        self._persistence_lifecycle_execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
         self.learning_persistence = learning_persistence
@@ -14852,6 +14877,7 @@ class AutonomousAgent:
         self.evaluator_calibration_persistence = evaluator_calibration_persistence
         self.prompt_learning_coordinator = prompt_learning_coordinator
         self.execution_journal = execution_journal
+        self.execution_persistence = execution_persistence
         self.execution_policy = resolved_execution_policy
         self.connector_registry = connector_registry or (
             connector_runtime.registry if connector_runtime is not None else None
@@ -14876,6 +14902,7 @@ class AutonomousAgent:
             except ProviderError as error:
                 raise BrainRunError("runtime and agent effect boundaries must be the same instance") from error
         self.capability_journal = capability_journal
+        self.capability_journal_persistence = capability_journal_persistence
         self.capability_runtime = (
             AutonomousCapabilityRuntime(self.tool_runtime, journal=capability_journal)
             if self.tool_runtime is not None
@@ -15158,6 +15185,8 @@ class AutonomousAgent:
         *,
         activation_store: AutonomousCapabilityActivationStore | None = None,
         selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
+        capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
+        execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
         require_all: bool = False,
         continue_on_error: bool = False,
     ) -> AutonomousAgentPersistenceLifecycleCoordinator:
@@ -15167,6 +15196,8 @@ class AutonomousAgent:
             or coordinator.model_inventory_store is not model_inventory_store
             or coordinator.activation_store is not activation_store
             or coordinator.selection_promotion_store is not selection_promotion_store
+            or coordinator.capability_journal_persistence is not capability_journal_persistence
+            or coordinator.execution_persistence is not execution_persistence
             or coordinator.require_all != require_all
             or coordinator.continue_on_error != continue_on_error
         ):
@@ -15175,12 +15206,16 @@ class AutonomousAgent:
                 model_inventory_store=model_inventory_store,
                 activation_store=activation_store,
                 selection_promotion_store=selection_promotion_store,
+                capability_journal_persistence=capability_journal_persistence,
+                execution_persistence=execution_persistence,
                 require_all=require_all,
                 continue_on_error=continue_on_error,
             )
             self._persistence_lifecycle_coordinator = coordinator
             self._persistence_lifecycle_activation_store = activation_store
             self._persistence_lifecycle_selection_promotion_store = selection_promotion_store
+            self._persistence_lifecycle_capability_journal_persistence = capability_journal_persistence
+            self._persistence_lifecycle_execution_persistence = execution_persistence
         return coordinator
 
     def restore_persisted_state(
@@ -15189,6 +15224,8 @@ class AutonomousAgent:
         model_inventory_store: AutonomousModelInventoryStore | None = None,
         activation_store: AutonomousCapabilityActivationStore | None = None,
         selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
+        capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
+        execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
         strict: bool = True,
         require_all: bool = False,
         continue_on_error: bool = False,
@@ -15199,6 +15236,8 @@ class AutonomousAgent:
             model_inventory_store,
             activation_store=activation_store,
             selection_promotion_store=selection_promotion_store,
+            capability_journal_persistence=(self.capability_journal_persistence if capability_journal_persistence is None else capability_journal_persistence),
+            execution_persistence=(self.execution_persistence if execution_persistence is None else execution_persistence),
             require_all=require_all,
             continue_on_error=continue_on_error,
         ).restore(strict=strict, continue_on_error=continue_on_error)
@@ -15210,6 +15249,8 @@ class AutonomousAgent:
         model_inventory_store: AutonomousModelInventoryStore | None = None,
         activation_store: AutonomousCapabilityActivationStore | None = None,
         selection_promotion_store: AutonomousSelectionPromotionLifecycleStore | None = None,
+        capability_journal_persistence: AutonomousCapabilityJournalPersistenceCoordinator | None = None,
+        execution_persistence: AutonomousExecutionPersistenceCoordinator | None = None,
         strict: bool = True,
         require_all: bool = False,
         continue_on_error: bool = False,
@@ -15220,6 +15261,8 @@ class AutonomousAgent:
             model_inventory_store,
             activation_store=activation_store,
             selection_promotion_store=selection_promotion_store,
+            capability_journal_persistence=(self.capability_journal_persistence if capability_journal_persistence is None else capability_journal_persistence),
+            execution_persistence=(self.execution_persistence if execution_persistence is None else execution_persistence),
             require_all=require_all,
             continue_on_error=continue_on_error,
         ).flush(strict=strict, continue_on_error=continue_on_error)
@@ -17987,6 +18030,34 @@ class AutonomousAgent:
             raise BrainRunError("restore_capability_journal requires a configured capability runtime")
         return self.capability_runtime.rehydrate()
 
+    def restore_capability_journal_persistence(self) -> dict[str, Any]:
+        """Restore durable capability metadata, then open its replay barrier in this process."""
+
+        if self.capability_journal_persistence is None:
+            raise BrainRunError("restore_capability_journal_persistence requires configured persistence")
+        persisted = self.capability_journal_persistence.restore()
+        runtime = self.capability_runtime
+        rehydrated = runtime.rehydrate() if runtime is not None else {
+            "restored": 0,
+            "replayable": 0,
+            "value_retention": "transient_caller_value_only",
+        }
+        return {
+            "schema": AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
+            **persisted,
+            "rehydrated": rehydrated["restored"],
+            "replayable": rehydrated["replayable"],
+            "value_retention": rehydrated["value_retention"],
+            "retention": "metadata_only;caller_values_not_restored",
+        }
+
+    def flush_capability_journal_persistence(self) -> dict[str, Any]:
+        """Flush the capability replay barrier without returning journal entries."""
+
+        if self.capability_journal_persistence is None:
+            raise BrainRunError("flush_capability_journal_persistence requires configured persistence")
+        return self.capability_journal_persistence.flush()
+
     def capability_execution_evidence(self) -> list[dict[str, Any]]:
         """Return bounded metadata-only capability records for evaluator integration."""
 
@@ -20229,6 +20300,39 @@ class AutonomousAgent:
         if self.execution_journal is None:
             return []
         return [dict(row) for row in self.execution_journal.events(execution_id=execution_id, after_sequence=after_sequence, limit=limit)]
+
+    def restore_execution_persistence(self) -> dict[str, Any]:
+        """Restore the metadata-only execution checkpoint used by long-horizon recovery."""
+
+        if self.execution_persistence is None:
+            raise BrainRunError("restore_execution_persistence requires configured persistence")
+        snapshot = self.execution_persistence.restore()
+        if snapshot is None:
+            return {"restored": False, "snapshot_digest": None, "events": 0, "retention": "metadata_only"}
+        rows = snapshot.get("rows")
+        return {
+            "restored": True,
+            "schema": snapshot.get("schema"),
+            "snapshot_digest": snapshot.get("snapshot_digest"),
+            "head_digest": snapshot.get("head_digest"),
+            "events": len(rows) if isinstance(rows, list) else 0,
+            "retention": "metadata_only_hash_chained",
+        }
+
+    def flush_execution_persistence(self) -> dict[str, Any]:
+        """Flush the execution journal while projecting only checkpoint metadata."""
+
+        if self.execution_persistence is None:
+            raise BrainRunError("flush_execution_persistence requires configured persistence")
+        snapshot = self.execution_persistence.flush()
+        rows = snapshot.get("rows")
+        return {
+            "schema": snapshot.get("schema"),
+            "snapshot_digest": snapshot.get("snapshot_digest"),
+            "head_digest": snapshot.get("head_digest"),
+            "events": len(rows) if isinstance(rows, list) else 0,
+            "retention": "metadata_only_hash_chained",
+        }
 
     def _resolve_candidates(
         self,

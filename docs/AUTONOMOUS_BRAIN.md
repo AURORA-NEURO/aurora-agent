@@ -11455,9 +11455,11 @@ The high-level brain now has one explicit startup/shutdown seam in both SDKs:
 caller-owned coordinators instead of introducing a second persistence implementation. Restore
 order is deterministic: model inventory, runtime transport health, provider/model health when
 available, redacted capability activation, learned-selection promotion authority, evaluator
-calibration, episodic memory, online learning, and prompt learning. Flush uses the reverse order
-so learned selection and activation state settle before process-level availability images are
-finalized. TypeScript reports the provider/model health slot as explicitly
+calibration, episodic memory, online learning, prompt learning, the capability replay journal,
+and the long-horizon execution checkpoint. Flush uses the reverse order so the execution
+checkpoint and capability replay barrier are finalized before learned selection and activation
+state settle, while process-level availability images are written last. TypeScript reports the
+provider/model health slot as explicitly
 `unconfigured` unless the embedding supplies an equivalent coordinator; it never infers one from
 the live health controller.
 
@@ -11477,6 +11479,24 @@ identity, and monotonic revision fences; selection-promotion restore preserves i
 authority state. Neither component contains provider credentials, prompts, tasks, learner
 parameters, rewards, tool arguments, or provider payloads. A missing selection-promotion object
 with a supplied store is rejected as a configuration error rather than silently ignored.
+
+Capability-journal persistence is a second, explicit replay barrier rather than an implicit
+write-through cache. Restore validates the canonical, hash-chained snapshot, installs it into
+the caller-owned journal, and only then rehydrates the in-process replay index. Rehydration
+restores request/replay identities and bounded evaluator metadata, never raw tool values; a
+capability call whose value is not available in the new process therefore replays as a
+metadata-only result or fails closed according to the capability contract. The lifecycle report
+projects the journal schema, digest, entry count, and snapshot generation without copying entries.
+
+The execution component performs the same boundary for long-horizon policy state. It restores
+the hash-checked journal snapshot before new work is admitted and flushes only event count,
+head/snapshot digests, and retention metadata into the lifecycle report. The application must
+still rehydrate task and prompt context and explicitly request resume with the same execution
+identity; a checkpoint never authorizes a provider call, tool effect, credential, or external
+side effect. Capability replay is restored before execution checkpoints so a resumed worker
+cannot observe a policy state whose duplicate-call barrier is still empty. These are ordered
+independent stores, not a distributed transaction: a crash between them remains visible to the
+caller through the partial lifecycle report and must be reconciled before dispatch.
 
 Model inventory now has an explicit flush operation as well. It re-commits only the last validated
 inventory snapshot after checking that the live catalogue still matches its catalogue digest; it

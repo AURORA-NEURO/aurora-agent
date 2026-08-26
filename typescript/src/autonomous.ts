@@ -12,7 +12,11 @@ import { AutonomousSelectionPromotionLifecycle } from "./autonomous-selection-li
 import type { AutonomousSelectionLifecycleState, AutonomousSelectionLifecycleStore } from "./autonomous-selection-lifecycle.js";
 import type { AutonomousSelectionPromotionReport } from "./autonomous-selection-promotion.js";
 import { AutonomousBrainControlPlaneBridge, AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
-import type { AutonomousExecutionController } from "./autonomous-execution.js";
+import type {
+  AutonomousExecutionController,
+  AutonomousExecutionPersistenceCoordinator,
+  AutonomousExecutionSnapshotJournal,
+} from "./autonomous-execution.js";
 import {
   AUTONOMOUS_CAPABILITY_BATCH_SCHEMA,
   AutonomousCapabilityRuntime,
@@ -34,7 +38,10 @@ import type {
   AutonomousCapabilityExecutionRequest,
   AutonomousCapabilityExecutionResult,
 } from "./autonomous-capabilities.js";
-import type { AutonomousCapabilityJournalStore } from "./autonomous-capability-persistence.js";
+import type {
+  AutonomousCapabilityJournalPersistenceCoordinator,
+  AutonomousCapabilityJournalStore,
+} from "./autonomous-capability-persistence.js";
 import {
   autonomousRunTraceStatus,
   AutonomousRunTraceSession,
@@ -1325,6 +1332,12 @@ export interface AutonomousAgentOptions {
   effectBoundary?: AutonomousEffectBoundary;
   /** Optional caller-owned metadata-only capability journal used for restart-safe replay. */
   capabilityJournal?: AutonomousCapabilityJournalStore;
+  /** Optional durable coordinator for the capability replay barrier. */
+  capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  /** Optional metadata-only execution journal used for long-horizon recovery. */
+  executionJournal?: AutonomousExecutionSnapshotJournal;
+  /** Optional durable coordinator for execution checkpoints. */
+  executionPersistence?: AutonomousExecutionPersistenceCoordinator;
   /** Optional caller-owned durable replay barrier for capability evaluator settlements. */
   capabilityLearningSettlementStore?: AutonomousCapabilityLearningSettlementStore;
   learner?: AutonomousOnlineLearner;
@@ -4868,6 +4881,12 @@ export class AutonomousAgent {
   private readonly toolApprover?: DomainToolApprover;
   private readonly effectBoundary?: AutonomousEffectBoundary;
   private readonly capabilityJournal?: AutonomousCapabilityJournalStore;
+  /** Caller-owned persistence for capability replay identities; values remain transient. */
+  readonly capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  /** Metadata-only execution journal used by restart-aware callers. */
+  readonly executionJournal?: AutonomousExecutionSnapshotJournal;
+  /** Caller-owned persistence for execution checkpoints. */
+  readonly executionPersistence?: AutonomousExecutionPersistenceCoordinator;
   private readonly capabilityLearningSettlementStore: AutonomousCapabilityLearningSettlementStore;
   /** Caller-owned connector catalogue and runtime for bounded external evidence/provider work. */
   readonly connectorRegistry?: AutonomousConnectorRegistry;
@@ -4895,6 +4914,8 @@ export class AutonomousAgent {
   private persistenceLifecycleModelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
   private persistenceLifecycleActivationStore?: AutonomousCapabilityActivationSnapshotStore;
   private persistenceLifecycleSelectionPromotionStore?: AutonomousSelectionLifecycleStore;
+  private persistenceLifecycleCapabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  private persistenceLifecycleExecutionPersistence?: AutonomousExecutionPersistenceCoordinator;
   private persistenceLifecycleRequireAll?: boolean;
   private persistenceLifecycleContinueOnError?: boolean;
 
@@ -4974,7 +4995,13 @@ export class AutonomousAgent {
       }
     }
     if (options.capabilityJournal !== undefined && (typeof options.capabilityJournal.append !== "function" || typeof options.capabilityJournal.find !== "function" || typeof options.capabilityJournal.records !== "function")) throw new ArgumentError("AutonomousAgent capabilityJournal is malformed");
+    if (options.capabilityJournalPersistence !== undefined && (typeof options.capabilityJournalPersistence.restore !== "function" || typeof options.capabilityJournalPersistence.flush !== "function" || options.capabilityJournalPersistence.store !== options.capabilityJournal)) throw new ArgumentError("AutonomousAgent capabilityJournalPersistence must be bound to the supplied capabilityJournal");
+    if (options.executionJournal !== undefined && (typeof options.executionJournal.append !== "function" || typeof options.executionJournal.state !== "function" || typeof options.executionJournal.snapshot !== "function" || typeof options.executionJournal.restore !== "function")) throw new ArgumentError("AutonomousAgent executionJournal is malformed");
+    if (options.executionPersistence !== undefined && (typeof options.executionPersistence.restore !== "function" || typeof options.executionPersistence.flush !== "function" || options.executionPersistence.journal !== options.executionJournal)) throw new ArgumentError("AutonomousAgent executionPersistence must be bound to the supplied executionJournal");
     this.capabilityJournal = options.capabilityJournal;
+    this.capabilityJournalPersistence = options.capabilityJournalPersistence;
+    this.executionJournal = options.executionJournal;
+    this.executionPersistence = options.executionPersistence;
     if (options.capabilityLearningSettlementStore !== undefined && (typeof options.capabilityLearningSettlementStore.load !== "function" || typeof options.capabilityLearningSettlementStore.save !== "function")) throw new ArgumentError("AutonomousAgent capabilityLearningSettlementStore is malformed");
     this.capabilityLearningSettlementStore = options.capabilityLearningSettlementStore ?? new InMemoryAutonomousCapabilityLearningSettlementStore();
     this.connectorRegistry = options.connectorRegistry ?? options.connectorRuntime?.registry;
@@ -5415,6 +5442,55 @@ export class AutonomousAgent {
     return runtime.rehydrate();
   }
 
+  /** Restore durable capability metadata and reopen the in-process replay barrier. */
+  async restoreCapabilityJournalPersistence(): Promise<Record<string, unknown>> {
+    if (this.capabilityJournalPersistence === undefined) throw new ArgumentError("restoreCapabilityJournalPersistence requires configured persistence");
+    const persisted = await this.capabilityJournalPersistence.restore();
+    const rehydrated = await this.restoreCapabilityJournal();
+    return {
+      schema: "bioprism-typescript-autonomous-capability-journal-snapshot/0.2",
+      ...persisted,
+      rehydrated: rehydrated.restored,
+      replayable: rehydrated.replayable,
+      value_retention: rehydrated.value_retention,
+      retention: "metadata_only;caller_values_not_restored",
+    };
+  }
+
+  /** Flush capability replay metadata without returning journal entries. */
+  async flushCapabilityJournalPersistence(): Promise<Record<string, unknown>> {
+    if (this.capabilityJournalPersistence === undefined) throw new ArgumentError("flushCapabilityJournalPersistence requires configured persistence");
+    return this.capabilityJournalPersistence.flush();
+  }
+
+  /** Restore the metadata-only execution checkpoint used by long-horizon recovery. */
+  async restoreExecutionPersistence(): Promise<Record<string, unknown>> {
+    if (this.executionPersistence === undefined) throw new ArgumentError("restoreExecutionPersistence requires configured persistence");
+    const snapshot = await this.executionPersistence.restore();
+    if (snapshot === null) return { restored: false, snapshot_digest: null, events: 0, retention: "metadata_only" };
+    return {
+      restored: true,
+      schema: snapshot.schema,
+      snapshot_digest: snapshot.snapshot_digest,
+      head_digest: snapshot.head_digest,
+      events: snapshot.rows.length,
+      retention: "metadata_only_hash_chained",
+    };
+  }
+
+  /** Flush the execution journal while projecting only checkpoint metadata. */
+  async flushExecutionPersistence(): Promise<Record<string, unknown>> {
+    if (this.executionPersistence === undefined) throw new ArgumentError("flushExecutionPersistence requires configured persistence");
+    const snapshot = await this.executionPersistence.flush();
+    return {
+      schema: snapshot.schema,
+      snapshot_digest: snapshot.snapshot_digest,
+      head_digest: snapshot.head_digest,
+      events: snapshot.rows.length,
+      retention: "metadata_only_hash_chained",
+    };
+  }
+
   /** Return metadata-only capability records produced by this agent instance. */
   capabilityExecutionEvidence(): AutonomousCapabilityExecutionRecord[] {
     return this.capabilityRuntime?.executionEvidence() ?? [];
@@ -5650,6 +5726,8 @@ export class AutonomousAgent {
     modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
     activationStore?: AutonomousCapabilityActivationSnapshotStore;
     selectionPromotionStore?: AutonomousSelectionLifecycleStore;
+    capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+    executionPersistence?: AutonomousExecutionPersistenceCoordinator;
     requireAll?: boolean;
     continueOnError?: boolean;
   } = {}): Promise<import("./autonomous-agent-lifecycle.js").AutonomousAgentPersistenceLifecycleCoordinator> {
@@ -5661,6 +5739,8 @@ export class AutonomousAgent {
       || this.persistenceLifecycleModelInventoryPersistence !== options.modelInventoryPersistence
       || this.persistenceLifecycleActivationStore !== options.activationStore
       || this.persistenceLifecycleSelectionPromotionStore !== options.selectionPromotionStore
+      || this.persistenceLifecycleCapabilityJournalPersistence !== options.capabilityJournalPersistence
+      || this.persistenceLifecycleExecutionPersistence !== options.executionPersistence
       || this.persistenceLifecycleRequireAll !== requireAll
       || this.persistenceLifecycleContinueOnError !== continueOnError
     ) {
@@ -5668,12 +5748,16 @@ export class AutonomousAgent {
         modelInventoryPersistence: options.modelInventoryPersistence,
         activationStore: options.activationStore,
         selectionPromotionStore: options.selectionPromotionStore,
+        capabilityJournalPersistence: options.capabilityJournalPersistence,
+        executionPersistence: options.executionPersistence,
         requireAll,
         continueOnError,
       });
       this.persistenceLifecycleModelInventoryPersistence = options.modelInventoryPersistence;
       this.persistenceLifecycleActivationStore = options.activationStore;
       this.persistenceLifecycleSelectionPromotionStore = options.selectionPromotionStore;
+      this.persistenceLifecycleCapabilityJournalPersistence = options.capabilityJournalPersistence;
+      this.persistenceLifecycleExecutionPersistence = options.executionPersistence;
       this.persistenceLifecycleRequireAll = requireAll;
       this.persistenceLifecycleContinueOnError = continueOnError;
     }
@@ -5685,6 +5769,8 @@ export class AutonomousAgent {
     modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
     activationStore?: AutonomousCapabilityActivationSnapshotStore;
     selectionPromotionStore?: AutonomousSelectionLifecycleStore;
+    capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+    executionPersistence?: AutonomousExecutionPersistenceCoordinator;
     strict?: boolean;
     requireAll?: boolean;
     continueOnError?: boolean;
@@ -5698,6 +5784,8 @@ export class AutonomousAgent {
     modelInventoryPersistence?: import("./autonomous-model-inventory.js").AutonomousModelInventoryPersistence;
     activationStore?: AutonomousCapabilityActivationSnapshotStore;
     selectionPromotionStore?: AutonomousSelectionLifecycleStore;
+    capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+    executionPersistence?: AutonomousExecutionPersistenceCoordinator;
     strict?: boolean;
     requireAll?: boolean;
     continueOnError?: boolean;

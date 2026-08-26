@@ -4,6 +4,8 @@ import type { AutonomousAgent } from "./autonomous.js";
 import type { AutonomousCapabilityActivationSnapshotStore } from "./autonomous-activation.js";
 import type { AutonomousModelInventoryPersistence } from "./autonomous-model-inventory.js";
 import type { AutonomousSelectionLifecycleStore } from "./autonomous-selection-lifecycle.js";
+import type { AutonomousCapabilityJournalPersistenceCoordinator } from "./autonomous-capability-persistence.js";
+import type { AutonomousExecutionPersistenceCoordinator } from "./autonomous-execution.js";
 
 /**
  * Strict startup/shutdown composition for the autonomous brain. Each component keeps its own
@@ -12,7 +14,7 @@ import type { AutonomousSelectionLifecycleStore } from "./autonomous-selection-l
  * arguments, or raw exception messages, and it never claims cross-store atomicity.
  */
 export const AUTONOMOUS_AGENT_LIFECYCLE_SCHEMA = "bioprism-typescript-autonomous-agent-persistence-lifecycle/0.1" as const;
-export const AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS = ["model_inventory", "runtime_health", "health", "activation", "selection_promotion", "evaluator_calibration", "memory", "learning", "prompt_learning"] as const;
+export const AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS = ["model_inventory", "runtime_health", "health", "activation", "selection_promotion", "evaluator_calibration", "memory", "learning", "prompt_learning", "capability_journal", "execution"] as const;
 export const AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER = AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS;
 export const AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER = [...AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS].reverse() as unknown as typeof AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS;
 
@@ -56,6 +58,8 @@ export interface AutonomousAgentPersistenceLifecycleOptions {
   modelInventoryPersistence?: AutonomousModelInventoryPersistence;
   activationStore?: AutonomousCapabilityActivationSnapshotStore;
   selectionPromotionStore?: AutonomousSelectionLifecycleStore;
+  capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  executionPersistence?: AutonomousExecutionPersistenceCoordinator;
   requireAll?: boolean;
   continueOnError?: boolean;
 }
@@ -88,7 +92,8 @@ function projection(value: unknown): { schema: string | null; snapshotDigest: st
     if (value[key] !== undefined && value[key] !== null) { snapshotDigest = boundedDigest(value[key]); break; }
   }
   const stateDigest = boundedDigest(value.state_digest);
-  const generation = Number.isSafeInteger(value.generation) && (value.generation as number) >= 0 ? value.generation as number : null;
+  const generationValue = value.generation ?? value.snapshot_generation;
+  const generation = Number.isSafeInteger(generationValue) && (generationValue as number) >= 0 ? generationValue as number : null;
   return { schema, snapshotDigest, stateDigest, generation };
 }
 
@@ -129,6 +134,8 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
   readonly modelInventoryPersistence?: AutonomousModelInventoryPersistence;
   readonly activationStore?: AutonomousCapabilityActivationSnapshotStore;
   readonly selectionPromotionStore?: AutonomousSelectionLifecycleStore;
+  readonly capabilityJournalPersistence?: AutonomousCapabilityJournalPersistenceCoordinator;
+  readonly executionPersistence?: AutonomousExecutionPersistenceCoordinator;
   readonly requireAll: boolean;
   readonly continueOnError: boolean;
   private readonly agent: AutonomousAgent;
@@ -141,12 +148,18 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
     if (options.activationStore !== undefined && (typeof options.activationStore.load !== "function" || typeof options.activationStore.save !== "function")) throw new ArgumentError("agent lifecycle activation store is malformed");
     if (options.selectionPromotionStore !== undefined && (typeof options.selectionPromotionStore.load !== "function" || typeof options.selectionPromotionStore.save !== "function")) throw new ArgumentError("agent lifecycle selection promotion store is malformed");
     if (options.selectionPromotionStore !== undefined && !(agent as unknown as { selectionPromotion?: unknown }).selectionPromotion) throw new ArgumentError("agent lifecycle selection promotion store requires a configured lifecycle");
+    if (options.capabilityJournalPersistence !== undefined && (typeof options.capabilityJournalPersistence.restore !== "function" || typeof options.capabilityJournalPersistence.flush !== "function")) throw new ArgumentError("agent lifecycle capability journal persistence is malformed");
+    if (options.capabilityJournalPersistence !== undefined && (agent as unknown as { capabilityJournalPersistence?: unknown }).capabilityJournalPersistence !== options.capabilityJournalPersistence) throw new ArgumentError("agent lifecycle capability journal persistence must be bound to the agent");
+    if (options.executionPersistence !== undefined && (typeof options.executionPersistence.restore !== "function" || typeof options.executionPersistence.flush !== "function")) throw new ArgumentError("agent lifecycle execution persistence is malformed");
+    if (options.executionPersistence !== undefined && (agent as unknown as { executionPersistence?: unknown }).executionPersistence !== options.executionPersistence) throw new ArgumentError("agent lifecycle execution persistence must be bound to the agent");
     if (options.requireAll !== undefined && typeof options.requireAll !== "boolean") throw new ArgumentError("agent lifecycle requireAll must be boolean");
     if (options.continueOnError !== undefined && typeof options.continueOnError !== "boolean") throw new ArgumentError("agent lifecycle continueOnError must be boolean");
     this.agent = agent;
     this.modelInventoryPersistence = options.modelInventoryPersistence;
     this.activationStore = options.activationStore;
     this.selectionPromotionStore = options.selectionPromotionStore;
+    this.capabilityJournalPersistence = options.capabilityJournalPersistence;
+    this.executionPersistence = options.executionPersistence;
     this.requireAll = options.requireAll ?? false;
     this.continueOnError = options.continueOnError ?? false;
   }
@@ -157,6 +170,8 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
     if (componentId === "model_inventory") return this.modelInventoryPersistence !== undefined;
     if (componentId === "activation") return this.activationStore !== undefined;
     if (componentId === "selection_promotion") return this.selectionPromotionStore !== undefined && Boolean((this.agent as unknown as { selectionPromotion?: unknown }).selectionPromotion);
+    if (componentId === "capability_journal") return Boolean(this.capabilityJournalPersistence ?? (this.agent as unknown as { capabilityJournalPersistence?: unknown }).capabilityJournalPersistence);
+    if (componentId === "execution") return Boolean(this.executionPersistence ?? (this.agent as unknown as { executionPersistence?: unknown }).executionPersistence);
     if (componentId === "health") return Boolean((this.agent as unknown as { healthPersistence?: unknown }).healthPersistence);
     const names = {
       runtime_health: "runtimeHealthPersistence",
@@ -173,6 +188,8 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
     if (componentId === "model_inventory") return operation === "restore" ? this.agent.restoreModelInventory(this.modelInventoryPersistence!) : this.agent.flushModelInventory(this.modelInventoryPersistence!);
     if (componentId === "activation") return operation === "restore" ? this.agent.restoreActivation(this.activationStore!) : this.agent.saveActivation(this.activationStore!);
     if (componentId === "selection_promotion") return operation === "restore" ? this.agent.restoreSelectionPromotion(this.selectionPromotionStore!) : this.agent.saveSelectionPromotion(this.selectionPromotionStore!);
+    if (componentId === "capability_journal") return operation === "restore" ? this.agent.restoreCapabilityJournalPersistence() : this.agent.flushCapabilityJournalPersistence();
+    if (componentId === "execution") return operation === "restore" ? this.agent.restoreExecutionPersistence() : this.agent.flushExecutionPersistence();
     const names: Record<AutonomousAgentPersistenceLifecycleComponent, [string, string]> = {
       model_inventory: ["restoreModelInventory", "flushModelInventory"],
       runtime_health: ["restoreRuntimeHealth", "flushRuntimeHealth"],
@@ -183,6 +200,8 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
       memory: ["restoreMemory", "flushMemory"],
       learning: ["restoreOnlineLearning", "flushOnlineLearning"],
       prompt_learning: ["restorePromptLearning", "flushPromptLearning"],
+      capability_journal: ["restoreCapabilityJournalPersistence", "flushCapabilityJournalPersistence"],
+      execution: ["restoreExecutionPersistence", "flushExecutionPersistence"],
     };
     const methodNames = names[componentId];
     if (methodNames === undefined) throw new ArgumentError(`agent does not expose ${operation} for ${componentId}`);

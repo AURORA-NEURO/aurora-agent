@@ -8,6 +8,10 @@ import {
   AutonomousAgentPersistenceLifecycleCoordinator,
   AutonomousAgentPersistenceLifecycleError,
   AutonomousCapabilityActivationStore,
+  AutonomousCapabilityJournalPersistenceCoordinator,
+  InMemoryAutonomousCapabilityJournalStore,
+  AutonomousExecutionPersistenceCoordinator,
+  InMemoryAutonomousExecutionJournal,
   AutonomousSelectionPromotionLifecycle,
   AutonomousSelectionPromotionLifecycleStore,
   LLMRuntime,
@@ -31,6 +35,8 @@ function fakeAgent(calls, failure = null) {
     memoryPersistence: {},
     learnerPersistence: {},
     promptLearningCoordinator: {},
+    capabilityJournalPersistence: {},
+    executionPersistence: {},
     restoreModelInventory: async () => { calls.push("restore:model_inventory"); return value("model_inventory", "restore"); },
     flushModelInventory: async () => { calls.push("flush:model_inventory"); return value("model_inventory", "flush"); },
     restoreActivation: async () => { calls.push("restore:activation"); return value("activation", "restore"); },
@@ -38,6 +44,10 @@ function fakeAgent(calls, failure = null) {
     restoreSelectionPromotion: async () => { calls.push("restore:selection_promotion"); return value("selection_promotion", "restore"); },
     saveSelectionPromotion: async () => { calls.push("flush:selection_promotion"); return value("selection_promotion", "flush"); },
   };
+  agent.restoreCapabilityJournalPersistence = async () => { calls.push("restore:capability_journal"); if (failure === "capability_journal") throw new Error("private task/prompt/provider payload must not escape"); return value("capability_journal", "restore"); };
+  agent.flushCapabilityJournalPersistence = async () => { calls.push("flush:capability_journal"); if (failure === "capability_journal") throw new Error("private task/prompt/provider payload must not escape"); return value("capability_journal", "flush"); };
+  agent.restoreExecutionPersistence = async () => { calls.push("restore:execution"); if (failure === "execution") throw new Error("private task/prompt/provider payload must not escape"); return value("execution", "restore"); };
+  agent.flushExecutionPersistence = async () => { calls.push("flush:execution"); if (failure === "execution") throw new Error("private task/prompt/provider payload must not escape"); return value("execution", "flush"); };
   for (const component of ["runtime_health", "health", "evaluator_calibration", "memory", "learning", "prompt_learning"]) {
     const suffix = component === "learning" ? "OnlineLearning" : component.replace(/(^|_)([a-z])/g, (_, prefix, letter) => letter.toUpperCase());
     agent[`restore${suffix}`] = async () => {
@@ -144,7 +154,36 @@ test("high-level agent lifecycle composes model inventory restart and flush with
     selectionPromotionStore: selectionStore,
     strict: false,
   });
-  assert.equal(flushed.components[8].status, "flushed");
-  assert.equal(flushed.components[8].snapshot_digest, snapshot.inventory_digest);
+  assert.equal(flushed.components[10].status, "flushed");
+  assert.equal(flushed.components[10].snapshot_digest, snapshot.inventory_digest);
   assert.doesNotMatch(JSON.stringify(restored), /credentials|lifecycle-model/);
+});
+
+test("high-level agent lifecycle carries capability and execution restart barriers", async () => {
+  const llm = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  const capabilitySnapshotStore = { value: null, read() { return this.value; }, write(snapshot) { this.value = structuredClone(snapshot); } };
+  const executionSnapshotStore = { value: null, read() { return this.value; }, write(snapshot) { this.value = structuredClone(snapshot); } };
+  const capabilityJournal = new InMemoryAutonomousCapabilityJournalStore();
+  const capabilityPersistence = new AutonomousCapabilityJournalPersistenceCoordinator(capabilityJournal, capabilitySnapshotStore);
+  const executionJournal = new InMemoryAutonomousExecutionJournal();
+  const executionPersistence = new AutonomousExecutionPersistenceCoordinator(executionJournal, executionSnapshotStore);
+  const source = new AutonomousAgent(llm, { capabilityJournal, capabilityJournalPersistence: capabilityPersistence, executionJournal, executionPersistence });
+  const flushed = await source.flushPersistedState({ strict: false });
+  assert.deepEqual(flushed.ordered_component_ids.slice(0, 2), ["execution", "capability_journal"]);
+  assert.equal(flushed.components[0].status, "flushed");
+  assert.equal(flushed.components[1].status, "flushed");
+
+  const restoredCapabilityJournal = new InMemoryAutonomousCapabilityJournalStore();
+  const restoredExecutionJournal = new InMemoryAutonomousExecutionJournal();
+  const restored = new AutonomousAgent(llm, {
+    capabilityJournal: restoredCapabilityJournal,
+    capabilityJournalPersistence: new AutonomousCapabilityJournalPersistenceCoordinator(restoredCapabilityJournal, capabilitySnapshotStore),
+    executionJournal: restoredExecutionJournal,
+    executionPersistence: new AutonomousExecutionPersistenceCoordinator(restoredExecutionJournal, executionSnapshotStore),
+  });
+  const report = await restored.restorePersistedState({ strict: false });
+  assert.equal(report.components[9].status, "restored");
+  assert.equal(report.components[10].status, "restored");
+  assert.equal(report.components[9].generation, 1);
+  assert.doesNotMatch(JSON.stringify(report), /entries|rows|credentials/);
 });

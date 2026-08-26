@@ -34,6 +34,8 @@ AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS = (
     "memory",
     "learning",
     "prompt_learning",
+    "capability_journal",
+    "execution",
 )
 AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER = AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS
 AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER = tuple(reversed(AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS))
@@ -102,7 +104,7 @@ def _snapshot_projection(value: Any) -> tuple[str | None, str | None, str | None
             snapshot_digest = _bounded_digest(f"lifecycle {key}", candidate)
             break
     state_digest = _bounded_digest("lifecycle state_digest", value.get("state_digest"))
-    generation = value.get("generation")
+    generation = value.get("generation", value.get("snapshot_generation"))
     if generation is not None and (isinstance(generation, bool) or not isinstance(generation, int) or generation < 0):
         generation = None
     return schema, snapshot_digest, state_digest, generation
@@ -240,6 +242,8 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
         model_inventory_store: Any | None = None,
         activation_store: Any | None = None,
         selection_promotion_store: Any | None = None,
+        capability_journal_persistence: Any | None = None,
+        execution_persistence: Any | None = None,
         require_all: bool = False,
         continue_on_error: bool = False,
     ) -> None:
@@ -253,6 +257,8 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
         self.model_inventory_store = model_inventory_store
         self.activation_store = activation_store
         self.selection_promotion_store = selection_promotion_store
+        self.capability_journal_persistence = capability_journal_persistence
+        self.execution_persistence = execution_persistence
         if selection_promotion_store is not None and getattr(agent, "selection_promotion", None) is None:
             raise ArgumentError("selection promotion persistence requires a configured selection lifecycle")
         self.require_all = require_all
@@ -271,6 +277,10 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
             return self.activation_store
         if component_id == "selection_promotion":
             return self.selection_promotion_store
+        if component_id == "capability_journal":
+            return self.capability_journal_persistence
+        if component_id == "execution":
+            return self.execution_persistence
         return getattr(self.agent, f"{component_id}_persistence", None)
 
     def _invoke(self, component_id: str, operation: str) -> Any:
@@ -286,6 +296,14 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
             if operation == "restore":
                 return self.agent.restore_selection_promotion(self.selection_promotion_store)
             return self.agent.save_selection_promotion(self.selection_promotion_store)
+        if component_id == "capability_journal":
+            if operation == "restore":
+                return self.agent.restore_capability_journal_persistence()
+            return self.agent.flush_capability_journal_persistence()
+        if component_id == "execution":
+            if operation == "restore":
+                return self.agent.restore_execution_persistence()
+            return self.agent.flush_execution_persistence()
         method = getattr(self.agent, f"{operation}_{component_id}", None)
         if not callable(method):
             raise ArgumentError(f"agent does not expose {operation}_{component_id}")

@@ -855,27 +855,30 @@ class AutonomousExecutionPersistenceCoordinator:
         self.journal = journal
         self.persistence = persistence
         self._expected_snapshot_digest: str | None = None
+        self._lock = threading.RLock()
 
     def restore(self) -> dict[str, Any] | None:
-        raw = self.persistence.read()
-        if raw is None:
-            self._expected_snapshot_digest = None
-            return None
-        snapshot = _normalize_execution_snapshot(raw, max_events=self.journal.max_events, max_bytes=self.journal.max_bytes)
-        self.journal.restore(snapshot)
-        self._expected_snapshot_digest = snapshot["snapshot_digest"]
-        return snapshot
+        with self._lock:
+            raw = self.persistence.read()
+            if raw is None:
+                self._expected_snapshot_digest = None
+                return None
+            snapshot = _normalize_execution_snapshot(raw, max_events=self.journal.max_events, max_bytes=self.journal.max_bytes)
+            self.journal.restore(snapshot)
+            self._expected_snapshot_digest = snapshot["snapshot_digest"]
+            return snapshot
 
     def flush(self) -> dict[str, Any]:
-        snapshot = self.journal.snapshot()
-        write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
-        if callable(write_if_unchanged):
-            if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
-                raise AutonomyPersistenceError("execution persistence compare-and-swap conflict")
-        else:
-            self.persistence.write(snapshot)
-        self._expected_snapshot_digest = snapshot["snapshot_digest"]
-        return snapshot
+        with self._lock:
+            snapshot = self.journal.snapshot()
+            write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+            if callable(write_if_unchanged):
+                if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                    raise AutonomyPersistenceError("execution persistence compare-and-swap conflict")
+            else:
+                self.persistence.write(snapshot)
+            self._expected_snapshot_digest = snapshot["snapshot_digest"]
+            return snapshot
 
 
 class AutonomousExecutionController:
