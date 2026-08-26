@@ -113,6 +113,7 @@ pub mod federated_continual_context_compilation_federated_control_plane;
 pub mod local_knowledge_representation_inference_engine;
 pub mod multimodal_knowledge_representation_inference_engine;
 pub mod throughput_knowledge_representation_inference_engine;
+pub mod federated_continual_knowledge_representation_inference_engine;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
@@ -745,6 +746,14 @@ pub use throughput_research_workbench::{
     ThroughputWorkbenchRequest as ThroughputResearchWorkbenchRequest,
     CONTRACT_VERSION as THROUGHPUT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use federated_continual_knowledge_representation_inference_engine::{
+    federated_continual_knowledge_representation_inference_engine_manifest,
+    infer_federated_continual_knowledge_representation, FederatedKnowledgeDisposition,
+    FederatedKnowledgeError, FederatedKnowledgePeer, FederatedKnowledgeReceipt,
+    FederatedKnowledgeRequest,
+    CONTRACT_VERSION as FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
 };
 pub use throughput_retrieval_assurance_harness::{
     throughput_retrieval_assurance_harness_manifest, verify_throughput_retrieval_assurance,
