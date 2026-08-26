@@ -1842,6 +1842,39 @@ its process-local transport circuit. Snapshots retain only bounded provider/mode
 latency, evaluator metadata, and digests—never prompts, responses, credentials, headers, tool
 arguments, or raw evidence—and the CAS boundary rejects stale writers across every domain.
 
+The Python runtime circuit is separately restartable when a deployment needs failover continuity.
+`LLMRuntimeHealthPersistenceCoordinator` is bound to the exact `LLMRuntime`, not merely to a
+provider-health ledger. It persists provider circuit counters, circuit expiry, attempt/success/
+failure counts, latency totals, last model, and status code, while excluding prompts, response
+text, headers, credentials, usage payloads, and tool arguments:
+
+```python
+from prism_sdk import (
+    AutonomousAgent,
+    LLMRuntime,
+    LLMRuntimeHealthPersistenceCoordinator,
+    TransactionalJsonLLMRuntimeHealthSnapshotPersistence,
+)
+
+runtime = LLMRuntime()
+runtime_health = LLMRuntimeHealthPersistenceCoordinator(
+    runtime,
+    TransactionalJsonLLMRuntimeHealthSnapshotPersistence(caller_owned_text_store),
+)
+agent = AutonomousAgent(workspace, runtime, runtime_health_persistence=runtime_health)
+
+agent.restore_runtime_health()  # after registering the same provider transports
+# invoke work...
+agent.flush_runtime_health()    # at the deployment's chosen checkpoint
+```
+
+Restore validates the hash-bound snapshot before replacing live state and refuses snapshots that
+reference unregistered providers. JSON adapters enforce canonical encoding and a one-megabyte
+bound; transactional adapters reject stale writers. `restore_transport_health()` and
+`flush_transport_health()` are compatibility aliases. This runtime projection is an immediate
+transport gate; the historical `ProviderHealthLedger` remains the durable model-selection prior,
+so applications can persist both independently and explicitly.
+
 ### Evaluator-gated memory consolidation
 
 Episodic recall and durable learning answer different questions. Recall can show that a similar

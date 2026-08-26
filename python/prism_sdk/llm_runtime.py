@@ -64,6 +64,8 @@ MODEL_CATALOGUE_SCHEMA = "bioprism-llm-model-catalogue/0.1"
 PROVIDER_HEALTH_LEDGER_SCHEMA = "bioprism-llm-provider-health-ledger/0.1"
 _LEGACY_PROVIDER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-provider-health-snapshot/0.1"
 PROVIDER_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-provider-health-snapshot/0.2"
+_LEGACY_LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-runtime-health-snapshot/0.1"
+LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA = "bioprism-llm-runtime-health-snapshot/0.2"
 CREDENTIAL_ONBOARDING_SCHEMA = "bioprism-llm-credential-onboarding/0.1"
 CREDENTIAL_PROVISIONING_SCHEMA = "bioprism-llm-credential-provisioning/0.1"
 PROVIDER_MODEL_DISCOVERY_SCHEMA = "bioprism-llm-provider-model-discovery/0.1"
@@ -73,6 +75,9 @@ MAX_MODEL_METADATA_BYTES = 256_000
 MAX_PROVIDER_HEALTH_RECORDS = 16_384
 MAX_PROVIDER_HEALTH_BYTES = 32_000_000
 MAX_PROVIDER_HEALTH_SNAPSHOT_BYTES = 32_000_000
+MAX_LLM_RUNTIME_HEALTH_PROVIDERS = 128
+MAX_LLM_RUNTIME_HEALTH_MODELS = 2_048
+MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES = 1_000_000
 MAX_PROVIDER_DISCOVERED_MODELS = 512
 MAX_PROVIDER_MODEL_DISCOVERY_BYTES = 8_000_000
 MAX_CREDENTIAL_PROVISIONING_SOURCES = 128
@@ -2237,6 +2242,335 @@ class ProviderHealthPersistenceCoordinator:
         return snapshot
 
 
+def _runtime_health_identifier(name: str, value: Any, *, max_bytes: int, provider: bool = False) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value.encode("utf-8")) > max_bytes:
+        raise ProviderError(f"{name} is outside its bounded identifier contract")
+    if any(ord(character) < 32 for character in value) or (provider and ("/" in value or " " in value)):
+        raise ProviderError(f"{name} is outside its bounded identifier contract")
+    return value
+
+
+def _runtime_health_count(name: str, value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > 2**53 - 1:
+        raise ProviderError(f"{name} is outside its bounded health contract")
+    return value
+
+
+def _runtime_health_metric(name: str, value: Any) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0 or value > 2**53 - 1:
+        raise ProviderError(f"{name} is outside its bounded health contract")
+    return value
+
+
+def _runtime_health_timestamp(name: str, value: Any) -> int | float | None:
+    if value is None:
+        return None
+    return _runtime_health_metric(name, value)
+
+
+def _runtime_health_nullable_string(name: str, value: Any, *, max_bytes: int) -> str | None:
+    if value is None:
+        return None
+    return _runtime_health_identifier(name, value, max_bytes=max_bytes)
+
+
+def _normalize_runtime_health_counts(name: str, value: Mapping[str, Any]) -> dict[str, Any]:
+    attempts = _runtime_health_count(f"{name} attempts", value.get("attempts"))
+    successes = _runtime_health_count(f"{name} successes", value.get("successes"))
+    failures = _runtime_health_count(f"{name} failures", value.get("failures"))
+    if successes + failures != attempts:
+        raise ProviderError(f"{name} attempts do not equal successes plus failures")
+    return {
+        "attempts": attempts,
+        "successes": successes,
+        "failures": failures,
+        "total_latency_ms": _runtime_health_metric(f"{name} total_latency_ms", value.get("total_latency_ms")),
+        "last_latency_ms": _runtime_health_timestamp(f"{name} last_latency_ms", value.get("last_latency_ms")),
+        "last_model": _runtime_health_nullable_string(f"{name} last_model", value.get("last_model"), max_bytes=512),
+        "last_status_code": (
+            None
+            if value.get("last_status_code") is None
+            else _runtime_health_count(f"{name} last_status_code", value.get("last_status_code"))
+        ),
+    }
+
+
+def _normalize_runtime_provider_health_row(value: Any) -> dict[str, Any]:
+    expected = {
+        "provider",
+        "attempts",
+        "successes",
+        "failures",
+        "total_latency_ms",
+        "last_latency_ms",
+        "last_model",
+        "last_status_code",
+        "consecutive_failures",
+        "circuit_opened_until",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected:
+        raise ProviderError("LLM runtime provider health row is malformed")
+    provider = _runtime_health_identifier(
+        "LLM runtime provider health provider", value.get("provider"), max_bytes=128, provider=True
+    )
+    return {
+        "provider": provider,
+        **_normalize_runtime_health_counts("LLM runtime provider health row", value),
+        "consecutive_failures": _runtime_health_count(
+            "LLM runtime provider health consecutive_failures", value.get("consecutive_failures")
+        ),
+        "circuit_opened_until": _runtime_health_timestamp(
+            "LLM runtime provider health circuit_opened_until", value.get("circuit_opened_until")
+        ),
+    }
+
+
+def _normalize_runtime_model_health_row(value: Any) -> dict[str, Any]:
+    expected = {
+        "provider",
+        "model",
+        "attempts",
+        "successes",
+        "failures",
+        "total_latency_ms",
+        "last_latency_ms",
+        "last_model",
+        "last_status_code",
+    }
+    if not isinstance(value, Mapping) or set(value) != expected:
+        raise ProviderError("LLM runtime model health row is malformed")
+    return {
+        "provider": _runtime_health_identifier(
+            "LLM runtime model health provider", value.get("provider"), max_bytes=128, provider=True
+        ),
+        "model": _runtime_health_identifier("LLM runtime model health model", value.get("model"), max_bytes=512),
+        **_normalize_runtime_health_counts("LLM runtime model health row", value),
+    }
+
+
+def _build_runtime_health_snapshot(
+    providers: Sequence[Mapping[str, Any]],
+    models: Sequence[Mapping[str, Any]],
+    *,
+    snapshot_generation: int,
+    previous_snapshot_digest: str | None,
+) -> dict[str, Any]:
+    if not isinstance(snapshot_generation, int) or isinstance(snapshot_generation, bool) or snapshot_generation < 1:
+        raise ProviderError("LLM runtime health snapshot generation is outside its bound")
+    if snapshot_generation == 1 and previous_snapshot_digest is not None:
+        raise ProviderError("LLM runtime health snapshot generation and previous_snapshot_digest are inconsistent")
+    if previous_snapshot_digest is not None and (
+        not isinstance(previous_snapshot_digest, str)
+        or len(previous_snapshot_digest) != 64
+        or any(character not in "0123456789abcdef" for character in previous_snapshot_digest)
+    ):
+        raise ProviderError("LLM runtime health previous_snapshot_digest is invalid")
+    normalized_providers = [_normalize_runtime_provider_health_row(row) for row in providers]
+    normalized_models = [_normalize_runtime_model_health_row(row) for row in models]
+    descriptor = {
+        "schema": LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA,
+        "snapshot_generation": snapshot_generation,
+        "previous_snapshot_digest": previous_snapshot_digest,
+        "providers": normalized_providers,
+        "models": normalized_models,
+        "retention": "transport_health_metadata_only_hash_bound",
+        "secret_material": "never_returned",
+    }
+    snapshot = {
+        **descriptor,
+        "snapshot_digest": hashlib.sha256(_canonical_provider_health_json(descriptor).encode("utf-8")).hexdigest(),
+    }
+    if len(_canonical_provider_health_json(snapshot).encode("utf-8")) > MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES:
+        raise ProviderError("LLM runtime health snapshot exceeds its byte capacity")
+    return snapshot
+
+
+def _normalize_runtime_health_snapshot(value: Mapping[str, Any], *, max_bytes: int) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ProviderError("LLM runtime health snapshot is malformed")
+    legacy = value.get("schema") == _LEGACY_LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA
+    expected = {
+        "schema",
+        "providers",
+        "models",
+        "snapshot_digest",
+        "retention",
+        "secret_material",
+    }
+    if not legacy:
+        expected.update({"snapshot_generation", "previous_snapshot_digest"})
+    if set(value) != expected:
+        raise ProviderError("LLM runtime health snapshot is malformed")
+    if value.get("schema") != LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA and not legacy:
+        raise ProviderError("LLM runtime health snapshot schema is unsupported")
+    if value.get("retention") != "transport_health_metadata_only_hash_bound" or value.get("secret_material") != "never_returned":
+        raise ProviderError("LLM runtime health snapshot markers are invalid")
+    generation = None
+    previous = None
+    if not legacy:
+        generation = value.get("snapshot_generation")
+        previous = value.get("previous_snapshot_digest")
+        if not isinstance(generation, int) or isinstance(generation, bool) or generation < 1:
+            raise ProviderError("LLM runtime health snapshot generation is outside its bound")
+        if previous is not None and (
+            not isinstance(previous, str)
+            or len(previous) != 64
+            or any(character not in "0123456789abcdef" for character in previous)
+        ):
+            raise ProviderError("LLM runtime health previous_snapshot_digest is invalid")
+        if (generation == 1) != (previous is None):
+            raise ProviderError("LLM runtime health snapshot generation and previous_snapshot_digest are inconsistent")
+    raw_providers = value.get("providers")
+    raw_models = value.get("models")
+    if not isinstance(raw_providers, Sequence) or isinstance(raw_providers, (str, bytes, bytearray)) or len(raw_providers) > MAX_LLM_RUNTIME_HEALTH_PROVIDERS:
+        raise ProviderError("LLM runtime health snapshot provider capacity is exceeded")
+    if not isinstance(raw_models, Sequence) or isinstance(raw_models, (str, bytes, bytearray)) or len(raw_models) > MAX_LLM_RUNTIME_HEALTH_MODELS:
+        raise ProviderError("LLM runtime health snapshot model capacity is exceeded")
+    providers = [_normalize_runtime_provider_health_row(row) for row in raw_providers]
+    models = [_normalize_runtime_model_health_row(row) for row in raw_models]
+    provider_ids: set[str] = set()
+    for row in providers:
+        if row["provider"] in provider_ids:
+            raise ProviderError(f"LLM runtime health snapshot contains duplicate provider {row['provider']}")
+        provider_ids.add(row["provider"])
+    model_ids: set[tuple[str, str]] = set()
+    for row in models:
+        model_id = (row["provider"], row["model"])
+        if model_id in model_ids:
+            raise ProviderError(f"LLM runtime health snapshot contains duplicate model {row['provider']}/{row['model']}")
+        model_ids.add(model_id)
+    descriptor = {
+        "schema": _LEGACY_LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA if legacy else LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA,
+        **({} if legacy else {"snapshot_generation": generation, "previous_snapshot_digest": previous}),
+        "providers": providers,
+        "models": models,
+        "retention": "transport_health_metadata_only_hash_bound",
+        "secret_material": "never_returned",
+    }
+    digest = value.get("snapshot_digest")
+    expected_digest = hashlib.sha256(_canonical_provider_health_json(descriptor).encode("utf-8")).hexdigest()
+    if not isinstance(digest, str) or len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest) or digest != expected_digest:
+        raise ProviderError("LLM runtime health snapshot digest does not match its metadata")
+    normalized = {**descriptor, "snapshot_digest": digest}
+    if len(_canonical_provider_health_json(normalized).encode("utf-8")) > min(max_bytes, MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES):
+        raise ProviderError("LLM runtime health snapshot exceeds its byte capacity")
+    return normalized
+
+
+def validate_llm_runtime_health_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Strictly validate a restart-safe, value-only runtime health snapshot."""
+
+    return _normalize_runtime_health_snapshot(value, max_bytes=MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES)
+
+
+class LLMRuntimeHealthSnapshotTextStore(Protocol):
+    """Portable text persistence for process-local provider transport health."""
+
+    def read(self) -> str | None: ...
+
+    def write(self, value: str) -> None: ...
+
+
+class TransactionalLLMRuntimeHealthSnapshotTextStore(LLMRuntimeHealthSnapshotTextStore, Protocol):
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool: ...
+
+
+class JsonLLMRuntimeHealthSnapshotPersistence:
+    """Canonical JSON persistence for runtime transport-health snapshots."""
+
+    def __init__(self, store: LLMRuntimeHealthSnapshotTextStore, *, max_bytes: int = MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) -> None:
+        if not all(callable(getattr(store, name, None)) for name in ("read", "write")):
+            raise ProviderError("LLM runtime health JSON persistence requires a text store")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES:
+            raise ProviderError("LLM runtime health JSON persistence max_bytes is outside its bound")
+        self.store = store
+        self.max_bytes = max_bytes
+
+    def read(self) -> dict[str, Any] | None:
+        encoded = self.store.read()
+        if encoded is None:
+            return None
+        if not isinstance(encoded, str) or len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ProviderError("LLM runtime health JSON snapshot exceeds its byte bound")
+        try:
+            raw = json.loads(encoded)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ProviderError("LLM runtime health JSON snapshot is invalid") from error
+        if not isinstance(raw, Mapping):
+            raise ProviderError("LLM runtime health JSON snapshot must be an object")
+        normalized = _normalize_runtime_health_snapshot(raw, max_bytes=self.max_bytes)
+        if encoded != _canonical_provider_health_json(normalized):
+            raise ProviderError("LLM runtime health JSON snapshot is not canonical")
+        return normalized
+
+    def write(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_runtime_health_snapshot(snapshot, max_bytes=self.max_bytes)
+        encoded = _canonical_provider_health_json(normalized)
+        if len(encoded.encode("utf-8")) > self.max_bytes:
+            raise ProviderError("LLM runtime health JSON snapshot exceeds its byte bound")
+        self.store.write(encoded)
+
+
+class TransactionalJsonLLMRuntimeHealthSnapshotPersistence(JsonLLMRuntimeHealthSnapshotPersistence):
+    """Canonical JSON runtime-health persistence with compare-and-swap fencing."""
+
+    def __init__(self, store: TransactionalLLMRuntimeHealthSnapshotTextStore, *, max_bytes: int = MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES) -> None:
+        super().__init__(store, max_bytes=max_bytes)
+        if not callable(getattr(store, "write_if_unchanged", None)):
+            raise ProviderError("transactional LLM runtime health persistence requires write_if_unchanged")
+        self.store = store
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        if expected_snapshot_digest is not None and (
+            not isinstance(expected_snapshot_digest, str)
+            or len(expected_snapshot_digest) != 64
+            or any(character not in "0123456789abcdef" for character in expected_snapshot_digest)
+        ):
+            raise ProviderError("LLM runtime health expected snapshot digest is invalid")
+        normalized = _normalize_runtime_health_snapshot(snapshot, max_bytes=self.max_bytes)
+        committed = self.store.write_if_unchanged(expected_snapshot_digest, _canonical_provider_health_json(normalized))
+        if not isinstance(committed, bool):
+            raise ProviderError("LLM runtime health compare-and-swap returned a non-boolean result")
+        return committed
+
+
+class LLMRuntimeHealthPersistenceCoordinator:
+    """Connect an LLM runtime's transport state to caller-owned durable storage."""
+
+    def __init__(self, runtime: Any, persistence: Any) -> None:
+        if not isinstance(runtime, LLMRuntime):
+            raise ProviderError("LLM runtime health persistence requires an LLMRuntime")
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ProviderError("LLM runtime health persistence adapter is malformed")
+        self.runtime = runtime
+        self.persistence = persistence
+        self._expected_snapshot_digest: str | None = None
+        self._operation_lock = threading.RLock()
+
+    def restore(self) -> dict[str, Any] | None:
+        with self._operation_lock:
+            raw = self.persistence.read()
+            if raw is None:
+                self._expected_snapshot_digest = None
+                return None
+            snapshot = _normalize_runtime_health_snapshot(raw, max_bytes=MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES)
+            self.runtime.restore_health(snapshot)
+            self._expected_snapshot_digest = snapshot["snapshot_digest"]
+            return deepcopy(snapshot)
+
+    def flush(self) -> dict[str, Any]:
+        with self._operation_lock:
+            snapshot = self.runtime.snapshot_health()
+            write_if_unchanged = getattr(self.persistence, "write_if_unchanged", None)
+            if callable(write_if_unchanged):
+                if not write_if_unchanged(self._expected_snapshot_digest, snapshot):
+                    raise ProviderError("LLM runtime health persistence compare-and-swap conflict")
+            else:
+                self.persistence.write(snapshot)
+            self._expected_snapshot_digest = snapshot["snapshot_digest"]
+            return deepcopy(snapshot)
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderContentPart:
     """Provider-neutral text/image content translated at the final wire boundary.
@@ -3067,6 +3401,10 @@ class LLMRuntime:
         self._circuits: dict[str, _CircuitState] = {}
         self._provider_observations: dict[str, _ProviderObservationState] = {}
         self._model_observations: dict[tuple[str, str], _ProviderObservationState] = {}
+        self._health_snapshot_generation = 0
+        self._previous_health_snapshot_digest: str | None = None
+        self._cached_health_snapshot: dict[str, Any] | None = None
+        self._cached_health_signature: str | None = None
         self._clock = clock
         self._sleeper = sleeper
         self._observation_lock = threading.RLock()
@@ -3380,6 +3718,152 @@ class LLMRuntime:
                 "total_output_tokens": 0,
             },
         )
+
+    def snapshot_health(self) -> dict[str, Any]:
+        """Seal bounded provider transport health without prompts, responses, or credentials.
+
+        The snapshot contains only counters, latency, model identifiers, status codes, and
+        circuit timing. It is deliberately separate from :class:`ProviderHealthLedger`: this
+        state is the runtime's immediate circuit/transport projection and is safe to restore
+        only after the same provider transports have been explicitly registered.
+        """
+
+        with self._observation_lock:
+            providers: list[dict[str, Any]] = []
+            for provider in sorted(self._providers):
+                observed = self._provider_observations.get(provider, _ProviderObservationState())
+                circuit = self._circuits.get(provider, _CircuitState())
+                providers.append(
+                    {
+                        "provider": provider,
+                        "attempts": observed.attempts,
+                        "successes": observed.successes,
+                        "failures": observed.failures,
+                        "total_latency_ms": observed.total_latency_ms,
+                        "last_latency_ms": observed.last_latency_ms,
+                        "last_model": observed.last_model,
+                        "last_status_code": observed.last_status_code,
+                        "consecutive_failures": circuit.consecutive_failures,
+                        "circuit_opened_until": circuit.opened_until,
+                    }
+                )
+            models: list[dict[str, Any]] = []
+            for (provider, model), observed in sorted(self._model_observations.items()):
+                models.append(
+                    {
+                        "provider": provider,
+                        "model": model,
+                        "attempts": observed.attempts,
+                        "successes": observed.successes,
+                        "failures": observed.failures,
+                        "total_latency_ms": observed.total_latency_ms,
+                        "last_latency_ms": observed.last_latency_ms,
+                        "last_model": observed.last_model,
+                        "last_status_code": observed.last_status_code,
+                    }
+                )
+            signature = _canonical_provider_health_json({"providers": providers, "models": models})
+            if self._cached_health_snapshot is not None and self._cached_health_signature == signature:
+                return deepcopy(self._cached_health_snapshot)
+            snapshot = _build_runtime_health_snapshot(
+                providers,
+                models,
+                snapshot_generation=self._health_snapshot_generation + 1,
+                previous_snapshot_digest=(
+                    None
+                    if self._health_snapshot_generation == 0
+                    else self._previous_health_snapshot_digest
+                ),
+            )
+            self._health_snapshot_generation = snapshot["snapshot_generation"]
+            self._previous_health_snapshot_digest = snapshot["snapshot_digest"]
+            self._cached_health_snapshot = deepcopy(snapshot)
+            self._cached_health_signature = signature
+            return deepcopy(snapshot)
+
+    def health_snapshot(self) -> dict[str, Any]:
+        """Compatibility alias for :meth:`snapshot_health` using the SDK's projection naming."""
+
+        return self.snapshot_health()
+
+    def restore_health(self, raw: Mapping[str, Any]) -> None:
+        """Atomically restore validated runtime transport health for registered providers."""
+
+        snapshot = _normalize_runtime_health_snapshot(raw, max_bytes=MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES)
+        for row in snapshot["providers"]:
+            if row["provider"] not in self._providers:
+                raise ProviderError(f"cannot restore health for unregistered provider {row['provider']}")
+        for row in snapshot["models"]:
+            if row["provider"] not in self._providers:
+                raise ProviderError(f"cannot restore model health for unregistered provider {row['provider']}")
+        providers: dict[str, _ProviderObservationState] = {
+            provider: _ProviderObservationState() for provider in self._providers
+        }
+        circuits: dict[str, _CircuitState] = {
+            provider: _CircuitState() for provider in self._providers
+        }
+        for row in snapshot["providers"]:
+            providers[row["provider"]] = _ProviderObservationState(
+                attempts=row["attempts"],
+                successes=row["successes"],
+                failures=row["failures"],
+                total_latency_ms=row["total_latency_ms"],
+                last_latency_ms=row["last_latency_ms"],
+                last_model=row["last_model"],
+                last_status_code=row["last_status_code"],
+            )
+            circuits[row["provider"]] = _CircuitState(
+                consecutive_failures=row["consecutive_failures"],
+                opened_until=row["circuit_opened_until"],
+            )
+        models: dict[tuple[str, str], _ProviderObservationState] = {}
+        for row in snapshot["models"]:
+            models[(row["provider"], row["model"])] = _ProviderObservationState(
+                attempts=row["attempts"],
+                successes=row["successes"],
+                failures=row["failures"],
+                total_latency_ms=row["total_latency_ms"],
+                last_latency_ms=row["last_latency_ms"],
+                last_model=row["last_model"],
+                last_status_code=row["last_status_code"],
+            )
+        with self._observation_lock:
+            self._provider_observations = providers
+            self._circuits = circuits
+            self._model_observations = models
+            if snapshot["schema"] == LLM_RUNTIME_HEALTH_SNAPSHOT_SCHEMA:
+                self._health_snapshot_generation = snapshot["snapshot_generation"]
+                self._previous_health_snapshot_digest = snapshot["snapshot_digest"]
+                self._cached_health_snapshot = deepcopy(snapshot)
+                self._cached_health_signature = _canonical_provider_health_json(
+                    {"providers": snapshot["providers"], "models": snapshot["models"]}
+                )
+            else:
+                self._health_snapshot_generation = 0
+                self._previous_health_snapshot_digest = None
+                self._cached_health_snapshot = None
+                self._cached_health_signature = None
+
+    def save_health(self, persistence: Any) -> dict[str, Any]:
+        """Write the current runtime health through a caller-owned persistence adapter."""
+
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ProviderError("LLM runtime health persistence adapter is malformed")
+        snapshot = self.snapshot_health()
+        persistence.write(snapshot)
+        return snapshot
+
+    def restore_persisted_health(self, persistence: Any) -> dict[str, Any] | None:
+        """Read and atomically apply a persisted runtime-health snapshot."""
+
+        if not all(callable(getattr(persistence, name, None)) for name in ("read", "write")):
+            raise ProviderError("LLM runtime health persistence adapter is malformed")
+        raw = persistence.read()
+        if raw is None:
+            return None
+        snapshot = _normalize_runtime_health_snapshot(raw, max_bytes=MAX_LLM_RUNTIME_HEALTH_SNAPSHOT_BYTES)
+        self.restore_health(snapshot)
+        return snapshot
 
     def provider_requires_credential(self, provider: str) -> bool:
         """Return whether this registered transport requires a caller-owned credential handle."""

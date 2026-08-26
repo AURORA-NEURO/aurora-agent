@@ -1401,14 +1401,17 @@ events, evaluations for unknown episodes, malformed normalized packets, broken c
 digests, raw-content fields, and stale writers fail closed.
 
 The Python `AutonomousAgent` now composes the three restart-sensitive selection inputs at its
-application boundary: evaluator/bandit learning, episodic memory, and provider/model health.
+application boundary: evaluator/bandit learning, episodic memory, provider/model health, and
+restart-safe runtime circuit/transport health.
 Each coordinator must be bound to the exact ledger/store used by the agent, and each restore or
 flush remains explicit so deployments can order evaluator feedback, health observations, and
 memory writes inside their own transaction. The façade exposes aliases for online learning and
 provider health, while all-domain restart tests verify CAS fencing, secret/task redaction, and
-misconfiguration refusal. This closes the local integration gap without turning historical
-health into authorization or treating provider success as task reward; storage, identity,
-approval, encryption, and external reconciliation remain deployment-owned.
+misconfiguration refusal. The runtime-health coordinator is identity-bound to the exact
+`LLMRuntime`, snapshots only bounded transport metadata, and uses canonical digest validation plus
+CAS fencing. This closes the local integration gap without turning historical health into
+authorization or treating provider success as task reward; storage, identity, approval,
+encryption, and external reconciliation remain deployment-owned.
 
 Python objective state now has the matching goal handoff boundary. `AutonomousGoalLedger` snapshots
 carry the sorted current objective records and full lifecycle event chain with strict sequence,
