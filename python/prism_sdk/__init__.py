@@ -237,6 +237,8 @@ from .research_contracts import (
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
@@ -6732,6 +6734,10 @@ from .adapter_throughput_retrieval_synthesis_workflow_fabric import (
     ThroughputRetrievalSynthesisWorkflowReceipt,
     run_throughput_retrieval_synthesis_workflow,
 )
+from .adapter_federated_continual_retrieval_synthesis_workflow_fabric import (
+    FederatedContinualRetrievalSynthesisWorkflowReceipt,
+    run_federated_continual_retrieval_synthesis_workflow,
+)
 from .adapter_multimodal_retrieval_synthesis_inference_engine import (
     MultimodalRetrievalSynthesisCandidate,
     MultimodalRetrievalSynthesisInferenceEngineReceipt,
@@ -6786,6 +6792,8 @@ __all__ += [
     "run_multimodal_retrieval_synthesis_workflow",
     "ThroughputRetrievalSynthesisWorkflowReceipt",
     "run_throughput_retrieval_synthesis_workflow",
+    "FederatedContinualRetrievalSynthesisWorkflowReceipt",
+    "run_federated_continual_retrieval_synthesis_workflow",
     "MultimodalRetrievalSynthesisCandidate",
     "MultimodalRetrievalSynthesisInferenceEngineReceipt",
     "run_multimodal_retrieval_synthesis_inference_engine",

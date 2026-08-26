@@ -1897,6 +1897,9 @@ impl Server {
             "adapter_throughput_retrieval_synthesis_workflow_fabric" => {
                 self.adapter_throughput_retrieval_synthesis_workflow_fabric(&arguments)
             },
+            "adapter_federated_continual_retrieval_synthesis_workflow_fabric" => {
+                self.adapter_federated_continual_retrieval_synthesis_workflow_fabric(&arguments)
+            },
             "adapter_multimodal_retrieval_synthesis_inference_engine" => {
                 self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
             },
@@ -25293,6 +25296,12 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 prospective high-throughput workflow enforces bounded queue admission, overflow retention, checkpoint continuity, budget compensation, replay identity, and output validation", "overflow, omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for approvals, queue retention, replication, schema migration, and local artifact retention"]}))
     }
 
+    fn adapter_federated_continual_retrieval_synthesis_workflow_fabric(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisWorkflowRequest")?;
+        let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_workflow_json(request)?;
+        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 federated continual workflow enforces purpose-bound peer quorum, aggregate-only exchange, checkpoint continuity, bounded budget, compensation, replay identity, and output validation", "federation denials, omissions, uncertainty, contradiction, overflow, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for federation approvals, key rotation, replay, schema migration, and local artifact retention"]}))
+    }
+
     fn adapter_multimodal_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(request)?;
@@ -37476,6 +37485,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "adapter_federated_continual_retrieval_workflow",
+            "domains": ["federated continual retrieval", "purpose-bound quorum", "aggregate-only federation", "checkpointed evidence synthesis"],
+            "crates": ["bioprism-adapter", "bioprism-mcp"],
+            "mcp_tools": ["adapter_federated_continual_retrieval_synthesis_workflow_fabric"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
@@ -40190,6 +40207,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "adapter_throughput_retrieval_synthesis_workflow_fabric",
             "description": "Run an A2 prospective high-throughput retrieval and synthesis workflow with bounded queue admission, overflow retention, checkpoints, budget compensation, replay, and omission-preserving receipts.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisWorkflowRequest with ScopedRetrievalQuery3, batch/capacity/checkpoint/queue admission, canonical stage order, budget, replay identity, policy/protected-closure/locality, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "adapter_federated_continual_retrieval_synthesis_workflow_fabric",
+            "description": "Run an A2 federated continual retrieval and synthesis workflow with purpose-bound peer quorum, aggregate-only federation, locality, checkpoints, budget compensation, replay, and omission-preserving receipts.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisWorkflowRequest with ScopedRetrievalQuery4, federation purpose/peers/quorum, aggregate-only policy, batch/checkpoint/capacity, canonical stage order, budget, replay identity, policy/protected-closure/locality, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "adapter_multimodal_retrieval_synthesis_inference_engine",
