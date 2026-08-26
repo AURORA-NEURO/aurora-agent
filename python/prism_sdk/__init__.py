@@ -265,6 +265,8 @@ from .research_contracts import (
     ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
@@ -6816,6 +6818,10 @@ from .adapter_local_retrieval_synthesis_federated_control_plane import (
     LocalRetrievalSynthesisFederatedControlPlaneReceipt,
     operate_local_retrieval_synthesis_federated_control_plane,
 )
+from .adapter_multimodal_retrieval_synthesis_federated_control_plane import (
+    MultimodalRetrievalSynthesisFederatedControlPlaneReceipt,
+    operate_multimodal_retrieval_synthesis_federated_control_plane,
+)
 from .adapter_multimodal_retrieval_synthesis_inference_engine import (
     MultimodalRetrievalSynthesisCandidate,
     MultimodalRetrievalSynthesisInferenceEngineReceipt,
@@ -6898,6 +6904,8 @@ __all__ += [
     "assure_federated_continual_retrieval_synthesis",
     "LocalRetrievalSynthesisFederatedControlPlaneReceipt",
     "operate_local_retrieval_synthesis_federated_control_plane",
+    "MultimodalRetrievalSynthesisFederatedControlPlaneReceipt",
+    "operate_multimodal_retrieval_synthesis_federated_control_plane",
     "MultimodalRetrievalSynthesisCandidate",
     "MultimodalRetrievalSynthesisInferenceEngineReceipt",
     "run_multimodal_retrieval_synthesis_inference_engine",

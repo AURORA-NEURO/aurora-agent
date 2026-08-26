@@ -1939,6 +1939,9 @@ impl Server {
             "adapter_local_retrieval_synthesis_federated_control_plane" => {
                 self.adapter_local_retrieval_synthesis_federated_control_plane(&arguments)
             },
+            "adapter_multimodal_retrieval_synthesis_federated_control_plane" => {
+                self.adapter_multimodal_retrieval_synthesis_federated_control_plane(&arguments)
+            },
             "adapter_multimodal_retrieval_synthesis_inference_engine" => {
                 self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
             },
@@ -25419,6 +25422,12 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 control plane admits institution-local retrieval/synthesis service work only under policy, federation-permission, signed-approval, health, and capacity gates", "degraded, approval-required, blocked, and saturated states remain explicit with omission and uncertainty receipts", "raw preclinical observations remain local and control-plane effects are content-addressed"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for service health attestations, capacity policy, and independent release governance"]}))
     }
 
+    fn adapter_multimodal_retrieval_synthesis_federated_control_plane(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisFederatedControlPlaneRequest")?;
+        let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_federated_control_plane_json(request)?;
+        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits multimodal multi-study retrieval/synthesis only when peer quorum, modality comparability, capacity, health, federation, signed approval, and protected-closure gates pass", "aggregate-only federation keeps raw preclinical imaging and omics data institution-local while omission, uncertainty, counterexample, degraded, approval-required, and blocked states remain explicit", "replay and content-addressed control receipts support deterministic audit and recovery"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for peer trust, comparability profiles, health attestations, signed authorization, and independent replication"]}))
+    }
+
     fn adapter_multimodal_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(request)?;
@@ -37714,6 +37723,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "adapter_multimodal_retrieval_synthesis_federated_control_plane",
+            "domains": ["multimodal multi-study retrieval synthesis operations", "federated control plane", "modality comparability", "peer quorum", "aggregate-only locality", "capacity and health admission"],
+            "crates": ["bioprism-adapter", "bioprism-mcp"],
+            "mcp_tools": ["adapter_multimodal_retrieval_synthesis_federated_control_plane"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
@@ -40498,6 +40515,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "adapter_local_retrieval_synthesis_federated_control_plane",
             "description": "Operate a local retrieval and synthesis federated control plane with capacity, health, policy, signed-approval, federation-permission, replay, and local-data gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisFederatedControlPlaneRequest with local workbench request, service/node identity, capacity and active-run counts, health/replay digests, policy and federation permissions, signed approval, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "adapter_multimodal_retrieval_synthesis_federated_control_plane",
+            "description": "Operate an A2 multimodal multi-study retrieval and synthesis federated control plane with peer quorum, modality comparability, capacity, health, signed approval, protected-closure, replay, and aggregate-only locality gates.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalRetrievalSynthesisFederatedControlPlaneRequest with multimodal workbench request, service/federation/purpose/peer quorum, capacity and active-run counts, comparability and health/replay digests, policy/federation permissions, signed approval, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "adapter_multimodal_retrieval_synthesis_inference_engine",
