@@ -6552,3 +6552,15 @@ __all__ += [
     "LocalEvidenceSurveillanceReceipt",
     "run_local_evidence_surveillance",
 ]
+
+from .adapter_multimodal_evidence_surveillance_inference_engine import (
+    MultimodalEvidenceObservation,
+    MultimodalEvidenceSurveillanceReceipt,
+    run_multimodal_evidence_surveillance,
+)
+
+__all__ += [
+    "MultimodalEvidenceObservation",
+    "MultimodalEvidenceSurveillanceReceipt",
+    "run_multimodal_evidence_surveillance",
+]

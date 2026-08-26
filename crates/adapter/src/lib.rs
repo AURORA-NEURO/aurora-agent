@@ -92,6 +92,7 @@ pub mod error;
 pub mod evaluation_assurance;
 pub mod evidence_surveillance;
 pub mod local_evidence_surveillance_inference_engine;
+pub mod multimodal_evidence_surveillance_inference_engine;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
@@ -197,6 +198,15 @@ pub use local_evidence_surveillance_inference_engine::{
     LocalQualifiedEvidenceSet,
     CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_inference_engine::{
+    multimodal_evidence_surveillance_inference_engine_manifest,
+    run_multimodal_evidence_surveillance, MultimodalEvidenceObservation,
+    MultimodalEvidenceSurveillanceDisposition, MultimodalEvidenceSurveillanceError,
+    MultimodalEvidenceSurveillanceReceipt, MultimodalEvidenceSurveillanceRequest,
+    MultimodalQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
 };
 pub use execution_control::{
     admit_computational_execution, AuthorizedExecutionEffect, ComputationalExecutionReceipt,

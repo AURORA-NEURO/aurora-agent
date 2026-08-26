@@ -4488,3 +4488,29 @@ export function validateAdapterLocalEvidenceSurveillanceInferenceEngineReceipt(r
 }
 
 export function adapterLocalEvidenceSurveillanceInferenceEngineReceiptDigest(receipt: AdapterLocalEvidenceSurveillanceInferenceEngineReceipt): string { validateAdapterLocalEvidenceSurveillanceInferenceEngineReceipt(receipt); return digestJsonSync(receipt); }
+
+export const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID = "AFA-adapter-P01-F02" as const;
+export const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION = "adapter-multimodal-evidence-surveillance-inference-engine/1.0" as const;
+
+export interface AdapterMultimodalEvidenceSurveillanceInferenceEngineReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; intent: string; semantic_profile: string;
+  disposition: "completed" | "partial" | "unknown" | "blocked";
+  study_order: string[]; modality_order: string[]; candidate_order: string[]; ranked_order: string[]; selected_order: string[]; unresolved_order: string[]; denied_order: string[];
+  comparability_digest: string; evidence_digest: string; provenance_digest: string; replay_identity: string;
+  omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[];
+  qualified_set: Record<string, unknown>; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateAdapterMultimodalEvidenceSurveillanceInferenceEngineReceipt(receipt: AdapterMultimodalEvidenceSurveillanceInferenceEngineReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID || receipt.contract_version !== ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION) throw new Error("multimodal evidence schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.intent.trim() || !receipt.semantic_profile.trim() || receipt.study_order.length < 2 || receipt.modality_order.length < 2 || !receipt.candidate_order.length || !receipt.effect_receipts.length) throw new Error("multimodal identity, closure, locality, candidates, or effects are incomplete");
+  for (const values of [receipt.study_order, receipt.modality_order, receipt.candidate_order, receipt.selected_order, receipt.unresolved_order, receipt.denied_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("multimodal ordering is invalid");
+  if (receipt.ranked_order.length !== receipt.candidate_order.length || JSON.stringify([...new Set(receipt.ranked_order)].sort()) !== JSON.stringify([...receipt.candidate_order].sort())) throw new Error("multimodal ranking must cover candidates exactly");
+  if (JSON.stringify([...receipt.selected_order, ...receipt.unresolved_order, ...receipt.denied_order].sort()) !== JSON.stringify([...receipt.candidate_order].sort())) throw new Error("multimodal state partition is incomplete");
+  if (receipt.selected_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.unresolved_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.denied_order.some((value) => !receipt.candidate_order.includes(value))) throw new Error("multimodal state is not covered by candidates");
+  for (const value of [receipt.comparability_digest, receipt.evidence_digest, receipt.provenance_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("multimodal digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-multimodal-evidence:") && effect !== "block:unsafe-release")) throw new Error("multimodal effect is outside local-read gate");
+  if (receipt.disposition === "blocked" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("blocked multimodal surveillance must be explicitly blocked");
+}
+
+export function adapterMultimodalEvidenceSurveillanceInferenceEngineReceiptDigest(receipt: AdapterMultimodalEvidenceSurveillanceInferenceEngineReceipt): string { validateAdapterMultimodalEvidenceSurveillanceInferenceEngineReceipt(receipt); return digestJsonSync(receipt); }
