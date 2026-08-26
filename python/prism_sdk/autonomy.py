@@ -20317,6 +20317,27 @@ class AutonomousAgent:
             completed_stages=completed_stages,
         )
 
+    def domain_operating_kit(self, domain: str) -> Any:
+        """Return one complete provider-free operating contract for a built-in domain."""
+
+        from .autonomous_domain_operating_kit import build_autonomous_domain_operating_kit
+
+        return build_autonomous_domain_operating_kit(domain)
+
+    def domain_operating_kits(self, domains: Sequence[str] | None = None) -> tuple[Any, ...]:
+        """Return deterministic operating contracts for the requested built-in domains."""
+
+        from .autonomous_domain_operating_kit import build_autonomous_domain_operating_kits
+
+        return build_autonomous_domain_operating_kits(domains)
+
+    def validate_domain_operating_kit(self, value: Mapping[str, Any] | Any) -> Any:
+        """Rebuild and validate a caller-held operating contract against current metadata."""
+
+        from .autonomous_domain_operating_kit import validate_autonomous_domain_operating_kit
+
+        return validate_autonomous_domain_operating_kit(value)
+
     def launch_preflight(
         self,
         *,

@@ -77,6 +77,12 @@ import {
   type AutonomousDomainAuditReport,
 } from "./autonomous-domain-audit.js";
 import {
+  buildAutonomousDomainOperatingKit,
+  buildAutonomousDomainOperatingKits,
+  validateAutonomousDomainOperatingKit,
+  type AutonomousDomainOperatingKit,
+} from "./autonomous-domain-operating-kit.js";
+import {
   auditAutonomousBrainLaunchPreflight,
   type AutonomousLaunchPreflightOptions,
   type AutonomousLaunchPreflightReport,
@@ -1503,6 +1509,24 @@ export class AutonomousBrainFacade {
    */
   async domainAudit(options: AutonomousDomainAuditOptions = {}): Promise<AutonomousDomainAuditReport> {
     return auditAutonomousDomainContracts(options);
+  }
+
+  /**
+   * Return one digest-bound, provider-free operating contract for a reviewed domain.
+   * This is a consistency/readiness projection and never authorizes dispatch.
+   */
+  async domainOperatingKit(domain: AutonomousDomainName): Promise<AutonomousDomainOperatingKit> {
+    return buildAutonomousDomainOperatingKit(domain);
+  }
+
+  /** Return operating contracts for all requested domains in deterministic order. */
+  async domainOperatingKits(domains?: readonly AutonomousDomainName[]): Promise<readonly AutonomousDomainOperatingKit[]> {
+    return buildAutonomousDomainOperatingKits(domains);
+  }
+
+  /** Rebuild and validate a caller-held operating contract against current reviewed metadata. */
+  async validateDomainOperatingKit(value: unknown): Promise<AutonomousDomainOperatingKit> {
+    return validateAutonomousDomainOperatingKit(value);
   }
 
   /**

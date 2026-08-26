@@ -104,6 +104,41 @@ bounded proposal to be produced; the subsequent execution re-checks the caller's
 acceptance and effect posture. This prevents a planner call from becoming an unreviewed escape
 hatch around the execution policy.
 
+## Domain operating kits
+
+The SDK also exposes a digest-bound operating kit for every built-in domain. A kit composes the
+reviewed profile and workflow with its policy, task lens, structured response contract, prompt
+registry coverage, evaluator profile, evidence outputs, and stage-compatible tool bindings. This
+gives an application one stable, inspectable contract to use for onboarding screens, deployment
+preflight, queue admission, and restart checks instead of separately guessing whether those
+surfaces agree.
+
+```typescript
+const kits = await buildAutonomousDomainOperatingKits();
+const operations = kits.find((kit) => kit.domain === "operations");
+// operations.status === "complete"
+// operations.coverage.tool_bindings === true
+// operations.stages includes approval and rollback metadata
+await validateAutonomousDomainOperatingKit(operations);
+```
+
+Python provides `build_autonomous_domain_operating_kits()`,
+`build_autonomous_domain_operating_kit(domain)`, and
+`validate_autonomous_domain_operating_kit(...)`, plus matching methods on `AutonomousAgent` and
+`AutonomousBrain`. The collection is deterministic and currently covers coding, browser, data,
+science, biomedical, neuroscience, operations, enterprise, multi-agent, multimodal,
+cross-domain, and evaluation. Every stage carries a prompt-manifest selection, evidence labels,
+evaluator signals, approval/read-only posture, compatible reviewed tool names, and its own digest;
+the kit carries a digest over the complete composition. Validation rebuilds the current reviewed
+composition and rejects stale or tampered metadata before it can be used as a handoff.
+
+Operating kits remain metadata-only. They do not render prompts, resolve credentials, call a
+provider, acquire evidence, execute a tool, update a bandit, or authorize an effect. The kit's
+`next_actions` explicitly directs the caller to perform the ordinary route, model-selection,
+evidence, approval, provider, evaluator, and learning gates. A complete kit therefore means the
+domain architecture is internally wired; it does not mean a deployment has configured a model or
+approved a live action.
+
 Semantic provider routing is covered by the same boundary. `route_with_provider`,
 `prepare_auto_with_provider`, and Python `run_auto(..., semantic_routing=True)` perform a
 provider-free cross-domain admission before model selection or classifier invocation. A strict

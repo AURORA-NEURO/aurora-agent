@@ -1442,6 +1442,26 @@ export type {
   AutonomousDomainResponseEvaluation,
 } from "./autonomous-domain-response.js";
 export {
+  AUTONOMOUS_DOMAIN_OPERATING_KIT_SCHEMA,
+  AUTONOMOUS_DOMAIN_OPERATING_KIT_STAGE_SCHEMA,
+  AUTONOMOUS_DOMAIN_OPERATING_KIT_VERSION,
+  MAX_AUTONOMOUS_DOMAIN_OPERATING_KITS,
+  MAX_AUTONOMOUS_DOMAIN_OPERATING_KIT_STAGES,
+  MAX_AUTONOMOUS_DOMAIN_OPERATING_KIT_CAPABILITIES,
+  MAX_AUTONOMOUS_DOMAIN_OPERATING_KIT_TOOLS,
+  buildAutonomousDomainOperatingKit,
+  buildAutonomousDomainOperatingKits,
+  autonomousDomainOperatingKit,
+  validateAutonomousDomainOperatingKit,
+} from "./autonomous-domain-operating-kit.js";
+export type {
+  AutonomousDomainOperatingKitStatus,
+  AutonomousDomainOperatingKitCoverage,
+  AutonomousDomainOperatingKitCapability,
+  AutonomousDomainOperatingKitStage,
+  AutonomousDomainOperatingKit,
+} from "./autonomous-domain-operating-kit.js";
+export {
   AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_EVALUATION_SCHEMA,
   AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_EVALUATOR_VERSION,
   AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_STATUSES,
