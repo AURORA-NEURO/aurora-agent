@@ -247,14 +247,19 @@ impl InteractiveInterpretation {
                     | GatewayDisposition::Incompatible
                     | GatewayDisposition::Unknown
             )
-            || !matches!(self.verdict.as_str(), "qualified" | "conditional" | "unknown" | "blocked")
+            || !matches!(
+                self.verdict.as_str(),
+                "qualified" | "conditional" | "unknown" | "blocked"
+            )
             || self.peer_order.is_empty()
             || self.claim_order.is_empty()
             || self.interpretation_order.is_empty()
             || self.checks.is_empty()
             || self.effect_receipts.is_empty()
         {
-            return Err(invalid("identity, peers, claims, checks, locality, verdict, or effects are incomplete"));
+            return Err(invalid(
+                "identity, peers, claims, checks, locality, verdict, or effects are incomplete",
+            ));
         }
         if !canonical(&self.peer_order)
             || !canonical(&self.accepted_peer_order)
@@ -272,8 +277,14 @@ impl InteractiveInterpretation {
         {
             return Err(invalid("federated interpretation output is not canonical"));
         }
-        if self.accepted_peer_order.iter().any(|id| !self.peer_order.contains(id))
-            || self.interpretation_order.windows(2).any(|pair| pair[0].claim_id >= pair[1].claim_id)
+        if self
+            .accepted_peer_order
+            .iter()
+            .any(|id| !self.peer_order.contains(id))
+            || self
+                .interpretation_order
+                .windows(2)
+                .any(|pair| pair[0].claim_id >= pair[1].claim_id)
             || self.interpretation_order.iter().any(|view| {
                 view.claim_id.trim().is_empty()
                     || view.modality.trim().is_empty()
@@ -282,7 +293,9 @@ impl InteractiveInterpretation {
                     || !canonical(&view.negative_evidence)
             })
         {
-            return Err(invalid("interpretation ordering or claim references are invalid"));
+            return Err(invalid(
+                "interpretation ordering or claim references are invalid",
+            ));
         }
         for observation in &self.influence_order {
             if observation.factor_id.trim().is_empty()
@@ -296,7 +309,9 @@ impl InteractiveInterpretation {
                         .collect::<Vec<_>>(),
                 )
             {
-                return Err(invalid("influence observation is incomplete or not canonical"));
+                return Err(invalid(
+                    "influence observation is incomplete or not canonical",
+                ));
             }
             if let Some(bound) = observation.bound {
                 if !bound.is_finite() || !(0.0..=1.0).contains(&bound) {
@@ -318,10 +333,19 @@ impl InteractiveInterpretation {
             && self.disposition != GatewayDisposition::Accepted
             && self.disposition != GatewayDisposition::Migrated
         {
-            return Err(invalid("only accepted or migrated integrations can be qualified"));
+            return Err(invalid(
+                "only accepted or migrated integrations can be qualified",
+            ));
         }
-        if self.verdict != "qualified" && self.effect_receipts.iter().all(|effect| effect == "interpret:qualified") {
-            return Err(invalid("non-qualified interpretation cannot emit a qualified effect"));
+        if self.verdict != "qualified"
+            && self
+                .effect_receipts
+                .iter()
+                .all(|effect| effect == "interpret:qualified")
+        {
+            return Err(invalid(
+                "non-qualified interpretation cannot emit a qualified effect",
+            ));
         }
         self.artifact
             .validate_metadata()
@@ -407,14 +431,21 @@ pub fn federated_continual_interpretation_manifest() -> CapabilityManifest {
     }
 }
 
-fn build_region(request: &EvidenceBackedResult4) -> Result<QueryRegion, FederatedInterpretationError> {
-    let mut builder = QueryRegion::builder(format!("federated-interpretation:{}", request.result_id));
+fn build_region(
+    request: &EvidenceBackedResult4,
+) -> Result<QueryRegion, FederatedInterpretationError> {
+    let mut builder =
+        QueryRegion::builder(format!("federated-interpretation:{}", request.result_id));
     for variable in &request.variables {
         builder = builder.variable(variable.name.clone(), variable.cardinality);
     }
     for factor in &request.factors {
         let region_factor = match &factor.table {
-            Some(table) => RegionFactor::with_table(factor.factor_id.clone(), factor.scope.clone(), table.clone()),
+            Some(table) => RegionFactor::with_table(
+                factor.factor_id.clone(),
+                factor.scope.clone(),
+                table.clone(),
+            ),
             None => RegionFactor::structural(factor.factor_id.clone(), factor.scope.clone()),
         };
         builder = builder.factor(region_factor);
@@ -445,7 +476,10 @@ fn validate_request(request: &EvidenceBackedResult4) -> Result<(), FederatedInte
         || request.free_variables.is_empty()
         || request.claims.is_empty()
         || request.evidence_digests.is_empty()
-        || !matches!(request.perturbation_class.as_str(), "removal" | "multiplicative_range")
+        || !matches!(
+            request.perturbation_class.as_str(),
+            "removal" | "multiplicative_range"
+        )
         || request.perturbation_class == "multiplicative_range"
             && request.relative_tolerance.is_none()
         || !request.raw_data_local
@@ -455,7 +489,9 @@ fn validate_request(request: &EvidenceBackedResult4) -> Result<(), FederatedInte
         return Err(invalid("identity, scope, contract, quorum, region, evidence, perturbation, locality, replay, or boundary is invalid"));
     }
     if request.target_contract_version != TARGET_CONTRACT_VERSION {
-        return Err(invalid("target contract version is outside the pinned gateway window"));
+        return Err(invalid(
+            "target contract version is outside the pinned gateway window",
+        ));
     }
     if let Some(tolerance) = request.relative_tolerance {
         if !tolerance.is_finite() || !(0.0..1.0).contains(&tolerance) {
@@ -466,12 +502,19 @@ fn validate_request(request: &EvidenceBackedResult4) -> Result<(), FederatedInte
         || !canonical(&request.required_modalities)
         || !canonical(&request.free_variables)
     {
-        return Err(invalid("required capabilities, modalities, and free variables must be canonical"));
+        return Err(invalid(
+            "required capabilities, modalities, and free variables must be canonical",
+        ));
     }
     let mut variable_ids = BTreeSet::new();
     for variable in &request.variables {
-        if variable.name.trim().is_empty() || variable.cardinality == 0 || !variable_ids.insert(variable.name.clone()) {
-            return Err(invalid("variables must have unique non-empty names and positive cardinalities"));
+        if variable.name.trim().is_empty()
+            || variable.cardinality == 0
+            || !variable_ids.insert(variable.name.clone())
+        {
+            return Err(invalid(
+                "variables must have unique non-empty names and positive cardinalities",
+            ));
         }
     }
     let evidence = request.evidence_digests.iter().collect::<BTreeSet<_>>();
@@ -489,15 +532,23 @@ fn validate_request(request: &EvidenceBackedResult4) -> Result<(), FederatedInte
             || factor.scope.iter().any(|name| !variable_ids.contains(name))
             || !evidence.contains(&factor.evidence_digest)
         {
-            return Err(invalid("factors must have unique typed scopes and evidence coverage"));
+            return Err(invalid(
+                "factors must have unique typed scopes and evidence coverage",
+            ));
         }
         if let Some(table) = &factor.table {
             if table.iter().any(|value| !value.is_finite() || *value < 0.0) {
-                return Err(invalid("factor tables must contain finite non-negative values"));
+                return Err(invalid(
+                    "factor tables must contain finite non-negative values",
+                ));
             }
         }
     }
-    if request.free_variables.iter().any(|name| !variable_ids.contains(name)) {
+    if request
+        .free_variables
+        .iter()
+        .any(|name| !variable_ids.contains(name))
+    {
         return Err(invalid("free variables must be declared variables"));
     }
     let mut claim_ids = BTreeSet::new();
@@ -508,9 +559,14 @@ fn validate_request(request: &EvidenceBackedResult4) -> Result<(), FederatedInte
             || claim.uncertainty.trim().is_empty()
             || claim.supporting_evidence.is_empty()
             || !claim_ids.insert(claim.claim_id.clone())
-            || claim.supporting_evidence.iter().any(|value| !evidence.contains(value))
+            || claim
+                .supporting_evidence
+                .iter()
+                .any(|value| !evidence.contains(value))
         {
-            return Err(invalid("claims must be unique, typed, uncertain, and evidence-backed"));
+            return Err(invalid(
+                "claims must be unique, typed, uncertain, and evidence-backed",
+            ));
         }
     }
     let mut peer_ids = BTreeSet::new();
@@ -522,27 +578,49 @@ fn validate_request(request: &EvidenceBackedResult4) -> Result<(), FederatedInte
             || !peer.raw_data_local
             || peer.boundary != PRECLINICAL_BOUNDARY
             || !peer_ids.insert(peer.endpoint_id.clone())
-            || peer.capabilities.iter().any(|value| value.trim().is_empty())
+            || peer
+                .capabilities
+                .iter()
+                .any(|value| value.trim().is_empty())
         {
-            return Err(invalid("peer capability envelopes are incomplete, duplicated, or outside the boundary"));
+            return Err(invalid(
+                "peer capability envelopes are incomplete, duplicated, or outside the boundary",
+            ));
         }
     }
     Ok(())
 }
 
-fn selected_perturbation(request: &EvidenceBackedResult4) -> Result<Perturbation, FederatedInterpretationError> {
+fn selected_perturbation(
+    request: &EvidenceBackedResult4,
+) -> Result<Perturbation, FederatedInterpretationError> {
     match request.perturbation_class.as_str() {
         "removal" => Ok(Perturbation::Removal),
-        "multiplicative_range" => Perturbation::relative_tolerance(request.relative_tolerance.unwrap_or(0.0))
-            .map_err(|error| FederatedInterpretationError::Influence(error.to_string())),
+        "multiplicative_range" => {
+            Perturbation::relative_tolerance(request.relative_tolerance.unwrap_or(0.0))
+                .map_err(|error| FederatedInterpretationError::Influence(error.to_string()))
+        }
         _ => Err(invalid("unsupported perturbation class")),
     }
 }
 
-fn peer_negotiation(request: &EvidenceBackedResult4) -> (Vec<String>, Vec<String>, Vec<String>, GatewayDisposition, Vec<SemanticLoss>, Vec<String>, Vec<String>) {
+fn peer_negotiation(
+    request: &EvidenceBackedResult4,
+) -> (
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+    GatewayDisposition,
+    Vec<SemanticLoss>,
+    Vec<String>,
+    Vec<String>,
+) {
     let mut peers = request.peer_capabilities.clone();
     peers.sort_by(|left, right| left.endpoint_id.cmp(&right.endpoint_id));
-    let peer_order = peers.iter().map(|peer| peer.endpoint_id.clone()).collect::<Vec<_>>();
+    let peer_order = peers
+        .iter()
+        .map(|peer| peer.endpoint_id.clone())
+        .collect::<Vec<_>>();
     let mut accepted = Vec::new();
     let mut capabilities = BTreeSet::new();
     let mut omissions = Vec::new();
@@ -552,8 +630,14 @@ fn peer_negotiation(request: &EvidenceBackedResult4) -> (Vec<String>, Vec<String
     for peer in peers {
         let version_ok = peer.contract_version == TARGET_CONTRACT_VERSION;
         let version_migrated = peer.contract_version == COMPATIBLE_CONTRACT_VERSION
-            && peer.supported_contract_versions.iter().any(|version| version == TARGET_CONTRACT_VERSION);
-        let capability_ok = request.required_capabilities.iter().all(|required| peer.capabilities.contains(required));
+            && peer
+                .supported_contract_versions
+                .iter()
+                .any(|version| version == TARGET_CONTRACT_VERSION);
+        let capability_ok = request
+            .required_capabilities
+            .iter()
+            .all(|required| peer.capabilities.contains(required));
         if !version_ok && !version_migrated {
             omissions.push(format!("{}:incompatible-contract", peer.endpoint_id));
             continue;
@@ -563,7 +647,10 @@ fn peer_negotiation(request: &EvidenceBackedResult4) -> (Vec<String>, Vec<String
             continue;
         }
         if !peer.healthy || !peer.signed_capability {
-            uncertainty.push(format!("{}:peer-health-or-signature-unresolved", peer.endpoint_id));
+            uncertainty.push(format!(
+                "{}:peer-health-or-signature-unresolved",
+                peer.endpoint_id
+            ));
             continue;
         }
         if !capability_ok {
@@ -583,7 +670,11 @@ fn peer_negotiation(request: &EvidenceBackedResult4) -> (Vec<String>, Vec<String
     }
     accepted.sort();
     let mut disposition = if accepted.len() < request.quorum {
-        uncertainty.push(format!("peer quorum not met: {} of {} required", accepted.len(), request.quorum));
+        uncertainty.push(format!(
+            "peer quorum not met: {} of {} required",
+            accepted.len(),
+            request.quorum
+        ));
         GatewayDisposition::Unknown
     } else if migrated {
         GatewayDisposition::Migrated
@@ -597,7 +688,15 @@ fn peer_negotiation(request: &EvidenceBackedResult4) -> (Vec<String>, Vec<String
         uncertainty.push("protected closure or signed A2 approval is incomplete".into());
         disposition = GatewayDisposition::ApprovalRequired;
     }
-    (peer_order, accepted, capabilities.into_iter().collect(), disposition, losses, omissions, uncertainty)
+    (
+        peer_order,
+        accepted,
+        capabilities.into_iter().collect(),
+        disposition,
+        losses,
+        omissions,
+        uncertainty,
+    )
 }
 
 pub fn run_federated_continual_interpretation(
@@ -606,7 +705,15 @@ pub fn run_federated_continual_interpretation(
     validate_request(request)?;
     let perturbation = selected_perturbation(request)?;
     let region = build_region(request)?;
-    let (peer_order, accepted_peer_order, capability_order, mut disposition, mut semantic_loss, mut omissions, mut uncertainty) = peer_negotiation(request);
+    let (
+        peer_order,
+        accepted_peer_order,
+        capability_order,
+        mut disposition,
+        mut semantic_loss,
+        mut omissions,
+        mut uncertainty,
+    ) = peer_negotiation(request);
     let mut factors = request.factors.clone();
     factors.sort_by(|left, right| left.factor_id.cmp(&right.factor_id));
     let analyzer = InfluenceAnalyzer::default();
@@ -618,14 +725,21 @@ pub fn run_federated_continual_interpretation(
             .analyse_factor(&region, &factor.factor_id, &perturbation)
             .map_err(|error| FederatedInterpretationError::Influence(error.to_string()))?;
         let (estimate, bound, selected_method) = match &analysis.estimate {
-            InfluenceEstimate::Bounded(value) => ("bounded".into(), Some(value.value()), Some(value.method().as_str().into())),
+            InfluenceEstimate::Bounded(value) => (
+                "bounded".into(),
+                Some(value.value()),
+                Some(value.method().as_str().into()),
+            ),
             InfluenceEstimate::Unknown(reason) => {
                 all_bounded = false;
                 uncertainty.push(format!("{}:influence-unknown:{reason}", factor.factor_id));
                 ("unknown".into(), None, None)
             }
         };
-        if !matches!(factor.evidence_state, EvidenceState::Proven | EvidenceState::Supported) {
+        if !matches!(
+            factor.evidence_state,
+            EvidenceState::Proven | EvidenceState::Supported
+        ) {
             all_bounded = false;
             uncertainty.push(format!("{}:evidence-state-not-supported", factor.factor_id));
         }
@@ -656,7 +770,11 @@ pub fn run_federated_continual_interpretation(
         });
     }
     influence_order.sort_by(|left, right| left.factor_id.cmp(&right.factor_id));
-    let covered_modalities = request.claims.iter().map(|claim| claim.modality.clone()).collect::<BTreeSet<_>>();
+    let covered_modalities = request
+        .claims
+        .iter()
+        .map(|claim| claim.modality.clone())
+        .collect::<BTreeSet<_>>();
     let mut required_modalities = request.required_modalities.clone();
     required_modalities.sort();
     required_modalities.dedup();
@@ -666,18 +784,29 @@ pub fn run_federated_continual_interpretation(
         .cloned()
         .collect::<Vec<_>>();
     if !omitted_modalities.is_empty() {
-        omissions.extend(omitted_modalities.iter().map(|modality| format!("required modality unavailable: {modality}")));
+        omissions.extend(
+            omitted_modalities
+                .iter()
+                .map(|modality| format!("required modality unavailable: {modality}")),
+        );
         semantic_loss.push(SemanticLoss {
             field: "required_modalities".into(),
-            reason: "interactive interpretation cannot claim a view that no local claim covers".into(),
+            reason: "interactive interpretation cannot claim a view that no local claim covers"
+                .into(),
             severity: LossSeverity::DecisionRelevant,
         });
         all_bounded = false;
     }
     let mut claims = request.claims.clone();
     claims.sort_by(|left, right| left.claim_id.cmp(&right.claim_id));
-    let claim_order = claims.iter().map(|claim| claim.claim_id.clone()).collect::<Vec<_>>();
-    let all_factors = influence_order.iter().map(|entry| entry.factor_id.clone()).collect::<Vec<_>>();
+    let claim_order = claims
+        .iter()
+        .map(|claim| claim.claim_id.clone())
+        .collect::<Vec<_>>();
+    let all_factors = influence_order
+        .iter()
+        .map(|entry| entry.factor_id.clone())
+        .collect::<Vec<_>>();
     let interpretation_order = claims
         .iter()
         .map(|claim| InterpretationView {
@@ -695,14 +824,16 @@ pub fn run_federated_continual_interpretation(
         })
         .collect::<Vec<_>>();
     if request.previous_receipt.is_none() {
-        uncertainty.push("continual chain has no previous receipt; this is an initial epoch".into());
+        uncertainty
+            .push("continual chain has no previous receipt; this is an initial epoch".into());
     }
     let mut counterexamples = Vec::new();
     if accepted_peer_order.len() < request.quorum {
         counterexamples.push("peer quorum not met".into());
     }
     if !all_bounded {
-        counterexamples.push("one or more required influence or evidence gates are unresolved".into());
+        counterexamples
+            .push("one or more required influence or evidence gates are unresolved".into());
     }
     if disposition == GatewayDisposition::Accepted || disposition == GatewayDisposition::Migrated {
         if !all_bounded || !omitted_modalities.is_empty() {
@@ -731,9 +862,16 @@ pub fn run_federated_continual_interpretation(
         "digest-only federation and continual replay identity".into(),
     ];
     checks.sort();
-    let passed_checks = if verdict == "qualified" { checks.clone() } else { Vec::new() };
+    let passed_checks = if verdict == "qualified" {
+        checks.clone()
+    } else {
+        Vec::new()
+    };
     let effect_receipts = if verdict == "qualified" {
-        vec!["exchange:permitted-artifact-digests-only".into(), "interpret:qualified".into()]
+        vec![
+            "exchange:permitted-artifact-digests-only".into(),
+            "interpret:qualified".into(),
+        ]
     } else if disposition == GatewayDisposition::ApprovalRequired {
         vec!["approval-required:protected-closure-or-signed-authority".into()]
     } else if disposition == GatewayDisposition::Blocked {
@@ -785,7 +923,10 @@ pub fn run_federated_continual_interpretation(
     let interpretation_digest = ContentHash::of_value(&interpretation_payload)
         .map_err(|error| FederatedInterpretationError::Serialization(error.to_string()))?;
     let artifact = TypedResearchArtifact::from_payload(
-        format!("interactive-interpretation:{}:{}", request.federation_id, request.epoch),
+        format!(
+            "interactive-interpretation:{}:{}",
+            request.federation_id, request.epoch
+        ),
         "application/vnd.aurora.interactive-interpretation+json",
         &interpretation_payload,
         semantic_loss.clone(),
@@ -871,7 +1012,10 @@ mod tests {
             }],
             evidence_digests: vec![evidence.clone()],
             required_modalities: vec!["imaging".into()],
-            variables: vec![InterpretationVariable { name: "signal".into(), cardinality: 2 }],
+            variables: vec![InterpretationVariable {
+                name: "signal".into(),
+                cardinality: 2,
+            }],
             factors: vec![InterpretationFactor {
                 factor_id: "factor:signal".into(),
                 scope: vec!["signal".into()],
