@@ -427,6 +427,11 @@ use bioprism_foundation::{
     MechanismExplorationAssuranceRequest, PolicyReceipt,
     FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
 };
+use bioprism_influence::{
+    run_federated_continual_interpretation, EvidenceBackedResult4,
+    FederatedInterpretationError, InteractiveInterpretation,
+    FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
+};
 use bioprism_governance::{
     compile_signed_research_object, SignedResearchObject, ValidatedResearchRun,
     RESEARCH_RELEASE_CONTRACT_FEATURE_ID,
@@ -1730,6 +1735,27 @@ pub fn validate_foundation_mechanism_exploration_assurance_json(value: &Value) -
     let receipt: MechanismExplorationAssuranceReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid foundation mechanism assurance receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID { return Err("foundation mechanism assurance feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub fn run_federated_continual_interpretation_json(value: &Value) -> Result<Value, String> {
+    let request: EvidenceBackedResult4 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated continual interpretation request: {error}"))?;
+    let receipt = run_federated_continual_interpretation(&request)
+        .map_err(|error: FederatedInterpretationError| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize federated continual interpretation receipt: {error}"))
+}
+
+pub fn validate_federated_continual_interpretation_json(
+    value: &Value,
+) -> Result<InteractiveInterpretation, String> {
+    let receipt: InteractiveInterpretation = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated continual interpretation receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID {
+        return Err("federated continual interpretation feature id mismatch".into());
+    }
     Ok(receipt)
 }
 

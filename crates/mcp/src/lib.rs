@@ -90,6 +90,8 @@ pub use research_contracts::{
     validate_federated_continual_retrieval_synthesis_federated_control_plane_json,
     run_foundation_mechanism_exploration_assurance_json,
     validate_foundation_mechanism_exploration_assurance_json,
+    run_federated_continual_interpretation_json,
+    validate_federated_continual_interpretation_json,
     run_local_retrieval_synthesis_research_copilot_json,
     validate_local_retrieval_synthesis_research_copilot_json,
     run_multimodal_retrieval_synthesis_research_copilot_json,

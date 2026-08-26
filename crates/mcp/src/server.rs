@@ -1951,6 +1951,9 @@ impl Server {
             "foundation_mechanism_exploration_assurance" => {
                 self.foundation_mechanism_exploration_assurance(&arguments)
             },
+            "influence_federated_continual_interpretation" => {
+                self.influence_federated_continual_interpretation(&arguments)
+            },
             "adapter_multimodal_retrieval_synthesis_inference_engine" => {
                 self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
             },
@@ -25455,6 +25458,30 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_foundation::FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance evaluates prospective high-throughput mechanism candidates against typed evidence, provenance, artifact, comparability, baseline, replay, policy, approval, protected-closure, and capacity gates", "unknown, speculative, contradicted, below-threshold, omitted, negative, and required-but-not-admitted candidates remain explicit", "non-qualified portfolios fail closed with block:unsafe-release and raw preclinical data remains local"], "limitations": ["the assurance harness is not a clinical decision system", "operators remain responsible for independent replication, causal interpretation, baseline selection, and release governance"]}))
     }
 
+    fn influence_federated_continual_interpretation(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be an EvidenceBackedResult4")?;
+        let receipt = crate::research_contracts::run_federated_continual_interpretation_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_influence::FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "sound dynamic-range, contraction, abstract-interpretation, and exact-removal methods remain visible per factor",
+                "federated peers are version-negotiated by signed capability and quorum while raw factor tables remain institution-local",
+                "unknown influence, protected omissions, contradictory or negative evidence, migration loss, and approval requirements remain explicit",
+                "continual epochs bind replay and content-addressed interactive interpretation artifacts"
+            ],
+            "limitations": [
+                "the gateway computes caller-supplied local regions and does not fetch remote data or render a browser UI",
+                "a qualified influence view is not a biological, clinical, treatment, or causal decision",
+                "independent replication, institutional authorization, and external transport conformance remain required"
+            ]
+        }))
+    }
+
     fn adapter_multimodal_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(request)?;
@@ -40586,6 +40613,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "foundation_mechanism_exploration_assurance",
             "description": "Assure a prospective high-throughput mechanism-exploration candidate batch with typed evidence/provenance/comparability, baseline, replay, capacity, policy, approval, protected-closure, negative-result, and fail-closed release gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MechanismExplorationAssuranceRequest with candidate evidence digests, baseline/algorithm identity, support threshold, bounded capacity, required mechanisms, policy/approval/closure/locality controls, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "influence_federated_continual_interpretation",
+            "description": "Run an A2 federated continual interpretation and visualization interoperability gateway over an institution-local typed region. Negotiate signed peer capabilities and quorum, compute sound influence bounds, retain unknown/negative/omitted evidence, and emit digest-only replayable InteractiveInterpretation6 receipts.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized EvidenceBackedResult4 with local variables/factors/claims, pinned contract and required capabilities, peer capability envelopes, continual epoch, perturbation class, policy/protected-closure/signed approval, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "adapter_multimodal_retrieval_synthesis_inference_engine",

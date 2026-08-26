@@ -139,6 +139,7 @@ pub mod domain;
 pub mod domains;
 pub mod error;
 pub mod exact;
+pub mod federated_continual_interpretation_gateway;
 pub mod gibbs;
 pub mod interpret;
 pub mod manifest;
@@ -176,6 +177,16 @@ pub use bruteforce::{maximum_influence, BruteForceResult, MAX_PERTURBATION_VERTI
 pub use contraction::{dobrushin_coefficients, ChainStructure};
 pub use error::{InfluenceError, UnknownReason};
 pub use exact::{exact_group_removal_influence, exact_removal_influence};
+pub use federated_continual_interpretation_gateway::{
+    federated_continual_interpretation_manifest, run_federated_continual_interpretation,
+    EvidenceBackedResult4, FederatedInterpretationError, GatewayDisposition,
+    InfluenceObservation, InterpretationClaim, InterpretationFactor, InterpretationVariable,
+    InteractiveInterpretation, MethodObservation, PeerCapability, InterpretationView,
+    CONTRACT_VERSION as FEDERATED_CONTINUAL_INTERPRETATION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_CONTINUAL_INTERPRETATION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_CONTINUAL_INTERPRETATION_OUTPUT_SCHEMA,
+};
 pub use manifest::{omission_group, omission_group_from_analysis, summarise, BoundedSummary};
 pub use measure::{total_variation, AnswerDistribution};
 pub use perturbation::Perturbation;

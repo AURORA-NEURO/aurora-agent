@@ -6840,6 +6840,10 @@ from .foundation_mechanism_exploration_assurance_harness import (
     MechanismExplorationAssuranceReceipt,
     assure_mechanism_exploration,
 )
+from .influence_federated_continual_interpretation_gateway import (
+    InteractiveInterpretationReceipt,
+    run_federated_continual_interpretation,
+)
 from .adapter_multimodal_retrieval_synthesis_inference_engine import (
     MultimodalRetrievalSynthesisCandidate,
     MultimodalRetrievalSynthesisInferenceEngineReceipt,
@@ -6943,6 +6947,8 @@ __all__ += [
     "run_federated_retrieval_synthesis_inference_engine",
     "FederatedRetrievalSynthesisContractModelReceipt",
     "run_federated_retrieval_synthesis_contract_model",
+    "InteractiveInterpretationReceipt",
+    "run_federated_continual_interpretation",
 ]
 
 from .adapter_multimodal_evidence_surveillance_research_copilot import (
