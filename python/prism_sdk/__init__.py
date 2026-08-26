@@ -501,6 +501,7 @@ from .brain_context_protocol import ContextProtocolCandidate, ContextProtocolRec
 from .brain_multimodal_context_protocol import MultimodalContextProtocolCell, MultimodalContextProtocolReceipt, serve_multimodal_context_protocol
 from .brain_throughput_context_protocol import ThroughputContextProtocolJob, ThroughputContextProtocolReceipt, serve_throughput_context_protocol
 from .brain_federated_context_protocol import FederatedContextProtocolPeer, FederatedContextProtocolReceipt, serve_federated_context_protocol
+from .brain_context_compilation_assurance import ContextAssuranceCandidate, ContextCompilationAssuranceReceipt, assure_context_compilation
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
