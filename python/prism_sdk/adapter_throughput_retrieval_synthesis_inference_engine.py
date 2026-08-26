@@ -1,0 +1,251 @@
+"""Python parity surface for AFA-adapter-P02-F03.
+
+The engine is deliberately local and deterministic.  It ranks typed candidate
+metadata for prospective high-throughput preclinical research, never moves raw source payloads, and emits
+an auditable partition of selected and omitted evidence.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import re
+from typing import Any, Sequence
+
+from .research_contracts import (
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+    PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
+    ResearchContractError,
+    research_artifact_digest,
+)
+
+FEATURE_ID = ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID
+CONTRACT_VERSION = ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION
+INPUT_SCHEMA = "ScopedRetrievalQuery@1"
+OUTPUT_SCHEMA = "EvidenceSynthesis1@1"
+
+
+@dataclass(frozen=True)
+class ThroughputRetrievalSynthesisCandidate:
+    evidence_id: str
+    study_id: str
+    modality: str
+    comparability_profile: str
+    digest: str | None
+    availability: str = "available"
+    relevance_score: int = 0
+    negative_result: bool = False
+    locator: str = "local://evidence"
+
+
+@dataclass(frozen=True)
+class ThroughputRetrievalSynthesisInferenceEngineReceipt:
+    request_id: str
+    query_id: str
+    engine_id: str
+    algorithm_version: str
+    requested_output: str
+    batch_id: str
+    checkpoint_seq: int
+    capacity: int
+    disposition: str
+    candidate_order: tuple[str, ...]
+    selected_order: tuple[str, ...]
+    omitted_order: tuple[str, ...]
+    uncertainty_order: tuple[str, ...]
+    negative_order: tuple[str, ...]
+    contradictory_order: tuple[str, ...]
+    overflow_order: tuple[str, ...]
+    replay_identity: str
+    synthesis_digest: str
+    engine_digest: str
+    effect_receipts: tuple[str, ...]
+    artifact: dict[str, Any]
+    schema_version: str = RESEARCH_CONTRACT_SCHEMA_VERSION
+    contract_version: str = CONTRACT_VERSION
+    feature_id: str = FEATURE_ID
+    raw_data_local: bool = True
+    boundary: str = PRECLINICAL_BOUNDARY
+
+    def validate(self) -> None:
+        if (
+            self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            or self.contract_version != CONTRACT_VERSION
+            or self.feature_id != FEATURE_ID
+            or self.boundary != PRECLINICAL_BOUNDARY
+            or not self.raw_data_local
+            or not self.request_id.strip()
+            or not self.query_id.strip()
+            or not self.engine_id.strip()
+            or not self.algorithm_version.strip()
+            or self.requested_output != OUTPUT_SCHEMA
+            or not self.batch_id.strip()
+            or self.checkpoint_seq <= 0
+            or self.capacity <= 0
+            or not self.candidate_order
+            or not self.effect_receipts
+        ):
+            raise ResearchContractError("throughput retrieval engine identity, output, locality, candidates, or effects are incomplete")
+        for values in (
+            self.candidate_order, self.selected_order, self.omitted_order,
+            self.uncertainty_order, self.negative_order,
+            self.contradictory_order, self.overflow_order, self.effect_receipts,
+        ):
+            if tuple(sorted(set(values))) != values:
+                raise ResearchContractError("throughput retrieval engine ordering is not canonical")
+        if set(self.selected_order) | set(self.omitted_order) != set(self.candidate_order):
+            raise ResearchContractError("throughput retrieval engine states do not partition candidates")
+        if any(item not in self.omitted_order for item in self.overflow_order):
+            raise ResearchContractError("throughput overflow must be an omitted candidate subset")
+        for value in (
+            self.replay_identity, self.synthesis_digest, self.engine_digest,
+            self.artifact.get("content_hash"),
+        ):
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                raise ResearchContractError("throughput retrieval engine digest is invalid")
+        if any(
+            not effect.startswith("compute:throughput-retrieval-engine:")
+            and effect != "block:unsafe-release"
+            for effect in self.effect_receipts
+        ):
+            raise ResearchContractError("throughput retrieval engine effect is outside local computation gate")
+
+
+def run_throughput_retrieval_synthesis_inference_engine(
+    *,
+    request_id: str,
+    query_id: str,
+    requester: str,
+    intent: str,
+    study_ids: Sequence[str],
+    required_modalities: Sequence[str],
+    comparability_profile: str,
+    max_results: int,
+    candidates: Sequence[ThroughputRetrievalSynthesisCandidate],
+    engine_id: str,
+    algorithm_version: str,
+    requested_output: str = OUTPUT_SCHEMA,
+    batch_id: str = "batch-1",
+    checkpoint_seq: int = 1,
+    capacity: int = 1,
+    budget_units: int = 1,
+    replay_identity: str,
+    policy_allow: bool = True,
+    protected_closure_satisfied: bool = True,
+    raw_data_local: bool = True,
+    boundary: str = PRECLINICAL_BOUNDARY,
+) -> ThroughputRetrievalSynthesisInferenceEngineReceipt:
+    if (
+        not request_id.strip() or not query_id.strip() or not requester.strip()
+        or not intent.strip() or not study_ids or not required_modalities
+        or not comparability_profile.strip() or max_results <= 0
+        or not candidates or not engine_id.strip() or not algorithm_version.strip()
+        or requested_output != OUTPUT_SCHEMA or budget_units <= 0
+        or boundary != PRECLINICAL_BOUNDARY or not raw_data_local
+        or not batch_id.strip() or checkpoint_seq <= 0 or capacity <= 0
+        or capacity > len(candidates)
+        or not re.fullmatch(r"[0-9a-f]{64}", replay_identity)
+    ):
+        raise ResearchContractError("engine identity, scoped query, budget, locality, replay, or boundary is invalid")
+    if len({item.evidence_id for item in candidates}) != len(candidates):
+        raise ResearchContractError("retrieval candidate identities must be unique")
+    ordered = tuple(sorted(candidates, key=lambda item: (-item.relevance_score, item.evidence_id)))
+    selected: list[ThroughputRetrievalSynthesisCandidate] = []
+    omitted: list[ThroughputRetrievalSynthesisCandidate] = []
+    uncertainty: set[str] = set()
+    negative: set[str] = set()
+    contradictory: set[str] = set()
+    allowed_studies = set(study_ids)
+    required = set(required_modalities)
+    for item in ordered:
+        if (
+            policy_allow and protected_closure_satisfied
+            and item.study_id in allowed_studies
+            and item.comparability_profile == comparability_profile
+            and item.availability == "available"
+            and item.digest is not None
+            and len(selected) < min(max_results, capacity)
+        ):
+            selected.append(item)
+            if item.negative_result:
+                negative.add(item.evidence_id)
+        else:
+            omitted.append(item)
+            if item.availability in {"unknown", "unmeasured", "stale"} or item.digest is None:
+                uncertainty.add(f"evidence:{item.evidence_id}:unresolved")
+            if item.availability == "contradictory":
+                contradictory.add(item.evidence_id)
+            if item.negative_result:
+                negative.add(item.evidence_id)
+    selected_modalities = {item.modality for item in selected}
+    for modality in sorted(required - selected_modalities):
+        uncertainty.add(f"modality:{modality}:required-coverage-missing")
+    if not policy_allow or not protected_closure_satisfied:
+        uncertainty.add("control:policy-or-protected-closure")
+    disposition = (
+        "blocked" if not policy_allow or not protected_closure_satisfied
+        else "unknown" if not selected or omitted or uncertainty
+        else "passed"
+    )
+    candidate_order = tuple(sorted(item.evidence_id for item in ordered))
+    selected_order = tuple(sorted(item.evidence_id for item in selected))
+    omitted_order = tuple(sorted(item.evidence_id for item in omitted))
+    uncertainty_order = tuple(sorted(uncertainty))
+    negative_order = tuple(sorted(negative))
+    contradictory_order = tuple(sorted(contradictory))
+    overflow_order = tuple(sorted(
+        item.evidence_id for item in ordered[capacity:]
+        if item.evidence_id in omitted_order
+    ))
+    synthesis = {
+        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+        "synthesis_id": f"evidence-synthesis:{request_id}", "query_id": query_id,
+        "intent": intent, "comparability_profile": comparability_profile,
+        "selected_evidence_ids": list(selected_order),
+        "selected_modalities": sorted(selected_modalities),
+        "selected_digests": [item.digest for item in sorted(selected, key=lambda item: item.evidence_id)],
+        "evidence_state": "supported" if disposition == "passed" else "unknown",
+        "negative_evidence_ids": list(negative_order),
+        "contradictory_evidence_ids": list(contradictory_order),
+        "omissions": list(omitted_order), "uncertainty": list(uncertainty_order),
+        "boundary": PRECLINICAL_BOUNDARY,
+    }
+    synthesis_digest = research_artifact_digest(synthesis)
+    engine_digest = research_artifact_digest({
+        "engine_id": engine_id, "algorithm_version": algorithm_version,
+        "requested_output": requested_output, "query_id": query_id,
+        "batch_id": batch_id, "checkpoint_seq": checkpoint_seq, "capacity": capacity,
+        "replay_identity": replay_identity, "synthesis_digest": synthesis_digest,
+        "overflow_order": list(overflow_order),
+    })
+    payload = {
+        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID,
+        "request_id": request_id, "query_id": query_id, "engine_id": engine_id,
+        "algorithm_version": algorithm_version, "requested_output": requested_output,
+        "batch_id": batch_id, "checkpoint_seq": checkpoint_seq, "capacity": capacity,
+        "disposition": disposition, "candidate_order": list(candidate_order),
+        "selected_order": list(selected_order), "omitted_order": list(omitted_order),
+        "uncertainty_order": list(uncertainty_order), "negative_order": list(negative_order),
+        "contradictory_order": list(contradictory_order),
+        "overflow_order": list(overflow_order),
+        "replay_identity": replay_identity, "synthesis_digest": synthesis_digest,
+        "engine_digest": engine_digest, "synthesis": synthesis,
+        "raw_data_local": True, "boundary": PRECLINICAL_BOUNDARY,
+    }
+    receipt = ThroughputRetrievalSynthesisInferenceEngineReceipt(
+        request_id=request_id, query_id=query_id, engine_id=engine_id,
+        algorithm_version=algorithm_version, requested_output=requested_output,
+        batch_id=batch_id, checkpoint_seq=checkpoint_seq, capacity=capacity,
+        disposition=disposition, candidate_order=candidate_order,
+        selected_order=selected_order, omitted_order=omitted_order,
+        uncertainty_order=uncertainty_order, negative_order=negative_order,
+        contradictory_order=contradictory_order, overflow_order=overflow_order,
+        replay_identity=replay_identity,
+        synthesis_digest=synthesis_digest, engine_digest=engine_digest,
+        effect_receipts=(f"compute:throughput-retrieval-engine:{engine_id}",),
+        artifact={"content_hash": research_artifact_digest(payload),
+                  "media_type": "application/vnd.aurora.throughput-retrieval-synthesis-engine+json"},
+    )
+    receipt.validate()
+    return receipt

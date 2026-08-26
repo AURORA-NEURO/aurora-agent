@@ -75,6 +75,12 @@ use bioprism_adapter::{
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    run_throughput_retrieval_synthesis_inference_engine,
+    ThroughputRetrievalSynthesisInferenceEngineReceipt,
+    ThroughputRetrievalSynthesisInferenceEngineRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+use bioprism_adapter::{
     compile_experiment_design, ExperimentDesignReceipt, FederatedExperimentDesignRequest,
     EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
 };
@@ -357,6 +363,7 @@ pub const ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_T
 pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
 pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_local_retrieval_synthesis_inference_engine";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
 pub const ADAPTER_RESOURCE_WORKBENCH_TOOL: &str = "adapter_resource_workbench";
@@ -1131,6 +1138,27 @@ pub fn validate_multimodal_retrieval_synthesis_inference_engine_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID {
         return Err("multimodal retrieval synthesis engine feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_inference_engine_json(value: &Value) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisInferenceEngineRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid throughput retrieval synthesis engine request: {error}"))?;
+    let receipt = run_throughput_retrieval_synthesis_inference_engine(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize throughput retrieval synthesis engine receipt: {error}"))
+}
+
+pub fn validate_throughput_retrieval_synthesis_inference_engine_json(
+    value: &Value,
+) -> Result<ThroughputRetrievalSynthesisInferenceEngineReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisInferenceEngineReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid throughput retrieval synthesis engine receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID {
+        return Err("throughput retrieval synthesis engine feature id mismatch".into());
     }
     Ok(receipt)
 }

@@ -145,6 +145,7 @@ pub mod resource_workbench;
 pub mod retrieval_synthesis;
 pub mod local_retrieval_synthesis_inference_engine;
 pub mod multimodal_retrieval_synthesis_inference_engine;
+pub mod throughput_retrieval_synthesis_inference_engine;
 pub mod scale_frontier;
 pub mod semantic_parity;
 pub mod source;
@@ -572,6 +573,15 @@ pub use multimodal_retrieval_synthesis_inference_engine::{
     MultimodalRetrievalSynthesisInferenceEngineRequest,
     CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_inference_engine::{
+    throughput_retrieval_synthesis_inference_engine_manifest,
+    run_throughput_retrieval_synthesis_inference_engine,
+    ThroughputRetrievalSynthesisInferenceEngineError,
+    ThroughputRetrievalSynthesisInferenceEngineReceipt,
+    ThroughputRetrievalSynthesisInferenceEngineRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
 };
 pub use scale_frontier::{
     plan_adapter_scale_frontier, ScaleDisposition, ScaleFrontierError, ScaleFrontierReceipt,
