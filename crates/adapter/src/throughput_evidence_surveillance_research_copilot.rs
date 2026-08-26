@@ -7,9 +7,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bioprism_foundation::{
-    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceAvailability, EvidenceState,
-    ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
-    RESEARCH_CONTRACT_SCHEMA_VERSION,
+    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect,
+    EvidenceAvailability, EvidenceReference, EvidenceState, ResearchSurface, TypedPort,
+    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -239,7 +239,58 @@ impl ThroughputEvidenceSurveillanceResearchCopilotReceipt {
 }
 
 pub fn throughput_evidence_surveillance_research_copilot_manifest() -> CapabilityManifest {
-    CapabilityManifest { capability_id: FEATURE_ID.into(), version: CONTRACT_VERSION.into(), title: "Prospective high-throughput evidence surveillance research copilot".into(), description: "Run bounded EvidenceFeed3 batches with checkpointed queue identity, explicit overflow, omission, negative evidence, and signed tool effects.".into(), autonomy_tier: AutonomyTier::A2, determinism: Determinism::Deterministic, inputs: vec![TypedPort::new(INPUT_SCHEMA, "typed prospective evidence batch")], outputs: vec![TypedPort::new(OUTPUT_SCHEMA, "qualified evidence batch")], effects: vec![Effect::LocalRead, Effect::LocalCompute, Effect::LocalWrite], permissions: vec!["invoke:declared-tools".into(), "read:local-evidence".into()], surfaces: vec![ResearchSurface::Ui, ResearchSurface::Api, ResearchSurface::Sdk, ResearchSurface::Cli, ResearchSurface::Mcp], consumers: vec!["consortium administrator".into(), "MCP host".into(), "queue schema steward".into()], evidence: vec![], boundary: PRECLINICAL_BOUNDARY.into() }
+    CapabilityManifest {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        capability_id: FEATURE_ID.into(),
+        version: CONTRACT_VERSION.into(),
+        owner_crate: "adapter".into(),
+        consumers: [
+            "consortium administrator".into(),
+            "MCP host".into(),
+            "queue schema steward".into(),
+        ]
+        .into(),
+        behavior: "runs bounded EvidenceFeed3 batches with checkpointed queue identity, explicit overflow, omission, negative evidence, and signed tool effects".into(),
+        value: "turns high-throughput evidence surveillance into resumable, policy-auditable research work".into(),
+        inputs: vec![TypedPort {
+            name: "evidence_feed".into(),
+            schema: INPUT_SCHEMA.into(),
+            required: true,
+        }],
+        outputs: vec![TypedPort {
+            name: "qualified_evidence_set".into(),
+            schema: OUTPUT_SCHEMA.into(),
+            required: true,
+        }],
+        effects: [
+            Effect::ReadLocalData,
+            Effect::ExecuteLocalComputation,
+            Effect::WriteLocalArtifact,
+        ]
+        .into(),
+        permissions: ["invoke:declared-tools".into(), "read:local-evidence".into()].into(),
+        determinism: Determinism::ByteStable,
+        evidence: vec![EvidenceReference {
+            source_id: "cwl".into(),
+            state: EvidenceState::Supported,
+            locator: Some("https://www.commonwl.org/specification/".into()),
+        }],
+        authority_requirements: vec![AuthorityRequirement {
+            role: "throughput evidence copilot approver".into(),
+            reason: "approve capacity and retry policy before scheduling prospective batch effects".into(),
+        }],
+        autonomy_tier: AutonomyTier::A2,
+        surfaces: [
+            ResearchSurface::Ui,
+            ResearchSurface::Api,
+            ResearchSurface::Sdk,
+            ResearchSurface::Cli,
+            ResearchSurface::McpTool,
+            ResearchSurface::Operator,
+        ]
+        .into(),
+        boundary: PRECLINICAL_BOUNDARY.into(),
+    }
 }
 
 pub fn run_throughput_evidence_surveillance_research_copilot(

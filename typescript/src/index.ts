@@ -3533,10 +3533,15 @@ export {
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
   adapterFederatedContinualEvidenceSurveillanceResearchCopilotReceiptDigest,
   validateAdapterFederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceWorkflowFabricReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceWorkflowFabricReceipt,
 } from "./research-contracts.js";
 export type { AdapterMultimodalEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
 export type { AdapterThroughputEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
 export type { AdapterFederatedContinualEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
 export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,

@@ -103,6 +103,7 @@ pub mod local_evidence_surveillance_research_copilot;
 pub mod multimodal_evidence_surveillance_research_copilot;
 pub mod throughput_evidence_surveillance_research_copilot;
 pub mod federated_continual_evidence_surveillance_research_copilot;
+pub mod local_evidence_surveillance_workflow_fabric;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
@@ -336,6 +337,14 @@ pub use federated_commons::{
     FederatedCommonsReceipt, FederatedCommonsRequest,
     CONTRACT_VERSION as FEDERATED_COMMONS_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_COMMONS_FEATURE_ID,
+};
+pub use local_evidence_surveillance_workflow_fabric::{
+    local_evidence_surveillance_workflow_fabric_manifest,
+    schedule_local_evidence_surveillance_workflow,
+    LocalEvidenceSurveillanceWorkflowError, LocalEvidenceSurveillanceWorkflowReceipt,
+    LocalEvidenceSurveillanceWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use federation_workflow::{
     schedule_federation_workflow, FederationRequest, FederationTask, FederationWorkflowDecision,

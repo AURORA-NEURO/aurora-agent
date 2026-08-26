@@ -6664,6 +6664,10 @@ from .adapter_federated_continual_evidence_surveillance_research_copilot import 
     FederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
     run_federated_continual_evidence_surveillance_research_copilot,
 )
+from .adapter_local_evidence_surveillance_workflow_fabric import (
+    LocalEvidenceSurveillanceWorkflowReceipt,
+    schedule_local_evidence_surveillance_workflow,
+)
 
 __all__ += [
     "MultimodalCopilotEvidenceObservation",
@@ -6675,4 +6679,6 @@ __all__ += [
     "FederatedCopilotEvidenceContribution",
     "FederatedContinualEvidenceSurveillanceResearchCopilotReceipt",
     "run_federated_continual_evidence_surveillance_research_copilot",
+    "LocalEvidenceSurveillanceWorkflowReceipt",
+    "schedule_local_evidence_surveillance_workflow",
 ]

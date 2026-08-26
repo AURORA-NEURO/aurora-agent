@@ -1845,6 +1845,9 @@ impl Server {
             "adapter_federated_continual_evidence_surveillance_research_copilot" => {
                 self.adapter_federated_continual_evidence_surveillance_research_copilot(&arguments)
             },
+            "adapter_local_evidence_surveillance_workflow_fabric" => {
+                self.adapter_local_evidence_surveillance_workflow_fabric(&arguments)
+            },
             "multimodal_retrieval_synthesis" => self.multimodal_retrieval_synthesis(&arguments),
             "adapter_context_compilation_assurance" => {
                 self.adapter_context_compilation_assurance(&arguments)
@@ -25008,6 +25011,32 @@ impl Server {
         }))
     }
 
+    fn adapter_local_evidence_surveillance_workflow_fabric(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a LocalEvidenceSurveillanceWorkflowRequest",
+        )?;
+        let receipt = crate::research_contracts::run_local_evidence_surveillance_workflow_fabric_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_adapter::ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "canonical workflow stages, checkpoint identity, budget admission, and replay are explicit",
+                "unknown, unavailable, negative, and unresolved evidence remain visible",
+                "schedule, compensation, and unsafe-release effects are distinct",
+                "raw preclinical data remains institution-local"
+            ],
+            "limitations": [
+                "the fabric orchestrates caller-supplied evidence metadata and does not make clinical decisions",
+                "operators remain responsible for local artifact retention and independent replication"
+            ]
+        }))
+    }
+
     fn multimodal_retrieval_synthesis(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -37187,7 +37216,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "release_assurance_harness", "protocol_assurance_harness", "federated_multimodal_assurance", "federated_knowledge_gateway", "federated_lens_assurance", "lab_semantic_parity", "federated_retrieval_assurance", "federated_continual_retrieval_copilot", "federated_context_compilation_assurance", "federated_knowledge_representation_assurance", "federated_resource_control_plane", "weavelang_release_assurance", "federated_mechanism_control_plane", "federated_mechanism_gateway", "evidence_surveillance_copilot", "adapter_local_evidence_surveillance_research_copilot", "adapter_multimodal_evidence_surveillance_research_copilot", "adapter_throughput_evidence_surveillance_research_copilot", "adapter_federated_continual_evidence_surveillance_research_copilot", "multimodal_retrieval_synthesis", "adapter_context_compilation_assurance", "multimodal_knowledge_workflow", "adapter_resource_workbench", "adapter_ingestion_gateway", "adapter_quality_envelope", "adapter_experiment_design_control", "adapter_protocol_simulation", "adapter_instrument_mesh", "adapter_execution_control", "adapter_analysis_portfolio", "adapter_interpretation_assurance", "adapter_replication_assurance", "adapter_release_assurance", "adapter_determinism_gateway", "adapter_provenance_assurance", "adapter_policy_gateway", "adapter_federation_workflow", "adapter_reliability_copilot", "adapter_interoperability_gateway", "adapter_evaluation_assurance", "adapter_research_workbench", "adapter_contract_frontier", "adapter_limitation_closure", "adapter_dependency_composition", "adapter_semantic_parity", "adapter_scale_frontier", "adapter_adversarial_recovery", "adapter_federated_commons", "adapter_bounded_evolution", "mcp_bounded_evolution_assurance", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "release_assurance_harness", "protocol_assurance_harness", "federated_multimodal_assurance", "federated_knowledge_gateway", "federated_lens_assurance", "lab_semantic_parity", "federated_retrieval_assurance", "federated_continual_retrieval_copilot", "federated_context_compilation_assurance", "federated_knowledge_representation_assurance", "federated_resource_control_plane", "weavelang_release_assurance", "federated_mechanism_control_plane", "federated_mechanism_gateway", "evidence_surveillance_copilot", "adapter_local_evidence_surveillance_research_copilot", "adapter_multimodal_evidence_surveillance_research_copilot", "adapter_throughput_evidence_surveillance_research_copilot", "adapter_federated_continual_evidence_surveillance_research_copilot", "adapter_local_evidence_surveillance_workflow_fabric", "multimodal_retrieval_synthesis", "adapter_context_compilation_assurance", "multimodal_knowledge_workflow", "adapter_resource_workbench", "adapter_ingestion_gateway", "adapter_quality_envelope", "adapter_experiment_design_control", "adapter_protocol_simulation", "adapter_instrument_mesh", "adapter_execution_control", "adapter_analysis_portfolio", "adapter_interpretation_assurance", "adapter_replication_assurance", "adapter_release_assurance", "adapter_determinism_gateway", "adapter_provenance_assurance", "adapter_policy_gateway", "adapter_federation_workflow", "adapter_reliability_copilot", "adapter_interoperability_gateway", "adapter_evaluation_assurance", "adapter_research_workbench", "adapter_contract_frontier", "adapter_limitation_closure", "adapter_dependency_composition", "adapter_semantic_parity", "adapter_scale_frontier", "adapter_adversarial_recovery", "adapter_federated_commons", "adapter_bounded_evolution", "mcp_bounded_evolution_assurance", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -39894,6 +39923,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized ClaimsWorkflowRequest with study scope, required/resolved claims, evidence receipt, policy, protected closure, locality, and preclinical boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "adapter_local_evidence_surveillance_workflow_fabric",
+            "description": "Schedule a local A1 evidence-surveillance workflow with canonical stages, checkpoint and replay identity, budget admission, compensation, and institution-local artifacts.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized LocalEvidenceSurveillanceWorkflowRequest with EvidenceFeed1, workflow/checkpoint/stage metadata, budget, policy, protected closure, locality, replay identity, and preclinical boundary." }
                 },
                 "required": ["request"]
             }

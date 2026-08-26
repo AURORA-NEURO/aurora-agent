@@ -4,8 +4,9 @@
 //! contributions cross an institution boundary; raw observations remain local.
 
 use bioprism_foundation::{
-    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceState, ResearchSurface,
-    TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
+    EvidenceState, ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -238,7 +239,63 @@ impl FederatedContinualEvidenceSurveillanceResearchCopilotReceipt {
 }
 
 pub fn federated_continual_evidence_surveillance_research_copilot_manifest() -> CapabilityManifest {
-    CapabilityManifest { capability_id: FEATURE_ID.into(), version: CONTRACT_VERSION.into(), title: "Federated continual evidence surveillance research copilot".into(), description: "Qualify signed aggregate-only evidence contributions under purpose, signer, quorum, locality, and policy gates.".into(), autonomy_tier: AutonomyTier::A2, determinism: Determinism::Deterministic, inputs: vec![TypedPort::new(INPUT_SCHEMA,"typed federated evidence envelope")], outputs: vec![TypedPort::new(OUTPUT_SCHEMA,"qualified aggregate evidence set")], effects: vec![Effect::LocalRead,Effect::LocalCompute,Effect::LocalWrite], permissions: vec!["invoke:declared-tools".into(),"exchange:aggregate-evidence".into()], surfaces: vec![ResearchSurface::Ui,ResearchSurface::Api,ResearchSurface::Sdk,ResearchSurface::Cli,ResearchSurface::Mcp], consumers: vec!["integration engineer".into(),"MCP host".into(),"consortium steward".into()], evidence: vec![], boundary: PRECLINICAL_BOUNDARY.into() }
+    CapabilityManifest {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        capability_id: FEATURE_ID.into(),
+        version: CONTRACT_VERSION.into(),
+        owner_crate: "adapter".into(),
+        consumers: [
+            "integration engineer".into(),
+            "MCP host".into(),
+            "consortium steward".into(),
+        ]
+        .into(),
+        behavior: "qualifies signed aggregate-only evidence contributions under purpose, signer, quorum, locality, and policy gates".into(),
+        value: "enables continual federated surveillance without moving raw experimental observations across institutions".into(),
+        inputs: vec![TypedPort {
+            name: "federation_envelope".into(),
+            schema: INPUT_SCHEMA.into(),
+            required: true,
+        }],
+        outputs: vec![TypedPort {
+            name: "qualified_aggregate_evidence".into(),
+            schema: OUTPUT_SCHEMA.into(),
+            required: true,
+        }],
+        effects: [
+            Effect::ReadLocalData,
+            Effect::ExecuteLocalComputation,
+            Effect::WriteLocalArtifact,
+            Effect::FederationExport,
+        ]
+        .into(),
+        permissions: [
+            "invoke:declared-tools".into(),
+            "exchange:aggregate-evidence".into(),
+        ]
+        .into(),
+        determinism: Determinism::ByteStable,
+        evidence: vec![EvidenceReference {
+            source_id: "ga4gh-drs".into(),
+            state: EvidenceState::Supported,
+            locator: Some("https://ga4gh.github.io/data-repository-service-schemas/preview/release/drs-1.3.0/docs/".into()),
+        }],
+        authority_requirements: vec![AuthorityRequirement {
+            role: "federated evidence copilot approver".into(),
+            reason: "approve purpose, signer, quorum, and export policy before any federation effect".into(),
+        }],
+        autonomy_tier: AutonomyTier::A2,
+        surfaces: [
+            ResearchSurface::Ui,
+            ResearchSurface::Api,
+            ResearchSurface::Sdk,
+            ResearchSurface::Cli,
+            ResearchSurface::McpTool,
+            ResearchSurface::Operator,
+        ]
+        .into(),
+        boundary: PRECLINICAL_BOUNDARY.into(),
+    }
 }
 
 pub fn run_federated_continual_evidence_surveillance_research_copilot(

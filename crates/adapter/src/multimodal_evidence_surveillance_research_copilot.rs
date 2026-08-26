@@ -5,9 +5,9 @@
 //! invocation part of the product contract.
 
 use bioprism_foundation::{
-    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceAvailability, EvidenceReference,
-    EvidenceState, ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
-    RESEARCH_CONTRACT_SCHEMA_VERSION,
+    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect,
+    EvidenceAvailability, EvidenceReference, EvidenceState, ResearchSurface, TypedPort,
+    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -249,7 +249,7 @@ impl MultimodalEvidenceSurveillanceResearchCopilotReceipt {
 }
 
 pub fn multimodal_evidence_surveillance_research_copilot_manifest() -> CapabilityManifest {
-    CapabilityManifest { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), capability_id: FEATURE_ID.into(), version: CONTRACT_VERSION.into(), owner_crate: "adapter".into(), consumers: ["preclinical researcher".into(), "MCP tool host".into(), "multimodal schema steward".into()].into(), behavior: "runs an A2 multimodal evidence-surveillance copilot with declared tools, study×modality closure, comparability, approval, and replay receipts".into(), value: "automates comparable imaging/omics evidence alerts without hiding missing cells, semantic mismatch, or unauthorized effects".into(), inputs: vec![TypedPort { name: "evidence_feed".into(), schema: INPUT_SCHEMA.into(), required: true }], outputs: vec![TypedPort { name: "qualified_evidence_set".into(), schema: OUTPUT_SCHEMA.into(), required: true }], effects: [Effect::ReadLocalData, Effect::ExecuteLocalComputation, Effect::WriteLocalArtifact].into(), permissions: ["invoke:declared-tools".into(), "read:local-research-artifacts".into()].into(), determinism: Determinism::ByteStable, evidence: vec![EvidenceReference { source_id: "MCP 2025-06-18".into(), state: EvidenceState::Supported, locator: Some("https://modelcontextprotocol.io/specification/2025-06-18/basic/index".into()) }], authority_requirements: Vec::new(), autonomy_tier: AutonomyTier::A2, surfaces: [ResearchSurface::Ui, ResearchSurface::Api, ResearchSurface::Sdk, ResearchSurface::Cli, ResearchSurface::McpTool, ResearchSurface::Operator].into(), boundary: PRECLINICAL_BOUNDARY.into() }
+    CapabilityManifest { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), capability_id: FEATURE_ID.into(), version: CONTRACT_VERSION.into(), owner_crate: "adapter".into(), consumers: ["preclinical researcher".into(), "MCP tool host".into(), "multimodal schema steward".into()].into(), behavior: "runs an A2 multimodal evidence-surveillance copilot with declared tools, study×modality closure, comparability, approval, and replay receipts".into(), value: "automates comparable imaging/omics evidence alerts without hiding missing cells, semantic mismatch, or unauthorized effects".into(), inputs: vec![TypedPort { name: "evidence_feed".into(), schema: INPUT_SCHEMA.into(), required: true }], outputs: vec![TypedPort { name: "qualified_evidence_set".into(), schema: OUTPUT_SCHEMA.into(), required: true }], effects: [Effect::ReadLocalData, Effect::ExecuteLocalComputation, Effect::WriteLocalArtifact].into(), permissions: ["invoke:declared-tools".into(), "read:local-research-artifacts".into()].into(), determinism: Determinism::ByteStable, evidence: vec![EvidenceReference { source_id: "MCP 2025-06-18".into(), state: EvidenceState::Supported, locator: Some("https://modelcontextprotocol.io/specification/2025-06-18/basic/index".into()) }], authority_requirements: vec![AuthorityRequirement { role: "multimodal evidence copilot approver".into(), reason: "approve declared-tool invocation after comparability, closure, and locality gates close".into() }], autonomy_tier: AutonomyTier::A2, surfaces: [ResearchSurface::Ui, ResearchSurface::Api, ResearchSurface::Sdk, ResearchSurface::Cli, ResearchSurface::McpTool, ResearchSurface::Operator].into(), boundary: PRECLINICAL_BOUNDARY.into() }
 }
 
 pub fn run_multimodal_evidence_surveillance_research_copilot(
