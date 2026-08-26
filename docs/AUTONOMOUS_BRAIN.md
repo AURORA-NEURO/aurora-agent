@@ -6213,6 +6213,44 @@ and evaluator metadata—never task text, prompts, responses, tool arguments, cr
 or raw evidence—and rejects malformed payloads, duplicate episodes, unknown evaluation targets,
 tampered event/head digests, and stale writers.
 
+The Python `AutonomousAgent` exposes the same boundary at the application façade. Bind a
+`BrainMemoryPersistenceCoordinator` to the exact `BrainEpisodicMemory` instance supplied to the
+agent, then restore once during worker startup and flush at an explicit lifecycle boundary:
+
+```python
+from prism_sdk import (
+    AutonomousAgent,
+    BrainEpisodicMemory,
+    BrainMemoryPersistenceCoordinator,
+    LLMRuntime,
+    TransactionalJsonBrainMemorySnapshotPersistence,
+)
+
+memory = BrainEpisodicMemory("state/agent-memory.sqlite3")
+memory_persistence = BrainMemoryPersistenceCoordinator(
+    memory,
+    TransactionalJsonBrainMemorySnapshotPersistence(caller_owned_text_store),
+)
+agent = AutonomousAgent(
+    workspace,
+    LLMRuntime(),
+    memory=memory,
+    memory_persistence=memory_persistence,
+)
+
+agent.restore_memory()
+# Run direct, adaptive, mission, workflow, goal, or cross-domain work here.
+agent.flush_memory()
+```
+
+`restore_memory()` and `flush_memory()` refuse when episodic memory or its persistence boundary is
+missing. Construction also rejects a coordinator bound to a different memory object, avoiding a
+successful-looking restore into an unused store. The coordinator preserves the existing
+hash-chain validation and compare-and-swap fence; it does not implicitly restore or flush during
+`run`, so the deployment can order memory writes with evaluator settlement and its own durable
+transaction. The same metadata-only snapshot contract applies uniformly to all twelve built-in
+domains and cross-domain synthesis.
+
 The TypeScript memory boundary now exposes the same guarantees through
 `JsonAutonomousMemoryPersistence` and `TransactionalJsonAutonomousMemoryPersistence`. These
 adapters validate the episode index and event chain before restore, emit canonical JSON, reject

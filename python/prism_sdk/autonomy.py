@@ -220,7 +220,13 @@ from .llm_runtime import (
     ProviderTool,
     normalize_provider_content_parts,
 )
-from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_facet_digests
+from .memory import (
+    BrainEpisodicMemory,
+    BrainMemoryError,
+    BrainMemoryPersistenceCoordinator,
+    MemoryQuery,
+    task_facet_digests,
+)
 from .autonomous_memory_consolidation import (
     MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS,
     AutonomousMemoryConsolidationObservation,
@@ -14657,6 +14663,7 @@ class AutonomousAgent:
         pack_registry: AutonomousDomainPackRegistry | None = None,
         ledger: BrainLearningLedger | None = None,
         memory: BrainEpisodicMemory | None = None,
+        memory_persistence: BrainMemoryPersistenceCoordinator | None = None,
         memory_consolidator: AutonomousMemoryConsolidator | None = None,
         health_ledger: ProviderHealthLedger | None = None,
         tool_registry: AutonomousDomainToolRegistry | None = None,
@@ -14684,6 +14691,15 @@ class AutonomousAgent:
             raise BrainRunError("ledger must be a BrainLearningLedger or None")
         if memory is not None and not isinstance(memory, BrainEpisodicMemory):
             raise BrainRunError("memory must be a BrainEpisodicMemory or None")
+        if memory_persistence is not None and not isinstance(
+            memory_persistence,
+            BrainMemoryPersistenceCoordinator,
+        ):
+            raise BrainRunError(
+                "memory_persistence must be a BrainMemoryPersistenceCoordinator or None"
+            )
+        if memory_persistence is not None and memory_persistence.store is not memory:
+            raise BrainRunError("memory_persistence must be bound to the supplied memory")
         if memory_consolidator is not None and not isinstance(memory_consolidator, AutonomousMemoryConsolidator):
             raise BrainRunError("memory_consolidator must be an AutonomousMemoryConsolidator or None")
         if health_ledger is not None and not isinstance(health_ledger, ProviderHealthLedger):
@@ -14755,6 +14771,7 @@ class AutonomousAgent:
         self.brain = brain or AutonomousBrain(workspace, runtime)
         self.ledger = ledger
         self.memory = memory
+        self.memory_persistence = memory_persistence
         self.memory_consolidator = memory_consolidator
         self.health_ledger = health_ledger
         self.tool_registry = tool_registry
@@ -20492,6 +20509,26 @@ class AutonomousAgent:
         coordinator = self.prompt_learning_coordinator
         if coordinator is None:
             raise BrainRunError("prompt learning coordinator is not configured")
+        return coordinator.flush()
+
+    def restore_memory(self) -> Any:
+        """Restore episodic memory from its caller-owned persistence boundary."""
+
+        if self.memory is None:
+            raise BrainRunError("AutonomousAgent has no episodic memory")
+        coordinator = self.memory_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent memory persistence is not configured")
+        return coordinator.restore()
+
+    def flush_memory(self) -> Any:
+        """Flush episodic memory through its caller-owned CAS boundary."""
+
+        if self.memory is None:
+            raise BrainRunError("AutonomousAgent has no episodic memory")
+        coordinator = self.memory_persistence
+        if coordinator is None:
+            raise BrainRunError("AutonomousAgent memory persistence is not configured")
         return coordinator.flush()
 
     def run(
