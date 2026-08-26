@@ -3626,6 +3626,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterFederatedContinualRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisWorkflowFabricReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
+export {
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
   adapterMultimodalRetrievalSynthesisInferenceEngineReceiptDigest,
