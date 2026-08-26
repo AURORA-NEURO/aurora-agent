@@ -201,6 +201,12 @@ use bioprism_adapter::{
     ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
 };
 use bioprism_adapter::{
+    operate_local_retrieval_synthesis_federated_control_plane,
+    LocalRetrievalSynthesisFederatedControlPlaneReceipt,
+    LocalRetrievalSynthesisFederatedControlPlaneRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_throughput_retrieval_synthesis_inference_engine,
     ThroughputRetrievalSynthesisInferenceEngineReceipt,
     ThroughputRetrievalSynthesisInferenceEngineRequest,
@@ -527,6 +533,7 @@ pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adap
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adapter_multimodal_retrieval_synthesis_assurance_harness";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adapter_throughput_retrieval_synthesis_assurance_harness";
 pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adapter_federated_continual_retrieval_synthesis_assurance_harness";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str = "adapter_local_retrieval_synthesis_federated_control_plane";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_throughput_retrieval_synthesis_contract_model";
@@ -1637,6 +1644,18 @@ pub fn validate_federated_continual_retrieval_synthesis_assurance_harness_json(v
     let receipt: FederatedContinualRetrievalSynthesisAssuranceHarnessReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid federated continual retrieval assurance receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID { return Err("federated continual retrieval assurance feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_federated_control_plane_json(value: &Value) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisFederatedControlPlaneRequest = serde_json::from_value(value.clone()).map_err(|error| format!("invalid local retrieval control-plane request: {error}"))?;
+    let receipt = operate_local_retrieval_synthesis_federated_control_plane(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize local retrieval control-plane receipt: {error}"))
+}
+pub fn validate_local_retrieval_synthesis_federated_control_plane_json(value: &Value) -> Result<LocalRetrievalSynthesisFederatedControlPlaneReceipt, String> {
+    let receipt: LocalRetrievalSynthesisFederatedControlPlaneReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid local retrieval control-plane receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID { return Err("local retrieval control-plane feature id mismatch".into()); }
     Ok(receipt)
 }
 
