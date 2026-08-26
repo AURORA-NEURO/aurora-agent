@@ -500,6 +500,7 @@ from .brain_federated_context_workbench import FederatedContextWorkbenchPeer, Fe
 from .brain_context_protocol import ContextProtocolCandidate, ContextProtocolReceipt, serve_context_protocol
 from .brain_multimodal_context_protocol import MultimodalContextProtocolCell, MultimodalContextProtocolReceipt, serve_multimodal_context_protocol
 from .brain_throughput_context_protocol import ThroughputContextProtocolJob, ThroughputContextProtocolReceipt, serve_throughput_context_protocol
+from .brain_federated_context_protocol import FederatedContextProtocolPeer, FederatedContextProtocolReceipt, serve_federated_context_protocol
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
