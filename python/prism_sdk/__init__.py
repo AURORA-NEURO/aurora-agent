@@ -6653,10 +6653,16 @@ from .adapter_local_evidence_surveillance_research_workbench import (
     LocalEvidenceSurveillanceResearchWorkbenchReceipt,
     render_local_evidence_surveillance_research_workbench,
 )
+from .adapter_multimodal_evidence_surveillance_research_workbench import (
+    MultimodalEvidenceSurveillanceResearchWorkbenchReceipt,
+    render_multimodal_evidence_surveillance_research_workbench,
+)
 
 __all__ += [
     "LocalEvidenceSurveillanceResearchWorkbenchReceipt",
     "render_local_evidence_surveillance_research_workbench",
+    "MultimodalEvidenceSurveillanceResearchWorkbenchReceipt",
+    "render_multimodal_evidence_surveillance_research_workbench",
 ]
 
 from .adapter_multimodal_evidence_surveillance_research_copilot import (
