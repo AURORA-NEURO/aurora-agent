@@ -6,12 +6,15 @@ import {
   AutonomousClaimIntegrityClaim,
   AutonomousClaimIntegrityEvidence,
   AutonomousClaimIntegrityPolicy,
+  AutonomousInformationAcquisitionCandidate,
   LLMRuntime,
   assessAutonomousClaimIntegrity,
   digestJsonSync,
+  planAutonomousClaimIntegrityAcquisition,
   reassessAutonomousClaimIntegrity,
   validateAutonomousClaimIntegrity,
   validateAutonomousClaimIntegritySnapshot,
+  validateAutonomousClaimIntegrityAcquisitionBridge,
 } from "../dist/index.js";
 
 const REFERENCE = "2026-08-26T12:00:00Z";
@@ -99,4 +102,29 @@ test("agent facade binds task digest without provider or source dispatch", () =>
   assert.equal(result.status, "ready");
   assert.equal(result.toJSON().context_digest, digestJsonSync({ task: "decide whether a bounded science claim may be used" }));
   assert.equal(JSON.stringify(result.toJSON()).includes("decide whether"), false);
+});
+
+test("integrity actions drive the reviewed acquisition queue", () => {
+  const assessment = assessAutonomousClaimIntegrity({ contextDigest: digest("acquisition-task"), claims: [claim("blocked-claim", "science")], evidence: [], referenceTime: REFERENCE });
+  const scienceCandidate = new AutonomousInformationAcquisitionCandidate({ candidateId: "science-next", domain: "science", capability: "evidence_acquisition", sourceId: "science-source", informationGain: 0.4, uncertaintyReduction: 0.4, reliability: 0.9, freshness: 0.9, coverage: 0.5, cost: 0.1, latencyMs: 100, risk: 0.05, conflictRisk: 0.05, metadata: { claim_ids: ["blocked-claim"] } });
+  const unrelatedCandidate = new AutonomousInformationAcquisitionCandidate({ candidateId: "coding-next", domain: "coding", capability: "evidence_acquisition", sourceId: "coding-source", informationGain: 1, uncertaintyReduction: 1, reliability: 0.9, freshness: 0.9, coverage: 1, cost: 0.1, latencyMs: 100, risk: 0.01, conflictRisk: 0.01 });
+  const bridge = planAutonomousClaimIntegrityAcquisition(assessment, { candidates: [unrelatedCandidate, scienceCandidate], policy: { maxItems: 1, exploration: 0 } });
+  assert.equal(bridge.status, "planned");
+  assert.deepEqual(bridge.targetedCandidateIds, ["science-next"]);
+  assert.equal(bridge.unmatchedActionCount, 0);
+  assert.equal(bridge.acquisitionPlan.selected[0].candidate_id, "science-next");
+  assert.equal(bridge.candidateActionMatches[0].match_strength, "claim_and_capability");
+  assert.equal(validateAutonomousClaimIntegrityAcquisitionBridge(bridge), bridge);
+  assert.equal(bridge.toJSON().secret_material, "never_returned");
+});
+
+test("integrity bridge is explicitly empty or blocked without dispatch", () => {
+  const ready = assessAutonomousClaimIntegrity({ contextDigest: digest("ready-task"), claims: [claim("ready-claim", "science")], evidence: [evidence("ready-evidence", "ready-claim", "science")], referenceTime: REFERENCE });
+  const empty = planAutonomousClaimIntegrityAcquisition(ready, { candidates: [] });
+  assert.equal(empty.status, "no_action_required");
+  assert.equal(empty.acquisitionPlan, null);
+  const blocked = assessAutonomousClaimIntegrity({ contextDigest: digest("no-candidates-task"), claims: [claim("missing-claim", "science")], evidence: [], referenceTime: REFERENCE });
+  const noQueue = planAutonomousClaimIntegrityAcquisition(blocked, { candidates: [] });
+  assert.equal(noQueue.status, "blocked");
+  assert.equal(noQueue.unmatchedActionCount, blocked.actions.length);
 });

@@ -1272,6 +1272,7 @@ export {
   AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_SCHEMA,
   AUTONOMOUS_CLAIM_INTEGRITY_ASSESSMENT_SCHEMA,
   AUTONOMOUS_CLAIM_INTEGRITY_ACTION_SCHEMA,
+  AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA,
   AUTONOMOUS_CLAIM_INTEGRITY_MAX_CLAIMS,
   AUTONOMOUS_CLAIM_INTEGRITY_MAX_EVIDENCE,
   AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACTIONS,
@@ -1288,10 +1289,13 @@ export {
   AutonomousClaimIntegrityEvidence,
   AutonomousClaimIntegrityAction,
   AutonomousClaimIntegrityAssessment,
+  AutonomousClaimIntegrityAcquisitionBridge,
   assessAutonomousClaimIntegrity,
   reassessAutonomousClaimIntegrity,
+  planAutonomousClaimIntegrityAcquisition,
   validateAutonomousClaimIntegrity,
   validateAutonomousClaimIntegritySnapshot,
+  validateAutonomousClaimIntegrityAcquisitionBridge,
 } from "./autonomous-claim-integrity.js";
 export type {
   AutonomousClaimIntegrityStatus,
@@ -1305,9 +1309,11 @@ export type {
   AutonomousClaimIntegrityEvidenceRow,
   AutonomousClaimIntegrityClaimAssessmentJSON,
   AutonomousClaimIntegrityAssessmentJSON,
+  AutonomousClaimIntegrityAcquisitionBridgeJSON,
   AutonomousClaimIntegrityActionType,
   AssessAutonomousClaimIntegrityOptions,
   ReassessAutonomousClaimIntegrityOptions,
+  PlanAutonomousClaimIntegrityAcquisitionOptions,
 } from "./autonomous-claim-integrity.js";
 export {
   AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA,

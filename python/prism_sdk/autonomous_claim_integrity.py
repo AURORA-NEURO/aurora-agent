@@ -14,12 +14,18 @@ are retained in the projection.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 import math
 from typing import Any, Mapping, Sequence
 
 from .authoring import content_digest
+from .autonomous_information_acquisition import (
+    AutonomousInformationAcquisitionCandidate,
+    AutonomousInformationAcquisitionPlan,
+    AutonomousInformationAcquisitionPolicy,
+    plan_autonomous_information_acquisition,
+)
 from .domain_tools import AUTONOMOUS_DOMAIN_NAMES
 from .errors import ArgumentError
 
@@ -30,6 +36,7 @@ AUTONOMOUS_CLAIM_INTEGRITY_CLAIM_SCHEMA = "bioprism-python-autonomous-claim-inte
 AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_SCHEMA = "bioprism-python-autonomous-claim-integrity-evidence/0.1"
 AUTONOMOUS_CLAIM_INTEGRITY_ASSESSMENT_SCHEMA = "bioprism-python-autonomous-claim-integrity-assessment/0.1"
 AUTONOMOUS_CLAIM_INTEGRITY_ACTION_SCHEMA = "bioprism-python-autonomous-claim-integrity-action/0.1"
+AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA = "bioprism-python-autonomous-claim-integrity-acquisition-bridge/0.1"
 
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_CLAIMS = 128
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_EVIDENCE = 512
@@ -653,6 +660,66 @@ class AutonomousClaimIntegrityAssessment:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousClaimIntegrityAcquisitionBridge:
+    """A digest-bound handoff from claim blockers to the reviewed acquisition planner."""
+
+    assessment_digest: str
+    action_ids: tuple[str, ...]
+    targeted_candidate_ids: tuple[str, ...]
+    candidate_action_matches: tuple[Mapping[str, Any], ...]
+    acquisition_plan: AutonomousInformationAcquisitionPlan | None
+    unmatched_action_count: int
+    status: str
+    generation: int = 1
+
+    def __post_init__(self) -> None:
+        _digest("acquisition bridge assessment_digest", self.assessment_digest)
+        _identifiers("acquisition bridge action_ids", self.action_ids, AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACTIONS)
+        _identifiers("acquisition bridge targeted_candidate_ids", self.targeted_candidate_ids, 512)
+        _integer("acquisition bridge unmatched_action_count", self.unmatched_action_count, 0, AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACTIONS)
+        _integer("acquisition bridge generation", self.generation, 1, 2_147_483_647)
+        if self.status not in {"planned", "no_action_required", "blocked"}:
+            raise ArgumentError("acquisition bridge status is unsupported")
+        if not isinstance(self.candidate_action_matches, Sequence):
+            raise ArgumentError("acquisition bridge candidate_action_matches must be a sequence")
+        for index, match in enumerate(self.candidate_action_matches):
+            if not isinstance(match, Mapping):
+                raise ArgumentError(f"acquisition bridge match {index} must be a mapping")
+            _safe_metadata(dict(match), name=f"acquisition bridge match {index}")
+        if self.status == "planned" and self.acquisition_plan is None:
+            raise ArgumentError("planned acquisition bridge requires an acquisition plan")
+        if self.status == "no_action_required" and self.unmatched_action_count != 0:
+            raise ArgumentError("no-action acquisition bridge cannot have unmatched actions")
+
+    def _payload(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA,
+            "assessment_digest": self.assessment_digest,
+            "action_ids": list(self.action_ids),
+            "targeted_candidate_ids": list(self.targeted_candidate_ids),
+            "candidate_action_matches": [dict(match) for match in self.candidate_action_matches],
+            "acquisition_plan_digest": None if self.acquisition_plan is None else self.acquisition_plan.plan_digest,
+            "unmatched_action_count": self.unmatched_action_count,
+            "status": self.status,
+            "generation": self.generation,
+        }
+
+    @property
+    def bridge_digest(self) -> str:
+        return content_digest(self._payload())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._payload(),
+            "bridge_digest": self.bridge_digest,
+            "actions_are": "proposals_only;source_dispatch_requires_reviewed_evidence_approval",
+            "acquisition_plan": None if self.acquisition_plan is None else self.acquisition_plan.to_dict(),
+            "retention": "metadata_only;raw_claim_text_evidence_values_and_source_payloads_caller_owned",
+            "secret_material": "never_returned",
+        }
+
+
 def _claim_value(value: AutonomousClaimIntegrityClaim | Mapping[str, Any]) -> AutonomousClaimIntegrityClaim:
     return value if isinstance(value, AutonomousClaimIntegrityClaim) else AutonomousClaimIntegrityClaim.from_mapping(value)
 
@@ -723,6 +790,143 @@ def _action_type(assessment: AutonomousClaimIntegrityClaimAssessment) -> str | N
     if assessment.status == "unreproducible":
         return "reproduce_evidence"
     return "acquire_evidence"
+
+
+def _capability_matches(candidate: AutonomousInformationAcquisitionCandidate, action: AutonomousClaimIntegrityAction) -> tuple[bool, str]:
+    capability = candidate.capability.lower().replace("-", "_").replace(" ", "_")
+    action_token = action.action_type.replace("acquire_", "")
+    generic_evidence = action.action_type == "acquire_evidence" and "evidence" in capability
+    direct = action_token in capability or capability in action.action_type or generic_evidence
+    metadata_claims = candidate.metadata.get("claim_ids", ()) if isinstance(candidate.metadata, Mapping) else ()
+    if isinstance(metadata_claims, Sequence) and not isinstance(metadata_claims, (str, bytes, bytearray)):
+        claim_match = bool(set(str(item) for item in metadata_claims).intersection(action.claim_ids))
+    else:
+        claim_match = False
+    if claim_match and direct:
+        return True, "claim_and_capability"
+    if claim_match:
+        return True, "claim_and_domain"
+    if direct:
+        return True, "capability"
+    return True, "domain"
+
+
+def plan_autonomous_claim_integrity_acquisition(
+    assessment: AutonomousClaimIntegrityAssessment,
+    *,
+    candidates: Sequence[AutonomousInformationAcquisitionCandidate | Mapping[str, Any]],
+    policy: AutonomousInformationAcquisitionPolicy | Mapping[str, Any] | None = None,
+    requested_domains: Sequence[str] | None = None,
+) -> AutonomousClaimIntegrityAcquisitionBridge:
+    """Compile integrity blockers into the existing reviewed acquisition planner.
+
+    The bridge only changes bounded candidate priority signals and records why each candidate was
+    promoted.  It does not fabricate evidence, add a source, dispatch an adapter, or authorize a
+    provider.  A caller can inspect the returned bridge and then pass its acquisition plan through
+    the existing reviewed evidence execution boundary.
+    """
+
+    if not isinstance(assessment, AutonomousClaimIntegrityAssessment):
+        raise ArgumentError("integrity acquisition planning requires a typed assessment")
+    validate_autonomous_claim_integrity(assessment)
+    normalized_candidates = tuple(
+        item if isinstance(item, AutonomousInformationAcquisitionCandidate) else AutonomousInformationAcquisitionCandidate.from_mapping(item)
+        for item in _sequence("integrity acquisition candidates", candidates, 512)
+    )
+    candidate_ids = [item.candidate_id for item in normalized_candidates]
+    if len(set(candidate_ids)) != len(candidate_ids):
+        raise ArgumentError("integrity acquisition candidates contain duplicate ids")
+    actions = tuple(assessment.actions)
+    if not actions:
+        return AutonomousClaimIntegrityAcquisitionBridge(
+            assessment_digest=assessment.assessment_digest,
+            action_ids=(),
+            targeted_candidate_ids=(),
+            candidate_action_matches=(),
+            acquisition_plan=None,
+            unmatched_action_count=0,
+            status="no_action_required",
+            generation=assessment.generation,
+        )
+    if not normalized_candidates:
+        return AutonomousClaimIntegrityAcquisitionBridge(
+            assessment_digest=assessment.assessment_digest,
+            action_ids=tuple(action.action_id for action in actions),
+            targeted_candidate_ids=(),
+            candidate_action_matches=(),
+            acquisition_plan=None,
+            unmatched_action_count=len(actions),
+            status="blocked",
+            generation=assessment.generation,
+        )
+    action_domains = {action.domain for action in actions}
+    selected_domains = (
+        tuple(domain for domain in AUTONOMOUS_DOMAIN_NAMES if domain in action_domains)
+        if requested_domains is None
+        else _domains("integrity acquisition requested_domains", requested_domains)
+    )
+    action_matches: list[dict[str, Any]] = []
+    adjusted: list[AutonomousInformationAcquisitionCandidate] = []
+    targeted_ids: list[str] = []
+    matched_action_ids: set[str] = set()
+    for candidate in normalized_candidates:
+        matches: list[tuple[AutonomousClaimIntegrityAction, str]] = []
+        for action in actions:
+            if candidate.domain != action.domain:
+                continue
+            matched, strength = _capability_matches(candidate, action)
+            if matched:
+                matches.append((action, strength))
+        if not matches:
+            adjusted.append(candidate)
+            continue
+        targeted_ids.append(candidate.candidate_id)
+        for action, _strength in matches:
+            matched_action_ids.add(action.action_id)
+        strength_rank = {"domain": 1, "capability": 2, "claim_and_domain": 3, "claim_and_capability": 4}
+        strongest = max(matches, key=lambda row: (strength_rank[row[1]], row[0].priority, row[0].action_id))
+        boost = min(0.4, 0.10 + 0.05 * strength_rank[strongest[1]] + 0.10 * strongest[0].priority)
+        adjusted.append(replace(
+            candidate,
+            information_gain=min(1.0, candidate.information_gain + boost),
+            uncertainty_reduction=min(1.0, candidate.uncertainty_reduction + boost),
+            coverage=min(1.0, candidate.coverage + boost * 0.5),
+            priority=min(1.0, candidate.priority + boost),
+        ))
+        action_matches.append({
+            "candidate_id": candidate.candidate_id,
+            "action_ids": sorted(action.action_id for action, _strength in matches),
+            "action_types": sorted({action.action_type for action, _strength in matches}),
+            "match_strength": strongest[1],
+            "priority_boost": _round(boost),
+        })
+    selected_domains = tuple(domain for domain in selected_domains if domain in action_domains)
+    acquisition_plan = plan_autonomous_information_acquisition(
+        task_digest=assessment.context_digest,
+        candidates=tuple(adjusted),
+        requested_domains=selected_domains,
+        policy=policy,
+    )
+    unmatched = len(set(action.action_id for action in actions).difference(matched_action_ids))
+    status = "planned" if acquisition_plan.selected else "blocked"
+    return AutonomousClaimIntegrityAcquisitionBridge(
+        assessment_digest=assessment.assessment_digest,
+        action_ids=tuple(action.action_id for action in actions),
+        targeted_candidate_ids=tuple(targeted_ids),
+        candidate_action_matches=tuple(action_matches),
+        acquisition_plan=acquisition_plan,
+        unmatched_action_count=unmatched,
+        status=status,
+        generation=assessment.generation,
+    )
+
+
+def validate_autonomous_claim_integrity_acquisition_bridge(value: AutonomousClaimIntegrityAcquisitionBridge) -> AutonomousClaimIntegrityAcquisitionBridge:
+    if not isinstance(value, AutonomousClaimIntegrityAcquisitionBridge):
+        raise ArgumentError("integrity acquisition bridge validation requires a typed bridge")
+    if content_digest(value._payload()) != value.bridge_digest:
+        raise ArgumentError("integrity acquisition bridge digest does not match its fields")
+    return value
 
 
 def assess_autonomous_claim_integrity(
@@ -982,6 +1186,7 @@ __all__ = [
     "AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_SCHEMA",
     "AUTONOMOUS_CLAIM_INTEGRITY_ASSESSMENT_SCHEMA",
     "AUTONOMOUS_CLAIM_INTEGRITY_ACTION_SCHEMA",
+    "AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA",
     "AUTONOMOUS_CLAIM_INTEGRITY_STATUSES",
     "AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_STATUSES",
     "AUTONOMOUS_CLAIM_INTEGRITY_STANCES",
@@ -995,8 +1200,11 @@ __all__ = [
     "AutonomousClaimIntegrityClaimAssessment",
     "AutonomousClaimIntegrityAction",
     "AutonomousClaimIntegrityAssessment",
+    "AutonomousClaimIntegrityAcquisitionBridge",
     "assess_autonomous_claim_integrity",
     "reassess_autonomous_claim_integrity",
+    "plan_autonomous_claim_integrity_acquisition",
     "validate_autonomous_claim_integrity",
     "validate_autonomous_claim_integrity_snapshot",
+    "validate_autonomous_claim_integrity_acquisition_bridge",
 ]

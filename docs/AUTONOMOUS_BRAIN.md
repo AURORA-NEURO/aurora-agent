@@ -11616,3 +11616,19 @@ the JSON validator rejects altered summaries or decision rows before a restarted
 them. Metadata keys are scanned fail-closed for API keys, bearer material, credentials, tokens,
 and related secret-shaped fields. Claim text, evidence values, prompts, locators, and credentials
 are never returned or persisted by this layer.
+
+The integrity-to-acquisition bridge closes the next planning seam. Given an integrity assessment
+and the caller's bounded candidate catalogue, `plan_claim_integrity_acquisition()` /
+`planClaimIntegrityAcquisition()` promotes candidates in the affected domain and records whether
+the match came from the claim, capability, or domain fallback. Candidates targeting a blocked
+claim receive bounded information-gain, uncertainty-reduction, coverage, and priority boosts;
+the underlying information planner still applies its normal dependency, reliability, freshness,
+latency, cost, approval, and exploration policy. The bridge retains the assessment digest, action
+IDs, targeted candidate IDs, match strengths, unmatched-action count, and nested acquisition-plan
+digest, so a reviewer can see exactly why the next queue was chosen.
+
+A ready assessment returns `no_action_required`, while missing candidates return `blocked`; neither
+case fabricates a source or silently invokes anything. A `planned` bridge is still review-only and
+must be handed to the existing evidence adapter/execution boundary. This makes the autonomous loop
+closed at the decision layer—integrity finding -> acquisition priority -> reviewed queue—without
+collapsing source truth or authorization into the planner.

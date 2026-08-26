@@ -496,6 +496,11 @@ domains. `reassess_claim_integrity` / `reassessClaimIntegrity` carries a prior a
 and generation for restart-safe continuation, while the JSON projection validator rejects tampered
 decision rows. This remains metadata fusion: it does not fetch evidence, resolve contradictions,
 reproduce an experiment, invoke a model, or grant authorization.
+The integrity-to-acquisition bridge compiles those action proposals into the existing candidate
+planner: affected domains and claim-linked capabilities receive bounded, digest-visible priority
+boosts, unmatched actions remain counted, and ready assessments produce an explicit no-action
+result. This closes the metadata-only planning handoff without dispatching sources or turning a
+proposal into authorization.
 The typed `BioAtlasPublicationAuditReport` and TypeScript `BioAtlasPublicationAuditResult` then
 preserve the next publication boundary: atlas aggregation, evidence-conditioned numeric scores,
 card disclosure, leaderboard ranking, ranked/unranked counts, and explicit target blockers remain

@@ -48,6 +48,7 @@ from .autonomous_claim_integrity import (
     AutonomousClaimIntegrityEvidence,
     AutonomousClaimIntegrityPolicy,
     assess_autonomous_claim_integrity,
+    plan_autonomous_claim_integrity_acquisition,
     reassess_autonomous_claim_integrity,
 )
 from .autonomous_domain_policy import (
@@ -16003,6 +16004,23 @@ class AutonomousAgent:
             evidence=evidence,
             reference_time=reference_time,
             policy=policy,
+        )
+
+    def plan_claim_integrity_acquisition(
+        self,
+        assessment: AutonomousClaimIntegrityAssessment,
+        *,
+        candidates: Sequence[Mapping[str, Any] | Any],
+        policy: Mapping[str, Any] | Any | None = None,
+        requested_domains: Sequence[str] | None = None,
+    ) -> Any:
+        """Translate unresolved claim actions into a reviewed, provider-free acquisition plan."""
+
+        return plan_autonomous_claim_integrity_acquisition(
+            assessment,
+            candidates=candidates,
+            policy=policy,
+            requested_domains=requested_domains,
         )
 
     def evidence_plan(

@@ -154,6 +154,7 @@ import {
 import type { AutonomousInformationAcquisitionCandidateInput } from "./autonomous-information-acquisition.js";
 import {
   assessAutonomousClaimIntegrity,
+  planAutonomousClaimIntegrityAcquisition,
   reassessAutonomousClaimIntegrity,
   type AssessAutonomousClaimIntegrityOptions,
   type AutonomousClaimIntegrityAssessment,
@@ -164,6 +165,7 @@ import {
   type AutonomousClaimIntegrityPolicy,
   type AutonomousClaimIntegrityPolicyInput,
 } from "./autonomous-claim-integrity.js";
+import type { PlanAutonomousClaimIntegrityAcquisitionOptions } from "./autonomous-claim-integrity.js";
 import type {
   AutonomousDomainEvidenceBrainRunOptions,
   AutonomousDomainEvidenceBrainRunResult,
@@ -6422,6 +6424,14 @@ export class AutonomousAgent {
     },
   ): AutonomousClaimIntegrityAssessment {
     return reassessAutonomousClaimIntegrity({ previous, ...options });
+  }
+
+  /** Translate integrity blockers into the existing reviewed acquisition planner. */
+  planClaimIntegrityAcquisition(
+    assessment: AutonomousClaimIntegrityAssessment,
+    options: PlanAutonomousClaimIntegrityAcquisitionOptions,
+  ) {
+    return planAutonomousClaimIntegrityAcquisition(assessment, options);
   }
 
   /** Resolve the bounded policy for a domain without provider, tool, or source activity. */

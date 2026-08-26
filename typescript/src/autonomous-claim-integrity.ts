@@ -9,6 +9,14 @@
  */
 import { ArgumentError, isObject } from "./errors.js";
 import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous-domains.js";
+import {
+  AutonomousInformationAcquisitionCandidate,
+  type AutonomousInformationAcquisitionCandidateInput,
+  AutonomousInformationAcquisitionPlan,
+  type AutonomousInformationAcquisitionPolicy,
+  type AutonomousInformationAcquisitionPolicyInput,
+  planAutonomousInformationAcquisition,
+} from "./autonomous-information-acquisition.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
@@ -18,6 +26,7 @@ export const AUTONOMOUS_CLAIM_INTEGRITY_CLAIM_SCHEMA = "bioprism-typescript-auto
 export const AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-evidence/0.1" as const;
 export const AUTONOMOUS_CLAIM_INTEGRITY_ASSESSMENT_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-assessment/0.1" as const;
 export const AUTONOMOUS_CLAIM_INTEGRITY_ACTION_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-action/0.1" as const;
+export const AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-acquisition-bridge/0.1" as const;
 
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_CLAIMS = 128;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_EVIDENCE = 512;
@@ -243,6 +252,38 @@ export class AutonomousClaimIntegrityAssessment {
   toJSON(): AutonomousClaimIntegrityAssessmentJSON { return { ...this.payload(), assessment_digest: this.assessmentDigest, policy: this.policy.toJSON(), execution: "provider_free_claim_integrity_fusion;no_source_or_provider_dispatch", retention: "metadata_only;claim_text_evidence_values_prompts_locators_credentials_caller_owned", authorization: "actions_are_proposals;acquisition_resolution_and_provider_calls_require_separate_approval", secret_material: "never_returned" } as unknown as AutonomousClaimIntegrityAssessmentJSON; }
 }
 
+export interface AutonomousClaimIntegrityAcquisitionBridgeJSON extends JsonObject {
+  schema: string;
+  assessment_digest: string;
+  action_ids: string[];
+  targeted_candidate_ids: string[];
+  candidate_action_matches: JsonObject[];
+  acquisition_plan_digest: string | null;
+  unmatched_action_count: number;
+  status: "planned" | "no_action_required" | "blocked";
+  generation: number;
+  bridge_digest?: string;
+}
+
+export class AutonomousClaimIntegrityAcquisitionBridge {
+  readonly assessmentDigest: string;
+  readonly actionIds: readonly string[];
+  readonly targetedCandidateIds: readonly string[];
+  readonly candidateActionMatches: readonly JsonObject[];
+  readonly acquisitionPlan: AutonomousInformationAcquisitionPlan | null;
+  readonly unmatchedActionCount: number;
+  readonly status: "planned" | "no_action_required" | "blocked";
+  readonly generation: number;
+  constructor(input: { assessmentDigest: string; actionIds: readonly string[]; targetedCandidateIds: readonly string[]; candidateActionMatches: readonly JsonObject[]; acquisitionPlan: AutonomousInformationAcquisitionPlan | null; unmatchedActionCount: number; status: "planned" | "no_action_required" | "blocked"; generation?: number }) {
+    this.assessmentDigest = digest("bridge assessmentDigest", input.assessmentDigest)!; this.actionIds = identifiers("bridge actionIds", input.actionIds, AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACTIONS); this.targetedCandidateIds = identifiers("bridge targetedCandidateIds", input.targetedCandidateIds, 512); this.candidateActionMatches = input.candidateActionMatches.map((item, index) => { if (!isObject(item)) fail(`bridge match ${index} must be an object`); safeMetadata(item, `bridge match ${index}`); return { ...item }; });
+    this.acquisitionPlan = input.acquisitionPlan; if (this.acquisitionPlan !== null && !(this.acquisitionPlan instanceof AutonomousInformationAcquisitionPlan)) fail("bridge acquisitionPlan is malformed"); this.unmatchedActionCount = integer("bridge unmatchedActionCount", input.unmatchedActionCount, 0, AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACTIONS); this.status = input.status; if (this.status !== "planned" && this.status !== "no_action_required" && this.status !== "blocked") fail("bridge status is unsupported"); this.generation = integer("bridge generation", input.generation ?? 1, 1, 2_147_483_647);
+    if (this.status === "planned" && this.acquisitionPlan === null) fail("planned bridge requires an acquisition plan"); if (this.status === "no_action_required" && this.unmatchedActionCount !== 0) fail("no-action bridge cannot have unmatched actions");
+  }
+  get digestDescriptor(): JsonObject { return { schema: AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA, assessment_digest: this.assessmentDigest, action_ids: [...this.actionIds], targeted_candidate_ids: [...this.targetedCandidateIds], candidate_action_matches: [...this.candidateActionMatches], acquisition_plan_digest: this.acquisitionPlan?.planDigest ?? null, unmatched_action_count: this.unmatchedActionCount, status: this.status, generation: this.generation }; }
+  get bridgeDigest(): string { return digestJsonSync(this.digestDescriptor); }
+  toJSON(): AutonomousClaimIntegrityAcquisitionBridgeJSON { return { ...this.digestDescriptor, bridge_digest: this.bridgeDigest, actions_are: "proposals_only;source_dispatch_requires_reviewed_evidence_approval", acquisition_plan: this.acquisitionPlan?.toJSON() ?? null, retention: "metadata_only;raw_claim_text_evidence_values_and_source_payloads_caller_owned", secret_material: "never_returned" } as unknown as AutonomousClaimIntegrityAcquisitionBridgeJSON; }
+}
+
 function normalizePolicy(value: AutonomousClaimIntegrityPolicy | AutonomousClaimIntegrityPolicyInput | undefined): AutonomousClaimIntegrityPolicy { return value instanceof AutonomousClaimIntegrityPolicy ? value : new AutonomousClaimIntegrityPolicy(value); }
 function normalizeClaim(value: AutonomousClaimIntegrityClaim | AutonomousClaimIntegrityClaimInput | Record<string, unknown>): AutonomousClaimIntegrityClaim {
   if (value instanceof AutonomousClaimIntegrityClaim) return value;
@@ -256,6 +297,12 @@ function normalizeEvidence(value: AutonomousClaimIntegrityEvidence | AutonomousC
   const record = value as Record<string, unknown>;
   return new AutonomousClaimIntegrityEvidence({ evidenceId: String(read(record, "evidence_id", "evidenceId")), domain: read(record, "domain", "domain") as AutonomousDomainName, claimIds: (read(record, "claim_ids", "claimIds", []) as string[]) ?? [], sourceId: String(read(record, "source_id", "sourceId")), evidenceDigest: String(read(record, "evidence_digest", "evidenceDigest")), sourceDigest: read(record, "source_digest", "sourceDigest", null) as string | null, observedAt: String(read(record, "observed_at", "observedAt")), validFrom: read(record, "valid_from", "validFrom", null) as string | null, validUntil: read(record, "valid_until", "validUntil", null) as string | null, reliability: read(record, "reliability", "reliability", 0.5) as number, support: read(record, "support", "support", 0.5) as number, status: read(record, "status", "status", "accepted") as AutonomousClaimIntegrityEvidenceStatus, stance: read(record, "stance", "stance", "support") as AutonomousClaimIntegrityStance, modality: String(read(record, "modality", "modality", "unspecified")), reproducibility: read(record, "reproducibility", "reproducibility", "unverified") as AutonomousClaimIntegrityReproducibility, metadata: (read(record, "metadata", "metadata", {}) as Record<string, unknown>) ?? {} });
 }
+function normalizeAcquisitionCandidate(value: AutonomousInformationAcquisitionCandidate | AutonomousInformationAcquisitionCandidateInput | Record<string, unknown>): AutonomousInformationAcquisitionCandidate {
+  if (value instanceof AutonomousInformationAcquisitionCandidate) return value;
+  if ("candidateId" in value) return new AutonomousInformationAcquisitionCandidate(value as AutonomousInformationAcquisitionCandidateInput);
+  const record = value as Record<string, unknown>;
+  return new AutonomousInformationAcquisitionCandidate({ candidateId: String(read(record, "candidate_id", "candidateId")), domain: read(record, "domain", "domain") as AutonomousDomainName, capability: String(read(record, "capability", "capability")), sourceId: String(read(record, "source_id", "sourceId")), informationGain: read(record, "information_gain", "informationGain") as number, uncertaintyReduction: read(record, "uncertainty_reduction", "uncertaintyReduction") as number, reliability: read(record, "reliability", "reliability") as number, freshness: read(record, "freshness", "freshness") as number, coverage: read(record, "coverage", "coverage") as number, cost: read(record, "cost", "cost") as number, latencyMs: read(record, "latency_ms", "latencyMs") as number, risk: read(record, "risk", "risk") as number, conflictRisk: read(record, "conflict_risk", "conflictRisk") as number, priority: read(record, "priority", "priority", 0.5) as number, status: read(record, "status", "status", "available") as "available" | "partial" | "stale" | "unavailable" | "requires_approval" | "conflicted", dependsOn: (read(record, "depends_on", "dependsOn", []) as string[]) ?? [], sourceDigest: read(record, "source_digest", "sourceDigest", null) as string | null, metadata: (read(record, "metadata", "metadata", {}) as Record<string, unknown>) ?? {} });
+}
 function temporalState(item: AutonomousClaimIntegrityEvidence, referenceSeconds: number, maxAgeSeconds: number): AutonomousClaimIntegrityTemporalState {
   const observed = epoch(item.observedAt); if (observed > referenceSeconds) return "future"; if (item.validFrom !== null && referenceSeconds < epoch(item.validFrom)) return "not_yet_valid"; if (item.validUntil !== null && referenceSeconds >= epoch(item.validUntil)) return "expired"; if (referenceSeconds - observed > maxAgeSeconds || item.status === "stale") return "stale"; return "valid";
 }
@@ -264,9 +311,37 @@ function evidenceRow(item: AutonomousClaimIntegrityEvidence, referenceSeconds: n
   const usable = temporal === "valid" && item.reliability >= policy.minReliability && item.support >= policy.minSupport && (item.status === "accepted" || policy.allowPartial && item.status === "partial");
   return { schema: AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_SCHEMA, evidence_id: item.evidenceId, domain: item.domain, claim_ids: [...item.claimIds], status: item.status, stance: item.stance, usable, temporal_state: temporal, source_key: item.sourceDigest ?? item.sourceId, reliability: rounded(item.reliability), support: rounded(item.support), reproducibility: item.reproducibility, issues: [...new Set(issues)].sort() };
 }
+function capabilityMatch(candidate: AutonomousInformationAcquisitionCandidate, action: AutonomousClaimIntegrityAction): [boolean, "domain" | "capability" | "claim_and_domain" | "claim_and_capability"] {
+  const capability = candidate.capability.toLowerCase().replaceAll("-", "_").replaceAll(" ", "_"); const actionToken = action.actionType.replace("acquire_", ""); const direct = capability.includes(actionToken) || actionToken === "evidence" && capability.includes("evidence"); const rawClaimIds = candidate.metadata.claim_ids; const claimMatch = Array.isArray(rawClaimIds) && rawClaimIds.some((item) => action.claimIds.includes(String(item)));
+  if (claimMatch && direct) return [true, "claim_and_capability"]; if (claimMatch) return [true, "claim_and_domain"]; if (direct) return [true, "capability"]; return [true, "domain"];
+}
 function actionType(status: AutonomousClaimIntegrityStatus): AutonomousClaimIntegrityActionType | null {
   if (status === "supported") return null; if (status === "conflicted" || status === "contradicted") return "resolve_contradiction"; if (status === "stale") return "acquire_fresh_evidence"; if (status === "insufficient_independence") return "acquire_independent_source"; if (status === "insufficient_modalities") return "acquire_cross_modal_evidence"; if (status === "unreproducible") return "reproduce_evidence"; return "acquire_evidence";
 }
+
+export interface PlanAutonomousClaimIntegrityAcquisitionOptions { candidates: readonly (AutonomousInformationAcquisitionCandidate | AutonomousInformationAcquisitionCandidateInput | Record<string, unknown>)[]; policy?: AutonomousInformationAcquisitionPolicy | AutonomousInformationAcquisitionPolicyInput; requestedDomains?: readonly AutonomousDomainName[]; }
+export function planAutonomousClaimIntegrityAcquisition(assessment: AutonomousClaimIntegrityAssessment, options: PlanAutonomousClaimIntegrityAcquisitionOptions): AutonomousClaimIntegrityAcquisitionBridge {
+  validateAutonomousClaimIntegrity(assessment); if (!Array.isArray(options.candidates) || options.candidates.length > 512) fail("acquisition candidates are outside their bounds"); const candidates = options.candidates.map(normalizeAcquisitionCandidate); if (new Set(candidates.map((item) => item.candidateId)).size !== candidates.length) fail("acquisition candidates contain duplicate ids"); const actions = [...assessment.actions];
+  if (actions.length === 0) return new AutonomousClaimIntegrityAcquisitionBridge({ assessmentDigest: assessment.assessmentDigest, actionIds: [], targetedCandidateIds: [], candidateActionMatches: [], acquisitionPlan: null, unmatchedActionCount: 0, status: "no_action_required", generation: assessment.generation });
+  if (candidates.length === 0) return new AutonomousClaimIntegrityAcquisitionBridge({ assessmentDigest: assessment.assessmentDigest, actionIds: actions.map((action) => action.actionId), targetedCandidateIds: [], candidateActionMatches: [], acquisitionPlan: null, unmatchedActionCount: actions.length, status: "blocked", generation: assessment.generation });
+  const actionDomains = new Set(actions.map((action) => action.domain)); const requestedDomains = options.requestedDomains === undefined ? AUTONOMOUS_DOMAIN_NAMES.filter((domain) => actionDomains.has(domain)) : domains("acquisition requestedDomains", options.requestedDomains); const matches: JsonObject[] = []; const targetedCandidateIds: string[] = []; const matchedActionIds = new Set<string>(); const adjusted: AutonomousInformationAcquisitionCandidate[] = []; const rank: Record<string, number> = { domain: 1, capability: 2, claim_and_domain: 3, claim_and_capability: 4 };
+  for (const candidate of candidates) {
+    const candidateMatches = actions
+      .filter((action) => action.domain === candidate.domain)
+      .map((action) => [action, capabilityMatch(candidate, action)[1]] as const);
+    if (candidateMatches.length === 0) { adjusted.push(candidate); continue; }
+    targetedCandidateIds.push(candidate.candidateId);
+    candidateMatches.forEach(([action]) => matchedActionIds.add(action.actionId));
+    const strongest = [...candidateMatches].sort((left, right) => (rank[right[1]] ?? 0) - (rank[left[1]] ?? 0) || right[0]!.priority - left[0]!.priority || left[0]!.actionId.localeCompare(right[0]!.actionId))[0]!;
+    const strongestAction = strongest[0]!;
+    const boost = Math.min(0.4, 0.1 + 0.05 * (rank[strongest[1]] ?? 0) + 0.1 * strongestAction.priority);
+    adjusted.push(new AutonomousInformationAcquisitionCandidate({ candidateId: candidate.candidateId, domain: candidate.domain, capability: candidate.capability, sourceId: candidate.sourceId, informationGain: Math.min(1, candidate.informationGain + boost), uncertaintyReduction: Math.min(1, candidate.uncertaintyReduction + boost), reliability: candidate.reliability, freshness: candidate.freshness, coverage: Math.min(1, candidate.coverage + boost * 0.5), cost: candidate.cost, latencyMs: candidate.latencyMs, risk: candidate.risk, conflictRisk: candidate.conflictRisk, priority: Math.min(1, candidate.priority + boost), status: candidate.status, dependsOn: candidate.dependsOn, sourceDigest: candidate.sourceDigest, metadata: candidate.metadata }));
+    matches.push({ candidate_id: candidate.candidateId, action_ids: candidateMatches.map(([action]) => action.actionId).sort(), action_types: [...new Set(candidateMatches.map(([action]) => action.actionType))].sort(), match_strength: strongest[1], priority_boost: rounded(boost) });
+  }
+  const acquisitionPlan = planAutonomousInformationAcquisition({ taskDigest: assessment.contextDigest, candidates: adjusted, requestedDomains, policy: options.policy }); const unmatchedActionCount = actions.filter((action) => !matchedActionIds.has(action.actionId)).length; return new AutonomousClaimIntegrityAcquisitionBridge({ assessmentDigest: assessment.assessmentDigest, actionIds: actions.map((action) => action.actionId), targetedCandidateIds, candidateActionMatches: matches, acquisitionPlan, unmatchedActionCount, status: acquisitionPlan.selected.length > 0 ? "planned" : "blocked", generation: assessment.generation });
+}
+
+export function validateAutonomousClaimIntegrityAcquisitionBridge(value: AutonomousClaimIntegrityAcquisitionBridge): AutonomousClaimIntegrityAcquisitionBridge { if (!(value instanceof AutonomousClaimIntegrityAcquisitionBridge)) fail("bridge validation requires a typed bridge"); if (digestJsonSync(value.digestDescriptor) !== value.bridgeDigest) fail("bridge digest does not match its fields"); return value; }
 
 export interface AssessAutonomousClaimIntegrityOptions { contextDigest: string; claims: readonly (AutonomousClaimIntegrityClaim | AutonomousClaimIntegrityClaimInput | Record<string, unknown>)[]; evidence: readonly (AutonomousClaimIntegrityEvidence | AutonomousClaimIntegrityEvidenceInput | Record<string, unknown>)[]; referenceTime: string; policy?: AutonomousClaimIntegrityPolicy | AutonomousClaimIntegrityPolicyInput; priorAssessmentDigest?: string | null; generation?: number; }
 
