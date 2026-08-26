@@ -20597,8 +20597,16 @@ class AutonomousAgent:
                 "launch-admitted automatic execution requires provider-free routing; "
                 "admit semantic routing separately before enabling it"
             )
-        route_options = {
-            key: kwargs[key]
+        route_options = self._automatic_route_options(kwargs)
+        blueprint = self.prepare_auto(task=task, **route_options)
+        return authorize_autonomous_launch_domains(launch_admission, blueprint.route.selected_domains)
+
+    @staticmethod
+    def _automatic_route_options(options: Mapping[str, Any]) -> dict[str, Any]:
+        """Keep provider-free automatic route compilation aligned across launch gates."""
+
+        return {
+            key: options[key]
             for key in (
                 "hints",
                 "min_confidence",
@@ -20619,10 +20627,86 @@ class AutonomousAgent:
                 "required_model_capabilities",
                 "memory_episodes",
             )
-            if key in kwargs
+            if key in options
         }
+
+    def run_auto_replan_cycle_with_launch_admission(
+        self,
+        *,
+        task: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        max_replans: int = 1,
+        hints: Sequence[str] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        **kwargs: Any,
+    ) -> AutonomousAutoReplanResult:
+        """Run the automatic learning/replan loop behind a process-boundary launch gate.
+
+        Routing is compiled once without a provider, the approved route is passed as an exact
+        route override, and every evaluator retry reuses that route.  Provider-assisted semantic
+        routing is rejected because its classifier is a separate provider boundary that must be
+        admitted independently.  Route abstention returns a review result without consuming the
+        launch admission or any credential.
+        """
+
+        semantic_routing = kwargs.pop("semantic_routing", False)
+        if not isinstance(semantic_routing, bool):
+            raise BrainRunError("semantic_routing must be a boolean")
+        if semantic_routing:
+            raise BrainRunError(
+                "launch-admitted automatic replan execution requires provider-free routing; "
+                "admit semantic routing separately before enabling it"
+            )
+        if "route_override" in kwargs:
+            raise BrainRunError(
+                "run_auto_replan_cycle_with_launch_admission owns the route override; "
+                "pass routing controls instead"
+            )
+
+        route_options = self._automatic_route_options(kwargs)
+        route_options.update(
+            {
+                "hints": hints,
+                "min_confidence": min_confidence,
+                "min_margin": min_margin,
+                "max_domains": max_domains,
+                "allow_cross_domain": allow_cross_domain,
+            }
+        )
         blueprint = self.prepare_auto(task=task, **route_options)
-        return authorize_autonomous_launch_domains(launch_admission, blueprint.route.selected_domains)
+        route = blueprint.route
+        if route.abstained:
+            return AutonomousAutoReplanResult(
+                status="route_review_required",
+                mode=None,
+                route=route,
+                final=AutonomousAutoResult(status="route_review_required", route=route),
+            )
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, route.selected_domains)
+        return self.run_auto_replan_cycle(
+            task=task,
+            credentials=credentials,
+            evaluator=evaluator,
+            model_candidates=model_candidates,
+            max_replans=max_replans,
+            route_override=route,
+            hints=hints,
+            min_confidence=min_confidence,
+            min_margin=min_margin,
+            max_domains=max_domains,
+            allow_cross_domain=allow_cross_domain,
+            semantic_routing=False,
+            **kwargs,
+        )
 
     def run_learning(
         self,

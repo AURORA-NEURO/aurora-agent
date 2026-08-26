@@ -7,7 +7,9 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_DOMAIN_NAMES,
     AutonomousAgent,
+    BrainEvaluatorDecision,
     BrainRunError,
+    BrainOutcomeEvaluator,
     CredentialStore,
     InMemoryAutonomousRunTraceStore,
     LLMRuntime,
@@ -177,6 +179,81 @@ def test_launch_admission_gate_blocks_before_execution_and_checks_route_coverage
             task="write a small function",
             launch_admission=coding,
             credentials={},
+            semantic_routing=True,
+        )
+
+
+def test_launch_admission_covers_route_frozen_auto_replan_before_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    approved = agent.launch_admission(
+        preflight,
+        decision="approve",
+        authorization_digest="a" * 64,
+    )
+    evaluator = BrainOutcomeEvaluator(
+        lambda _value: BrainEvaluatorDecision(
+            evaluator_id="launch-replan-quality",
+            evaluator_version="1",
+            reward=1.0,
+            passed=True,
+        ),
+        evaluator_id="launch-replan-quality",
+        evaluator_version="1",
+    )
+    tasks = {
+        "coding": "debug this Rust repository implementation",
+        "browser": "compare browser research sources",
+        "data": "validate this dataset schema",
+        "science": "design a scientific experiment hypothesis",
+        "biomedical": "review biomedical clinical evidence",
+        "neuroscience": "analyze neuroscience neural signals",
+        "operations": "plan an operations incident rollback",
+        "enterprise": "review enterprise governance compliance",
+        "multi_agent": "delegate a multi agent specialist subtask",
+        "multimodal": "align multimodal image audio evidence",
+        "cross_domain": "synthesize cross domain evidence",
+        "evaluation": "run an evaluation benchmark holdout",
+    }
+    dispatched: list[dict[str, object]] = []
+
+    def fake_cycle(**kwargs: object) -> str:
+        dispatched.append(kwargs)
+        return "dispatched"
+
+    monkeypatch.setattr(agent, "run_auto_replan_cycle", fake_cycle)
+    for domain, task in tasks.items():
+        assert agent.run_auto_replan_cycle_with_launch_admission(
+            task=task,
+            launch_admission=approved,
+            credentials={},
+            evaluator=evaluator,
+            max_replans=2,
+        ) == "dispatched"
+
+    assert len(dispatched) == len(tasks)
+    for task, call in zip(tasks.values(), dispatched):
+        route = call["route_override"]
+        assert route.task_digest == agent.route(task=task).task_digest
+        assert route.route_digest == agent.route(task=task).route_digest
+        assert call["semantic_routing"] is False
+
+    held = agent.launch_admission(preflight, decision="hold")
+    with pytest.raises(ArgumentError, match="not approved"):
+        agent.run_auto_replan_cycle_with_launch_admission(
+            task=tasks["coding"],
+            launch_admission=held,
+            credentials={},
+            evaluator=evaluator,
+        )
+    assert len(dispatched) == len(tasks)
+
+    with pytest.raises(BrainRunError, match="requires provider-free routing"):
+        agent.run_auto_replan_cycle_with_launch_admission(
+            task=tasks["coding"],
+            launch_admission=approved,
+            credentials={},
+            evaluator=evaluator,
             semantic_routing=True,
         )
 

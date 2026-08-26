@@ -345,6 +345,25 @@ evaluator can improve bounded context but cannot use feedback to widen the route
 connector. The same contract is exercised across all twelve built-in domains, including explicit
 route abstention before provider invocation and credential-shaped feedback refusal.
 
+For a deployment process that must bind launch approval before resolving a user credential, use
+`agent.run_auto_replan_cycle_with_launch_admission(...)`. It compiles the automatic route without
+a provider, verifies every selected domain against the approved launch record, and passes that
+exact route as the cycle's override. A held or incomplete admission fails before provider,
+learner, evaluator, or execution-controller setup; provider-assisted semantic routing is rejected
+at this boundary because its classifier call needs its own explicit approval. A route that
+abstains returns `route_review_required` without consuming admission authority or credentials.
+
+```python
+cycle = agent.run_auto_replan_cycle_with_launch_admission(
+    task="compare the implementation, dataset, and evaluation evidence",
+    launch_admission=approved_launch_record,
+    credentials=user_credential_session,
+    evaluator=evaluator,
+    max_replans=2,
+    approve_provider_call=True,
+)
+```
+
 #### Binding a reviewed launch admission at the CLI
 
 Deployments that require an operator or queue decision before credential intake can persist the
