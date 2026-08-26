@@ -221,6 +221,8 @@ from .research_contracts import (
     RetrievalSynthesisReceipt,
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_CONTEXT_COMPILATION_FEATURE_ID,
     ADAPTER_CONTEXT_COMPILATION_CONTRACT_VERSION,
     AdapterContextCompilationReceipt,
@@ -6672,6 +6674,11 @@ from .adapter_local_retrieval_synthesis_inference_engine import (
     LocalRetrievalSynthesisInferenceEngineReceipt,
     run_local_retrieval_synthesis_inference_engine,
 )
+from .adapter_multimodal_retrieval_synthesis_inference_engine import (
+    MultimodalRetrievalSynthesisCandidate,
+    MultimodalRetrievalSynthesisInferenceEngineReceipt,
+    run_multimodal_retrieval_synthesis_inference_engine,
+)
 
 __all__ += [
     "LocalEvidenceSurveillanceResearchWorkbenchReceipt",
@@ -6685,6 +6692,9 @@ __all__ += [
     "LocalRetrievalSynthesisCandidate",
     "LocalRetrievalSynthesisInferenceEngineReceipt",
     "run_local_retrieval_synthesis_inference_engine",
+    "MultimodalRetrievalSynthesisCandidate",
+    "MultimodalRetrievalSynthesisInferenceEngineReceipt",
+    "run_multimodal_retrieval_synthesis_inference_engine",
 ]
 
 from .adapter_multimodal_evidence_surveillance_research_copilot import (
