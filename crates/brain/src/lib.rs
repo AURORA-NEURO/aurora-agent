@@ -101,6 +101,7 @@ pub mod throughput_context_workbench;
 pub mod federated_context_workbench;
 pub mod context_protocol_adapter;
 pub mod multimodal_context_protocol;
+pub mod throughput_context_protocol;
 pub mod throughput_context_workflow_fabric;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
@@ -605,6 +606,17 @@ pub use multimodal_context_protocol::{
     PROTOCOL_VERSION as MULTIMODAL_CONTEXT_PROTOCOL_VERSION,
     RESPONSE_SCHEMA as MULTIMODAL_CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
     ROUTE as MULTIMODAL_CONTEXT_PROTOCOL_ROUTE,
+};
+pub use throughput_context_protocol::{
+    throughput_context_protocol_manifest, serve_throughput_context_protocol,
+    ThroughputContextProtocolError, ThroughputContextProtocolJob,
+    ThroughputContextProtocolReceipt, ThroughputContextProtocolRequest,
+    CONTRACT_VERSION as THROUGHPUT_CONTEXT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_CONTEXT_PROTOCOL_ADAPTER_FEATURE_ID,
+    METHOD as THROUGHPUT_CONTEXT_PROTOCOL_METHOD,
+    PROTOCOL_VERSION as THROUGHPUT_CONTEXT_PROTOCOL_VERSION,
+    RESPONSE_SCHEMA as THROUGHPUT_CONTEXT_PROTOCOL_RESPONSE_SCHEMA,
+    ROUTE as THROUGHPUT_CONTEXT_PROTOCOL_ROUTE,
 };
 pub use throughput_context_workflow_fabric::{
     compile_throughput_context_workflow, throughput_context_workflow_fabric_manifest,
