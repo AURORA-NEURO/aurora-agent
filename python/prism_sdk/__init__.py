@@ -6676,6 +6676,10 @@ from .adapter_throughput_evidence_surveillance_workflow_fabric import (
     ThroughputEvidenceSurveillanceWorkflowReceipt,
     schedule_throughput_evidence_surveillance_workflow,
 )
+from .adapter_federated_continual_evidence_surveillance_workflow_fabric import (
+    FederatedContinualEvidenceSurveillanceWorkflowReceipt,
+    schedule_federated_continual_evidence_surveillance_workflow,
+)
 
 __all__ += [
     "MultimodalCopilotEvidenceObservation",
@@ -6693,4 +6697,6 @@ __all__ += [
     "schedule_multimodal_evidence_surveillance_workflow",
     "ThroughputEvidenceSurveillanceWorkflowReceipt",
     "schedule_throughput_evidence_surveillance_workflow",
+    "FederatedContinualEvidenceSurveillanceWorkflowReceipt",
+    "schedule_federated_continual_evidence_surveillance_workflow",
 ]
