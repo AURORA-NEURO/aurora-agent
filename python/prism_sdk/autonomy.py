@@ -20663,6 +20663,18 @@ class AutonomousAgent:
                 "launch-admitted automatic replan execution requires provider-free routing; "
                 "admit semantic routing separately before enabling it"
             )
+        if not isinstance(evaluator, (BrainOutcomeEvaluator, DomainEvaluatorRegistry)):
+            raise BrainRunError(
+                "automatic replan evaluator must be a BrainOutcomeEvaluator or DomainEvaluatorRegistry"
+            )
+        if (
+            isinstance(max_replans, bool)
+            or not isinstance(max_replans, int)
+            or not 0 <= max_replans <= MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS
+        ):
+            raise BrainRunError(
+                f"automatic replan max_replans must be within [0, {MAX_AUTONOMOUS_REPLAN_CYCLE_REPLANS}]"
+            )
         if "route_override" in kwargs:
             raise BrainRunError(
                 "run_auto_replan_cycle_with_launch_admission owns the route override; "
