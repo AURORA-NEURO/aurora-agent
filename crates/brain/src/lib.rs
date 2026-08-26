@@ -117,6 +117,7 @@ pub mod federated_continual_knowledge_representation_inference_engine;
 pub mod local_knowledge_representation_contract_model;
 pub mod multimodal_knowledge_representation_contract_model;
 pub mod throughput_knowledge_representation_contract_model;
+pub mod federated_continual_knowledge_representation_contract_model;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
@@ -783,6 +784,15 @@ pub use throughput_knowledge_representation_contract_model::{
     ThroughputKnowledgeContractRequest,
     CONTRACT_VERSION as THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use federated_continual_knowledge_representation_contract_model::{
+    federated_continual_knowledge_representation_contract_model_manifest,
+    model_federated_continual_knowledge_representation_contract,
+    FederatedKnowledgeContractDisposition, FederatedKnowledgeContractError,
+    FederatedKnowledgeContractPeer, FederatedKnowledgeContractReceipt,
+    FederatedKnowledgeContractRequest,
+    CONTRACT_VERSION as FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
 };
 pub use throughput_retrieval_assurance_harness::{
     throughput_retrieval_assurance_harness_manifest, verify_throughput_retrieval_assurance,
