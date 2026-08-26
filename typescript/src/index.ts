@@ -3661,6 +3661,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterLocalRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterMultimodalRetrievalSynthesisResearchWorkbenchReceiptDigest,
+  validateAdapterMultimodalRetrievalSynthesisResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
   adapterMultimodalRetrievalSynthesisInferenceEngineReceiptDigest,

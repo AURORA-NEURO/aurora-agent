@@ -1903,6 +1903,9 @@ impl Server {
             "adapter_local_retrieval_synthesis_research_workbench" => {
                 self.adapter_local_retrieval_synthesis_research_workbench(&arguments)
             },
+            "adapter_multimodal_retrieval_synthesis_research_workbench" => {
+                self.adapter_multimodal_retrieval_synthesis_research_workbench(&arguments)
+            },
             "adapter_multimodal_retrieval_synthesis_inference_engine" => {
                 self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
             },
@@ -25311,6 +25314,12 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local read-only workbench renders canonical overview, evidence, omission, and provenance views over typed retrieval synthesis", "unknown, omitted, contradictory, and negative evidence remain explicit with deterministic replay and provenance digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for scope, local retention, independent replication, and schema migration"]}))
     }
 
+    fn adapter_multimodal_retrieval_synthesis_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisResearchWorkbenchRequest")?;
+        let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_research_workbench_json(request)?;
+        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal workbench renders canonical overview, evidence, omission, provenance, comparability, negative, and unknown views over multiple studies and modalities", "incomparable, omitted, uncertain, contradictory, and negative evidence remain explicit with replay and provenance digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for semantic-profile governance, scope, local retention, and independent replication"]}))
+    }
+
     fn adapter_multimodal_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(request)?;
@@ -37510,6 +37519,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "adapter_multimodal_retrieval_research_workbench",
+            "domains": ["multimodal retrieval synthesis", "multi-study researcher interaction", "comparability views", "omission-aware provenance"],
+            "crates": ["bioprism-adapter", "bioprism-mcp"],
+            "mcp_tools": ["adapter_multimodal_retrieval_synthesis_research_workbench"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
@@ -40234,6 +40251,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "adapter_local_retrieval_synthesis_research_workbench",
             "description": "Render an A0 local retrieval and synthesis researcher workbench with canonical read-only views, omission/negative evidence panels, provenance, and replay receipts.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisResearchWorkbenchRequest with ScopedRetrievalQuery, workspace scope, canonical view/panel order, local budget, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "adapter_multimodal_retrieval_synthesis_research_workbench",
+            "description": "Render an A1 multimodal retrieval and synthesis researcher workbench with comparability-aware views, omission/negative evidence panels, provenance, and replay receipts.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalRetrievalSynthesisResearchWorkbenchRequest with multi-study ScopedRetrievalQuery, required modalities, comparability digest, workspace scope, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "adapter_multimodal_retrieval_synthesis_inference_engine",
