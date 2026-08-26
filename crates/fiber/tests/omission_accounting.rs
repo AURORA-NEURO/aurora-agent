@@ -274,11 +274,10 @@ impl WorldSource for CollidingIdentifiers {
                 }
             }
             Collision::OneIdentifierForTwoVariables { variables, id }
-                if variables.iter().any(|subject| subject == variable) =>
+                if variables.iter().any(|subject| subject == variable)
+                    && !ids.iter().any(|existing| existing == id) =>
             {
-                if !ids.iter().any(|existing| existing == id) {
-                    ids.push(id.clone());
-                }
+                ids.push(id.clone());
             }
             _ => {}
         }
