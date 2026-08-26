@@ -773,6 +773,61 @@ def test_cross_domain_structured_response_gate_admits_only_reviewed_synthesis() 
     assert completed.execution_receipt.next_action == "complete"
 
 
+def test_direct_structured_response_admission_holds_weak_answers_across_every_domain() -> None:
+    runtime = LLMRuntime()
+
+    def weak_handler(request: ProviderRequest) -> Mapping[str, object]:
+        value = _structured_value_from_schema(request.response_schema)
+        assert isinstance(value, dict)
+        for key in ("observations", "inferences", "uncertainty", "evidence_gaps", "next_actions"):
+            value[key] = []
+        stages = value.get("stages")
+        if isinstance(stages, list):
+            value["stages"] = [
+                {**stage, "evidence": [], "findings": [], "uncertainty": [], "open_questions": []}
+                for stage in stages
+                if isinstance(stage, dict)
+            ]
+        details = value.get("domain_details")
+        if isinstance(details, dict):
+            value["domain_details"] = {field: [] for field in details}
+        return {"output_text": json.dumps(value)}
+
+    runtime.register_in_memory_provider("openai", weak_handler)
+    candidate = dict(_model()[0])
+    candidate["capabilities"] = [*candidate["capabilities"], "structured_output"]
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue([candidate]),
+    )
+
+    for domain in AUTONOMOUS_DOMAINS:
+        held = agent.run(
+            task=f"Produce a weak structured answer for {domain}.",
+            domain=domain,
+            credentials={},
+            approve_provider_call=True,
+            structured_domain_response=True,
+        )
+        assert held.status == "response_review_required", domain
+        assert held.response_evaluation is not None
+        assert held.response_evaluation["passed"] is False
+        assert held.response_evaluation["failure_class"] == "response_integrity_gate"
+
+        opted_out = agent.run(
+            task=f"Produce a weak structured answer for {domain}.",
+            domain=domain,
+            credentials={},
+            approve_provider_call=True,
+            structured_domain_response=True,
+            require_response_review=False,
+        )
+        assert opted_out.status.startswith("completed"), domain
+        assert opted_out.response_evaluation is not None
+        assert opted_out.response_evaluation["passed"] is False
+
+
 def test_model_catalogue_and_agent_facade_connect_readiness_session_and_execution():
     unconfigured = AutonomousAgent(
         _Workspace(),

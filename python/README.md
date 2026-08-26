@@ -551,6 +551,14 @@ quality, source, or external-effect oracle. `evaluate_autonomous_domain_response
 detection; no provider call or credential is needed for those operations. Credential-shaped fields
 and values are refused before the response can cross into durable learning metadata.
 
+Direct structured execution defaults to admission control: when the response is structurally valid
+but its value-only composition score is below the reviewed threshold, the result is returned with
+`status="response_review_required"` instead of being projected as completed. The provider response
+and evaluation remain available to the caller for review, but transport success is not promoted to
+an accepted autonomous answer. Set `require_response_review=False` only when an application needs
+the legacy `completed` projection; the failed evaluation remains visible and is not converted into
+task-quality reward. Cross-domain children and synthesis defer to the parent fan-in gate.
+
 Cross-domain structured runs automatically apply a second fan-in gate before synthesis. The gate
 revalidates every specialist against its reviewed response contract and returns a digest-only
 `response_assessment` with structural scores, domain coverage, alignment metadata, and bounded

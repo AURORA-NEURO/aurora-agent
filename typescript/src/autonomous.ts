@@ -1039,7 +1039,7 @@ export interface AutonomousCapabilityPlan extends JsonObject {
   plan_digest: string;
 }
 
-export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "policy_review_required" | "policy_blocked" | "reconciliation_required" | "turn_limit_reached" | "abstained" | "cross_domain_partial" | "child_failed";
+export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "policy_review_required" | "policy_blocked" | "reconciliation_required" | "turn_limit_reached" | "abstained" | "cross_domain_partial" | "child_failed" | "response_review_required";
 
 export type AutonomousToolLoopStatus = "completed" | "authorization_required" | "reconciliation_required" | "turn_limit_reached";
 
@@ -1652,6 +1652,8 @@ export interface AutonomousRunOptions {
   responseSchema?: JsonObject;
   /** Opt into the reviewed domain-specific JSON response contract for this run. */
   structuredDomainResponse?: boolean;
+  /** Hold a structurally valid but below-threshold structured response for caller review. Defaults to true. */
+  requireStructuredResponseReview?: boolean;
   temperature?: number;
   tools?: readonly ProviderTool[];
   authorizeAndExecute?: (calls: ProviderToolCall[]) => ProviderToolResult[] | Promise<ProviderToolResult[]>;
@@ -2675,9 +2677,10 @@ export async function validateAutonomousCrossDomainExecutionReceipt(value: unkno
   return { ...fields, receipt_digest: receiptDigest };
 }
 
-function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOptions, "requireJson" | "responseSchema" | "structuredDomainResponse">): void {
+function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOptions, "requireJson" | "responseSchema" | "structuredDomainResponse" | "requireStructuredResponseReview">): void {
   if (options.requireJson !== undefined && typeof options.requireJson !== "boolean") throw new ArgumentError("autonomous requireJson must be boolean");
   if (options.structuredDomainResponse !== undefined && typeof options.structuredDomainResponse !== "boolean") throw new ArgumentError("autonomous structuredDomainResponse must be boolean");
+  if (options.requireStructuredResponseReview !== undefined && typeof options.requireStructuredResponseReview !== "boolean") throw new ArgumentError("autonomous requireStructuredResponseReview must be boolean");
   if (options.structuredDomainResponse === true && options.responseSchema !== undefined) throw new ArgumentError("structuredDomainResponse cannot be combined with a custom responseSchema");
   if (options.responseSchema !== undefined) {
     if (!isObject(options.responseSchema)) throw new ArgumentError("autonomous responseSchema must be a JSON object");
@@ -2686,6 +2689,16 @@ function validateAutonomousStructuredOutputOptions(options: Pick<AutonomousRunOp
     try { encoded = JSON.stringify(options.responseSchema); } catch { throw new ArgumentError("autonomous responseSchema must be JSON-serializable"); }
     if (!encoded || bytes(encoded) > 1_000_000) throw new ArgumentError("autonomous responseSchema exceeds its bounded size");
   }
+}
+
+function directStructuredResponseStatus(
+  status: AutonomousRunStatus,
+  evaluation: AutonomousDomainResponseEvaluation | null,
+  requireReview: boolean | undefined,
+): AutonomousRunStatus {
+  return status === "completed" && requireReview !== false && evaluation !== null && !evaluation.passed
+    ? "response_review_required"
+    : status;
 }
 
 type RenderedAutonomousRunPrompt = {
@@ -8224,17 +8237,21 @@ export class AutonomousAgent {
           : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, maxTurns: effectiveMaxToolTurns, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, toolReadOnly });
-      const status: AutonomousRunStatus = loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached";
       const responseEvaluation = options.structuredDomainResponse === true && loop.loop.finalResponse
         ? evaluateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract)
         : null;
+      const status: AutonomousRunStatus = directStructuredResponseStatus(
+        loop.loop.status === "completed" ? "completed" : loop.loop.status === "authorization_required" ? "approval_required" : loop.loop.status === "reconciliation_required" ? "reconciliation_required" : "turn_limit_reached",
+        responseEvaluation,
+        options.requireStructuredResponseReview,
+      );
       return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, provider_invocations: loop.provider_invocations, provider_failover: loop.provider_failover, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
     const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined });
     const responseEvaluation = options.structuredDomainResponse === true
       ? evaluateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract)
       : null;
-    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "completed", route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, provider_invocations: result.provider_invocations, provider_failover: result.provider_failover, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: directStructuredResponseStatus("completed", responseEvaluation, options.requireStructuredResponseReview), route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, provider_invocations: result.provider_invocations, provider_failover: result.provider_failover, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
   }
 
   private crossDomainResponseEntries(
@@ -8390,6 +8407,7 @@ export class AutonomousAgent {
         requireJson: options.requireJson,
         responseSchema: options.responseSchema,
         structuredDomainResponse: options.structuredDomainResponse,
+        requireStructuredResponseReview: false,
         domainPolicyMode: options.domainPolicyMode,
         domainPolicyEvidenceReady: options.domainPolicyEvidenceReady,
         domainPolicyEvaluatorConfigured: options.domainPolicyEvaluatorConfigured,
@@ -8532,6 +8550,7 @@ export class AutonomousAgent {
       requireJson: options.requireJson,
       responseSchema: options.responseSchema,
       structuredDomainResponse: options.structuredDomainResponse,
+      requireStructuredResponseReview: false,
       domainPolicyMode: options.domainPolicyMode,
       domainPolicyEvidenceReady: options.domainPolicyEvidenceReady,
       domainPolicyEvaluatorConfigured: options.domainPolicyEvaluatorConfigured,

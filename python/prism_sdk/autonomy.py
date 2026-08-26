@@ -10512,6 +10512,29 @@ class AutonomousTaskOrchestrator:
             )
         return replace(result, brain_run=replace(result.brain_run, response_evaluation=evaluation))
 
+    @staticmethod
+    def _apply_direct_response_review_gate(
+        result: Any,
+        *,
+        require_response_review: bool,
+    ) -> Any:
+        """Project a failed structural response into an explicit caller-review state.
+
+        Provider transport success is deliberately retained in the response and evaluation
+        metadata.  The status only communicates that the answer did not earn admission as a
+        completed autonomous result; callers can opt out when they need the legacy projection.
+        """
+
+        if not require_response_review:
+            return result
+        evaluation = _structured_response_evaluation(result)
+        if not isinstance(evaluation, Mapping) or evaluation.get("passed") is not False:
+            return result
+        status = getattr(result, "status", None)
+        if not isinstance(status, str) or not status.startswith("completed"):
+            return result
+        return replace(result, status="response_review_required")
+
     def _execute(
         self,
         blueprint: AutonomousTaskBlueprint,
@@ -11424,6 +11447,7 @@ class AutonomousTaskOrchestrator:
         max_steps: int = 8,
         require_json: bool = False,
         structured_domain_response: bool = False,
+        require_response_review: bool = True,
         response_schema: Mapping[str, Any] | None = None,
         execution_mode: str = "provider",
         domain_policy_mode: str = "audit",
@@ -11484,6 +11508,9 @@ class AutonomousTaskOrchestrator:
         learning loop. Pass ``mission_policy`` to promote the provider proposal into the existing
         route/mission executor; dispatch still requires ``approve_mission_dispatch=True``.
         """
+
+        if not isinstance(require_response_review, bool):
+            raise BrainRunError("require_response_review must be a boolean")
 
         normalized_content_parts = (
             None if content_parts is None else normalize_provider_content_parts(content_parts)
@@ -11770,7 +11797,7 @@ class AutonomousTaskOrchestrator:
                     "trace_event_callback": trace_event_callback,
                 },
             ))
-        return self._execute(
+        result = self._execute(
             blueprint,
             model_candidates=model_candidates,
             credentials=credentials,
@@ -11804,6 +11831,10 @@ class AutonomousTaskOrchestrator:
             execution_controller=execution_controller,
             invocation_observer=invocation_observer,
             trace_event_callback=trace_event_callback,
+        )
+        return self._apply_direct_response_review_gate(
+            result,
+            require_response_review=require_response_review,
         )
 
     @staticmethod
@@ -12102,6 +12133,7 @@ class AutonomousTaskOrchestrator:
                 max_steps=item.spec.max_steps,
                 require_json=item.spec.require_json,
                 structured_domain_response=item.spec.structured_domain_response,
+                require_response_review=False,
                 response_schema=None if item.spec.structured_domain_response else item.spec.response_schema,
                 execution_mode=item.spec.execution_mode,
                 required_model_capabilities=tuple(
@@ -13553,6 +13585,7 @@ class AutonomousTaskOrchestrator:
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 structured_domain_response=child.spec.structured_domain_response,
+                require_response_review=False,
                 # ``prepare`` stores the generated contract schema in the spec for replay, but
                 # the structured mode owns that schema at the run boundary. Passing it back as
                 # a custom schema would incorrectly trip the mutually-exclusive option guard.
@@ -13710,6 +13743,7 @@ class AutonomousTaskOrchestrator:
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
             structured_domain_response=synthesis.spec.structured_domain_response,
+            require_response_review=False,
             response_schema=None if synthesis.spec.structured_domain_response else synthesis.spec.response_schema,
             execution_mode=synthesis.spec.execution_mode,
             ledger=ledger,
@@ -14045,6 +14079,7 @@ class AutonomousTaskOrchestrator:
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 structured_domain_response=child.spec.structured_domain_response,
+                require_response_review=False,
                 response_schema=None if child.spec.structured_domain_response else child.spec.response_schema,
                 execution_mode=child.spec.execution_mode,
                 required_model_capabilities=tuple(
@@ -14166,6 +14201,7 @@ class AutonomousTaskOrchestrator:
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
             structured_domain_response=synthesis.spec.structured_domain_response,
+            require_response_review=False,
             response_schema=None if synthesis.spec.structured_domain_response else synthesis.spec.response_schema,
             execution_mode=synthesis.spec.execution_mode,
             ledger=ledger,

@@ -2687,6 +2687,14 @@ only the episode and validated response-evaluation projection are required. Norm
 cross-domain online learning record this signal as a separate `structured_response` evaluation,
 so it cannot collide with task-quality credit.
 
+Direct structured runs also have an explicit admission status. A response can satisfy the JSON
+contract while still failing the deterministic composition threshold; in that case the Python
+orchestrator returns `response_review_required` by default, retaining only the caller-owned
+response and value-only evaluation for review. `require_response_review=False` is an explicit
+compatibility opt-out that restores the `completed` projection without turning the failed signal
+into task-quality credit. Cross-domain fan-out passes this option as false for nested calls and
+lets the parent structural assessment gate synthesis.
+
 ### Provider-free model-selection preview
 
 Applications that need to show an operator what the brain would choose before requesting approval

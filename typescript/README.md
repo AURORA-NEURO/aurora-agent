@@ -759,6 +759,14 @@ correctness, source truth, or proof of an external effect. `evaluateAndSettleRun
 `runLearning()` settle both streams when both are prepared and return the response receipt
 separately.
 
+Direct structured execution defaults to admission control: a structurally valid response whose
+value-only composition score is below the reviewed threshold returns
+`status: "response_review_required"` rather than `"completed"`. The provider response and
+evaluation remain caller-owned for review, while transport success is kept separate from answer
+admission. Set `requireStructuredResponseReview: false` only when a caller explicitly wants the
+legacy completed projection; the failed evaluation is still exposed and never becomes task-quality
+reward. Cross-domain children and synthesis defer to the parent fan-in assessment.
+
 Cross-domain structured execution adds an automatic response-admission gate before fan-in. With
 `structuredDomainResponse: true`, each specialist is revalidated against its digest-bound domain
 contract and the result exposes a metadata-only `response_assessment`. The assessment keeps
