@@ -25,6 +25,8 @@ import threading
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .authoring import canonical_json, content_digest
+from .autonomous_prompt_learning import AutonomousPromptAdaptiveSelection
+from .errors import ArgumentError
 from .brain import (
     AutonomousBrain,
     BrainEvaluatorDecision,
@@ -80,6 +82,7 @@ _MODEL_QUALITY_FIELDS = frozenset(
         "replayed",
         "retention",
         "secret_material",
+        "prompt_learning",
     }
 )
 _MODEL_QUALITY_DIGEST_FIELDS = frozenset(
@@ -156,6 +159,61 @@ def _private_shape_free(value: Mapping[str, Any], *, label: str) -> None:
         raise BrainRunError(f"{label} contains private or payload-shaped material")
 
 
+def _prompt_learning_projection(value: Any) -> dict[str, Any]:
+    """Normalize registry-bound prompt choices without retaining rendered prompt content."""
+
+    if not isinstance(value, Mapping):
+        raise BrainRunError("mission prompt learning projection must be a mapping")
+    expected = {
+        "selection_count",
+        "selection_digests",
+        "selections",
+        "retention",
+        "secret_material",
+    }
+    if set(value) != expected:
+        raise BrainRunError("mission prompt learning projection fields are invalid")
+    if value.get("retention") != "selection_metadata_only;rendered_messages_transient":
+        raise BrainRunError("mission prompt learning projection retention is invalid")
+    if value.get("secret_material") != _SECRET_MATERIAL:
+        raise BrainRunError("mission prompt learning projection secret marker is invalid")
+    selection_count = value.get("selection_count")
+    if isinstance(selection_count, bool) or not isinstance(selection_count, int) or not 0 <= selection_count <= 128:
+        raise BrainRunError("mission prompt learning selection_count is outside its bound")
+    raw_digests = value.get("selection_digests")
+    raw_selections = value.get("selections")
+    if (
+        not isinstance(raw_digests, Sequence)
+        or isinstance(raw_digests, (str, bytes))
+        or not isinstance(raw_selections, Sequence)
+        or isinstance(raw_selections, (str, bytes))
+        or len(raw_digests) != selection_count
+        or len(raw_selections) != selection_count
+    ):
+        raise BrainRunError("mission prompt learning projection selections are malformed")
+    selections: list[dict[str, Any]] = []
+    digests: list[str] = []
+    for index, raw in enumerate(raw_selections):
+        if not isinstance(raw, Mapping):
+            raise BrainRunError(f"mission prompt learning selection {index} is malformed")
+        try:
+            selection = AutonomousPromptAdaptiveSelection.from_dict(raw)
+        except (ArgumentError, BrainRunError, TypeError, ValueError) as error:
+            raise BrainRunError(f"mission prompt learning selection {index} is invalid") from error
+        normalized = selection.to_dict()
+        selections.append(normalized)
+        digests.append(selection.selection_digest)
+    if list(raw_digests) != digests:
+        raise BrainRunError("mission prompt learning selection digests do not match selections")
+    return {
+        "selection_count": selection_count,
+        "selection_digests": digests,
+        "selections": selections,
+        "retention": value["retention"],
+        "secret_material": value["secret_material"],
+    }
+
+
 def _model_quality_projection(value: Mapping[str, Any]) -> dict[str, Any]:
     """Allow only the bounded fields that a health settlement can persist."""
 
@@ -166,8 +224,11 @@ def _model_quality_projection(value: Mapping[str, Any]) -> dict[str, Any]:
         raise BrainRunError("mission model quality projection contains unsupported fields")
     _safe_metadata(value, label="mission model quality projection")
     _private_shape_free(value, label="mission model quality projection")
+    normalized = dict(value)
     for field, item in value.items():
-        if field in _MODEL_QUALITY_DIGEST_FIELDS:
+        if field == "prompt_learning":
+            normalized[field] = _prompt_learning_projection(item)
+        elif field in _MODEL_QUALITY_DIGEST_FIELDS:
             if item is not None and not isinstance(item, str):
                 raise BrainRunError(f"mission model quality {field} must be a digest or None")
             if item is not None and not re.fullmatch(r"[0-9a-f]{64}", item):
@@ -182,7 +243,7 @@ def _model_quality_projection(value: Mapping[str, Any]) -> dict[str, Any]:
                 raise BrainRunError(f"mission model quality {field} must be boolean")
         elif not isinstance(item, str) or not item.strip() or "\x00" in item or len(item.encode("utf-8")) > 512:
             raise BrainRunError(f"mission model quality {field} must be bounded text")
-    return dict(value)
+    return normalized
 
 
 def _screen_instruction(value: Any) -> str:
@@ -798,6 +859,47 @@ class AutonomousMissionReplanRehydrationContext:
         }
 
 
+def _insert_replan_chunk_into_override(
+    prompt: Mapping[str, Any],
+    chunk: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep a rendered prompt override aligned with the metadata context on retries."""
+
+    result = dict(prompt)
+    override = result.get("_provider_messages_override")
+    if override is None:
+        return result
+    if not isinstance(override, Mapping):
+        raise BrainRunError("mission replan provider prompt override must be a mapping")
+    chunk_id = chunk.get("id")
+    content = chunk.get("content")
+    if not isinstance(chunk_id, str) or not isinstance(content, str):
+        raise BrainRunError("mission replan retry context chunk is malformed")
+    raw_messages = override.get("messages")
+    if (
+        not isinstance(raw_messages, Sequence)
+        or isinstance(raw_messages, (str, bytes))
+        or not raw_messages
+        or any(not isinstance(message, Mapping) for message in raw_messages)
+    ):
+        raise BrainRunError("mission replan provider prompt override messages are malformed")
+    retry_message = {
+        "role": "developer",
+        "content": f"Context {chunk_id}:\n{content}",
+    }
+    rendered_messages = [dict(message) for message in raw_messages]
+    last_user_index = max(
+        (index for index, message in enumerate(rendered_messages) if message.get("role") == "user"),
+        default=-1,
+    )
+    insertion_index = len(rendered_messages) if last_user_index < 0 else last_user_index
+    rendered_messages.insert(insertion_index, retry_message)
+    updated_override = dict(override)
+    updated_override["messages"] = rendered_messages
+    result["_provider_messages_override"] = updated_override
+    return result
+
+
 def _append_replan_context(prompt: Mapping[str, Any], *, attempt: int, result: BrainMissionResult, decision: BrainEvaluatorDecision) -> dict[str, Any]:
     if not isinstance(prompt, Mapping):
         raise BrainRunError("mission replan prompt must be a mapping")
@@ -842,7 +944,7 @@ def _append_replan_context(prompt: Mapping[str, Any], *, attempt: int, result: B
     )
     result = dict(prompt)
     result["context"] = chunks
-    return result
+    return _insert_replan_chunk_into_override(result, chunks[-1])
 
 
 def _checkpoint_from_state(state: AutonomousMissionReplanState) -> AutonomousMissionReplanCheckpoint:
@@ -1147,6 +1249,7 @@ def run_autonomous_mission_replan_cycle(
             }
         )
         current_prompt["context"] = chunks
+        current_prompt = _insert_replan_chunk_into_override(current_prompt, chunks[-1])
         start_attempt = state.attempt if state.phase == "replan_handoff" else state.attempt - 1
     elif state.phase == "evaluation_pending":
         if rehydrate_result is None:

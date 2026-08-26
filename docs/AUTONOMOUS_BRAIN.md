@@ -6133,6 +6133,13 @@ task text, prompt content, credential handles, or evaluator prose. A ledger writ
 and is surfaced as a bounded diagnostic projection; it cannot change the mission result or widen
 the next attempt's contract.
 
+If the façade is constructed with `prompt_learning_coordinator`, mission replans use the same
+registry-bound adaptive prompt selection as direct, workflow, and cross-domain runs. Each
+evaluation retains only the validated prompt-arm receipt and its digest, so callers can recover
+`agent.prompt_learning_selections(cycle)` and explicitly settle prompt quality after independent
+review. Retry context is inserted into the active transient prompt override as well as the base
+context, preventing a versioned prompt from silently dropping evaluator feedback on attempt two.
+
 The optional `state_store` persists a hash-chained metadata cursor with phases
 `execution_pending`, `evaluation_pending`, `replan_handoff`, and `terminal`. It contains attempt
 and evaluation projections, protected-contract and outcome digests, the bandit-state digest, and

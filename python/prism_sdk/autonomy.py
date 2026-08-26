@@ -20579,6 +20579,7 @@ class AutonomousAgent:
             if overlap:
                 raise BrainRunError("mission_options duplicates runtime options: " + ", ".join(overlap))
             options.update(dict(mission_options))
+        options = self._prompt_learning_options(options)
         supplied_execution_mode = options.get("execution_mode")
         if supplied_execution_mode not in (None, "mission"):
             raise BrainRunError("run_mission_replan_cycle requires execution_mode='mission'")
@@ -20613,6 +20614,17 @@ class AutonomousAgent:
         }
         prepare_options["execution_mode"] = "mission"
         blueprint = self.orchestrator.prepare(task=task, domain=domain, **prepare_options)
+        route_binding = blueprint.selection_context.get("autonomous_route")
+        blueprint = _apply_versioned_prompt(
+            blueprint,
+            route=route_binding if isinstance(route_binding, Mapping) else None,
+            prompt_template=options.get("prompt_template"),
+            prompt_registry=options.get("prompt_registry"),
+            prompt_selection=options.get("prompt_selection"),
+            prompt_stage=options.get("prompt_stage", "answer"),
+            prompt_learning_state=options.get("prompt_learning_state"),
+            prompt_learning_exploration=options.get("prompt_learning_exploration", 0.35),
+        )
 
         # `_execution_inputs` enriches the ordinary agent request with reviewed tool/catalogue
         # context. Filter that request down to the explicit adaptive-mission kernel contract so
@@ -20664,7 +20676,24 @@ class AutonomousAgent:
 
             try:
                 episode = self.brain.prepare_learning_episode(result, evidence=evidence)
-                return self._record_model_quality_feedback(episode, decision)
+                quality = self._record_model_quality_feedback(episode, decision)
+                coordinator = self.prompt_learning_coordinator
+                if coordinator is not None:
+                    selections = extract_autonomous_prompt_learning_selections(
+                        {"prompt": dict(result.brain_run.prompt)},
+                        coordinator.registry,
+                    )
+                    quality = {
+                        **quality,
+                        "prompt_learning": {
+                            "selection_count": len(selections),
+                            "selection_digests": [selection.selection_digest for selection in selections],
+                            "selections": [selection.to_dict() for selection in selections],
+                            "retention": "selection_metadata_only;rendered_messages_transient",
+                            "secret_material": "never_returned",
+                        },
+                    }
+                return quality
             except Exception as error:
                 return {
                     "status": "failed",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import pytest
 
@@ -22,6 +22,8 @@ from prism_sdk import (
     LLMRuntime,
     ModelCatalogue,
     ProviderHealthLedger,
+    AutonomousPromptLearningPersistenceCoordinator,
+    builtin_autonomous_prompt_registry,
     run_autonomous_mission_replan_cycle,
 )
 
@@ -100,9 +102,15 @@ def _bandit_state() -> dict[str, Any]:
     return {"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []}
 
 
-def _mission_result(index: int, *, dispatched: bool = False) -> BrainMissionResult:
+def _mission_result(
+    index: int,
+    *,
+    dispatched: bool = False,
+    domain: str = "coding",
+    prompt: Mapping[str, Any] | None = None,
+) -> BrainMissionResult:
     context = {
-        "domain": "coding",
+        "domain": domain,
         "capability": "implementation",
         "risk_class": "research",
         "task_family": None,
@@ -123,7 +131,7 @@ def _mission_result(index: int, *, dispatched: bool = False) -> BrainMissionResu
             ).hexdigest(),
             "context": context,
         },
-        prompt={"prompt_digest": "p" * 64},
+        prompt={"prompt_digest": "p" * 64} if prompt is None else dict(prompt),
         plan={"plan": {"plan_digest": "l" * 64}},
         response=None,
         outcome_digest=(f"{index:064x}")[-64:],
@@ -210,6 +218,58 @@ def test_mission_replan_is_bounded_and_serializes_only_metadata(monkeypatch: pyt
     assert "Reduce uncertainty" in json.dumps(calls[1])
 
 
+def test_mission_replan_inserts_feedback_into_versioned_prompt_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = _Workspace()
+    brain = _brain(workspace)
+    prompts: list[Mapping[str, Any]] = []
+
+    def run_adaptive_mission(**kwargs: Any) -> BrainMissionResult:
+        prompts.append(dict(kwargs["prompt"]))
+        return _mission_result(len(prompts))
+
+    monkeypatch.setattr(brain, "run_adaptive_mission", run_adaptive_mission)
+    result = run_autonomous_mission_replan_cycle(
+        brain,
+        task="retry a versioned mission prompt",
+        model_candidates=[_candidate()],
+        prompt={
+            "system": "system",
+            "context": [],
+            "_provider_messages_override": {
+                "messages": [
+                    {"role": "system", "content": "versioned system"},
+                    {"role": "user", "content": "versioned task"},
+                ],
+                "metadata": {
+                    "mode": "registry_selection",
+                    "retention": "prompt_messages_transient;digest_only_projection",
+                    "secret_material": "never_returned",
+                },
+            },
+        },
+        plan={"steps": []},
+        credentials={},
+        mission_policy={"allowed_tools": ["read_only"]},
+        evaluator=_evaluator([]),
+        bandit_state=_bandit_state(),
+        max_replans=1,
+    )
+
+    assert result.status == "completed"
+    assert len(prompts) == 2
+    second_override = prompts[1]["_provider_messages_override"]
+    assert isinstance(second_override, Mapping)
+    second_messages = second_override["messages"]
+    assert isinstance(second_messages, Sequence)
+    assert any(
+        isinstance(message, Mapping)
+        and "autonomy-mission-replan-2" in str(message.get("content", ""))
+        for message in second_messages
+    )
+
+
 def test_mission_replan_checkpoint_resumes_handoff_without_replaying_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -225,6 +285,21 @@ def test_mission_replan_checkpoint_resumes_handoff_without_replaying_attempt(
     seen_first: list[Mapping[str, Any]] = []
     store = InMemoryAutonomousMissionReplanStateStore()
     instruction = "Reduce uncertainty and retry the bounded mission."
+    versioned_prompt = {
+        "system": "system",
+        "context": [],
+        "_provider_messages_override": {
+            "messages": [
+                {"role": "system", "content": "versioned system"},
+                {"role": "user", "content": "versioned task"},
+            ],
+            "metadata": {
+                "mode": "registry_selection",
+                "retention": "prompt_messages_transient;digest_only_projection",
+                "secret_material": "never_returned",
+            },
+        },
+    }
 
     def interrupt(checkpoint: AutonomousMissionReplanCheckpoint) -> None:
         if checkpoint.phase == "replan_scheduled":
@@ -235,7 +310,7 @@ def test_mission_replan_checkpoint_resumes_handoff_without_replaying_attempt(
             brain,
             task="restart the bounded mission",
             model_candidates=[_candidate()],
-            prompt={"system": "system", "context": []},
+            prompt=versioned_prompt,
             plan={"steps": []},
             credentials={},
             mission_policy={"allowed_tools": ["read_only"]},
@@ -257,7 +332,7 @@ def test_mission_replan_checkpoint_resumes_handoff_without_replaying_attempt(
         brain,
         task="restart the bounded mission",
         model_candidates=[_candidate()],
-        prompt={"system": "system", "context": []},
+        prompt=versioned_prompt,
         plan={"steps": []},
         credentials={},
         mission_policy={"allowed_tools": ["read_only"]},
@@ -276,6 +351,15 @@ def test_mission_replan_checkpoint_resumes_handoff_without_replaying_attempt(
     assert len(seen_first) == 1
     assert len(seen_resume) == 1
     assert "Reduce uncertainty" in json.dumps(calls[1])
+    resumed_override = calls[1]["_provider_messages_override"]
+    assert isinstance(resumed_override, Mapping)
+    resumed_messages = resumed_override["messages"]
+    assert isinstance(resumed_messages, Sequence)
+    assert any(
+        isinstance(message, Mapping)
+        and "autonomy-mission-replan-2" in str(message.get("content", ""))
+        for message in resumed_messages
+    )
     terminal = store.load("restartable-mission")
     assert terminal is not None
     assert terminal.phase == "terminal"
@@ -468,6 +552,65 @@ def test_agent_mission_replan_settles_model_quality_for_every_live_attempt(
     public = json.dumps(result.to_dict())
     assert "adapt model choice" not in public
     assert "private_provider_text" not in public
+
+
+def test_agent_mission_replan_uses_adaptive_prompt_learning_for_every_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = builtin_autonomous_prompt_registry()
+    coordinator = AutonomousPromptLearningPersistenceCoordinator(registry)
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_candidate()]),
+        prompt_learning_coordinator=coordinator,
+    )
+
+    for index, domain in enumerate(AUTONOMOUS_DOMAINS, start=1):
+        def run_adaptive_mission(**kwargs: Any) -> BrainMissionResult:
+            prompt = kwargs["prompt"]
+            override = prompt.get("_provider_messages_override")
+            assert isinstance(override, Mapping)
+            metadata = override.get("metadata")
+            assert isinstance(metadata, Mapping)
+            return _mission_result(
+                index,
+                domain=domain,
+                prompt={
+                    "prompt_digest": f"{index:064x}",
+                    "autonomous_prompt": dict(metadata),
+                },
+            )
+
+        monkeypatch.setattr(agent.brain, "run_adaptive_mission", run_adaptive_mission)
+        result = agent.run_mission_replan_cycle(
+            task=f"adapt the bounded {domain} mission prompt",
+            domain=domain,
+            credentials={},
+            mission_policy={"allowed_tools": ["read_only"]},
+            evaluator=_evaluator([], request_replan_once=False),
+            model_candidates=[_candidate()],
+            max_replans=0,
+        )
+
+        selections = agent.prompt_learning_selections(result)
+        assert len(selections) == 1, domain
+        assert selections[0].plan.rows[0].domain == domain
+        quality = result.evaluations[0]["model_quality"]
+        assert quality["prompt_learning"]["selection_count"] == 1
+        settled = agent.settle_prompt_learning(
+            selections[0],
+            arm_id=selections[0].arm_ids[0],
+            evaluator_id=f"{domain}-prompt-quality",
+            evaluator_version="1",
+            reward=0.8,
+            passed=True,
+            outcome_digest=result.attempts[0].outcome_digest,
+        )
+        assert settled.status == "settled"
+        public = json.dumps(result.to_dict())
+        assert "adapt the bounded" not in public
+        assert '"messages":' not in public
 
 
 def test_mission_replan_rejects_payload_shaped_model_quality_projection(

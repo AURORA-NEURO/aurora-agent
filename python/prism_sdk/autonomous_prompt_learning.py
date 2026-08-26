@@ -409,6 +409,9 @@ def extract_autonomous_prompt_learning_selections(
             if identity in visited:
                 return
             visited.add(identity)
+            if value.get("schema") == AUTONOMOUS_PROMPT_ADAPTIVE_SELECTION_SCHEMA:
+                add(value)
+                return
             prompt = value.get("prompt")
             if isinstance(prompt, Mapping):
                 inspect_prompt(prompt)
@@ -427,6 +430,10 @@ def extract_autonomous_prompt_learning_selections(
                 "final_result",
                 "result",
                 "stage_results",
+                "evaluations",
+                "model_quality",
+                "prompt_learning",
+                "selections",
             ):
                 child = value.get(key)
                 if isinstance(child, (Mapping, Sequence)) and not isinstance(child, (str, bytes, bytearray)):
@@ -463,6 +470,10 @@ def extract_autonomous_prompt_learning_selections(
             "final_result",
             "result",
             "stage_results",
+            "evaluations",
+            "model_quality",
+            "prompt_learning",
+            "selections",
         ):
             child = getattr(value, attribute, None)
             if isinstance(child, (Mapping, Sequence)) or hasattr(child, "prompt") or hasattr(child, "adaptive_selection"):
