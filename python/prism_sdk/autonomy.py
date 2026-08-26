@@ -11765,6 +11765,7 @@ class AutonomousTaskOrchestrator:
                 ledger=ledger,
                 max_replans=max_replans,
                 memory_tags=memory_tags,
+                require_response_review=require_response_review,
                 execution_kwargs={
                     "contextual_observations": contextual_observations,
                     "content_parts": normalized_content_parts,
@@ -14936,6 +14937,7 @@ class AutonomousTaskOrchestrator:
         ledger: BrainLearningLedger | None,
         max_replans: int,
         memory_tags: Sequence[str],
+        require_response_review: bool,
         execution_kwargs: Mapping[str, Any],
     ) -> AutonomousLearningResult:
         if store is None:
@@ -14974,6 +14976,23 @@ class AutonomousTaskOrchestrator:
             attempts.append(result)
             if result.status not in {"completed_provider_call", "completed_provider_tool_loop"}:
                 final_status = result.status
+                break
+            structured_evaluation = _structured_response_evaluation(result)
+            if (
+                require_response_review
+                and isinstance(structured_evaluation, Mapping)
+                and structured_evaluation.get("passed") is False
+            ):
+                structured_feedback = _record_structured_response_feedback(
+                    self.brain,
+                    result,
+                    bandit_state=state,
+                    ledger=ledger,
+                )
+                if structured_feedback is not None:
+                    state, structured_evaluation_record = structured_feedback
+                    evaluations.append(structured_evaluation_record)
+                final_status = "response_review_required"
                 break
             decision, report = resolved_evaluator.evaluate_and_record_with_decision(
                 self.brain,

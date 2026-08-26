@@ -828,6 +828,88 @@ def test_direct_structured_response_admission_holds_weak_answers_across_every_do
         assert opted_out.response_evaluation["passed"] is False
 
 
+def test_structured_response_review_precedes_python_task_learning_across_every_domain(tmp_path: Path) -> None:
+    runtime = LLMRuntime()
+
+    def weak_handler(request: ProviderRequest) -> Mapping[str, object]:
+        value = _structured_value_from_schema(request.response_schema)
+        assert isinstance(value, dict)
+        for key in ("observations", "inferences", "uncertainty", "evidence_gaps", "next_actions"):
+            value[key] = []
+        stages = value.get("stages")
+        if isinstance(stages, list):
+            value["stages"] = [
+                {**stage, "evidence": [], "findings": [], "uncertainty": [], "open_questions": []}
+                for stage in stages
+                if isinstance(stage, dict)
+            ]
+        details = value.get("domain_details")
+        if isinstance(details, dict):
+            value["domain_details"] = {field: [] for field in details}
+        return {"output_text": json.dumps(value)}
+
+    runtime.register_in_memory_provider("openai", weak_handler)
+    candidate = dict(_model()[0])
+    candidate["capabilities"] = [*candidate["capabilities"], "structured_output"]
+    memory = BrainEpisodicMemory(tmp_path / "structured-learning-review.sqlite3")
+    try:
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            model_catalogue=ModelCatalogue([candidate]),
+            memory=memory,
+        )
+        evaluator = BrainOutcomeEvaluator(
+            lambda _input: {"reward": 0.8, "passed": True, "failed": False},
+            evaluator_id="python-task-quality-review",
+            evaluator_version="1",
+        )
+        state: Mapping[str, object] = {
+            "schema": "bioprism-brain-bandit/0.1",
+            "generation": 0,
+            "arms": [],
+        }
+        for domain in AUTONOMOUS_DOMAINS:
+            held = agent.run(
+                task=f"Learn from a weak structured answer for {domain}.",
+                domain=domain,
+                credentials={},
+                approve_provider_call=True,
+                structured_domain_response=True,
+                learn=True,
+                evaluator=evaluator,
+                bandit_state=state,
+                max_replans=0,
+                run_id=f"structured-review-{domain}",
+            )
+            assert held.status == "response_review_required", domain
+            assert held.final_result.response_evaluation is not None
+            assert held.final_result.response_evaluation["passed"] is False
+            assert held.memory_receipts == (), domain
+            assert all(item.get("kind") == "structured_response" for item in held.evaluations), domain
+            state = held.bandit_state
+
+            admitted = agent.run(
+                task=f"Opt out of the weak structured review gate for {domain}.",
+                domain=domain,
+                credentials={},
+                approve_provider_call=True,
+                structured_domain_response=True,
+                require_response_review=False,
+                learn=True,
+                evaluator=evaluator,
+                bandit_state=state,
+                max_replans=0,
+                run_id=f"structured-opt-out-{domain}",
+            )
+            assert admitted.status.startswith("completed"), domain
+            assert admitted.memory_receipts, domain
+            assert any(item.get("kind") != "structured_response" for item in admitted.evaluations), domain
+            state = admitted.bandit_state
+    finally:
+        memory.close()
+
+
 def test_model_catalogue_and_agent_facade_connect_readiness_session_and_execution():
     unconfigured = AutonomousAgent(
         _Workspace(),

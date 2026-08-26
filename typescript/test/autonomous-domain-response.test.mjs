@@ -119,18 +119,29 @@ test("direct structured response admission holds weak answers across every domai
     value.domain_details = Object.fromEntries(contract.domain_fields.map((field) => [field, []]));
     return { structured: value };
   }, { structuredOutputMode: "json_schema" });
-  const agent = new AutonomousAgent(llm);
+  const agent = new AutonomousAgent(llm, { learner: new AutonomousOnlineLearner() });
   agent.registerModel(model);
+  const learning = new AutonomousLearningController(agent);
 
   for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
     const held = await agent.run(`Produce a weak structured answer for ${domain}.`, {
       domain,
       approveProviderCall: true,
       structuredDomainResponse: true,
+      learning,
+      learningEpisodeId: `weak-structured-${domain}`,
     });
     assert.equal(held.status, "response_review_required", domain);
     assert.equal(held.response_evaluation.passed, false, domain);
     assert.equal(held.response_evaluation.failure_class, "response_integrity_gate", domain);
+    assert.equal(held.learning_episode_status, "not_eligible", domain);
+    assert.equal(held.response_learning_episode_status, "prepared", domain);
+    assert.equal(held.learning_episode_id, null, domain);
+    assert.ok(held.response_learning_episode_id, domain);
+    const responseEpisode = await learning.episodes.load(held.response_learning_episode_id);
+    assert.equal(responseEpisode.status, "pending", domain);
+    const responseSettlement = await learning.settleStructuredResponse(held);
+    assert.equal(responseSettlement.episode.episode_id, held.response_learning_episode_id, domain);
 
     const optedOut = await agent.run(`Produce a weak structured answer for ${domain}.`, {
       domain,

@@ -2333,12 +2333,14 @@ export class AutonomousLearningController {
     return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "settled", run, rewards, settlement: settlement.trajectory, response_settlements: settlement.response_settlements, reason: null, retention: "run_caller_owned; rewards_and_settlement_value_only" };
   }
 
-  async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null; memoryEpisodeId?: string | null }): Promise<AutonomousLearningEpisode> {
+  async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null; memoryEpisodeId?: string | null; responseOnly?: boolean }): Promise<AutonomousLearningEpisode> {
     if (!isObject(options)) throw new ArgumentError("learning episode options must be an object");
     const episodeId = boundedIdentifier("episodeId", options.episodeId);
     const planRefinementDigest = options.planRefinementDigest === undefined ? null : boundedDigest("planRefinementDigest", options.planRefinementDigest, true);
     const memoryEpisodeId = options.memoryEpisodeId === undefined || options.memoryEpisodeId === null ? null : boundedIdentifier("memoryEpisodeId", options.memoryEpisodeId);
-    if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) throw new ArgumentError("learning episode requires a completed autonomous run");
+    if (options.responseOnly !== undefined && typeof options.responseOnly !== "boolean") throw new ArgumentError("learning episode responseOnly must be boolean");
+    const responseOnly = options.responseOnly === true;
+    if ((!responseOnly && result.status !== "completed") || (responseOnly && result.status !== "response_review_required") || !result.blueprint || !result.selection?.selected_model || (responseOnly && !result.response_evaluation)) throw new ArgumentError(responseOnly ? "response learning episode requires a reviewed structured response" : "learning episode requires a completed autonomous run");
     const runId = boundedIdentifier("runId", options.runId ?? episodeId);
     const selectionDigest = await digestJson(result.selection);
     const outcomeDigest = await digestJson({ status: result.status, route_digest: result.route.route_digest, selection: result.selection, response: result.response });

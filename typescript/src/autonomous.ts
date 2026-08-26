@@ -8618,28 +8618,37 @@ export class AutonomousAgent {
     options: Pick<AutonomousRunOptions, "learning" | "learningEpisodeId" | "memoryRunId"> & { memoryEpisodeId?: string | null },
   ): Promise<Pick<AutonomousRunResult, "learning_episode_id" | "learning_episode_status" | "learning_error_class" | "response_learning_episode_id" | "response_learning_episode_status" | "response_learning_error_class">> {
     if (!options.learning) return {};
-    if (result.status !== "completed" || !result.blueprint || !result.selection?.selected_model) {
+    if (!result.blueprint || !result.selection?.selected_model) {
       return { learning_episode_id: null, learning_episode_status: "not_eligible", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "not_eligible", response_learning_error_class: null };
     }
+    const taskEligible = result.status === "completed";
+    let episode: Awaited<ReturnType<AutonomousLearningController["prepareRun"]>> | null = null;
     try {
-      const derivedId = options.learningEpisodeId
-        ?? (options.memoryRunId
-          ? `learning:${memoryIdentity("memory run id", options.memoryRunId)}`
-          : `learning:${route.task_digest.slice(0, 24)}:${++autonomousLearningEpisodeSequence}`);
-      const episodeId = memoryIdentity("learning episode id", derivedId);
-      const episode = await options.learning.prepareRun(result, { episodeId, runId: episodeId, memoryEpisodeId: options.memoryEpisodeId ?? null });
-      if (!result.response_evaluation) return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "not_eligible", response_learning_error_class: null };
+      if (taskEligible) {
+        const derivedId = options.learningEpisodeId
+          ?? (options.memoryRunId
+            ? `learning:${memoryIdentity("memory run id", options.memoryRunId)}`
+            : `learning:${route.task_digest.slice(0, 24)}:${++autonomousLearningEpisodeSequence}`);
+        const episodeId = memoryIdentity("learning episode id", derivedId);
+        episode = await options.learning.prepareRun(result, { episodeId, runId: episodeId, memoryEpisodeId: options.memoryEpisodeId ?? null });
+      }
+      if (!result.response_evaluation) {
+        return { learning_episode_id: episode?.episode_id ?? null, learning_episode_status: episode ? "prepared" : "not_eligible", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "not_eligible", response_learning_error_class: null };
+      }
       try {
-        const responseEpisodeId = memoryIdentity("response learning episode id", `response:${digestJsonSync({ episode_id: episode.episode_id }).slice(0, 64)}`);
-        const responseEpisode = await options.learning.prepareRun(result, { episodeId: responseEpisodeId, runId: responseEpisodeId, memoryEpisodeId: null });
-        return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: responseEpisode.episode_id, response_learning_episode_status: "prepared", response_learning_error_class: null };
+        const responseSeed = episode?.episode_id
+          ? `response:${digestJsonSync({ episode_id: episode.episode_id }).slice(0, 64)}`
+          : `response:${options.learningEpisodeId ?? `run:${route.task_digest.slice(0, 24)}:${result.response_evaluation.response_digest.slice(0, 40)}`}`;
+        const responseEpisodeId = memoryIdentity("response learning episode id", responseSeed);
+        const responseEpisode = await options.learning.prepareRun(result, { episodeId: responseEpisodeId, runId: responseEpisodeId, memoryEpisodeId: null, responseOnly: !taskEligible });
+        return { learning_episode_id: episode?.episode_id ?? null, learning_episode_status: episode ? "prepared" : "not_eligible", learning_error_class: null, response_learning_episode_id: responseEpisode.episode_id, response_learning_episode_status: "prepared", response_learning_error_class: null };
       } catch (error) {
-        return { learning_episode_id: episode.episode_id, learning_episode_status: "prepared", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "failed", response_learning_error_class: memoryErrorClass(error) };
+        return { learning_episode_id: episode?.episode_id ?? null, learning_episode_status: episode ? "prepared" : "not_eligible", learning_error_class: null, response_learning_episode_id: null, response_learning_episode_status: "failed", response_learning_error_class: memoryErrorClass(error) };
       }
     } catch (error) {
       // A requested learning adapter must be observable as failed, but it must not turn a valid
       // provider result into a fabricated provider failure or cause a provider replay.
-      return { learning_episode_id: null, learning_episode_status: "failed", learning_error_class: memoryErrorClass(error), response_learning_episode_id: null, response_learning_episode_status: result.response_evaluation ? "failed" : "not_eligible", response_learning_error_class: result.response_evaluation ? memoryErrorClass(error) : null };
+      return { learning_episode_id: null, learning_episode_status: taskEligible ? "failed" : "not_eligible", learning_error_class: taskEligible ? memoryErrorClass(error) : null, response_learning_episode_id: null, response_learning_episode_status: result.response_evaluation ? "failed" : "not_eligible", response_learning_error_class: result.response_evaluation ? memoryErrorClass(error) : null };
     }
   }
 

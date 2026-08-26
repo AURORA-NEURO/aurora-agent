@@ -559,6 +559,12 @@ an accepted autonomous answer. Set `require_response_review=False` only when an 
 the legacy `completed` projection; the failed evaluation remains visible and is not converted into
 task-quality reward. Cross-domain children and synthesis defer to the parent fan-in gate.
 
+The same boundary applies when `learn=True`: a weak structured response can update only the
+separate value-only response-composition arm, while task-quality evaluation, episodic memory
+receipts, and evaluator-guided replanning remain pending behind review. This prevents parseable
+JSON from receiving task credit. `require_response_review=False` explicitly restores the legacy
+learning projection.
+
 Cross-domain structured runs automatically apply a second fan-in gate before synthesis. The gate
 revalidates every specialist against its reviewed response contract and returns a digest-only
 `response_assessment` with structural scores, domain coverage, alignment metadata, and bounded

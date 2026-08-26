@@ -2695,6 +2695,11 @@ compatibility opt-out that restores the `completed` projection without turning t
 into task-quality credit. Cross-domain fan-out passes this option as false for nested calls and
 lets the parent structural assessment gate synthesis.
 
+Python online learning applies the same ordering. A weak structured response may update the
+separate response-composition arm, but task-quality evaluation, episodic-memory receipts, and
+evaluator-guided replanning stop at `response_review_required`. The explicit opt-out restores the
+legacy learning projection; it does not change what the structural evaluator proves.
+
 The TypeScript restart-safe cross-domain executor preserves the same invariant. It explicitly
 defers the direct status for specialist and synthesis provider calls, then records the parent
 response assessment and its digest in the checkpoint. A weak specialist therefore becomes a
