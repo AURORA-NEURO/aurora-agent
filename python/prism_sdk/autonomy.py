@@ -5407,7 +5407,7 @@ class AutonomousCrossDomainCheckpoint:
                 raise BrainRunError("cross-domain checkpoint cannot contain synthesis before all children")
         if self.response_assessment_digest is not None:
             _route_digest(self.response_assessment_digest, "cross-domain checkpoint response_assessment_digest")
-        if self.status not in {"children_pending", "synthesis_pending", "response_review_required", "approval_required", "completed", "reconciliation_required"}:
+        if self.status not in {"children_pending", "synthesis_pending", "response_review_required", "synthesis_response_review_required", "approval_required", "completed", "reconciliation_required"}:
             raise BrainRunError("cross-domain checkpoint has an invalid status")
         if self.status == "synthesis_pending" and len(completed) != len(execution):
             raise BrainRunError("cross-domain synthesis_pending checkpoint has incomplete children")
@@ -5418,6 +5418,13 @@ class AutonomousCrossDomainCheckpoint:
             or self.response_assessment_digest is None
         ):
             raise BrainRunError("cross-domain response_review_required checkpoint must bind complete pre-synthesis assessment")
+        if self.status == "synthesis_response_review_required" and (
+            len(completed) != len(execution)
+            or self.next_child_id is not None
+            or self.synthesis_result_digest is None
+            or self.response_assessment_digest is None
+        ):
+            raise BrainRunError("cross-domain synthesis_response_review_required checkpoint must bind synthesis and post-synthesis assessment")
         if self.status == "completed" and self.synthesis_result_digest is None:
             raise BrainRunError("completed cross-domain checkpoint must contain synthesis digest")
         if self.last_item_id is not None:
@@ -5479,6 +5486,7 @@ class AutonomousCrossDomainCheckpoint:
                 "next_child_id": self.next_child_id,
                 "plan_refinement_digest": self.plan_refinement_digest,
                 "synthesis_result_digest": self.synthesis_result_digest,
+                "response_assessment_digest": self.response_assessment_digest,
                 "status": self.status,
                 "last_item_id": self.last_item_id,
                 "last_item_phase": self.last_item_phase,
@@ -11973,6 +11981,7 @@ class AutonomousTaskOrchestrator:
         model_candidates: Sequence[Mapping[str, Any]],
         credentials: Mapping[str, CredentialHandle],
         completed_child_results: Mapping[str, BrainRunResult | BrainToolLoopResult | BrainMissionResult] | None = None,
+        completed_synthesis_result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None = None,
         next_child_id: str | None = None,
         accepted_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
         ledger: BrainLearningLedger | None = None,
@@ -12009,6 +12018,7 @@ class AutonomousTaskOrchestrator:
         minimum_response_reward: float = 0.8,
         minimum_response_alignment_confidence: float = 0.75,
         response_contradiction_confidence_threshold: float = 0.75,
+        retry_synthesis_after_response_review: bool = False,
         execution_controller: AutonomousExecutionController | None = None,
     ) -> AutonomousCrossDomainStepResult:
         """Execute exactly one child or the final synthesis for restart-safe fan-out.
@@ -12022,6 +12032,8 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("cross-domain step requires an AutonomousCrossDomainBlueprint")
         if not isinstance(require_response_alignment, bool):
             raise BrainRunError("require_response_alignment must be a boolean")
+        if not isinstance(retry_synthesis_after_response_review, bool):
+            raise BrainRunError("retry_synthesis_after_response_review must be a boolean")
         response_alignments = _mapping_sequence("cross-domain response_alignments", response_alignments, maximum=64)
         for name, value in (
             ("minimum_response_reward", minimum_response_reward),
@@ -12051,6 +12063,13 @@ class AutonomousTaskOrchestrator:
             if not result.status.startswith("completed"):
                 raise BrainRunError("cross-domain step cannot rehydrate an incomplete child result")
             prior[child_id] = result
+        if completed_synthesis_result is not None and not isinstance(
+            completed_synthesis_result,
+            (BrainRunResult, BrainToolLoopResult, BrainMissionResult),
+        ):
+            raise BrainRunError("cross-domain step completed synthesis result is unsupported")
+        if completed_synthesis_result is not None and not completed_synthesis_result.status.startswith("completed"):
+            raise BrainRunError("cross-domain step cannot rehydrate an incomplete synthesis result")
 
         def child_context_for(child_id: str) -> dict[str, Any]:
             child = child_by_id[child_id]
@@ -12161,6 +12180,57 @@ class AutonomousTaskOrchestrator:
             item.spec.structured_domain_response
             for item in (*blueprint.child_blueprints, blueprint.synthesis_blueprint)
         )
+        if completed_synthesis_result is not None and not retry_synthesis_after_response_review:
+            if structured_mode:
+                entries = self._cross_domain_response_entries(
+                    blueprint,
+                    execution_child_ids,
+                    tuple(prior[child_id] for child_id in execution_child_ids),
+                    synthesis_result=completed_synthesis_result,
+                )
+                if entries is not None:
+                    response_assessment = assess_autonomous_cross_domain_response_set(
+                        entries,
+                        requested_domains=tuple(child.profile.domain for child in blueprint.child_blueprints),
+                        context_digest=blueprint.task_digest,
+                        alignments=response_alignments,
+                        require_synthesis=True,
+                        require_complete_alignment=require_response_alignment,
+                        minimum_reward=float(minimum_response_reward),
+                        minimum_alignment_confidence=float(minimum_response_alignment_confidence),
+                        contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
+                    )
+            if response_assessment is not None and response_assessment.status != "completed":
+                return AutonomousCrossDomainStepResult(
+                    status="synthesis_response_review_required",
+                    phase="synthesis",
+                    item_id="synthesis",
+                    blueprint=blueprint,
+                    result=completed_synthesis_result,
+                    execution_child_ids=execution_child_ids,
+                    completed_child_ids=execution_child_ids,
+                    child_result_digests={
+                        child_id: _autonomous_result_digest(prior[child_id])
+                        for child_id in execution_child_ids
+                    },
+                    plan_refinement_digest=plan_refinement_digest,
+                    response_assessment=response_assessment,
+                )
+            return AutonomousCrossDomainStepResult(
+                status=completed_synthesis_result.status,
+                phase="synthesis",
+                item_id="synthesis",
+                blueprint=blueprint,
+                result=completed_synthesis_result,
+                execution_child_ids=execution_child_ids,
+                completed_child_ids=execution_child_ids,
+                child_result_digests={
+                    child_id: _autonomous_result_digest(prior[child_id])
+                    for child_id in execution_child_ids
+                },
+                plan_refinement_digest=plan_refinement_digest,
+                response_assessment=response_assessment,
+            )
         if structured_mode:
             entries = self._cross_domain_response_entries(
                 blueprint,
@@ -12222,6 +12292,41 @@ class AutonomousTaskOrchestrator:
             context=synthesis_context,
             identity_suffix="synthesis",
         )
+        if structured_mode and synthesis_result.status.startswith("completed"):
+            entries = self._cross_domain_response_entries(
+                blueprint,
+                execution_child_ids,
+                tuple(prior[child_id] for child_id in execution_child_ids),
+                synthesis_result=synthesis_result,
+            )
+            if entries is not None:
+                response_assessment = assess_autonomous_cross_domain_response_set(
+                    entries,
+                    requested_domains=tuple(child.profile.domain for child in blueprint.child_blueprints),
+                    context_digest=blueprint.task_digest,
+                    alignments=response_alignments,
+                    require_synthesis=True,
+                    require_complete_alignment=require_response_alignment,
+                    minimum_reward=float(minimum_response_reward),
+                    minimum_alignment_confidence=float(minimum_response_alignment_confidence),
+                    contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
+                )
+                if response_assessment.status != "completed":
+                    return AutonomousCrossDomainStepResult(
+                        status="synthesis_response_review_required",
+                        phase="synthesis",
+                        item_id="synthesis",
+                        blueprint=blueprint,
+                        result=synthesis_result,
+                        execution_child_ids=execution_child_ids,
+                        completed_child_ids=execution_child_ids,
+                        child_result_digests={
+                            child_id: _autonomous_result_digest(prior[child_id])
+                            for child_id in execution_child_ids
+                        },
+                        plan_refinement_digest=plan_refinement_digest,
+                        response_assessment=response_assessment,
+                    )
         return AutonomousCrossDomainStepResult(
             status=synthesis_result.status,
             phase="synthesis",

@@ -37,10 +37,10 @@ export const AUTONOMOUS_CROSS_DOMAIN_MAX_EVENTS = 256;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_JOBS = 1_024;
 export const AUTONOMOUS_CROSS_DOMAIN_MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 
-export type AutonomousCrossDomainCheckpointStatus = "children_pending" | "synthesis_pending" | "response_review_required" | "paused" | "reconciliation_required" | "completed" | "failed";
-export type AutonomousCrossDomainExecutionStatus = "completed" | "paused" | "approval_required" | "policy_review_required" | "policy_blocked" | "response_review_required" | "reconciliation_required" | "failed" | "route_review_required";
+export type AutonomousCrossDomainCheckpointStatus = "children_pending" | "synthesis_pending" | "response_review_required" | "synthesis_response_review_required" | "paused" | "reconciliation_required" | "completed" | "failed";
+export type AutonomousCrossDomainExecutionStatus = "completed" | "paused" | "approval_required" | "policy_review_required" | "policy_blocked" | "response_review_required" | "synthesis_response_review_required" | "reconciliation_required" | "failed" | "route_review_required";
 export type AutonomousCrossDomainSemanticRouteStatus = AutonomousSemanticRouteResult["status"];
-export type AutonomousCrossDomainEventType = "started" | "child_completed" | "checkpointed" | "approval_required" | "response_review_required" | "reconciliation_required" | "reconciliation_retry_authorized" | "synthesis_completed" | "failed" | "completed";
+export type AutonomousCrossDomainEventType = "started" | "child_completed" | "checkpointed" | "approval_required" | "response_review_required" | "synthesis_response_review_required" | "synthesis_response_review_resolved" | "synthesis_response_retry_authorized" | "reconciliation_required" | "reconciliation_retry_authorized" | "synthesis_completed" | "failed" | "completed";
 
 export interface AutonomousCrossDomainCheckpoint {
   schema: typeof AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA;
@@ -127,6 +127,11 @@ export interface AutonomousCrossDomainChildResultResolver {
   (childId: string, checkpoint: AutonomousCrossDomainCheckpoint): Promise<AutonomousCrossDomainRehydratableChild | null> | AutonomousCrossDomainRehydratableChild | null;
 }
 
+/** Rehydrate the caller-owned synthesis result after a post-synthesis review pause. */
+export interface AutonomousCrossDomainSynthesisResultResolver {
+  (checkpoint: AutonomousCrossDomainCheckpoint): Promise<AutonomousRunResult | null> | AutonomousRunResult | null;
+}
+
 export interface AutonomousCrossDomainStepResult {
   phase: "child" | "synthesis";
   item_id: string;
@@ -185,6 +190,10 @@ export interface AutonomousCrossDomainExecuteOptions extends AutonomousCrossDoma
   rebindLegacyExecutionContract?: boolean;
   /** Rehydrate raw child results from caller-owned durable storage before the next step. */
   resolveChildResult?: AutonomousCrossDomainChildResultResolver;
+  /** Rehydrate a caller-owned synthesis result after post-synthesis response review. */
+  resolveSynthesisResult?: AutonomousCrossDomainSynthesisResultResolver;
+  /** Explicitly authorize a fresh synthesis provider call after a post-synthesis review. */
+  retrySynthesisAfterResponseReview?: boolean;
   /**
    * Reconciliation is a quarantine, not an implicit retry policy. Set this only after the
    * caller has inspected the effect/provider system and determined that replay is safe.
@@ -289,7 +298,7 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousCrossDomain
   if (synthesisResultDigest !== null && completed.length !== execution.length) throw new ArgumentError("cross-domain checkpoint cannot contain synthesis before all children");
   const generation = boundedInteger(value.generation, "cross-domain checkpoint generation", Number.MAX_SAFE_INTEGER, 1);
   const status = value.status;
-  if (status !== "children_pending" && status !== "synthesis_pending" && status !== "response_review_required" && status !== "paused" && status !== "reconciliation_required" && status !== "completed" && status !== "failed") throw new ArgumentError("cross-domain checkpoint status is invalid");
+  if (status !== "children_pending" && status !== "synthesis_pending" && status !== "response_review_required" && status !== "synthesis_response_review_required" && status !== "paused" && status !== "reconciliation_required" && status !== "completed" && status !== "failed") throw new ArgumentError("cross-domain checkpoint status is invalid");
   if (status === "completed" && synthesisResultDigest === null) throw new ArgumentError("completed cross-domain checkpoint must contain synthesis digest");
   if (status === "completed" && nextChildId !== null) throw new ArgumentError("completed cross-domain checkpoint cannot have a next child");
   if (status === "children_pending" && nextChildId === null) throw new ArgumentError("children_pending checkpoint must have a next child");
@@ -297,6 +306,7 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousCrossDomain
   if (status === "synthesis_pending" && (completed.length !== execution.length || nextChildId !== null)) throw new ArgumentError("synthesis_pending checkpoint must have all children and no next child");
   if (status === "synthesis_pending" && synthesisResultDigest !== null) throw new ArgumentError("synthesis_pending checkpoint cannot contain synthesis");
   if (status === "response_review_required" && (completed.length !== execution.length || nextChildId !== null || synthesisResultDigest !== null || responseAssessmentDigest === undefined || responseAssessmentDigest === null)) throw new ArgumentError("response_review_required checkpoint must bind a complete pre-synthesis response assessment");
+  if (status === "synthesis_response_review_required" && (completed.length !== execution.length || nextChildId !== null || synthesisResultDigest === null || responseAssessmentDigest === undefined || responseAssessmentDigest === null)) throw new ArgumentError("synthesis_response_review_required checkpoint must bind a synthesis result and post-synthesis assessment");
   const previous = digest(value.previous_checkpoint_digest, "cross-domain checkpoint previous_checkpoint_digest", true);
   if ((generation === 1) !== (previous === null)) throw new ArgumentError("cross-domain checkpoint generation and predecessor are inconsistent");
   const descriptor = checkpointDescriptor({
@@ -333,7 +343,7 @@ async function validateEvent(value: unknown): Promise<AutonomousCrossDomainEvent
   const sequence = boundedInteger(value.sequence, "cross-domain event sequence", Number.MAX_SAFE_INTEGER, 1);
   const jobId = boundedId(value.job_id, "cross-domain event job_id");
   const eventType = value.event_type;
-  if (!["started", "child_completed", "checkpointed", "approval_required", "response_review_required", "reconciliation_required", "reconciliation_retry_authorized", "synthesis_completed", "failed", "completed"].includes(String(eventType))) throw new ArgumentError("cross-domain event type is invalid");
+  if (!["started", "child_completed", "checkpointed", "approval_required", "response_review_required", "synthesis_response_review_required", "synthesis_response_review_resolved", "synthesis_response_retry_authorized", "reconciliation_required", "reconciliation_retry_authorized", "synthesis_completed", "failed", "completed"].includes(String(eventType))) throw new ArgumentError("cross-domain event type is invalid");
   const itemId = value.item_id === null ? null : boundedId(value.item_id, "cross-domain event item_id");
   const phase = value.phase;
   if (phase !== "child" && phase !== "synthesis" && phase !== "lifecycle") throw new ArgumentError("cross-domain event phase is invalid");
@@ -555,6 +565,7 @@ function validateDurableOptions(options: AutonomousCrossDomainExecuteOptions): v
   if (options.maxParallelChildren !== undefined && options.maxParallelChildren !== 1) throw new ArgumentError("durable cross-domain execution is sequential; maxParallelChildren must be 1 or omitted");
   if (options.allowPartial === true) throw new ArgumentError("durable cross-domain execution does not synthesize partial children; use synthesize: false and resume the failed child explicitly");
   boundedBoolean(options.retryReconciliation, "cross-domain retryReconciliation");
+  boundedBoolean(options.retrySynthesisAfterResponseReview, "cross-domain retrySynthesisAfterResponseReview");
 }
 
 function crossPlanRefinement(options: AutonomousCrossDomainExecuteOptions): AutonomousCrossDomainPlanRefinementResult | undefined {
@@ -769,8 +780,8 @@ export class AutonomousCrossDomainExecutor {
     return { ...descriptor, checkpoint_digest: await digestJson(descriptor) };
   }
 
-  private async makeCheckpointFromExisting(checkpoint: AutonomousCrossDomainCheckpoint, status: AutonomousCrossDomainCheckpointStatus, contractDigest: string, planRefinementDigest: string | null, synthesisResultDigest: string | null, responseAssessmentDigest: string | null = checkpoint.response_assessment_digest ?? null): Promise<AutonomousCrossDomainCheckpoint> {
-    const descriptor = { schema: AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA, job_id: checkpoint.job_id, task_digest: checkpoint.task_digest, route_digest: checkpoint.route_digest, base_plan_digest: checkpoint.base_plan_digest, execution_child_ids: [...checkpoint.execution_child_ids], completed_child_ids: [...checkpoint.completed_child_ids], child_result_digests: { ...checkpoint.child_result_digests }, next_child_id: checkpoint.next_child_id, plan_refinement_digest: planRefinementDigest, execution_contract_digest: contractDigest, synthesis_result_digest: synthesisResultDigest, learning_episode_ids: [...(checkpoint.learning_episode_ids ?? [])], response_learning_episode_ids: [...(checkpoint.response_learning_episode_ids ?? [])], response_assessment_digest: responseAssessmentDigest, generation: checkpoint.generation + 1, status, previous_checkpoint_digest: checkpoint.checkpoint_digest, retention: "metadata_only;task_prompt_response_and_credentials_not_retained" as const, secret_material: "never_returned" as const };
+  private async makeCheckpointFromExisting(checkpoint: AutonomousCrossDomainCheckpoint, status: AutonomousCrossDomainCheckpointStatus, contractDigest: string, planRefinementDigest: string | null, synthesisResultDigest: string | null, responseAssessmentDigest: string | null = checkpoint.response_assessment_digest ?? null, learningEpisodeIds: readonly string[] = checkpoint.learning_episode_ids ?? [], responseLearningEpisodeIds: readonly string[] = checkpoint.response_learning_episode_ids ?? []): Promise<AutonomousCrossDomainCheckpoint> {
+    const descriptor = { schema: AUTONOMOUS_CROSS_DOMAIN_CHECKPOINT_SCHEMA, job_id: checkpoint.job_id, task_digest: checkpoint.task_digest, route_digest: checkpoint.route_digest, base_plan_digest: checkpoint.base_plan_digest, execution_child_ids: [...checkpoint.execution_child_ids], completed_child_ids: [...checkpoint.completed_child_ids], child_result_digests: { ...checkpoint.child_result_digests }, next_child_id: checkpoint.next_child_id, plan_refinement_digest: planRefinementDigest, execution_contract_digest: contractDigest, synthesis_result_digest: synthesisResultDigest, learning_episode_ids: [...learningEpisodeIds], response_learning_episode_ids: [...responseLearningEpisodeIds], response_assessment_digest: responseAssessmentDigest, generation: checkpoint.generation + 1, status, previous_checkpoint_digest: checkpoint.checkpoint_digest, retention: "metadata_only;task_prompt_response_and_credentials_not_retained" as const, secret_material: "never_returned" as const };
     return { ...descriptor, checkpoint_digest: await digestJson(descriptor) };
   }
 
@@ -807,6 +818,16 @@ export class AutonomousCrossDomainExecutor {
     }
     this.resultCache.set(jobId, local);
     return results;
+  }
+
+  private async hydrateSynthesis(checkpoint: AutonomousCrossDomainCheckpoint, blueprint: AutonomousCrossDomainBlueprint, options: AutonomousCrossDomainExecuteOptions): Promise<AutonomousRunResult> {
+    if (checkpoint.status !== "synthesis_response_review_required") throw new ProviderRuntimeError("cross-domain synthesis rehydration was requested outside post-synthesis review");
+    if (!options.resolveSynthesisResult) throw new ProviderRuntimeError("cross-domain synthesis response review requires caller-owned synthesis result rehydration");
+    const synthesis = await options.resolveSynthesisResult(checkpoint);
+    if (!synthesis || !isObject(synthesis) || synthesis.status !== "completed") throw new ProviderRuntimeError("cross-domain synthesis rehydration returned an incomplete result");
+    if (checkpoint.synthesis_result_digest !== await digestJson(synthesis)) throw new ProviderRuntimeError("cross-domain synthesis result digest does not match the checkpoint");
+    if (!synthesis.blueprint || synthesis.blueprint.task_digest !== blueprint.synthesis_blueprint.task_digest) throw new ProviderRuntimeError("cross-domain synthesis result task does not match the blueprint");
+    return synthesis;
   }
 
   private durableResponseAssessment(
@@ -862,10 +883,21 @@ export class AutonomousCrossDomainExecutor {
     }
     const localResults = await this.hydrateChildren(checkpoint.job_id, checkpoint, blueprint, options);
     if (options.approveProviderCall !== true) {
-      checkpoint = await this.makeCheckpointFromExisting(checkpoint, "paused", contractDigest, planRefinementDigest, checkpoint.synthesis_result_digest);
+      const pauseStatus: AutonomousCrossDomainCheckpointStatus = checkpoint.status === "synthesis_response_review_required" ? "synthesis_response_review_required" : "paused";
+      checkpoint = await this.makeCheckpointFromExisting(checkpoint, pauseStatus, contractDigest, planRefinementDigest, checkpoint.synthesis_result_digest);
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint.job_id, "approval_required", checkpoint.next_child_id, checkpoint.next_child_id === null ? "synthesis" : "child", checkpoint);
       return finish("approval_required");
+    }
+    let rehydratedSynthesis: AutonomousRunResult | null = null;
+    if (checkpoint.status === "synthesis_response_review_required") {
+      if (options.retrySynthesisAfterResponseReview === true) {
+        checkpoint = await this.makeCheckpointFromExisting(checkpoint, "synthesis_pending", contractDigest, planRefinementDigest, null, null);
+        await this.store.save(checkpoint);
+        await this.appendEvent(checkpoint.job_id, "synthesis_response_retry_authorized", "synthesis", "synthesis", checkpoint);
+      } else {
+        rehydratedSynthesis = await this.hydrateSynthesis(checkpoint, blueprint, options);
+      }
     }
     const costBudget = options.costBudget ?? (options.maxTotalCostUnits === undefined ? undefined : new AutonomousCostBudget(options.maxTotalCostUnits));
     const learning = this.learning ?? options.learning;
@@ -930,7 +962,20 @@ export class AutonomousCrossDomainExecutor {
         stepResults[step] = { ...stepResults[step]!, completed_child_ids: [...completed], child_result_digests: { ...digests } };
         continue;
       }
-      let responseAssessment = this.durableResponseAssessment(blueprint, localResults, options);
+      const responseAssessment = this.durableResponseAssessment(blueprint, localResults, options, rehydratedSynthesis);
+      if (rehydratedSynthesis) {
+        if (responseAssessment !== null && responseAssessment.status !== "completed") {
+          checkpoint = await this.makeCheckpointFromExisting(checkpoint, "synthesis_response_review_required", contractDigest, planRefinementDigest, await digestJson(rehydratedSynthesis), responseAssessment.assessment_digest);
+          await this.store.save(checkpoint);
+          await this.appendEvent(checkpoint.job_id, "synthesis_response_review_required", "synthesis", "synthesis", checkpoint);
+          return finish("synthesis_response_review_required", undefined, rehydratedSynthesis, responseAssessment);
+        }
+        checkpoint = await this.makeCheckpointFromExisting(checkpoint, "completed", contractDigest, planRefinementDigest, await digestJson(rehydratedSynthesis), responseAssessment?.assessment_digest ?? null);
+        await this.store.save(checkpoint);
+        await this.appendEvent(checkpoint.job_id, "synthesis_response_review_resolved", "synthesis", "synthesis", checkpoint);
+        await this.appendEvent(checkpoint.job_id, "completed", null, "lifecycle", checkpoint);
+        return finish("completed", undefined, rehydratedSynthesis, responseAssessment);
+      }
       if (options.synthesize !== false && responseAssessment !== null && !responseAssessment.ready_to_synthesize) {
         if (checkpoint.status !== "response_review_required" || checkpoint.response_assessment_digest !== responseAssessment.assessment_digest) {
           checkpoint = await this.makeCheckpointFromExisting(checkpoint, "response_review_required", contractDigest, planRefinementDigest, null, responseAssessment.assessment_digest);
@@ -997,11 +1042,19 @@ export class AutonomousCrossDomainExecutor {
         await this.appendEvent(checkpoint.job_id, "failed", "synthesis", "synthesis", checkpoint);
         return finish("failed");
       }
-      checkpoint = await this.makeCheckpoint(checkpoint.job_id, route, blueprint, order, checkpoint.completed_child_ids, checkpoint.child_result_digests, "completed", checkpoint, contractDigest, planRefinementDigest, await digestJson(synthesis), learningEpisodeIds, responseLearningEpisodeIds);
+      const postResponseAssessment = this.durableResponseAssessment(blueprint, localResults, options, synthesis);
+      if (postResponseAssessment !== null && postResponseAssessment.status !== "completed") {
+        checkpoint = await this.makeCheckpointFromExisting(checkpoint, "synthesis_response_review_required", contractDigest, planRefinementDigest, await digestJson(synthesis), postResponseAssessment.assessment_digest, learningEpisodeIds, responseLearningEpisodeIds);
+        await this.store.save(checkpoint);
+        await this.appendEvent(checkpoint.job_id, "synthesis_response_review_required", "synthesis", "synthesis", checkpoint);
+        return finish("synthesis_response_review_required", undefined, synthesis, postResponseAssessment);
+      }
+      const finalResponseAssessment = postResponseAssessment ?? responseAssessment;
+      checkpoint = await this.makeCheckpoint(checkpoint.job_id, route, blueprint, order, checkpoint.completed_child_ids, checkpoint.child_result_digests, "completed", checkpoint, contractDigest, planRefinementDigest, await digestJson(synthesis), learningEpisodeIds, responseLearningEpisodeIds, finalResponseAssessment?.assessment_digest ?? null);
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint.job_id, "synthesis_completed", "synthesis", "synthesis", checkpoint);
       await this.appendEvent(checkpoint.job_id, "completed", null, "lifecycle", checkpoint);
-      return finish("completed", undefined, synthesis, responseAssessment);
+      return finish("completed", undefined, synthesis, finalResponseAssessment);
     }
     const status: AutonomousCrossDomainExecutionStatus = checkpoint.status === "completed" ? "completed" : "paused";
     if (checkpoint.status !== "completed") {

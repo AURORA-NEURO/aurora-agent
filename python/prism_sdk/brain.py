@@ -5357,7 +5357,8 @@ class AutonomousBrain:
                 "max_provider_failovers", "tool_loop_options", "bandit_state",
                 "accepted_plan_refinement", "response_alignments", "require_response_alignment",
                 "minimum_response_reward", "minimum_response_alignment_confidence",
-                "response_contradiction_confidence_threshold",
+                "response_contradiction_confidence_threshold", "retry_synthesis_after_response_review",
+                "completed_synthesis_result",
             }
             unknown_options = sorted(set(options).difference(allowed_options))
             if unknown_options:
@@ -5422,12 +5423,37 @@ class AutonomousBrain:
                     raise BrainRunError(
                         f"rehydrated child result digest does not match the checkpoint for {child_id}"
                     )
+            retry_synthesis_after_review = options.get("retry_synthesis_after_response_review", False)
+            if not isinstance(retry_synthesis_after_review, bool):
+                raise BrainRunError("cross_domain_options.retry_synthesis_after_response_review must be a boolean")
+            raw_synthesis_result = options.get("completed_synthesis_result")
+            if retry_synthesis_after_review:
+                if current.status != "synthesis_response_review_required":
+                    raise BrainRunError("retry_synthesis_after_response_review requires a post-synthesis review checkpoint")
+                if raw_synthesis_result is not None:
+                    raise BrainRunError("retry_synthesis_after_response_review cannot combine with a rehydrated synthesis result")
+                completed_synthesis_result = None
+            elif raw_synthesis_result is not None:
+                if current.status != "synthesis_response_review_required":
+                    raise BrainRunError("completed_synthesis_result is only valid for post-synthesis response review")
+                if not isinstance(raw_synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+                    raise BrainRunError("completed_synthesis_result contains an unsupported result")
+                if not raw_synthesis_result.status.startswith("completed"):
+                    raise BrainRunError("completed_synthesis_result contains an incomplete result")
+                if current.synthesis_result_digest != _autonomous_result_digest(raw_synthesis_result):
+                    raise BrainRunError("rehydrated synthesis result digest does not match the checkpoint")
+                completed_synthesis_result = raw_synthesis_result
+            elif current.status == "synthesis_response_review_required":
+                raise BrainRunError("post-synthesis response review requires completed_synthesis_result or explicit retry")
+            else:
+                completed_synthesis_result = None
             options["accepted_plan_refinement"] = accepted_plan
             options["run_id"] = current.run_id
             options["bandit_state"] = bandit_state
             options["ledger"] = ledger
             options["memory"] = memory if memory is not None else self.memory
             options["completed_child_results"] = completed_results
+            options["completed_synthesis_result"] = completed_synthesis_result
             if approval_released:
                 options["approve_provider_call"] = True
             if provider_health is not None:
@@ -5467,6 +5493,30 @@ class AutonomousBrain:
                     merged_model_health[arm_id] = dict(snapshot)
                 merged_overrides["model_health"] = merged_model_health
                 options["selection_overrides"] = merged_overrides
+            if current.status == "synthesis_response_review_required" and retry_synthesis_after_review:
+                retry_checkpoint = AutonomousCrossDomainCheckpoint(
+                    run_id=current.run_id,
+                    task_digest=current.task_digest,
+                    base_plan_digest=current.base_plan_digest,
+                    execution_child_ids=current.execution_child_ids,
+                    completed_child_ids=current.completed_child_ids,
+                    child_result_digests=current.child_result_digests,
+                    next_child_id=None,
+                    plan_refinement_digest=current.plan_refinement_digest,
+                    synthesis_result_digest=None,
+                    response_assessment_digest=None,
+                    status="synthesis_pending",
+                    generation=current.generation + 1,
+                    previous_checkpoint_digest=current.checkpoint_digest,
+                )
+                store.checkpoint(
+                    job.job_id,
+                    worker_id,
+                    phase="cross_domain_synthesis_response_retry_authorized",
+                    checkpoint=checkpoint_metadata(retry_checkpoint, phase="cross_domain_synthesis_response_retry_authorized"),
+                    side_effect_boundary="preflight",
+                )
+                current = retry_checkpoint
             store.checkpoint(
                 job.job_id,
                 worker_id,
@@ -5513,6 +5563,44 @@ class AutonomousBrain:
                         side_effect_boundary="preflight",
                     )
                 released = store.release(job.job_id, worker_id, reason="response admission requires explicit review before synthesis")
+                return BrainJobRunResult(status="queued", job=released.to_dict(), cycle=None, workflow=step_result)
+            if step_result.status == "synthesis_response_review_required":
+                assessment = step_result.response_assessment
+                synthesis_result = step_result.result
+                if assessment is None or not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+                    raise BrainRunError("post-synthesis response review did not return an assessment and synthesis result")
+                if not synthesis_result.status.startswith("completed"):
+                    raise BrainRunError("post-synthesis response review returned an incomplete synthesis result")
+                synthesis_digest = _autonomous_result_digest(synthesis_result)
+                if current.status == "synthesis_response_review_required" and (
+                    current.synthesis_result_digest == synthesis_digest
+                    and current.response_assessment_digest == assessment.assessment_digest
+                ):
+                    review_checkpoint = current
+                else:
+                    review_checkpoint = AutonomousCrossDomainCheckpoint(
+                        run_id=current.run_id,
+                        task_digest=current.task_digest,
+                        base_plan_digest=current.base_plan_digest,
+                        execution_child_ids=current.execution_child_ids,
+                        completed_child_ids=step_result.completed_child_ids,
+                        child_result_digests=step_result.child_result_digests,
+                        next_child_id=None,
+                        plan_refinement_digest=current.plan_refinement_digest,
+                        synthesis_result_digest=synthesis_digest,
+                        response_assessment_digest=assessment.assessment_digest,
+                        status="synthesis_response_review_required",
+                        generation=current.generation + 1,
+                        previous_checkpoint_digest=current.checkpoint_digest,
+                    )
+                    store.checkpoint(
+                        job.job_id,
+                        worker_id,
+                        phase="cross_domain_synthesis_response_review_required",
+                        checkpoint=checkpoint_metadata(review_checkpoint, phase="cross_domain_synthesis_response_review_required", step=step_result),
+                        side_effect_boundary="preflight",
+                    )
+                released = store.release(job.job_id, worker_id, reason="post-synthesis response review requires explicit resolution or retry")
                 return BrainJobRunResult(status="queued", job=released.to_dict(), cycle=None, workflow=step_result)
             if step_result.status in {"approval_required", "mission_approval_required"}:
                 approval_checkpoint = AutonomousCrossDomainCheckpoint(

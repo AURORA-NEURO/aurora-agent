@@ -1519,6 +1519,17 @@ integrity-checked snapshots and a caller-owned persistence adapter through
 `AutonomousCrossDomainPersistenceCoordinator`; production workers can implement the same store
 interface over their durable database or queue.
 
+Structured durable fan-out has two explicit admission boundaries. Before synthesis,
+`response_review_required` binds the specialist assessment digest and blocks fan-in when the
+review policy is not satisfied. After a synthesis provider call, the executor independently
+reassesses the synthesis row; a weak, blocked, incomplete, or otherwise non-complete structured
+response creates `synthesis_response_review_required` and binds both the caller-owned synthesis
+result digest and the post-synthesis assessment digest. The checkpoint never stores that result.
+The caller must either provide `resolveSynthesisResult` and updated reviewer-owned alignment data
+that passes the same contract, or explicitly set `retrySynthesisAfterResponseReview: true` after
+inspecting the result. The latter records `synthesis_response_retry_authorized` before a fresh
+synthesis call; neither path silently replays or upgrades a reviewed failure into completion.
+
 When durable execution receives `structuredDomainResponse: true` and a learning controller, every
 completed specialist and synthesis receives two independently addressable episode identities. The
 checkpoint ledger carries both `learning_episode_ids` and `response_learning_episode_ids`, while

@@ -566,6 +566,16 @@ and no synthesis result. The thresholds `minimum_response_reward`,
 bounded fractions for deployments with a stricter review policy. With alignment disabled, the
 gate still performs structural admission and includes a third synthesis row after fan-in.
 
+The durable `BrainWorker` applies the same contract at both sides of the fan-in boundary.
+`response_review_required` is the pre-synthesis checkpoint and retains only the specialist
+assessment digest. If synthesis returns a structurally blocked or otherwise non-complete
+response, the worker creates `synthesis_response_review_required`, binding the synthesis outcome
+digest and the post-synthesis assessment digest while keeping the result caller-owned. A resolver
+must return that exact `completed_synthesis_result` for review-based continuation, or the caller
+must set `retry_synthesis_after_response_review=True` to record an explicit retry authorization
+before a new provider call. The worker never marks the job complete from a stale or unreviewed
+synthesis value, and tampering with either digest fails before dispatch or settlement.
+
 Workflow stages receive the same value-only treatment. A valid structured stage response is
 scored by `evaluate_autonomous_workflow_stage_response()` for contract integrity only—stage
 identity, status, evidence, uncertainty, bounded notes, next actions, and response-digest

@@ -529,3 +529,102 @@ test("durable cross-domain execution cannot bypass structured response review af
   assert.equal(completed.checkpoint.status, "completed");
   assert.equal(completed.synthesis?.response?.structured?.domain, "cross_domain");
 });
+
+test("durable cross-domain execution re-admits synthesis responses and requires explicit retry", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const contracts = new Map();
+  for (const profile of profiles) contracts.set(profile.domain, await buildAutonomousDomainResponseContract(profile));
+  let synthesisAttempts = 0;
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("durable-post-synthesis", (request) => {
+    const domain = request.responseSchema?.properties?.domain?.const;
+    const response = structuredResponse(contracts.get(domain));
+    if (domain === "cross_domain") {
+      synthesisAttempts += 1;
+      if (synthesisAttempts === 1) response.status = "blocked";
+    }
+    return { structured: response };
+  });
+  const candidate = { ...model(), provider: "durable-post-synthesis", model: "durable-post-synthesis-model" };
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(candidate);
+  const store = new InMemoryAutonomousCrossDomainCheckpointStore();
+  const executor = new AutonomousCrossDomainExecutor(agent, store);
+  const options = {
+    candidates: [candidate],
+    subtasks,
+    structuredDomainResponse: true,
+    requireResponseAlignment: true,
+    approveProviderCall: true,
+    maxSteps: 2,
+    jobId: "durable-post-synthesis-gate-1",
+  };
+
+  const first = await executor.start(task, options);
+  assert.equal(first.status, "paused");
+  const children = new Map(first.step_results.filter((step) => step.phase === "child").map((step) => [step.item_id, step.run]));
+  const preReview = await executor.resume("durable-post-synthesis-gate-1", task, {
+    ...options,
+    jobId: undefined,
+    maxSteps: 1,
+    resolveChildResult: (id) => children.get(id) ?? null,
+  });
+  assert.equal(preReview.status, "response_review_required");
+  assert.equal(preReview.checkpoint.status, "response_review_required");
+  const rows = preReview.response_assessment.rows.filter((row) => row.role === "specialist");
+  const alignment = {
+    alignment_id: "post-synthesis-bio-neuro-review",
+    left_domain: rows[0].domain,
+    right_domain: rows[1].domain,
+    stance: "neutral",
+    confidence: 1,
+    topic_digest: await digestJson({ topic: "bounded EEG review" }),
+    rationale_digest: null,
+    left_response_digest: rows[0].response_digest,
+    right_response_digest: rows[1].response_digest,
+  };
+  const blocked = await executor.resume("durable-post-synthesis-gate-1", task, {
+    ...options,
+    jobId: undefined,
+    maxSteps: 1,
+    responseAlignments: [alignment],
+    resolveChildResult: (id) => children.get(id) ?? null,
+  });
+  assert.equal(blocked.status, "synthesis_response_review_required");
+  assert.equal(blocked.synthesis?.response?.structured?.status, "blocked");
+  assert.notEqual(blocked.response_assessment?.status, "completed");
+  assert.equal(blocked.checkpoint.status, "synthesis_response_review_required");
+  assert.equal(blocked.checkpoint.synthesis_result_digest, await digestJson(blocked.synthesis));
+  assert.equal(blocked.checkpoint.response_assessment_digest, blocked.response_assessment.assessment_digest);
+  assert.equal(blocked.events.some((event) => event.event_type === "synthesis_response_review_required"), true);
+  const tamperedCheckpoint = structuredClone(blocked.checkpoint);
+  tamperedCheckpoint.response_assessment_digest = "0".repeat(64);
+  await assert.rejects(() => store.save(tamperedCheckpoint), /checkpoint digest/);
+  const rehydratedReview = await executor.resume("durable-post-synthesis-gate-1", task, {
+    ...options,
+    jobId: undefined,
+    maxSteps: 1,
+    responseAlignments: [alignment],
+    resolveChildResult: (id) => children.get(id) ?? null,
+    resolveSynthesisResult: () => blocked.synthesis,
+  });
+  assert.equal(rehydratedReview.status, "synthesis_response_review_required");
+  assert.equal(rehydratedReview.synthesis?.response?.structured?.status, "blocked");
+  assert.equal(synthesisAttempts, 1);
+
+  const completed = await executor.resume("durable-post-synthesis-gate-1", task, {
+    ...options,
+    jobId: undefined,
+    maxSteps: 1,
+    responseAlignments: [alignment],
+    retrySynthesisAfterResponseReview: true,
+    resolveChildResult: (id) => children.get(id) ?? null,
+    resolveSynthesisResult: () => blocked.synthesis,
+  });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.checkpoint.status, "completed");
+  assert.equal(completed.synthesis?.response?.structured?.status, "complete");
+  assert.equal(synthesisAttempts, 2);
+  assert.equal(completed.events.some((event) => event.event_type === "synthesis_response_retry_authorized"), true);
+  assert.equal(completed.events.some((event) => event.event_type === "synthesis_completed"), true);
+});

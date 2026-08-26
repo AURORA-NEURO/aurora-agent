@@ -4596,6 +4596,19 @@ caller-owned child results. This gives TypeScript and Python the same operationa
 steps, digest-bound replay, caller-owned payload retention, and no claim that a checkpoint itself
 authorizes external effects.
 
+Structured durable fan-out now applies a second, post-synthesis admission boundary as well. The
+pre-synthesis `response_review_required` state binds the specialist assessment digest and cannot
+dispatch fan-in until its structural/alignment requirements pass. If the synthesis call returns a
+blocked, incomplete, or below-threshold structured response, the continuation moves to
+`synthesis_response_review_required`; its checkpoint binds the synthesis outcome digest and the
+post-synthesis assessment digest but never retains the provider result. TypeScript rehydrates that
+result through `resolveSynthesisResult`, while the Python worker receives it as the resolver-owned
+`completed_synthesis_result`. A caller may resolve the review with updated reviewer-owned metadata,
+or explicitly authorize `retrySynthesisAfterResponseReview`/
+`retry_synthesis_after_response_review`; the retry is itself checkpointed before a new provider
+dispatch. This preserves a truthful distinction among accepted synthesis, review-pending
+synthesis, and an explicitly retried synthesis across process restarts.
+
 Durable TypeScript fan-out also preserves the learning boundary across restart. With
 `structuredDomainResponse` and a learning controller enabled, each completed specialist and
 synthesis records separate task-quality and structural-response episode IDs in the checkpoint and
