@@ -195,6 +195,12 @@ use bioprism_adapter::{
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
 };
 use bioprism_adapter::{
+    assure_federated_continual_retrieval_synthesis,
+    FederatedContinualRetrievalSynthesisAssuranceHarnessReceipt,
+    FederatedContinualRetrievalSynthesisAssuranceHarnessRequest,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_throughput_retrieval_synthesis_inference_engine,
     ThroughputRetrievalSynthesisInferenceEngineReceipt,
     ThroughputRetrievalSynthesisInferenceEngineRequest,
@@ -520,6 +526,7 @@ pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEW
 pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adapter_local_retrieval_synthesis_assurance_harness";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adapter_multimodal_retrieval_synthesis_assurance_harness";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adapter_throughput_retrieval_synthesis_assurance_harness";
+pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adapter_federated_continual_retrieval_synthesis_assurance_harness";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_throughput_retrieval_synthesis_contract_model";
@@ -1618,6 +1625,18 @@ pub fn validate_throughput_retrieval_synthesis_assurance_harness_json(value: &Va
     let receipt: ThroughputRetrievalSynthesisAssuranceHarnessReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid throughput retrieval assurance receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID { return Err("throughput retrieval assurance feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub fn run_federated_continual_retrieval_synthesis_assurance_harness_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedContinualRetrievalSynthesisAssuranceHarnessRequest = serde_json::from_value(value.clone()).map_err(|error| format!("invalid federated continual retrieval assurance request: {error}"))?;
+    let receipt = assure_federated_continual_retrieval_synthesis(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize federated continual retrieval assurance receipt: {error}"))
+}
+pub fn validate_federated_continual_retrieval_synthesis_assurance_harness_json(value: &Value) -> Result<FederatedContinualRetrievalSynthesisAssuranceHarnessReceipt, String> {
+    let receipt: FederatedContinualRetrievalSynthesisAssuranceHarnessReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid federated continual retrieval assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID { return Err("federated continual retrieval assurance feature id mismatch".into()); }
     Ok(receipt)
 }
 
