@@ -3456,6 +3456,14 @@ export {
   taskFacetDigests,
   validateAutonomousMemorySnapshot,
 } from "./autonomous-memory.js";
+
+export {
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceInferenceEngineReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
 export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,

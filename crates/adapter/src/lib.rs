@@ -91,6 +91,7 @@ pub mod determinism_gateway;
 pub mod error;
 pub mod evaluation_assurance;
 pub mod evidence_surveillance;
+pub mod local_evidence_surveillance_inference_engine;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
@@ -187,6 +188,15 @@ pub use evidence_surveillance::{
     EvidenceSurveillanceDisposition, EvidenceSurveillanceError, EvidenceSurveillanceReceipt,
     QualifiedEvidenceSet, CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+pub use local_evidence_surveillance_inference_engine::{
+    local_evidence_surveillance_inference_engine_manifest,
+    run_local_evidence_surveillance, LocalEvidenceObservation,
+    LocalEvidenceSurveillanceDisposition, LocalEvidenceSurveillanceError,
+    LocalEvidenceSurveillanceReceipt, LocalEvidenceSurveillanceRequest,
+    LocalQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
 };
 pub use execution_control::{
     admit_computational_execution, AuthorizedExecutionEffect, ComputationalExecutionReceipt,

@@ -4462,3 +4462,29 @@ export function validateEvidenceReceipt(receipt: EvidenceReceipt): void {
 export function researchArtifactDigest(payload: unknown): string {
   return digestJsonSync(payload);
 }
+
+export const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID = "AFA-adapter-P01-F01" as const;
+export const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION = "adapter-local-evidence-surveillance-inference-engine/1.0" as const;
+
+export interface AdapterLocalEvidenceSurveillanceInferenceEngineReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; study_id: string; intent: string;
+  disposition: "completed" | "partial" | "unknown" | "blocked";
+  candidate_order: string[]; selected_order: string[]; unresolved_order: string[]; denied_order: string[];
+  replay_identity: string; evidence_digest: string; provenance_digest: string;
+  omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[];
+  qualified_set: Record<string, unknown>; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateAdapterLocalEvidenceSurveillanceInferenceEngineReceipt(receipt: AdapterLocalEvidenceSurveillanceInferenceEngineReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID || receipt.contract_version !== ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION) throw new Error("adapter local evidence schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.study_id.trim() || !receipt.intent.trim() || !receipt.candidate_order.length || !receipt.effect_receipts.length) throw new Error("adapter local evidence identity, locality, candidates, or effects are incomplete");
+  if (!["completed", "partial", "unknown", "blocked"].includes(receipt.disposition)) throw new Error("adapter local evidence disposition is invalid");
+  for (const values of [receipt.candidate_order, receipt.selected_order, receipt.unresolved_order, receipt.denied_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("adapter local evidence ordering is invalid");
+  if (JSON.stringify([...receipt.selected_order, ...receipt.unresolved_order, ...receipt.denied_order].sort()) !== JSON.stringify([...receipt.candidate_order].sort())) throw new Error("adapter local evidence partition is incomplete");
+  if (receipt.selected_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.unresolved_order.some((value) => !receipt.candidate_order.includes(value)) || receipt.denied_order.some((value) => !receipt.candidate_order.includes(value))) throw new Error("adapter local evidence state is not covered by candidates");
+  for (const value of [receipt.replay_identity, receipt.evidence_digest, receipt.provenance_digest, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("adapter local evidence digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("read:local-evidence-surveillance:") && effect !== "block:unsafe-release")) throw new Error("adapter local evidence effect is outside local-read gate");
+  if (receipt.disposition === "blocked" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("blocked adapter local evidence must be explicitly blocked");
+}
+
+export function adapterLocalEvidenceSurveillanceInferenceEngineReceiptDigest(receipt: AdapterLocalEvidenceSurveillanceInferenceEngineReceipt): string { validateAdapterLocalEvidenceSurveillanceInferenceEngineReceipt(receipt); return digestJsonSync(receipt); }

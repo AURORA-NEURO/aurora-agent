@@ -6540,3 +6540,15 @@ __all__ = [
     "provider_image_base64_part",
     "normalize_provider_content_parts",
 ]
+
+from .adapter_local_evidence_surveillance_inference_engine import (
+    LocalEvidenceObservation,
+    LocalEvidenceSurveillanceReceipt,
+    run_local_evidence_surveillance,
+)
+
+__all__ += [
+    "LocalEvidenceObservation",
+    "LocalEvidenceSurveillanceReceipt",
+    "run_local_evidence_surveillance",
+]
