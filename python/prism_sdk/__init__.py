@@ -249,6 +249,8 @@ from .research_contracts import (
     ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
@@ -6768,6 +6770,10 @@ from .adapter_local_retrieval_synthesis_interoperability_gateway import (
     LocalRetrievalSynthesisInteroperabilityGatewayReceipt,
     render_local_retrieval_synthesis_interoperability_gateway,
 )
+from .adapter_multimodal_retrieval_synthesis_interoperability_gateway import (
+    MultimodalRetrievalSynthesisInteroperabilityGatewayReceipt,
+    render_multimodal_retrieval_synthesis_interoperability_gateway,
+)
 from .adapter_multimodal_retrieval_synthesis_inference_engine import (
     MultimodalRetrievalSynthesisCandidate,
     MultimodalRetrievalSynthesisInferenceEngineReceipt,
@@ -6834,6 +6840,8 @@ __all__ += [
     "render_federated_continual_retrieval_synthesis_research_workbench",
     "LocalRetrievalSynthesisInteroperabilityGatewayReceipt",
     "render_local_retrieval_synthesis_interoperability_gateway",
+    "MultimodalRetrievalSynthesisInteroperabilityGatewayReceipt",
+    "render_multimodal_retrieval_synthesis_interoperability_gateway",
     "MultimodalRetrievalSynthesisCandidate",
     "MultimodalRetrievalSynthesisInferenceEngineReceipt",
     "run_multimodal_retrieval_synthesis_inference_engine",
