@@ -42,6 +42,14 @@ from .autonomous_evidence_runtime import (
     AutonomousEvidenceRuntimeJournal,
     AutonomousEvidenceRuntimeResult,
 )
+from .autonomous_claim_integrity import (
+    AutonomousClaimIntegrityAssessment,
+    AutonomousClaimIntegrityClaim,
+    AutonomousClaimIntegrityEvidence,
+    AutonomousClaimIntegrityPolicy,
+    assess_autonomous_claim_integrity,
+    reassess_autonomous_claim_integrity,
+)
 from .autonomous_domain_policy import (
     AUTONOMOUS_DOMAIN_POLICY_MODES,
     AutonomousDomainPolicy,
@@ -15950,6 +15958,51 @@ class AutonomousAgent:
             requested_domains=requested_domains,
             policy=policy,
             satisfied_candidate_ids=satisfied_candidate_ids,
+        )
+
+    def assess_claim_integrity(
+        self,
+        *,
+        task: str,
+        claims: Sequence[AutonomousClaimIntegrityClaim | Mapping[str, Any]],
+        evidence: Sequence[AutonomousClaimIntegrityEvidence | Mapping[str, Any]],
+        reference_time: str,
+        policy: AutonomousClaimIntegrityPolicy | Mapping[str, Any] | None = None,
+    ) -> AutonomousClaimIntegrityAssessment:
+        """Fuse evidence metadata before a provider or effect can rely on a claim.
+
+        This is intentionally adjacent to information acquisition planning: the result's
+        provider-free actions can become the next candidate capabilities, while source dispatch,
+        contradiction resolution, and reproduction remain separately approved caller work.
+        """
+
+        if not isinstance(task, str) or not task.strip() or "\x00" in task or len(task.encode("utf-8")) > 32_000:
+            raise BrainRunError("claim integrity task is outside its bound")
+        return assess_autonomous_claim_integrity(
+            context_digest=content_digest({"task": task}),
+            claims=claims,
+            evidence=evidence,
+            reference_time=reference_time,
+            policy=policy,
+        )
+
+    def reassess_claim_integrity(
+        self,
+        previous: AutonomousClaimIntegrityAssessment,
+        *,
+        claims: Sequence[AutonomousClaimIntegrityClaim | Mapping[str, Any]],
+        evidence: Sequence[AutonomousClaimIntegrityEvidence | Mapping[str, Any]],
+        reference_time: str,
+        policy: AutonomousClaimIntegrityPolicy | Mapping[str, Any] | None = None,
+    ) -> AutonomousClaimIntegrityAssessment:
+        """Continue a claim decision chain after caller-owned evidence changes."""
+
+        return reassess_autonomous_claim_integrity(
+            previous,
+            claims=claims,
+            evidence=evidence,
+            reference_time=reference_time,
+            policy=policy,
         )
 
     def evidence_plan(

@@ -488,6 +488,14 @@ claim prerequisite validation, duplicate-ID rejection, omission accounting, clai
 subaudits, and sync/async/HTTP transport helpers. TypeScript exposes the same top-level result
 projection. Rust remains authoritative for metric comparability, release posture, and nested
 scientific audits.
+The autonomous SDK layer now adds `assess_claim_integrity` / `assessClaimIntegrity` as a
+provider-free join above those focused contracts. It applies an explicit reference-time temporal
+firewall, source-independence counting, contradiction vetoes, modality requirements,
+reproducibility requirements, and bounded next-action proposals across all twelve autonomous
+domains. `reassess_claim_integrity` / `reassessClaimIntegrity` carries a prior assessment digest
+and generation for restart-safe continuation, while the JSON projection validator rejects tampered
+decision rows. This remains metadata fusion: it does not fetch evidence, resolve contradictions,
+reproduce an experiment, invoke a model, or grant authorization.
 The typed `BioAtlasPublicationAuditReport` and TypeScript `BioAtlasPublicationAuditResult` then
 preserve the next publication boundary: atlas aggregation, evidence-conditioned numeric scores,
 card disclosure, leaderboard ranking, ranked/unranked counts, and explicit target blockers remain

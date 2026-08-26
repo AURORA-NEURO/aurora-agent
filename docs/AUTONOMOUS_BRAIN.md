@@ -11583,3 +11583,36 @@ the deployment's identity/approval store, and crash recovery between component w
 caller-owned. Reports therefore say `per_component_cas_only` instead of claiming all-or-nothing
 durability. Component projections retain no task text, prompts, provider payloads, credentials,
 evidence, tool arguments, effects, or raw exception messages.
+
+## Claim-integrity fusion and next-action planning
+
+Evidence acquisition and evidence truth are intentionally separate from the autonomous decision
+loop. `AutonomousAgent.assess_claim_integrity()` / `assessClaimIntegrity()` now provide the
+missing join. The caller supplies digest-bound claims and bounded evidence metadata, plus an
+explicit RFC3339 `reference_time`; the projection evaluates every linked observation against
+domain, freshness, validity windows, reliability, support strength, source independence,
+contradiction, modality, and reproducibility policy. No wall clock is read, so the same input
+replays identically in Python and TypeScript.
+
+Each claim is classified as `supported`, `partially_supported`, `missing`, `stale`, `conflicted`,
+`contradicted`, `insufficient_independence`, `insufficient_modalities`, `unreproducible`, or
+`blocked`. A conflict is not averaged away: with the default veto policy, usable support and
+usable contradiction become `conflicted`; contradiction-only claims become `contradicted`.
+Future, expired, and over-age evidence is retained as an excluded metadata row, never silently
+credited. Independent support is counted by source digest (falling back to the caller's bounded
+source identifier), while reproducibility remains an explicit status rather than a confidence
+guess.
+
+Every non-supported claim produces at most one deterministic next action: acquire evidence,
+acquire fresh evidence, acquire an independent source, acquire cross-modal evidence, resolve a
+contradiction, or reproduce evidence. Actions are proposals only. They can be translated into
+the existing information-acquisition candidate catalogue, but source dispatch, evaluator
+acceptance, contradiction resolution, reproduction, provider invocation, and external effects
+still require their own caller-owned approval boundaries.
+
+`reassess_claim_integrity()` / `reassessClaimIntegrity()` continues the chain with a prior
+assessment digest and monotonically increasing generation. Typed snapshots are digest-validated;
+the JSON validator rejects altered summaries or decision rows before a restarted worker can use
+them. Metadata keys are scanned fail-closed for API keys, bearer material, credentials, tokens,
+and related secret-shaped fields. Claim text, evidence values, prompts, locators, and credentials
+are never returned or persisted by this layer.

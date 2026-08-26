@@ -152,6 +152,18 @@ import {
   type AutonomousInformationAcquisitionPolicyInput,
 } from "./autonomous-information-acquisition.js";
 import type { AutonomousInformationAcquisitionCandidateInput } from "./autonomous-information-acquisition.js";
+import {
+  assessAutonomousClaimIntegrity,
+  reassessAutonomousClaimIntegrity,
+  type AssessAutonomousClaimIntegrityOptions,
+  type AutonomousClaimIntegrityAssessment,
+  type AutonomousClaimIntegrityClaim,
+  type AutonomousClaimIntegrityClaimInput,
+  type AutonomousClaimIntegrityEvidence,
+  type AutonomousClaimIntegrityEvidenceInput,
+  type AutonomousClaimIntegrityPolicy,
+  type AutonomousClaimIntegrityPolicyInput,
+} from "./autonomous-claim-integrity.js";
 import type {
   AutonomousDomainEvidenceBrainRunOptions,
   AutonomousDomainEvidenceBrainRunResult,
@@ -6377,6 +6389,39 @@ export class AutonomousAgent {
       policy: options.policy,
       satisfiedCandidateIds: options.satisfiedCandidateIds,
     });
+  }
+
+  /** Fuse caller-supplied evidence metadata into claim decisions without dispatching anything. */
+  assessClaimIntegrity(
+    task: string,
+    options: {
+      claims: readonly (AutonomousClaimIntegrityClaim | AutonomousClaimIntegrityClaimInput | Record<string, unknown>)[];
+      evidence: readonly (AutonomousClaimIntegrityEvidence | AutonomousClaimIntegrityEvidenceInput | Record<string, unknown>)[];
+      referenceTime: string;
+      policy?: AutonomousClaimIntegrityPolicy | AutonomousClaimIntegrityPolicyInput;
+    },
+  ): AutonomousClaimIntegrityAssessment {
+    const taskText = boundedText("claim integrity task", task, 32_000);
+    return assessAutonomousClaimIntegrity({
+      contextDigest: digestJsonSync({ task: taskText }),
+      claims: options.claims,
+      evidence: options.evidence,
+      referenceTime: options.referenceTime,
+      policy: options.policy,
+    } satisfies AssessAutonomousClaimIntegrityOptions);
+  }
+
+  /** Continue a claim-integrity chain with a digest-fenced generation and caller-owned values. */
+  reassessClaimIntegrity(
+    previous: AutonomousClaimIntegrityAssessment,
+    options: {
+      claims: AssessAutonomousClaimIntegrityOptions["claims"];
+      evidence: AssessAutonomousClaimIntegrityOptions["evidence"];
+      referenceTime: string;
+      policy?: AutonomousClaimIntegrityPolicy | AutonomousClaimIntegrityPolicyInput;
+    },
+  ): AutonomousClaimIntegrityAssessment {
+    return reassessAutonomousClaimIntegrity({ previous, ...options });
   }
 
   /** Resolve the bounded policy for a domain without provider, tool, or source activity. */
