@@ -4539,3 +4539,26 @@ export function validateAdapterThroughputEvidenceSurveillanceInferenceEngineRece
 }
 
 export function adapterThroughputEvidenceSurveillanceInferenceEngineReceiptDigest(receipt: AdapterThroughputEvidenceSurveillanceInferenceEngineReceipt): string { validateAdapterThroughputEvidenceSurveillanceInferenceEngineReceipt(receipt); return digestJsonSync(receipt); }
+
+export const ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID = "AFA-adapter-P01-F04" as const;
+export const ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION = "adapter-federated-evidence-surveillance-inference-engine/1.0" as const;
+
+export interface AdapterFederatedEvidenceSurveillanceInferenceEngineReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; federation_id: string; purpose: string; endpoint: string;
+  disposition: "completed" | "partial" | "unknown" | "blocked"; peer_order: string[]; candidate_order: string[]; ranked_order: string[]; selected_order: string[]; unresolved_order: string[]; denied_order: string[]; aggregate_order: string[];
+  federation_digest: string; envelope_digest: string; evidence_digest: string; provenance_digest: string; replay_identity: string;
+  omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[]; qualified_set: Record<string, unknown>; artifact: Record<string, unknown>; raw_data_local: boolean; boundary: string;
+}
+
+export function validateAdapterFederatedEvidenceSurveillanceInferenceEngineReceipt(receipt: AdapterFederatedEvidenceSurveillanceInferenceEngineReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.feature_id !== ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID || receipt.contract_version !== ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION) throw new Error("federated evidence schema, feature, or version mismatch");
+  if (receipt.boundary !== PRECLINICAL_BOUNDARY || !receipt.raw_data_local || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.purpose.trim() || !receipt.endpoint.trim() || !receipt.candidate_order.length || !receipt.effect_receipts.length) throw new Error("federated identity, locality, candidates, or effects are incomplete");
+  for (const values of [receipt.peer_order, receipt.candidate_order, receipt.selected_order, receipt.unresolved_order, receipt.denied_order, receipt.aggregate_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("federated ordering is invalid");
+  if (receipt.ranked_order.length !== receipt.candidate_order.length || JSON.stringify([...new Set(receipt.ranked_order)].sort()) !== JSON.stringify([...receipt.candidate_order].sort())) throw new Error("federated ranking must cover candidates exactly");
+  if (JSON.stringify([...receipt.selected_order, ...receipt.unresolved_order, ...receipt.denied_order].sort()) !== JSON.stringify([...receipt.candidate_order].sort())) throw new Error("federated state partition is incomplete");
+  for (const value of [receipt.federation_digest, receipt.envelope_digest, receipt.evidence_digest, receipt.provenance_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value)) throw new Error("federated digest is invalid");
+  if (receipt.effect_receipts.some((effect) => !effect.startsWith("exchange:aggregate-evidence:") && effect !== "block:unsafe-release")) throw new Error("federated effect is outside aggregate exchange gate");
+  if (receipt.disposition === "blocked" && JSON.stringify(receipt.effect_receipts) !== JSON.stringify(["block:unsafe-release"])) throw new Error("blocked federated surveillance must be explicitly blocked");
+}
+
+export function adapterFederatedEvidenceSurveillanceInferenceEngineReceiptDigest(receipt: AdapterFederatedEvidenceSurveillanceInferenceEngineReceipt): string { validateAdapterFederatedEvidenceSurveillanceInferenceEngineReceipt(receipt); return digestJsonSync(receipt); }

@@ -3479,6 +3479,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterThroughputEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterFederatedEvidenceSurveillanceInferenceEngineReceiptDigest,
+  validateAdapterFederatedEvidenceSurveillanceInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
+export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,
   AUTONOMOUS_GOAL_MAX_CRITERIA,

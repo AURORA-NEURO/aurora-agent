@@ -6576,3 +6576,15 @@ __all__ += [
     "ThroughputEvidenceSurveillanceReceipt",
     "run_throughput_evidence_surveillance",
 ]
+
+from .adapter_federated_evidence_surveillance_inference_engine import (
+    FederatedEvidenceObservation,
+    FederatedEvidenceSurveillanceReceipt,
+    run_federated_evidence_surveillance,
+)
+
+__all__ += [
+    "FederatedEvidenceObservation",
+    "FederatedEvidenceSurveillanceReceipt",
+    "run_federated_evidence_surveillance",
+]
