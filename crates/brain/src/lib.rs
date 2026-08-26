@@ -111,6 +111,7 @@ pub mod multimodal_context_compilation_federated_control_plane;
 pub mod throughput_context_compilation_federated_control_plane;
 pub mod federated_continual_context_compilation_federated_control_plane;
 pub mod local_knowledge_representation_inference_engine;
+pub mod multimodal_knowledge_representation_inference_engine;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
@@ -715,6 +716,13 @@ pub use throughput_operations_control_plane::{
     ThroughputOperationsRequest,
     CONTRACT_VERSION as THROUGHPUT_OPERATIONS_CONTROL_PLANE_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_OPERATIONS_CONTROL_PLANE_FEATURE_ID,
+};
+pub use multimodal_knowledge_representation_inference_engine::{
+    infer_multimodal_knowledge_representation, multimodal_knowledge_representation_inference_engine_manifest,
+    MultimodalKnowledgeClaim, MultimodalKnowledgeDisposition, MultimodalKnowledgeError,
+    MultimodalKnowledgeReceipt, MultimodalKnowledgeRequest,
+    CONTRACT_VERSION as MULTIMODAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
 };
 pub use throughput_protocol_adapter::{
     serve_throughput_protocol, throughput_protocol_adapter_manifest, ThroughputProtocolError,
