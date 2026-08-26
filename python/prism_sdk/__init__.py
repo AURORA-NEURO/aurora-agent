@@ -259,6 +259,8 @@ from .research_contracts import (
     ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
@@ -6798,6 +6800,10 @@ from .adapter_multimodal_retrieval_synthesis_assurance_harness import (
     MultimodalRetrievalSynthesisAssuranceHarnessReceipt,
     assure_multimodal_retrieval_synthesis,
 )
+from .adapter_throughput_retrieval_synthesis_assurance_harness import (
+    ThroughputRetrievalSynthesisAssuranceHarnessReceipt,
+    assure_throughput_retrieval_synthesis,
+)
 from .adapter_multimodal_retrieval_synthesis_inference_engine import (
     MultimodalRetrievalSynthesisCandidate,
     MultimodalRetrievalSynthesisInferenceEngineReceipt,
@@ -6874,6 +6880,8 @@ __all__ += [
     "assure_local_retrieval_synthesis",
     "MultimodalRetrievalSynthesisAssuranceHarnessReceipt",
     "assure_multimodal_retrieval_synthesis",
+    "ThroughputRetrievalSynthesisAssuranceHarnessReceipt",
+    "assure_throughput_retrieval_synthesis",
     "MultimodalRetrievalSynthesisCandidate",
     "MultimodalRetrievalSynthesisInferenceEngineReceipt",
     "run_multimodal_retrieval_synthesis_inference_engine",

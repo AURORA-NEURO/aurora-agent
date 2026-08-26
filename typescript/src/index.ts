@@ -3683,6 +3683,8 @@ export { ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER
 export type { AdapterLocalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
 export { ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterMultimodalRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterMultimodalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
 export type { AdapterMultimodalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export { ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterThroughputRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterThroughputRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
 export {
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,

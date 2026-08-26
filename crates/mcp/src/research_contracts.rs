@@ -189,6 +189,12 @@ use bioprism_adapter::{
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
 };
 use bioprism_adapter::{
+    assure_throughput_retrieval_synthesis,
+    ThroughputRetrievalSynthesisAssuranceHarnessReceipt,
+    ThroughputRetrievalSynthesisAssuranceHarnessRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
+};
+use bioprism_adapter::{
     run_throughput_retrieval_synthesis_inference_engine,
     ThroughputRetrievalSynthesisInferenceEngineReceipt,
     ThroughputRetrievalSynthesisInferenceEngineRequest,
@@ -513,6 +519,7 @@ pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_TOOL: 
 pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_TOOL: &str = "adapter_federated_continual_retrieval_synthesis_interoperability_gateway";
 pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adapter_local_retrieval_synthesis_assurance_harness";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adapter_multimodal_retrieval_synthesis_assurance_harness";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str = "adapter_throughput_retrieval_synthesis_assurance_harness";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_throughput_retrieval_synthesis_contract_model";
@@ -1599,6 +1606,18 @@ pub fn validate_multimodal_retrieval_synthesis_assurance_harness_json(value: &Va
     let receipt: MultimodalRetrievalSynthesisAssuranceHarnessReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid multimodal retrieval assurance receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID { return Err("multimodal retrieval assurance feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_assurance_harness_json(value: &Value) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisAssuranceHarnessRequest = serde_json::from_value(value.clone()).map_err(|error| format!("invalid throughput retrieval assurance request: {error}"))?;
+    let receipt = assure_throughput_retrieval_synthesis(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize throughput retrieval assurance receipt: {error}"))
+}
+pub fn validate_throughput_retrieval_synthesis_assurance_harness_json(value: &Value) -> Result<ThroughputRetrievalSynthesisAssuranceHarnessReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisAssuranceHarnessReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid throughput retrieval assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID { return Err("throughput retrieval assurance feature id mismatch".into()); }
     Ok(receipt)
 }
 
