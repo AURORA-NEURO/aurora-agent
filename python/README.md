@@ -551,6 +551,21 @@ quality, source, or external-effect oracle. `evaluate_autonomous_domain_response
 detection; no provider call or credential is needed for those operations. Credential-shaped fields
 and values are refused before the response can cross into durable learning metadata.
 
+Cross-domain structured runs automatically apply a second fan-in gate before synthesis. The gate
+revalidates every specialist against its reviewed response contract and returns a digest-only
+`response_assessment` with structural scores, domain coverage, alignment metadata, and bounded
+next actions. Provider text and structured values remain on the caller-owned child/synthesis
+results; they are not copied into the assessment or execution receipt. Structural admission is
+enabled by `structured_domain_response=True` and does not fabricate semantic agreement. Set
+`require_response_alignment=True` to require explicit caller/reviewer-owned pairwise alignment
+records before synthesis. A missing pair, high-confidence contradiction, unresolved alignment,
+low-confidence alignment, weak response, or missing domain coverage returns
+`status="response_review_required"`, `execution_receipt.next_action="review_response_gate"`,
+and no synthesis result. The thresholds `minimum_response_reward`,
+`minimum_response_alignment_confidence`, and `response_contradiction_confidence_threshold` are
+bounded fractions for deployments with a stricter review policy. With alignment disabled, the
+gate still performs structural admission and includes a third synthesis row after fan-in.
+
 Workflow stages receive the same value-only treatment. A valid structured stage response is
 scored by `evaluate_autonomous_workflow_stage_response()` for contract integrity only—stage
 identity, status, evidence, uncertainty, bounded notes, next actions, and response-digest

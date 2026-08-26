@@ -759,6 +759,26 @@ correctness, source truth, or proof of an external effect. `evaluateAndSettleRun
 `runLearning()` settle both streams when both are prepared and return the response receipt
 separately.
 
+Cross-domain structured execution adds an automatic response-admission gate before fan-in. With
+`structuredDomainResponse: true`, each specialist is revalidated against its digest-bound domain
+contract and the result exposes a metadata-only `response_assessment`. The assessment keeps
+response/evaluation digests, structural scores, stage counts, bounded gate reasons, and next
+actions; provider text, prompts, credentials, evidence values, and structured response objects
+remain caller-owned and are never serialized into the result or execution receipt. Structural
+admission is not semantic truth evaluation and never infers agreement from provider output.
+
+Set `requireResponseAlignment: true` when synthesis must wait for explicit reviewer-owned
+`responseAlignments` for every specialist pair. Each alignment binds the two response digests and
+uses a bounded stance (`support`, `contradict`, `neutral`, or `unresolved`). Missing pairs,
+high-confidence contradictions, unresolved or low-confidence alignments, weak contract
+evaluations, and incomplete domain coverage return `status: "response_review_required"` before
+synthesis dispatch, with `execution_receipt.next_action: "review_response_gate"` and
+`safe_to_synthesize: false`. The optional controls `minimumResponseReward`,
+`minimumResponseAlignmentConfidence`, and `responseContradictionConfidenceThreshold` tighten
+the same deterministic gate. When pairwise alignment is not required, structurally admissible
+specialists may proceed and the post-synthesis assessment includes the synthesis row. Python
+`require_response_alignment` and threshold options implement the same contract.
+
 The composed execution wrappers preserve these options instead of rebuilding a weaker request:
 decision-cycle attempts and replans forward the cost, latency, quality, JSON, and schema policy;
 cross-domain cycles apply it to every specialist and synthesis call; and workflow stages apply it

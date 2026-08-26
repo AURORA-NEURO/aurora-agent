@@ -681,6 +681,97 @@ def _structured_runtime() -> tuple[LLMRuntime, CredentialStore, HTTPServer, thre
     return runtime, store, server, thread
 
 
+def _structured_value_from_schema(schema: object, index: int = 0) -> object:
+    """Produce a complete, provider-neutral fixture from the reviewed JSON schema."""
+
+    if not isinstance(schema, dict):
+        return "bounded fixture"
+    if "const" in schema:
+        return schema["const"]
+    enum = schema.get("enum")
+    if isinstance(enum, list) and enum:
+        return enum[0]
+    kind = schema.get("type")
+    if kind == "object":
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            return {}
+        result: dict[str, object] = {}
+        for key, value in properties.items():
+            if key == "stage_id" and isinstance(value, dict) and isinstance(value.get("enum"), list) and value["enum"]:
+                result[key] = value["enum"][index % len(value["enum"])]
+            else:
+                result[key] = _structured_value_from_schema(value, index)
+        return result
+    if kind == "array":
+        item_schema = schema.get("items", {})
+        minimum = schema.get("minItems", 1)
+        return [_structured_value_from_schema(item_schema, item_index) for item_index in range(minimum if isinstance(minimum, int) else 1)]
+    if kind == "boolean":
+        return True
+    if kind == "integer" or kind == "number":
+        return 1
+    return "bounded fixture"
+
+
+def test_cross_domain_structured_response_gate_admits_only_reviewed_synthesis() -> None:
+    calls: list[str] = []
+
+    def handler(request: object) -> dict[str, object]:
+        calls.append(getattr(request, "model", "unknown"))
+        schema = getattr(request, "response_schema", None)
+        return {
+            "output_text": json.dumps(_structured_value_from_schema(schema)),
+        }
+
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("openai", handler)
+    candidate = dict(_model()[0])
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue([candidate]),
+    )
+    task = "Review a biomedical neuroscience task with structural synthesis admission."
+    subtasks = (
+        {"id": "bio", "domain": "biomedical", "task": "Review the biomedical evidence."},
+        {"id": "neuro", "domain": "neuroscience", "task": "Review the neuroscience signal limits."},
+    )
+
+    blocked = agent.run_cross_domain(
+        task=task,
+        subtasks=subtasks,
+        credentials={},
+        approve_provider_call=True,
+        structured_domain_response=True,
+        require_response_alignment=True,
+    )
+    assert blocked.status == "response_review_required"
+    assert blocked.synthesis_result is None
+    assert blocked.response_assessment is not None
+    assert blocked.response_assessment.status == "needs_alignment_review"
+    assert "pairwise_alignment_incomplete" in blocked.response_assessment.gate_reasons
+    assert calls == ["test-model", "test-model"]
+    assert "bounded structured fixture" not in json.dumps(blocked.response_assessment.to_dict())
+    assert blocked.execution_receipt.next_action == "review_response_gate"
+    assert blocked.execution_receipt.safe_to_synthesize is False
+
+    completed = agent.run_cross_domain(
+        task=task,
+        subtasks=subtasks,
+        credentials={},
+        approve_provider_call=True,
+        structured_domain_response=True,
+    )
+    assert completed.status == "completed"
+    assert completed.synthesis_result is not None
+    assert completed.response_assessment is not None
+    assert completed.response_assessment.status == "completed"
+    assert len(completed.response_assessment.rows) == 3
+    assert calls == ["test-model"] * 5
+    assert completed.execution_receipt.next_action == "complete"
+
+
 def test_model_catalogue_and_agent_facade_connect_readiness_session_and_execution():
     unconfigured = AutonomousAgent(
         _Workspace(),

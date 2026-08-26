@@ -6003,6 +6003,55 @@ result = brain.run_cross_domain(
 )
 ```
 
+Structured cross-domain runs add an automatic fan-in admission gate. When
+`structured_domain_response=True` (or `structuredDomainResponse: true` in TypeScript), every
+completed specialist response is revalidated against its digest-bound domain contract before a
+synthesis call is allowed. The gate retains only per-domain response/evaluation digests, bounded
+coverage scores, stage-status counts, alignment digests, and recovery actions. It never copies
+provider text, prompts, credentials, evidence values, or the structured response itself into the
+cross-domain result, receipt, learning ledger, or restart metadata.
+
+The structural gate is intentionally not a semantic truth oracle. By default it checks domain
+coverage and response-contract integrity, so a provider-free caller can proceed when specialist
+outputs are structurally admissible. Set `require_response_alignment=True` in Python or
+`requireResponseAlignment: true` in TypeScript when synthesis must also wait for explicit,
+digest-bound pairwise alignment for every specialist pair. Alignment records are
+caller/reviewer-owned signals (`support`, `contradict`, `neutral`, or `unresolved`); the runtime
+does not invent agreement from lexical overlap or model self-report. High-confidence
+contradictions, unresolved or low-confidence alignments, missing specialist coverage, and weak
+contract evaluations all produce a reviewable gate result rather than silently synthesizing.
+
+```python
+reviewed = brain.run_cross_domain(
+    task="Combine biomedical and neuroscience reviews without hiding disagreement.",
+    subtasks=(
+        {"id": "bio", "domain": "biomedical", "task": "Review the biomedical evidence."},
+        {"id": "neuro", "domain": "neuroscience", "task": "Review the neuroscience limits."},
+    ),
+    model_candidates=model_catalogue,
+    credentials={"openai": openai_handle},
+    structured_domain_response=True,
+    require_response_alignment=True,
+    approve_provider_call=True,
+)
+if reviewed.status == "response_review_required":
+    # Inspect reviewed.response_assessment.next_actions and supply explicit alignment records.
+    # No synthesis provider call has occurred at this boundary.
+    operator_action = reviewed.execution_receipt.next_action
+```
+
+The corresponding TypeScript options are `responseAlignments`, `requireResponseAlignment`,
+`minimumResponseReward`, `minimumResponseAlignmentConfidence`, and
+`responseContradictionConfidenceThreshold`. A blocked result has status
+`response_review_required`, receipt action `review_response_gate`, and
+`safe_to_synthesize: false`; the synthesis field remains null. The result's
+`response_assessment` can therefore be persisted and replayed as metadata-only evidence while
+the caller keeps the transient responses needed to construct or verify the next alignment set.
+When alignment is optional and structural admission passes, the synthesis row is evaluated as a
+third response and the final assessment becomes `completed`. This same gate is applied to
+ordinary fan-out, learning-enabled fan-out, and the TypeScript decision-cycle wrapper, preserving
+the same stop-before-synthesis behavior across both SDKs.
+
 Automatic intake can use the same fan-out path with explicit online learning. Set
 `cross_domain_learning=True` when each completed child should update the value-only selector before
 the next child and synthesis decision. Set `cross_domain_trajectory_learning=True` when all child

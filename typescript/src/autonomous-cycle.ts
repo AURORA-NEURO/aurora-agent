@@ -1671,7 +1671,8 @@ export type AutonomousCrossDomainDecisionCycleStatus =
   | "children_completed"
   | "children_partial"
   | "child_failed"
-  | "reconciliation_required";
+  | "reconciliation_required"
+  | "response_review_required";
 
 export type AutonomousCrossDomainDecisionCycleEvaluator = (
   result: AutonomousCrossDomainRunResult,

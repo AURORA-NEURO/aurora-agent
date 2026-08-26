@@ -1664,6 +1664,61 @@ test("cross-domain structured output propagates through specialists and synthesi
   assert.deepEqual(bodies.map((body) => body.response_format), [{ type: "json_object" }, { type: "json_object" }, { type: "json_object" }]);
 });
 
+function structuredFixtureFromSchema(schema, index = 0) {
+  if (!schema || typeof schema !== "object") return "bounded fixture";
+  if (Object.hasOwn(schema, "const")) return schema.const;
+  if (Array.isArray(schema.enum) && schema.enum.length) return schema.enum[0];
+  if (schema.type === "object") return Object.fromEntries(Object.entries(schema.properties ?? {}).map(([key, value]) => [key, key === "stage_id" && Array.isArray(value.enum) && value.enum.length ? value.enum[index % value.enum.length] : structuredFixtureFromSchema(value, index)]));
+  if (schema.type === "array") return Array.from({ length: Number.isSafeInteger(schema.minItems) ? schema.minItems : 1 }, (_, itemIndex) => structuredFixtureFromSchema(schema.items, itemIndex));
+  if (schema.type === "boolean") return true;
+  if (schema.type === "number" || schema.type === "integer") return 1;
+  return "bounded fixture";
+}
+
+test("cross-domain structured response admission stops synthesis until pairwise review is complete", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("structured-gate", (request) => {
+    calls += 1;
+    return { text: "bounded structured fixture", structured: structuredFixtureFromSchema(request.responseSchema) };
+  });
+  const agent = new AutonomousAgent(llm);
+  const model = candidate("structured-gate", "structured-gate-model", ["reasoning", "coordination", "biomedical", "neuroscience", "science", "structured_output"]);
+  agent.registerModel(model);
+  const task = "Research a biomedical neuroscience experiment with EEG patient evidence";
+  const subtasks = [
+    { id: "bio", domain: "biomedical", task: "Review the biomedical evidence." },
+    { id: "neuro", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+  ];
+  const blocked = await agent.runCrossDomain(task, {
+    candidates: [model],
+    approveProviderCall: true,
+    structuredDomainResponse: true,
+    requireResponseAlignment: true,
+    subtasks,
+  });
+  assert.equal(blocked.status, "response_review_required");
+  assert.equal(blocked.synthesis, null);
+  assert.equal(blocked.response_assessment?.status, "needs_alignment_review");
+  assert.ok(blocked.response_assessment?.gate_reasons.includes("pairwise_alignment_incomplete"));
+  assert.equal(calls, 2, "the response gate must prevent the synthesis provider call");
+  assert.equal(blocked.execution_receipt.next_action, "review_response_gate");
+  assert.equal(blocked.execution_receipt.safe_to_synthesize, false);
+  assert.equal(JSON.stringify(blocked.response_assessment).includes("bounded structured fixture"), false);
+
+  const completed = await agent.runCrossDomain(task, {
+    candidates: [model],
+    approveProviderCall: true,
+    structuredDomainResponse: true,
+    subtasks,
+  });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.response_assessment?.status, "completed");
+  assert.equal(completed.response_assessment?.rows.length, 3);
+  assert.equal(calls, 5);
+  assert.equal(completed.execution_receipt.next_action, "complete");
+});
+
 test("cross-domain fan-out uses bounded concurrency and preserves deterministic child order", async () => {
   let active = 0;
   let maximumActive = 0;

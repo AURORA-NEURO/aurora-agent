@@ -4970,7 +4970,19 @@ class AutonomousCrossDomainExecutionReceipt:
         incomplete = tuple(child_id for child_id in result.execution_child_ids if not statuses[child_id].startswith("completed"))
         synthesis_status = None if result.synthesis_result is None else result.synthesis_result.status
         synthesis_digest = None if result.synthesis_result is None else _autonomous_result_digest(result.synthesis_result)
-        if synthesis_status is not None and synthesis_status.startswith("completed"):
+        response_assessment = result.response_assessment
+        # A partial fan-out still has a more fundamental recovery action: finish or retry the
+        # missing child before asking an operator to review response alignment. Once all children
+        # are present, or synthesis has already been attempted for an explicitly partial run,
+        # the response gate becomes the authoritative next action.
+        response_gate_requires_review = (
+            response_assessment is not None
+            and response_assessment.status not in {"ready_to_synthesize", "completed"}
+            and (not incomplete or synthesis_status is not None)
+        )
+        if response_gate_requires_review:
+            next_action = "review_response_gate"
+        elif synthesis_status is not None and synthesis_status.startswith("completed"):
             next_action = "complete" if not incomplete else "inspect_partial_synthesis"
         elif synthesis_status is not None and synthesis_status == "approval_required":
             next_action = "approve_synthesis"
@@ -5010,7 +5022,11 @@ class AutonomousCrossDomainExecutionReceipt:
             total_units=total_units,
             progress=completed_units / total_units,
             next_action=next_action,
-            safe_to_synthesize=not incomplete and result.synthesis_result is None,
+            safe_to_synthesize=(
+                not incomplete
+                and result.synthesis_result is None
+                and not response_gate_requires_review
+            ),
             reconciliation_required=reconciliation_required,
         )
 
@@ -5025,6 +5041,9 @@ class AutonomousCrossDomainResult:
     synthesis_result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None
     plan_refinement_digest: str | None = None
     execution_child_ids: tuple[str, ...] = ()
+    # Digest-only structural admission for specialist/synthesis responses. Provider payloads
+    # remain on the caller-owned child/synthesis result objects and never enter this projection.
+    response_assessment: AutonomousCrossDomainResponseAssessment | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.blueprint, AutonomousCrossDomainBlueprint):
@@ -5040,6 +5059,11 @@ class AutonomousCrossDomainResult:
             (BrainRunResult, BrainToolLoopResult, BrainMissionResult),
         ):
             raise BrainRunError("cross-domain synthesis_result is unsupported")
+        if self.response_assessment is not None:
+            if not isinstance(self.response_assessment, AutonomousCrossDomainResponseAssessment):
+                raise BrainRunError("cross-domain response_assessment is unsupported")
+            if self.response_assessment.context_digest != self.blueprint.task_digest:
+                raise BrainRunError("cross-domain response_assessment is not bound to the blueprint task")
         if self.plan_refinement_digest is not None:
             _route_digest(self.plan_refinement_digest, "cross-domain result plan_refinement_digest")
         order = self.execution_child_ids or self.blueprint.child_ids[: len(self.child_results)]
@@ -5063,6 +5087,7 @@ class AutonomousCrossDomainResult:
             "synthesis_result": None if self.synthesis_result is None else self.synthesis_result.to_dict(),
             "plan_refinement_digest": self.plan_refinement_digest,
             "execution_child_ids": list(self.execution_child_ids),
+            "response_assessment": None if self.response_assessment is None else self.response_assessment.to_dict(),
             "execution": "completed" if receipt.next_action == "complete" else "partial_or_blocked",
             "execution_receipt": receipt.to_dict(),
             "retention": "provider_responses_returned_to_caller; learning_memory_not_implicit",
@@ -13082,6 +13107,50 @@ class AutonomousTaskOrchestrator:
         encoded = response.text.encode("utf-8")[:32_000]
         return encoded.decode("utf-8", errors="ignore")
 
+    def _cross_domain_response_entries(
+        self,
+        blueprint: AutonomousCrossDomainBlueprint,
+        execution_child_ids: Sequence[str],
+        child_results: Sequence[BrainRunResult | BrainToolLoopResult | BrainMissionResult],
+        *,
+        synthesis_result: BrainRunResult | BrainToolLoopResult | BrainMissionResult | None = None,
+    ) -> list[dict[str, Any]] | None:
+        """Build transient structured-response entries for the synthesis admission gate."""
+
+        if not any(child.response_contract is not None for child in blueprint.child_blueprints) and blueprint.synthesis_blueprint.response_contract is None:
+            return None
+        child_by_id = dict(zip(blueprint.child_ids, blueprint.child_blueprints))
+        entries: list[dict[str, Any]] = []
+        for child_id, result in zip(execution_child_ids, child_results):
+            child = child_by_id.get(child_id)
+            if child is None or child.response_contract is None:
+                continue
+            provider_response = self._workflow_provider_response(result)
+            response = getattr(provider_response, "structured", None)
+            if response is None and isinstance(provider_response, Mapping):
+                response = provider_response.get("structured")
+            if response is None:
+                continue
+            entries.append({
+                "domain": child.profile.domain,
+                "contract": child.response_contract,
+                "response": response,
+                "role": "specialist",
+            })
+        if synthesis_result is not None and blueprint.synthesis_blueprint.response_contract is not None:
+            provider_response = self._workflow_provider_response(synthesis_result)
+            response = getattr(provider_response, "structured", None)
+            if response is None and isinstance(provider_response, Mapping):
+                response = provider_response.get("structured")
+            if response is not None:
+                entries.append({
+                    "domain": blueprint.synthesis_blueprint.profile.domain,
+                    "contract": blueprint.synthesis_blueprint.response_contract,
+                    "response": response,
+                    "role": "synthesis",
+                })
+        return entries or None
+
     @staticmethod
     def _cross_domain_identity(prefix: str, parent: str | None, child_id: str) -> str | None:
         if parent is None:
@@ -13179,6 +13248,11 @@ class AutonomousTaskOrchestrator:
         allow_partial: bool = False,
         bandit_state: Mapping[str, Any] | None = None,
         accepted_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
+        response_alignments: Sequence[Mapping[str, Any]] = (),
+        require_response_alignment: bool = False,
+        minimum_response_reward: float = 0.8,
+        minimum_response_alignment_confidence: float = 0.75,
+        response_contradiction_confidence_threshold: float = 0.75,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
@@ -13197,6 +13271,22 @@ class AutonomousTaskOrchestrator:
         )
         if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
             raise BrainRunError("synthesize and allow_partial must be booleans")
+        if not isinstance(require_response_alignment, bool):
+            raise BrainRunError("require_response_alignment must be a boolean")
+        response_alignments = _sequence(
+            "cross-domain response_alignments",
+            response_alignments,
+            maximum=64,
+        )
+        if any(not isinstance(alignment, Mapping) for alignment in response_alignments):
+            raise BrainRunError("cross-domain response_alignments must contain mappings")
+        for name, value in (
+            ("minimum_response_reward", minimum_response_reward),
+            ("minimum_response_alignment_confidence", minimum_response_alignment_confidence),
+            ("response_contradiction_confidence_threshold", response_contradiction_confidence_threshold),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or not 0.0 <= float(value) <= 1.0:
+                raise BrainRunError(f"{name} must be finite and within [0, 1]")
         if execution_plan_context is not None:
             if not isinstance(execution_plan_context, Mapping):
                 raise BrainRunError("cross-domain execution_plan_context must be a mapping or None")
@@ -13267,7 +13357,10 @@ class AutonomousTaskOrchestrator:
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 structured_domain_response=child.spec.structured_domain_response,
-                response_schema=child.spec.response_schema,
+                # ``prepare`` stores the generated contract schema in the spec for replay, but
+                # the structured mode owns that schema at the run boundary. Passing it back as
+                # a custom schema would incorrectly trip the mutually-exclusive option guard.
+                response_schema=None if child.spec.structured_domain_response else child.spec.response_schema,
                 execution_mode=child.spec.execution_mode,
                 required_model_capabilities=tuple(
                     capability
@@ -13327,6 +13420,25 @@ class AutonomousTaskOrchestrator:
             child_results.append(result)
 
         complete = [result.status.startswith("completed") for result in child_results]
+        response_assessment = None
+        if structured_domain_response:
+            entries = self._cross_domain_response_entries(
+                blueprint,
+                execution_child_ids,
+                child_results,
+            )
+            if entries is not None:
+                response_assessment = assess_autonomous_cross_domain_response_set(
+                    entries,
+                    requested_domains=tuple(child.profile.domain for child in blueprint.child_blueprints),
+                    context_digest=blueprint.task_digest,
+                    alignments=response_alignments,
+                    require_synthesis=False,
+                    require_complete_alignment=require_response_alignment,
+                    minimum_reward=float(minimum_response_reward),
+                    minimum_alignment_confidence=float(minimum_response_alignment_confidence),
+                    contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
+                )
         if not all(complete) and not allow_partial:
             status = "approval_required" if any(result.status == "approval_required" for result in child_results) else "child_incomplete"
             return AutonomousCrossDomainResult(
@@ -13336,6 +13448,17 @@ class AutonomousTaskOrchestrator:
                 None,
                 plan_refinement_digest,
                 execution_child_ids,
+                response_assessment,
+            )
+        if synthesize and response_assessment is not None and not response_assessment.ready_to_synthesize:
+            return AutonomousCrossDomainResult(
+                "response_review_required",
+                blueprint,
+                tuple(child_results),
+                None,
+                plan_refinement_digest,
+                execution_child_ids,
+                response_assessment,
             )
         if not synthesize:
             return AutonomousCrossDomainResult(
@@ -13345,6 +13468,7 @@ class AutonomousTaskOrchestrator:
                 None,
                 plan_refinement_digest,
                 execution_child_ids,
+                response_assessment,
             )
         child_outputs = [
             {
@@ -13390,7 +13514,7 @@ class AutonomousTaskOrchestrator:
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
             structured_domain_response=synthesis.spec.structured_domain_response,
-            response_schema=synthesis.spec.response_schema,
+            response_schema=None if synthesis.spec.structured_domain_response else synthesis.spec.response_schema,
             execution_mode=synthesis.spec.execution_mode,
             ledger=ledger,
             memory=memory,
@@ -13442,13 +13566,36 @@ class AutonomousTaskOrchestrator:
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
             raise BrainRunError("cross-domain synthesis returned an unsupported result")
+        if structured_domain_response and synthesis_result.status.startswith("completed"):
+            entries = self._cross_domain_response_entries(
+                blueprint,
+                execution_child_ids,
+                child_results,
+                synthesis_result=synthesis_result,
+            )
+            if entries is not None:
+                response_assessment = assess_autonomous_cross_domain_response_set(
+                    entries,
+                    requested_domains=tuple(child.profile.domain for child in blueprint.child_blueprints),
+                    context_digest=blueprint.task_digest,
+                    alignments=response_alignments,
+                    require_synthesis=True,
+                    require_complete_alignment=require_response_alignment,
+                    minimum_reward=float(minimum_response_reward),
+                    minimum_alignment_confidence=float(minimum_response_alignment_confidence),
+                    contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
+                )
+        result_status = "completed" if synthesis_result.status.startswith("completed") else synthesis_result.status
+        if response_assessment is not None and response_assessment.status != "completed" and synthesis_result.status.startswith("completed"):
+            result_status = "response_review_required"
         return AutonomousCrossDomainResult(
-            "completed" if synthesis_result.status.startswith("completed") else synthesis_result.status,
+            result_status,
             blueprint,
             tuple(child_results),
             synthesis_result,
             plan_refinement_digest,
             execution_child_ids,
+            response_assessment,
         )
 
     def run_cross_domain_learning(
@@ -13702,7 +13849,7 @@ class AutonomousTaskOrchestrator:
                 max_steps=child.spec.max_steps,
                 require_json=child.spec.require_json,
                 structured_domain_response=child.spec.structured_domain_response,
-                response_schema=child.spec.response_schema,
+                response_schema=None if child.spec.structured_domain_response else child.spec.response_schema,
                 execution_mode=child.spec.execution_mode,
                 required_model_capabilities=tuple(
                     capability
@@ -13823,7 +13970,7 @@ class AutonomousTaskOrchestrator:
             max_steps=synthesis.spec.max_steps,
             require_json=synthesis.spec.require_json,
             structured_domain_response=synthesis.spec.structured_domain_response,
-            response_schema=synthesis.spec.response_schema,
+            response_schema=None if synthesis.spec.structured_domain_response else synthesis.spec.response_schema,
             execution_mode=synthesis.spec.execution_mode,
             ledger=ledger,
             memory=memory_store,
