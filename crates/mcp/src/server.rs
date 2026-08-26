@@ -1857,6 +1857,9 @@ impl Server {
             "adapter_federated_continual_evidence_surveillance_workflow_fabric" => {
                 self.adapter_federated_continual_evidence_surveillance_workflow_fabric(&arguments)
             },
+            "adapter_local_evidence_surveillance_research_workbench" => {
+                self.adapter_local_evidence_surveillance_research_workbench(&arguments)
+            },
             "multimodal_retrieval_synthesis" => self.multimodal_retrieval_synthesis(&arguments),
             "adapter_context_compilation_assurance" => {
                 self.adapter_context_compilation_assurance(&arguments)
@@ -25124,6 +25127,26 @@ impl Server {
         }))
     }
 
+    fn adapter_local_evidence_surveillance_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a LocalEvidenceSurveillanceResearchWorkbenchRequest")?;
+        let receipt = crate::research_contracts::run_local_evidence_surveillance_research_workbench_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_adapter::ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "A0 local read-only workbench preserves qualified, unknown, negative, omission, and provenance views",
+                "canonical view and panel order is replayable across clients",
+                "raw preclinical data remains institution-local and no external effect is scheduled"
+            ],
+            "limitations": [
+                "the workbench renders caller-supplied evidence metadata and does not make clinical decisions",
+                "operators remain responsible for source authorization and independent replication"
+            ]
+        }))
+    }
+
     fn multimodal_retrieval_synthesis(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -39999,6 +40022,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized FederatedContinualEvidenceSurveillanceResearchCopilotRequest with federation identity, allowed aggregate artifacts, peer contributions, quorum, declared tool, dry_run, approval, replay identity, policy, protected closure, locality, and preclinical boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "adapter_local_evidence_surveillance_research_workbench",
+            "description": "Render an A0 local single-study EvidenceFeed1 research workbench with canonical overview, evidence, omission, negative, unknown, qualified, and provenance panels; no external effects are scheduled.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized LocalEvidenceSurveillanceResearchWorkbenchRequest with local copilot request, workspace and study scope, canonical view/panel order, budget, replay identity, and preclinical boundary." }
                 },
                 "required": ["request"]
             }

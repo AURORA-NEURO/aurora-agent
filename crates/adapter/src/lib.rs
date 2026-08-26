@@ -100,6 +100,7 @@ pub mod multimodal_evidence_surveillance_contract_model;
 pub mod throughput_evidence_surveillance_contract_model;
 pub mod federated_continual_evidence_surveillance_contract_model;
 pub mod local_evidence_surveillance_research_copilot;
+pub mod local_evidence_surveillance_research_workbench;
 pub mod multimodal_evidence_surveillance_research_copilot;
 pub mod throughput_evidence_surveillance_research_copilot;
 pub mod federated_continual_evidence_surveillance_research_copilot;
@@ -288,6 +289,15 @@ pub use local_evidence_surveillance_research_copilot::{
     LocalEvidenceSurveillanceResearchCopilotRequest, ResearchCopilotDisposition,
     CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use local_evidence_surveillance_research_workbench::{
+    local_evidence_surveillance_research_workbench_manifest,
+    render_local_evidence_surveillance_research_workbench,
+    LocalEvidenceSurveillanceResearchWorkbenchError,
+    LocalEvidenceSurveillanceResearchWorkbenchReceipt,
+    LocalEvidenceSurveillanceResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 pub use multimodal_evidence_surveillance_research_copilot::{
     multimodal_evidence_surveillance_research_copilot_manifest,

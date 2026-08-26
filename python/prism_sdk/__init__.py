@@ -6649,6 +6649,16 @@ __all__ += [
     "run_local_evidence_surveillance_research_copilot",
 ]
 
+from .adapter_local_evidence_surveillance_research_workbench import (
+    LocalEvidenceSurveillanceResearchWorkbenchReceipt,
+    render_local_evidence_surveillance_research_workbench,
+)
+
+__all__ += [
+    "LocalEvidenceSurveillanceResearchWorkbenchReceipt",
+    "render_local_evidence_surveillance_research_workbench",
+]
+
 from .adapter_multimodal_evidence_surveillance_research_copilot import (
     MultimodalCopilotEvidenceObservation,
     MultimodalEvidenceSurveillanceResearchCopilotReceipt,
