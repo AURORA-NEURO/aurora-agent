@@ -1948,6 +1948,9 @@ impl Server {
             "adapter_federated_continual_retrieval_synthesis_federated_control_plane" => {
                 self.adapter_federated_continual_retrieval_synthesis_federated_control_plane(&arguments)
             },
+            "foundation_mechanism_exploration_assurance" => {
+                self.foundation_mechanism_exploration_assurance(&arguments)
+            },
             "adapter_multimodal_retrieval_synthesis_inference_engine" => {
                 self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
             },
@@ -25446,6 +25449,12 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits federated continual retrieval/synthesis only under purpose-bound peer quorum, checkpoint continuity, capacity, health, policy, federation, signed approval, and protected-closure gates", "aggregate-only locality keeps raw preclinical observations institution-local and preserves omissions, uncertainty, counterexamples, negative evidence, degraded, approval-required, and blocked states", "content-addressed workflow, workbench, health, replay, and control receipts support deterministic audit and bounded autonomy"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for consortium governance, peer trust, checkpoint retention, health attestations, signed authorization, and independent replication"]}))
     }
 
+    fn foundation_mechanism_exploration_assurance(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or("request is required and must be a MechanismExplorationAssuranceRequest")?;
+        let receipt = crate::research_contracts::run_foundation_mechanism_exploration_assurance_json(request)?;
+        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_foundation::FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance evaluates prospective high-throughput mechanism candidates against typed evidence, provenance, artifact, comparability, baseline, replay, policy, approval, protected-closure, and capacity gates", "unknown, speculative, contradicted, below-threshold, omitted, negative, and required-but-not-admitted candidates remain explicit", "non-qualified portfolios fail closed with block:unsafe-release and raw preclinical data remains local"], "limitations": ["the assurance harness is not a clinical decision system", "operators remain responsible for independent replication, causal interpretation, baseline selection, and release governance"]}))
+    }
+
     fn adapter_multimodal_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(request)?;
@@ -37765,6 +37774,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "foundation_mechanism_exploration_assurance",
+            "domains": ["prospective mechanism exploration", "high-throughput assurance", "evidence and provenance closure", "baseline and replay gates", "negative-result retention"],
+            "crates": ["bioprism-foundation", "bioprism-mcp"],
+            "mcp_tools": ["foundation_mechanism_exploration_assurance"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
@@ -40564,6 +40581,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "adapter_federated_continual_retrieval_synthesis_federated_control_plane",
             "description": "Operate an A2 federated continual retrieval and synthesis control plane with purpose-bound peer quorum, checkpoint continuity, capacity, health, signed approval, protected-closure, replay, and aggregate-only locality gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisFederatedControlPlaneRequest with continual workbench request, service/federation/purpose/peer quorum, checkpoint/capacity, health/replay digests, policy/federation permissions, signed approval, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "foundation_mechanism_exploration_assurance",
+            "description": "Assure a prospective high-throughput mechanism-exploration candidate batch with typed evidence/provenance/comparability, baseline, replay, capacity, policy, approval, protected-closure, negative-result, and fail-closed release gates.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MechanismExplorationAssuranceRequest with candidate evidence digests, baseline/algorithm identity, support threshold, bounded capacity, required mechanisms, policy/approval/closure/locality controls, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "adapter_multimodal_retrieval_synthesis_inference_engine",

@@ -422,7 +422,11 @@ use bioprism_fiber::{
     FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID,
     RESOURCE_WORKBENCH_FEATURE_ID as FIBER_RESOURCE_WORKBENCH_FEATURE_ID,
 };
-use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
+use bioprism_foundation::{
+    assure_mechanism_exploration, EvidenceReceipt, MechanismExplorationAssuranceReceipt,
+    MechanismExplorationAssuranceRequest, PolicyReceipt,
+    FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
+};
 use bioprism_governance::{
     compile_signed_research_object, SignedResearchObject, ValidatedResearchRun,
     RESEARCH_RELEASE_CONTRACT_FEATURE_ID,
@@ -555,6 +559,7 @@ pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str =
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_federated_control_plane";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str = "adapter_throughput_retrieval_synthesis_federated_control_plane";
 pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str = "adapter_federated_continual_retrieval_synthesis_federated_control_plane";
+pub const FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_TOOL: &str = "foundation_mechanism_exploration_assurance";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_throughput_retrieval_synthesis_contract_model";
@@ -1713,6 +1718,18 @@ pub fn validate_federated_continual_retrieval_synthesis_federated_control_plane_
     let receipt: FederatedContinualRetrievalSynthesisFederatedControlPlaneReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid continual retrieval control-plane receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID { return Err("continual retrieval control-plane feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub fn run_foundation_mechanism_exploration_assurance_json(value: &Value) -> Result<Value, String> {
+    let request: MechanismExplorationAssuranceRequest = serde_json::from_value(value.clone()).map_err(|error| format!("invalid foundation mechanism assurance request: {error}"))?;
+    let receipt = assure_mechanism_exploration(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize foundation mechanism assurance receipt: {error}"))
+}
+pub fn validate_foundation_mechanism_exploration_assurance_json(value: &Value) -> Result<MechanismExplorationAssuranceReceipt, String> {
+    let receipt: MechanismExplorationAssuranceReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid foundation mechanism assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID { return Err("foundation mechanism assurance feature id mismatch".into()); }
     Ok(receipt)
 }
 

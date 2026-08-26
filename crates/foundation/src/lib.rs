@@ -71,6 +71,7 @@ pub mod lattice;
 pub mod ledger;
 pub mod lens;
 pub mod maturity;
+pub mod mechanism_exploration_assurance_harness;
 pub mod reference;
 pub mod research;
 pub mod spine;
@@ -81,6 +82,13 @@ pub mod worldclass;
 pub mod worldline;
 
 pub use error::ResearchContractError;
+pub use mechanism_exploration_assurance_harness::{
+    assure_mechanism_exploration, mechanism_exploration_assurance_manifest,
+    MechanismCandidate, MechanismExplorationAssuranceError,
+    MechanismExplorationAssuranceReceipt, MechanismExplorationAssuranceRequest,
+    CONTRACT_VERSION as FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
+};
 pub use research::{
     ApprovalRequirement, AuthorityRequirement, AutonomyGrant, AutonomyTier, CapabilityManifest,
     Compensation,
