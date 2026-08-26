@@ -147,6 +147,7 @@ pub mod local_retrieval_synthesis_inference_engine;
 pub mod local_retrieval_synthesis_contract_model;
 pub mod multimodal_retrieval_synthesis_inference_engine;
 pub mod throughput_retrieval_synthesis_inference_engine;
+pub mod throughput_retrieval_synthesis_contract_model;
 pub mod federated_retrieval_synthesis_inference_engine;
 pub mod scale_frontier;
 pub mod semantic_parity;
@@ -593,6 +594,15 @@ pub use throughput_retrieval_synthesis_inference_engine::{
     ThroughputRetrievalSynthesisInferenceEngineRequest,
     CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use throughput_retrieval_synthesis_contract_model::{
+    throughput_retrieval_synthesis_contract_model_manifest,
+    run_throughput_retrieval_synthesis_contract_model,
+    ThroughputRetrievalSynthesisContractModelError,
+    ThroughputRetrievalSynthesisContractModelReceipt,
+    ThroughputRetrievalSynthesisContractModelRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
 };
 pub use federated_retrieval_synthesis_inference_engine::{
     federated_retrieval_synthesis_inference_engine_manifest,

@@ -227,6 +227,8 @@ from .research_contracts import (
     ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
     ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
     ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
     ADAPTER_CONTEXT_COMPILATION_FEATURE_ID,
@@ -6694,6 +6696,10 @@ from .adapter_throughput_retrieval_synthesis_inference_engine import (
     ThroughputRetrievalSynthesisInferenceEngineReceipt,
     run_throughput_retrieval_synthesis_inference_engine,
 )
+from .adapter_throughput_retrieval_synthesis_contract_model import (
+    ThroughputRetrievalSynthesisContractModelReceipt,
+    run_throughput_retrieval_synthesis_contract_model,
+)
 from .adapter_federated_retrieval_synthesis_inference_engine import (
     FederatedRetrievalSynthesisCandidate,
     FederatedRetrievalSynthesisInferenceEngineReceipt,
@@ -6720,6 +6726,8 @@ __all__ += [
     "ThroughputRetrievalSynthesisCandidate",
     "ThroughputRetrievalSynthesisInferenceEngineReceipt",
     "run_throughput_retrieval_synthesis_inference_engine",
+    "ThroughputRetrievalSynthesisContractModelReceipt",
+    "run_throughput_retrieval_synthesis_contract_model",
     "FederatedRetrievalSynthesisCandidate",
     "FederatedRetrievalSynthesisInferenceEngineReceipt",
     "run_federated_retrieval_synthesis_inference_engine",
