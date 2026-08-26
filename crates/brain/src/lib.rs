@@ -112,6 +112,7 @@ pub mod throughput_context_compilation_federated_control_plane;
 pub mod federated_continual_context_compilation_federated_control_plane;
 pub mod local_knowledge_representation_inference_engine;
 pub mod multimodal_knowledge_representation_inference_engine;
+pub mod throughput_knowledge_representation_inference_engine;
 pub mod throughput_contract_model;
 pub mod throughput_operations_control_plane;
 pub mod throughput_protocol_adapter;
@@ -729,6 +730,13 @@ pub use throughput_protocol_adapter::{
     ThroughputProtocolReceipt, ThroughputProtocolRequest,
     CONTRACT_VERSION as THROUGHPUT_PROTOCOL_ADAPTER_CONTRACT_VERSION,
     FEATURE_ID as THROUGHPUT_PROTOCOL_ADAPTER_FEATURE_ID,
+};
+pub use throughput_knowledge_representation_inference_engine::{
+    infer_throughput_knowledge_representation, throughput_knowledge_representation_inference_engine_manifest,
+    ThroughputKnowledgeDisposition, ThroughputKnowledgeError, ThroughputKnowledgeJob,
+    ThroughputKnowledgeReceipt, ThroughputKnowledgeRequest,
+    CONTRACT_VERSION as THROUGHPUT_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as THROUGHPUT_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
 };
 pub use throughput_research_workbench::{
     compile_throughput_research_workbench, throughput_research_workbench_manifest,
