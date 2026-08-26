@@ -46,6 +46,8 @@ pub use research_contracts::{
     resource_discovery_contract_v2_json, run_evidence_surveillance_json,
     run_local_retrieval_synthesis_inference_engine_json,
     validate_local_retrieval_synthesis_inference_engine_json,
+    run_local_retrieval_synthesis_contract_model_json,
+    validate_local_retrieval_synthesis_contract_model_json,
     run_multimodal_retrieval_synthesis_inference_engine_json,
     validate_multimodal_retrieval_synthesis_inference_engine_json,
     run_throughput_retrieval_synthesis_inference_engine_json,

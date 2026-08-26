@@ -3591,6 +3591,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterLocalRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisContractModelReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisContractModelReceipt } from "./research-contracts.js";
+export {
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
   adapterMultimodalRetrievalSynthesisInferenceEngineReceiptDigest,
