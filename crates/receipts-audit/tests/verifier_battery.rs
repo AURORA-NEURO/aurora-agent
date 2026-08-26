@@ -761,18 +761,18 @@ fn wrong_digest(document: &Value, pointer: &str) -> Value {
 
 // -- the boundary of this file's claim -----------------------------------------------------------
 
-/// Every verifier entry point in the workspace, classified, so the claim above has to stay true.
-///
-/// `every_document_verifier_in_the_workspace_is_covered_or_recorded` scans `crates/*/src` for the
-/// two shapes an entry point takes here — a `pub fn` whose name begins with `verify`, and
-/// `pub fn digest_is_intact` — and fails when a site appears in none of the four lists below. A
-/// verifier added tomorrow therefore has to be classified before this file goes green again.
-///
-/// The scan's bound, stated because it is real: it finds functions by name, so a verifying
-/// *constructor* is invisible to it. `RepairPlan::from_json` and `AcceptanceReport::from_json` are
-/// two this battery already drives; `WorldTape` verifies its chain from a `#[serde(try_from)]`
-/// reader, which no name pattern would catch. The key is the path under `crates/` and the function
-/// name, so several sites that share both are one entry.
+// Every verifier entry point in the workspace, classified, so the claim above has to stay true.
+//
+// `every_document_verifier_in_the_workspace_is_covered_or_recorded` scans `crates/*/src` for the
+// two shapes an entry point takes here — a `pub fn` whose name begins with `verify`, and
+// `pub fn digest_is_intact` — and fails when a site appears in none of the four lists below. A
+// verifier added tomorrow therefore has to be classified before this file goes green again.
+//
+// The scan's bound, stated because it is real: it finds functions by name, so a verifying
+// *constructor* is invisible to it. `RepairPlan::from_json` and `AcceptanceReport::from_json` are
+// two this battery already drives; `WorldTape` verifies its chain from a `#[serde(try_from)]`
+// reader, which no name pattern would catch. The key is the path under `crates/` and the function
+// name, so several sites that share both are one entry.
 
 /// The entry points this battery's subjects drive, each named with its subject label.
 const COVERED_HERE: [(&str, &str); 11] = [
