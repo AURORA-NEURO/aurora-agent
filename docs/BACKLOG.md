@@ -1901,3 +1901,11 @@ checkpoint/CAS persistence and append-only replay revisions, so the all-domain f
 without issuing an implicit duplicate source call. Remaining deployment work is still caller-owned:
 credential storage and rotation, source truth, identity and authorization, distributed leasing,
 encrypted raw-value retention, and reconciliation of uncertain external effects.
+
+The high-level TypeScript agent now composes the same restart-safe LLM transport-health boundary
+already available in Python. `runtimeHealthPersistence` must be bound to the exact `LLMRuntime`,
+and `restoreRuntimeHealth()` / `flushRuntimeHealth()` (plus transport-health aliases) explicitly
+restore and CAS-flush provider/model counters and circuit continuity. This keeps provider
+availability recovery aligned across SDKs without restoring credentials, prompts, responses,
+evaluator rewards, or authorization; provider registration and deployment checkpoint ordering
+remain caller-owned.

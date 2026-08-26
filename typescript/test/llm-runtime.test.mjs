@@ -856,6 +856,51 @@ test("LLM transport health JSON persistence is canonical, serialized, and CAS-fe
   textStore.write(canonical);
 });
 
+test("AutonomousAgent composes restart-safe transport health with exact runtime binding", async () => {
+  const config = openaiCompatibleProvider("agent-health", "https://agent-health.test", {
+    requiresCredential: false,
+    maxAttempts: 1,
+    circuitBreakerFailureThreshold: 1,
+    circuitBreakerResetMs: 60_000,
+  });
+  const source = new LLMRuntime({ fetch: async () => jsonResponse({ error: "busy" }, 503) });
+  source.registerProvider(config);
+  let persisted = null;
+  const persistence = {
+    read: () => persisted,
+    write: (snapshot) => { persisted = structuredClone(snapshot); },
+  };
+  const sourceAgent = new AutonomousAgent(source, {
+    runtimeHealthPersistence: new LLMRuntimeHealthPersistenceCoordinator(source, persistence),
+  });
+
+  await assert.rejects(source.invoke("agent-health", request("agent-model")), /503/);
+  const flushed = await sourceAgent.flushRuntimeHealth();
+  assert.equal(flushed.providers[0].attempts, 1);
+  assert.equal(flushed.providers[0].consecutive_failures, 1);
+  assert.deepEqual(await sourceAgent.flushTransportHealth(), flushed);
+  assert.equal(JSON.stringify(flushed).includes("authorization"), false);
+
+  let restartedCalls = 0;
+  const restarted = new LLMRuntime({ fetch: async () => { restartedCalls += 1; throw new Error("must not dispatch"); } });
+  restarted.registerProvider(config);
+  const restartedAgent = new AutonomousAgent(restarted, {
+    runtimeHealthPersistence: new LLMRuntimeHealthPersistenceCoordinator(restarted, persistence),
+  });
+  const restored = await restartedAgent.restoreTransportHealth();
+  assert.equal(restored?.snapshot_digest, flushed.snapshot_digest);
+  assert.equal(restarted.providerStatus("agent-health").circuit, "open");
+  await assert.rejects(restarted.invoke("agent-health", request("agent-model")), (error) => error instanceof ProviderRuntimeError && error.circuitOpen);
+  assert.equal(restartedCalls, 0);
+
+  const foreignRuntime = new LLMRuntime();
+  assert.throws(
+    () => new AutonomousAgent(foreignRuntime, { runtimeHealthPersistence: new LLMRuntimeHealthPersistenceCoordinator(source, persistence) }),
+    /bound to the supplied LLMRuntime/,
+  );
+  await assert.rejects(new AutonomousAgent(foreignRuntime).restoreRuntimeHealth(), /not configured/);
+});
+
 test("autonomous runtime gates candidates on provider readiness and feeds health back to selection", async () => {
   const calls = [];
   const runtime = new LLMRuntime({

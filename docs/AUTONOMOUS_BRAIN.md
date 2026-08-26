@@ -8239,6 +8239,17 @@ secret-shaped fields, and tampered digests fail closed without mutating the live
 transport ledger informs circuit and failover continuity, while the existing model-health ledger
 continues to own evaluator-quality feedback and selection adaptation.
 
+The high-level Python and TypeScript agents now compose this boundary directly. Configure the
+coordinator against the exact runtime instance, then call `restore_runtime_health()` /
+`flush_runtime_health()` in Python or `restoreRuntimeHealth()` / `flushRuntimeHealth()` in
+TypeScript at explicit deployment checkpoints. Construction rejects a coordinator bound to a
+different runtime, and compatibility aliases `restore_transport_health()` /
+`flush_transport_health()` and their TypeScript camel-case equivalents are available for worker
+integrations. Restoration must happen after provider registration and before dispatch; it restores
+only bounded transport observations and circuit continuity, never credentials or provider
+payloads. A missing coordinator is an explicit configuration error rather than an implicit fresh
+health image.
+
 The TypeScript and Python provider-health envelopes are now current `0.2` images. Every new
 snapshot carries a bounded `snapshot_generation` and exact `previous_snapshot_digest`; generation
 one is the only root, and a snapshot with unchanged provider/model counters is cache-stable rather
