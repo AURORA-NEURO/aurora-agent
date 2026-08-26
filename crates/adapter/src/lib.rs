@@ -106,6 +106,7 @@ pub mod multimodal_evidence_surveillance_research_copilot;
 pub mod throughput_evidence_surveillance_research_copilot;
 pub mod throughput_evidence_surveillance_research_workbench;
 pub mod federated_continual_evidence_surveillance_research_copilot;
+pub mod federated_continual_evidence_surveillance_research_workbench;
 pub mod local_evidence_surveillance_workflow_fabric;
 pub mod multimodal_evidence_surveillance_workflow_fabric;
 pub mod throughput_evidence_surveillance_workflow_fabric;
@@ -363,6 +364,15 @@ pub use federated_continual_evidence_surveillance_research_copilot::{
     FederatedCopilotQualifiedEvidenceSet,
     CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+pub use federated_continual_evidence_surveillance_research_workbench::{
+    federated_continual_evidence_surveillance_research_workbench_manifest,
+    render_federated_continual_evidence_surveillance_research_workbench,
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchError,
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 pub use fact::{FactDraft, ValueQualifiers};
 pub use federated_commons::{

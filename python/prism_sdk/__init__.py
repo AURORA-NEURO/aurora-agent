@@ -6661,6 +6661,10 @@ from .adapter_throughput_evidence_surveillance_research_workbench import (
     ThroughputEvidenceSurveillanceResearchWorkbenchReceipt,
     render_throughput_evidence_surveillance_research_workbench,
 )
+from .adapter_federated_continual_evidence_surveillance_research_workbench import (
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
+    render_federated_continual_evidence_surveillance_research_workbench,
+)
 
 __all__ += [
     "LocalEvidenceSurveillanceResearchWorkbenchReceipt",
@@ -6669,6 +6673,8 @@ __all__ += [
     "render_multimodal_evidence_surveillance_research_workbench",
     "ThroughputEvidenceSurveillanceResearchWorkbenchReceipt",
     "render_throughput_evidence_surveillance_research_workbench",
+    "FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt",
+    "render_federated_continual_evidence_surveillance_research_workbench",
 ]
 
 from .adapter_multimodal_evidence_surveillance_research_copilot import (

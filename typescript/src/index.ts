@@ -3577,6 +3577,13 @@ export {
 } from "./research-contracts.js";
 export type { AdapterThroughputEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
 export {
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterFederatedContinualEvidenceSurveillanceResearchWorkbenchReceiptDigest,
+  validateAdapterFederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,
   AUTONOMOUS_GOAL_MAX_CRITERIA,
