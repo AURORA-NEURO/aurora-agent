@@ -791,7 +791,18 @@ export class AutonomousModelHealthController {
   selector(): AutonomousModelSelector {
     return async (request: AutonomousSelectionRequest): Promise<AutonomousSelectionDecision> => {
       const persistent = await this.store.selectorHealth();
-      const merged: AutonomousSelectionRequest = { ...request, model_health: { ...request.model_health, ...persistent } };
+      // Evaluator quality is distinct from transport success, but it is still a caller-owned
+      // routing prior. Blend it into the candidate's quality with the same capped evidence
+      // confidence used for reliability/latency so the canonical ranker remains policy-driven.
+      const candidates = request.candidates.map((candidate) => {
+        const health = persistent[`${candidate.provider}/${candidate.model}`];
+        const observations = health?.quality_observations ?? 0;
+        const quality = health?.quality_mean;
+        if (typeof quality !== "number" || !Number.isFinite(quality) || observations <= 0) return candidate;
+        const confidence = Math.min(observations / 12, 0.75);
+        return { ...candidate, quality: (1 - confidence) * candidate.quality + confidence * quality };
+      });
+      const merged: AutonomousSelectionRequest = { ...request, candidates, model_health: { ...request.model_health, ...persistent } };
       const ranking = rankAutonomousModels(merged);
       const chosen = ranking.find((row) => row.eligible);
       return { selected_model: chosen ? { provider: chosen.provider, model: chosen.model } : null, strategy: "caller_selector", ranking, abstention_reason: chosen ? null : "no eligible model candidate after persisted health" };

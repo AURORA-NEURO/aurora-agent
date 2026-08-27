@@ -26,6 +26,9 @@ import {
   providerTextPart,
   providerImageUrlPart,
   providerImageBase64Part,
+  DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS,
+  normalizeAutonomousSelectionWeights,
+  rankAutonomousModels,
   validateLLMRuntimeHealthSnapshot,
 } from "../dist/index.js";
 
@@ -921,9 +924,9 @@ test("autonomous runtime gates candidates on provider readiness and feeds health
   const agent = new AutonomousRuntime(runtime);
   const local = await agent.invoke(plan, { feedback: async (_selection, outcome) => feedback.push(outcome) });
   assert.equal(local.selection.strategy, "deterministic_health_utility");
-  assert.equal(local.selection.selected_model.provider, "slow");
+  assert.equal(local.selection.selected_model.provider, "fast");
   assert.equal(feedback[0].success, true);
-  assert.equal(calls[0], "https://slow.test/v1/chat/completions");
+  assert.equal(calls[0], "https://fast.test/v1/chat/completions");
 
   let selectionInput;
   const delegated = new AutonomousRuntime(runtime, {
@@ -942,6 +945,47 @@ test("autonomous runtime gates candidates on provider readiness and feeds health
   gatedRuntime.registerProvider(openaiProvider({ baseUrl: "https://gated.test" }));
   const gatedAgent = new AutonomousRuntime(gatedRuntime);
   await assert.rejects(gatedAgent.invoke({ ...plan, candidates: [{ ...candidates[0], provider: "openai", model: "gated-model", requires_credential: true }] }), ProviderRuntimeError);
+});
+
+test("weighted model selection is deterministic, auditable, and learning-policy aware", () => {
+  const candidates = [
+    { provider: "lab", model: "quality", context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.99, latency_ms: 800, cost_per_million_tokens: 100, reliability: 0.95 },
+    { provider: "lab", model: "efficient", context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.78, latency_ms: 20, cost_per_million_tokens: 1, reliability: 0.9 },
+  ];
+  const base = {
+    task: "choose a bounded model",
+    domain: "evaluation",
+    capability: "reasoning",
+    risk_class: "review_required",
+    required_capabilities: [],
+    estimated_input_tokens: 100,
+    requested_output_tokens: 100,
+    candidates,
+    provider_health: {
+      lab: { provider: "lab", registered: true, circuit: "closed", credential_required: false, credential_ready: true, eligible: true, attempts: 0, successes: 0, failures: 0, success_rate: 0, mean_latency_ms: null, last_latency_ms: null, last_model: null, last_status_code: null },
+    },
+    model_health: {},
+  };
+  assert.deepEqual(normalizeAutonomousSelectionWeights(), DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS);
+  assert.deepEqual(normalizeAutonomousSelectionWeights({ cost: 2 }), { quality: 0.55, reliability: 0.25, cost: 2, latency: 0.1, exploration: 0.15 });
+  assert.throws(() => normalizeAutonomousSelectionWeights({ quality: 0, reliability: 0, cost: 0, latency: 0, exploration: 0 }), /at least one positive/);
+
+  const qualityFirst = rankAutonomousModels({ ...base, weights: { quality: 1, reliability: 0, cost: 0, latency: 0, exploration: 0 } });
+  assert.equal(qualityFirst[0].model, "quality");
+  assert.equal(typeof qualityFirst[0].base_score, "number");
+  assert.equal(qualityFirst[0].observed_pulls, 0);
+
+  const costFirst = rankAutonomousModels({ ...base, weights: { quality: 0.1, reliability: 0, cost: 10, latency: 0, exploration: 0 } });
+  assert.equal(costFirst[0].model, "efficient");
+
+  const disabledByLearning = rankAutonomousModels({
+    ...base,
+    observations: [{ arm_id: "lab/efficient", pulls: 12, reward_sum: 10, failures: 0, disabled: true }],
+  });
+  const efficient = disabledByLearning.find((row) => row.model === "efficient");
+  assert.equal(efficient.eligible, false);
+  assert.match(efficient.reasons.join(";"), /learning policy/);
+  assert.equal(efficient.observed_pulls, 12);
 });
 
 test("autonomous runtime emits metadata-only selection lifecycle for selection and abstention", async () => {

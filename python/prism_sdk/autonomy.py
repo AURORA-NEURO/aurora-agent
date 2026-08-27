@@ -126,6 +126,7 @@ from .brain import (
     _json_digest,
     build_model_selection_audit,
 )
+from .autonomous_selection_lab import normalize_autonomous_selection_weights
 from .autonomous_prompt_registry import (
     AutonomousPromptRegistry,
     AutonomousPromptSelectionPlan,
@@ -8565,6 +8566,33 @@ def _planner_adaptive_prompt_selection(
     return selection
 
 
+def _selection_overrides_with_weights(
+    selection_overrides: Mapping[str, Any] | None,
+    selection_weights: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    """Bind a typed selection policy to the legacy override envelope.
+
+    The override envelope remains useful for persisted health projections and deployment-specific
+    metadata. A first-class policy must nevertheless be normalized before it crosses any nested
+    run boundary, and conflicting representations must fail before planning or provider work.
+    """
+
+    if selection_weights is None:
+        return selection_overrides
+    if selection_overrides is not None and not isinstance(selection_overrides, Mapping):
+        raise BrainRunError("selection_overrides must be a mapping or None")
+    try:
+        normalized = normalize_autonomous_selection_weights(selection_weights)
+        existing = None if selection_overrides is None else selection_overrides.get("weights")
+        if existing is not None and normalize_autonomous_selection_weights(existing) != normalized:
+            raise BrainRunError("selection_weights conflicts with selection_overrides.weights")
+    except ArgumentError as error:
+        raise BrainRunError(str(error)) from error
+    merged = {} if selection_overrides is None else dict(selection_overrides)
+    merged["weights"] = normalized
+    return merged
+
+
 class AutonomousTaskOrchestrator:
     """Compose domain intake with adaptive execution and optional online learning."""
 
@@ -8644,6 +8672,7 @@ class AutonomousTaskOrchestrator:
         bandit_state: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 1_024,
         max_cost_per_million_tokens: int | None = None,
@@ -8772,6 +8801,7 @@ class AutonomousTaskOrchestrator:
             max_latency_ms=max_latency_ms,
             min_quality=min_quality,
             selection_overrides=selection_overrides,
+            selection_weights=selection_weights,
         )
         run = self.brain.run(
             task=classifier_task,
@@ -9045,6 +9075,7 @@ class AutonomousTaskOrchestrator:
         bandit_state: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 1_024,
         max_cost_per_million_tokens: int | None = None,
@@ -9206,6 +9237,7 @@ class AutonomousTaskOrchestrator:
             max_latency_ms=max_latency_ms,
             min_quality=min_quality,
             selection_overrides=selection_overrides,
+            selection_weights=selection_weights,
         )
         run = self.brain.run(
             task=planner_task,
@@ -9323,6 +9355,7 @@ class AutonomousTaskOrchestrator:
         bandit_state: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 1_024,
         max_cost_per_million_tokens: int | None = None,
@@ -9498,6 +9531,7 @@ class AutonomousTaskOrchestrator:
             max_latency_ms=max_latency_ms,
             min_quality=min_quality,
             selection_overrides=selection_overrides,
+            selection_weights=selection_weights,
         )
         run = self.brain.run(
             task=planner_task,
@@ -10110,6 +10144,7 @@ class AutonomousTaskOrchestrator:
         bandit_state: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 1_024,
         max_cost_per_million_tokens: int | None = None,
@@ -10141,6 +10176,7 @@ class AutonomousTaskOrchestrator:
             bandit_state=bandit_state,
             contextual_observations=contextual_observations,
             selection_overrides=selection_overrides,
+            selection_weights=selection_weights,
             input_tokens=input_tokens,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
@@ -11492,6 +11528,7 @@ class AutonomousTaskOrchestrator:
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
         approved_stage_ids: Sequence[str] = (),
@@ -11529,6 +11566,10 @@ class AutonomousTaskOrchestrator:
 
         if not isinstance(require_response_review, bool):
             raise BrainRunError("require_response_review must be a boolean")
+        selection_overrides = _selection_overrides_with_weights(
+            selection_overrides,
+            selection_weights,
+        )
 
         normalized_content_parts = (
             None if content_parts is None else normalize_provider_content_parts(content_parts)
@@ -12048,6 +12089,7 @@ class AutonomousTaskOrchestrator:
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
         approved_stage_ids: Sequence[str] = (),
@@ -12175,6 +12217,7 @@ class AutonomousTaskOrchestrator:
                 max_latency_ms=max_latency_ms,
                 min_quality=min_quality,
                 selection_overrides=selection_overrides,
+                selection_weights=selection_weights,
                 bandit_state=bandit_state,
                 approve_provider_call=approve_provider_call,
                 approve_mission_dispatch=approve_mission_dispatch,
@@ -12420,6 +12463,7 @@ class AutonomousTaskOrchestrator:
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
         approved_stage_ids: Sequence[str] = (),
@@ -12718,6 +12762,7 @@ class AutonomousTaskOrchestrator:
                 max_latency_ms=max_latency_ms,
                 min_quality=min_quality,
                 selection_overrides=selection_overrides,
+                selection_weights=selection_weights,
                 approve_provider_call=approve_provider_call,
                 approve_mission_dispatch=approve_mission_dispatch,
                 run_id=f"{workflow_run_id}-stage-{ready.id}",
@@ -13532,6 +13577,7 @@ class AutonomousTaskOrchestrator:
         max_latency_ms: int | None = None,
         min_quality: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
         run_id: str | None = None,
@@ -13578,6 +13624,10 @@ class AutonomousTaskOrchestrator:
 
         normalized_content_parts = (
             None if content_parts is None else normalize_provider_content_parts(content_parts)
+        )
+        selection_overrides = _selection_overrides_with_weights(
+            selection_overrides,
+            selection_weights,
         )
         if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
             raise BrainRunError("synthesize and allow_partial must be booleans")
@@ -17885,6 +17935,7 @@ class AutonomousAgent:
         min_quality: float | None = None,
         min_selection_confidence: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Preview the live domain-scoped selector without contacting a provider.
 
@@ -17955,6 +18006,10 @@ class AutonomousAgent:
                 self.health_ledger.selection_overrides(),
                 effective_overrides,
             )
+        effective_overrides = _selection_overrides_with_weights(
+            effective_overrides,
+            selection_weights,
+        )
         merged_overrides = {} if effective_overrides is None else dict(effective_overrides)
         merged_overrides.update(
             {
@@ -18039,6 +18094,7 @@ class AutonomousAgent:
                 "max_latency_ms": max_latency_ms,
                 "min_quality": min_quality,
                 "min_selection_confidence": min_selection_confidence,
+                "selection_weights": selection_request["weights"],
             },
             "selection_audit": audit,
             "review": {
@@ -18086,6 +18142,7 @@ class AutonomousAgent:
         min_quality: float | None = None,
         min_selection_confidence: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Revalidate a provider-free preview, then invoke only its reviewed model arm."""
@@ -18102,6 +18159,27 @@ class AutonomousAgent:
         audit = selection_preview.get("selection_audit")
         if not isinstance(contract, Mapping) or not isinstance(audit, Mapping):
             raise BrainRunError("approved model selection preview is missing its selection contract")
+        try:
+            supplied_weights = normalize_autonomous_selection_weights(
+                selection_weights
+                if selection_weights is not None
+                else (
+                    selection_overrides.get("weights")
+                    if isinstance(selection_overrides, Mapping)
+                    else None
+                )
+            )
+            reviewed_weights = normalize_autonomous_selection_weights(
+                contract.get("selection_weights")
+            )
+        except ArgumentError as error:
+            raise BrainRunError(str(error)) from error
+        if supplied_weights != reviewed_weights:
+            raise BrainRunError("approved model selection weights changed; re-review required")
+        effective_selection_overrides = _selection_overrides_with_weights(
+            selection_overrides,
+            supplied_weights,
+        )
         selected = audit.get("selected_model")
         selected_id = selected.get("model_id") if isinstance(selected, Mapping) else None
         if not isinstance(selected_id, str) or not selected_id.strip() or "/" not in selected_id:
@@ -18148,6 +18226,7 @@ class AutonomousAgent:
             "max_latency_ms": max_latency_ms,
             "min_quality": min_quality,
             "min_selection_confidence": min_selection_confidence,
+            "selection_weights": supplied_weights,
         }
         if contract != expected_contract:
             raise BrainRunError("approved model selection inputs changed; re-review required")
@@ -18168,7 +18247,8 @@ class AutonomousAgent:
             max_latency_ms=max_latency_ms,
             min_quality=min_quality,
             min_selection_confidence=min_selection_confidence,
-            selection_overrides=selection_overrides,
+            selection_overrides=effective_selection_overrides,
+            selection_weights=supplied_weights,
         )
         for field_name in (
             "task_digest", "domain", "capability", "risk_class", "workflow_id",
@@ -18202,7 +18282,8 @@ class AutonomousAgent:
                 "max_cost_per_million_tokens": max_cost_per_million_tokens,
                 "max_latency_ms": max_latency_ms,
                 "min_quality": min_quality,
-                "selection_overrides": selection_overrides,
+                "selection_overrides": effective_selection_overrides,
+                "selection_weights": supplied_weights,
                 "approve_provider_call": True,
                 "max_provider_failovers": 0,
             }
@@ -18237,6 +18318,7 @@ class AutonomousAgent:
         min_quality: float | None = None,
         min_selection_confidence: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Invoke an approved model arm only after its domain passes launch admission."""
@@ -18261,6 +18343,7 @@ class AutonomousAgent:
             min_quality=min_quality,
             min_selection_confidence=min_selection_confidence,
             selection_overrides=selection_overrides,
+            selection_weights=selection_weights,
             **kwargs,
         )
 
@@ -19378,6 +19461,7 @@ class AutonomousAgent:
         bandit_state: Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
         input_tokens: int = 4_096,
         requested_output_tokens: int = 1_024,
         max_cost_per_million_tokens: int | None = None,
@@ -19420,6 +19504,7 @@ class AutonomousAgent:
             bandit_state=bandit_state,
             contextual_observations=contextual_observations,
             selection_overrides=resolved_overrides,
+            selection_weights=selection_weights,
             input_tokens=input_tokens,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,

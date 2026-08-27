@@ -104,6 +104,48 @@ bounded proposal to be produced; the subsequent execution re-checks the caller's
 acceptance and effect posture. This prevents a planner call from becoming an unreviewed escape
 hatch around the execution policy.
 
+### Weighted model selection and online evidence
+
+Model selection uses one explicit multi-objective policy across the Rust kernel, TypeScript SDK,
+Python SDK, and provider-free selection lab. The policy is a set of utility coefficients—not
+probabilities—with bounded values for `quality`, `reliability`, `cost`, `latency`, and
+`exploration`. The shared default is `{ quality: 0.55, reliability: 0.25, cost: 0.10,
+latency: 0.10, exploration: 0.15 }`. Hard gates (registration, credentials, circuits, capacity,
+capabilities, caller budgets, and learning-policy disables) run before the score, and every ranking
+row retains its reason codes plus `base_score`, `exploration_bonus`, and observed pull count.
+
+The Python high-level entry points accept `selection_weights=...`; TypeScript accepts
+`selectionWeights=...`. The older `selection_overrides={"weights": ...}` envelope remains
+supported for persisted deployments, but if both forms are supplied they must normalize to the
+same policy. This means a single policy can be carried through a single-domain run, cross-domain
+fan-out, synthesis, planning previews, and approval revalidation without silently changing the
+decision between review and dispatch:
+
+```python
+result = orchestrator.run(
+    task="compare two bounded implementation strategies",
+    domain="coding",
+    model_candidates=models,
+    credentials=credentials,
+    selection_weights={
+        "quality": 0.7,
+        "reliability": 0.25,
+        "cost": 0.05,
+        "latency": 0.05,
+        "exploration": 0.10,
+    },
+    approve_provider_call=False,
+)
+```
+
+Online observations are caller-owned value-only arm statistics. They can contribute bounded mean
+reward and deterministic UCB-style exploration, while `disabled: true` is an explicit hard gate;
+transport success is never treated as task quality. The TypeScript preview binds the observations'
+digest into its approval contract, and changing either the policy or observations requires a new
+review. Persisted evaluator quality remains separate from transport health and is blended only as
+a capped routing prior. No key, prompt, response, raw evaluator text, or hidden learner state is
+accepted by the selection policy contract.
+
 ## Domain operating kits
 
 The SDK also exposes a digest-bound operating kit for every built-in domain. A kit composes the

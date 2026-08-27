@@ -42,6 +42,7 @@ from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_fac
 from .tooling import ToolCatalogue, ToolSchemaError
 from .autonomy_persistence import AutonomousExecutionController
 from .autonomy_provider import AutonomousProviderInvocationSession
+from .autonomous_selection_lab import normalize_autonomous_selection_weights
 
 if TYPE_CHECKING:
     from .jobs import BrainJobStore
@@ -3144,6 +3145,7 @@ class AutonomousBrain:
         min_quality: float | None = None,
         min_selection_confidence: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
+        selection_weights: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Build a live model-selection request from registered transports and learned state.
 
@@ -3206,6 +3208,24 @@ class AutonomousBrain:
             raise BrainRunError("selection_overrides must be a mapping or None")
         if selection_overrides is not None:
             BrainLearningLedger._assert_safe(selection_overrides)
+        # Make the multi-objective policy first-class while retaining the older override escape
+        # hatch for callers that persist complete selector requests.  Both paths normalize to the
+        # same bounded value-only contract before health and bandit state are joined below.
+        try:
+            override_weights = (
+                None if selection_overrides is None else selection_overrides.get("weights")
+            )
+            normalized_weights = normalize_autonomous_selection_weights(
+                selection_weights if selection_weights is not None else override_weights
+            )
+            if selection_weights is not None and override_weights is not None:
+                normalized_override_weights = normalize_autonomous_selection_weights(override_weights)
+                if normalized_override_weights != normalized_weights:
+                    raise BrainRunError(
+                        "selection_weights conflicts with selection_overrides.weights"
+                    )
+        except ArgumentError as error:
+            raise BrainRunError(str(error)) from error
         health_overrides: Mapping[str, Any] = {}
         if selection_overrides is not None and selection_overrides.get("provider_health") is not None:
             raw_health_overrides = selection_overrides.get("provider_health")
@@ -3475,6 +3495,7 @@ class AutonomousBrain:
                 "observations": observations,
                 "provider_health": provider_health,
                 "model_health": model_health,
+                "weights": normalized_weights,
             }
         )
         if max_cost_per_million_tokens is not None:

@@ -231,6 +231,10 @@ import {
   AutonomousCostBudget,
   type AutonomousCostBudgetSnapshot,
   type AutonomousModelCandidate,
+  type AutonomousModelObservation,
+  type AutonomousSelectionWeights,
+  normalizeAutonomousSelectionWeights,
+  normalizeAutonomousModelObservations,
   type AutonomousModelSelector,
   type AutonomousModelSelectionTraceEventCallback,
   type AutonomousSelectionDecision,
@@ -752,6 +756,10 @@ export interface AutonomousModelSelectionPreviewOptions {
   maxLatencyMs?: number;
   minQuality?: number;
   minSelectionConfidence?: number;
+  /** Explicit weighted utility policy shared with the Rust brain kernel. */
+  selectionWeights?: Partial<AutonomousSelectionWeights>;
+  /** Optional value-only observations used by the deterministic preview ranker. */
+  selectionObservations?: readonly AutonomousModelObservation[];
 }
 
 export interface AutonomousModelSelectionContract extends JsonObject {
@@ -770,6 +778,8 @@ export interface AutonomousModelSelectionContract extends JsonObject {
   max_latency_ms: number | null;
   min_quality: number | null;
   min_selection_confidence: number | null;
+  selection_weights: AutonomousSelectionWeights;
+  selection_observations_digest: string;
 }
 
 /** Options for approving one previously reviewed model-selection preview. */
@@ -1457,6 +1467,10 @@ export interface AutonomousProviderPlanningOptions {
   maxLatencyMs?: number;
   minQuality?: number;
   minSelectionConfidence?: number;
+  /** Explicit weighted utility policy for this run's model decision. */
+  selectionWeights?: Partial<AutonomousSelectionWeights>;
+  /** Caller-owned global online observations used by the deterministic selection ranker. */
+  selectionObservations?: readonly AutonomousModelObservation[];
   /** Aggregate estimated spend ceiling for this planning call and any provider failover. */
   maxTotalCostUnits?: number;
   /** Share a caller-owned aggregate budget across planning and the eventual execution. */
@@ -1658,6 +1672,10 @@ export interface AutonomousRunOptions {
   minQuality?: number;
   /** Abstain when eligible model ranking separation is below this normalized floor. */
   minSelectionConfidence?: number;
+  /** Explicit weighted utility policy for this run's model decision. */
+  selectionWeights?: Partial<AutonomousSelectionWeights>;
+  /** Caller-owned global online observations used by the deterministic selection ranker. */
+  selectionObservations?: readonly AutonomousModelObservation[];
   /** Aggregate estimated spend ceiling shared by nested provider calls in this run. */
   maxTotalCostUnits?: number;
   /** Share a caller-owned aggregate budget across fan-out, synthesis, retries, or cycles. */
@@ -3475,6 +3493,8 @@ async function prepareProviderPlanning(
       maxLatencyMs: options.maxLatencyMs,
       minQuality: options.minQuality,
       minSelectionConfidence: options.minSelectionConfidence,
+      selectionWeights: options.selectionWeights,
+      selectionObservations: options.selectionObservations,
       candidates: options.candidates ?? [],
       request,
     },
@@ -3605,6 +3625,8 @@ async function prepareOrderedStepPlanning(
     maxLatencyMs: options.maxLatencyMs,
     minQuality: options.minQuality,
     minSelectionConfidence: options.minSelectionConfidence,
+    selectionWeights: options.selectionWeights,
+    selectionObservations: options.selectionObservations,
     candidates: options.candidates ?? [],
     request: {
       model: "selection-delegated",
@@ -6181,6 +6203,9 @@ export class AutonomousAgent {
         throw new ArgumentError(`autonomous model selection preview ${name} is outside its bounds`);
       }
     }
+    const selectionWeights = normalizeAutonomousSelectionWeights(options.selectionWeights);
+    const selectionObservations = normalizeAutonomousModelObservations(options.selectionObservations);
+    const selectionObservationsDigest = await digestJson(selectionObservations);
     const blueprintEnvelope = await this.blueprint(taskText, {
       domain: options.domain,
       capability: options.capability,
@@ -6216,6 +6241,8 @@ export class AutonomousAgent {
       maxLatencyMs: options.maxLatencyMs,
       minQuality: options.minQuality,
       minSelectionConfidence: options.minSelectionConfidence,
+      selectionWeights,
+      selectionObservations,
       candidates,
       request,
     };
@@ -6240,6 +6267,8 @@ export class AutonomousAgent {
         max_latency_ms: options.maxLatencyMs ?? null,
         min_quality: options.minQuality ?? null,
         min_selection_confidence: options.minSelectionConfidence ?? null,
+        selection_weights: selectionWeights,
+        selection_observations_digest: selectionObservationsDigest,
       },
     });
     const selected = selection.selected_model !== null;
@@ -6277,6 +6306,8 @@ export class AutonomousAgent {
         max_latency_ms: options.maxLatencyMs ?? null,
         min_quality: options.minQuality ?? null,
         min_selection_confidence: options.minSelectionConfidence ?? null,
+        selection_weights: selectionWeights,
+        selection_observations_digest: selectionObservationsDigest,
       },
       selection_audit: structuredClone(selection),
       review: {
@@ -6325,6 +6356,12 @@ export class AutonomousAgent {
     if (!isObject(contract) || !Array.isArray(contract.candidate_ids) || contract.candidate_ids.some((candidateId) => typeof candidateId !== "string" || !candidateId.trim())) {
       throw new ProviderRuntimeError("approved model selection preview contract is malformed");
     }
+    const reviewedWeights = normalizeAutonomousSelectionWeights(contract.selection_weights);
+    const suppliedWeights = normalizeAutonomousSelectionWeights(options.selectionWeights);
+    if (canonicalJson(reviewedWeights) !== canonicalJson(suppliedWeights)) throw new ProviderRuntimeError("approved model selection weights changed; re-review required");
+    const suppliedObservations = normalizeAutonomousModelObservations(options.selectionObservations);
+    if (typeof contract.selection_observations_digest !== "string" || !/^[0-9a-f]{64}$/.test(contract.selection_observations_digest)) throw new ProviderRuntimeError("approved model selection observation contract is malformed");
+    if (await digestJson(suppliedObservations) !== contract.selection_observations_digest) throw new ProviderRuntimeError("approved model selection observations changed; re-review required");
     const audit = preview.selection_audit;
     if (!isObject(audit) || !isObject(audit.selected_model) || typeof audit.selected_model.provider !== "string" || typeof audit.selected_model.model !== "string") {
       throw new ProviderRuntimeError("approved model selection preview has no exact selected model");
@@ -6368,6 +6405,8 @@ export class AutonomousAgent {
       ...(maxLatencyMs === undefined ? {} : { maxLatencyMs }),
       ...(minQuality === undefined ? {} : { minQuality }),
       ...(minSelectionConfidence === undefined ? {} : { minSelectionConfidence }),
+      selectionWeights: suppliedWeights,
+      selectionObservations: suppliedObservations,
     });
     for (const field of [
       "task_digest",
@@ -6402,6 +6441,8 @@ export class AutonomousAgent {
       ...(maxLatencyMs === undefined ? {} : { maxLatencyMs }),
       ...(minQuality === undefined ? {} : { minQuality }),
       ...(minSelectionConfidence === undefined ? {} : { minSelectionConfidence }),
+      selectionWeights: suppliedWeights,
+      selectionObservations: suppliedObservations,
       approveProviderCall: true,
       maxProviderFailovers: 0,
     };
@@ -7518,6 +7559,8 @@ export class AutonomousAgent {
       ...(planning?.promptLearningExploration === undefined && options.planningPromptLearningExploration !== undefined ? { promptLearningExploration: options.planningPromptLearningExploration } : {}),
       ...(planning?.promptLearningExploration === undefined && options.planningPromptLearningExploration === undefined && options.promptLearningExploration !== undefined ? { promptLearningExploration: options.promptLearningExploration } : {}),
       ...(planning?.promptStage === undefined ? { promptStage: options.planningPromptStage ?? "planning" } : {}),
+      ...(planning?.selectionWeights === undefined && options.selectionWeights !== undefined ? { selectionWeights: options.selectionWeights } : {}),
+      ...(planning?.selectionObservations === undefined && options.selectionObservations !== undefined ? { selectionObservations: options.selectionObservations } : {}),
       ...(sharedBudget ? { costBudget: sharedBudget, maxTotalCostUnits: undefined } : {}),
       ...(options.domainPolicyMode === undefined ? {} : { domainPolicyMode: options.domainPolicyMode }),
       ...(options.domainPolicyEvidenceReady === undefined ? {} : { domainPolicyEvidenceReady: options.domainPolicyEvidenceReady }),
@@ -8305,7 +8348,7 @@ export class AutonomousAgent {
       tools: tools.length ? tools : undefined,
       toolChoice: tools.length ? "auto" : undefined,
     };
-    const executionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: blueprint.selection_context.capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: effectiveMinSelectionConfidence, candidates, request };
+    const executionPlan: AutonomousExecutionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: blueprint.selection_context.capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: effectiveMinSelectionConfidence, selectionWeights: options.selectionWeights, selectionObservations: options.selectionObservations, candidates, request };
     const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);

@@ -842,6 +842,87 @@ export interface AutonomousModelCandidateDefaults extends JsonObject {
   capabilities?: string[];
 }
 
+/**
+ * Explicit multi-objective policy for model selection.
+ *
+ * The values are non-negative utility weights, not probabilities.  They intentionally mirror
+ * the Rust brain kernel's `SelectionWeights` contract so a selection preview, an autonomous
+ * provider call, and an offline replay can make the same decision from the same metadata.  A
+ * policy with all weights set to zero is refused because it would make the decision entirely
+ * dependent on tie-breaking.
+ */
+export interface AutonomousSelectionWeights extends JsonObject {
+  quality: number;
+  reliability: number;
+  cost: number;
+  latency: number;
+  exploration: number;
+}
+
+export const AUTONOMOUS_SELECTION_WEIGHTS_SCHEMA = "bioprism-autonomous-selection-weights/0.1" as const;
+
+/** Defaults shared with the executable Rust selection kernel. */
+export const DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS: Readonly<AutonomousSelectionWeights> = Object.freeze({
+  quality: 0.55,
+  reliability: 0.25,
+  cost: 0.10,
+  latency: 0.10,
+  exploration: 0.15,
+});
+
+const AUTONOMOUS_SELECTION_WEIGHT_NAMES = ["quality", "reliability", "cost", "latency", "exploration"] as const;
+
+/** Validate and fill a partial policy without mutating caller-owned state. */
+export function normalizeAutonomousSelectionWeights(value: unknown = undefined): AutonomousSelectionWeights {
+  if (value === undefined || value === null) return { ...DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS };
+  if (!isObject(value)) throw new ProviderRuntimeError("autonomous selection weights must be an object");
+  const unsupported = Object.keys(value).filter((key) => !(AUTONOMOUS_SELECTION_WEIGHT_NAMES as readonly string[]).includes(key));
+  if (unsupported.length) throw new ProviderRuntimeError(`autonomous selection weights contain unsupported fields: ${unsupported.sort().join(", ")}`);
+  const normalized = { ...DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS } as AutonomousSelectionWeights;
+  for (const name of AUTONOMOUS_SELECTION_WEIGHT_NAMES) {
+    const supplied = value[name];
+    if (supplied === undefined) continue;
+    if (typeof supplied !== "number" || !Number.isFinite(supplied) || supplied < 0 || supplied > 100) {
+      throw new ProviderRuntimeError(`autonomous selection weight ${name} is outside [0, 100]`);
+    }
+    normalized[name] = Number(supplied.toFixed(12));
+  }
+  if (AUTONOMOUS_SELECTION_WEIGHT_NAMES.every((name) => normalized[name] === 0)) {
+    throw new ProviderRuntimeError("autonomous selection weights must contain at least one positive value");
+  }
+  return normalized;
+}
+
+/** One caller-owned value-only global observation for an online selection arm. */
+export interface AutonomousModelObservation extends JsonObject {
+  arm_id: string;
+  pulls: number;
+  reward_sum: number;
+  failures: number;
+  disabled?: boolean;
+}
+
+/** Validate and canonicalize observations before they influence ranking. */
+export function normalizeAutonomousModelObservations(value: unknown = undefined): AutonomousModelObservation[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_PROVIDER_MODELS) throw new ProviderRuntimeError("autonomous model observations are outside their bounds");
+  const seen = new Set<string>();
+  return value.map((raw, index) => {
+    if (!isObject(raw)) throw new ProviderRuntimeError(`autonomous model observation ${index} must be an object`);
+    const armId = boundedText(`autonomous model observation ${index} arm_id`, raw.arm_id, 768);
+    if (seen.has(armId)) throw new ProviderRuntimeError(`autonomous model observations contain duplicate arm ${armId}`);
+    seen.add(armId);
+    const pulls = raw.pulls;
+    const rewardSum = raw.reward_sum;
+    const failures = raw.failures;
+    if (!Number.isSafeInteger(pulls) || (pulls as number) < 0 || (pulls as number) > 1_000_000_000) throw new ProviderRuntimeError(`autonomous model observation ${armId} pulls are outside their bounds`);
+    if (typeof rewardSum !== "number" || !Number.isFinite(rewardSum) || rewardSum < -1e12 || rewardSum > 1e12) throw new ProviderRuntimeError(`autonomous model observation ${armId} reward_sum is outside its bounds`);
+    if (!Number.isSafeInteger(failures) || (failures as number) < 0 || (failures as number) > (pulls as number)) throw new ProviderRuntimeError(`autonomous model observation ${armId} failures are outside their bounds`);
+    if (raw.disabled !== undefined && typeof raw.disabled !== "boolean") throw new ProviderRuntimeError(`autonomous model observation ${armId} disabled must be boolean`);
+    return { arm_id: armId, pulls: pulls as number, reward_sum: Number(rewardSum.toFixed(12)), failures: failures as number, ...(raw.disabled === undefined ? {} : { disabled: raw.disabled as boolean }) };
+  });
+}
+
 export interface AutonomousSelectionRequest extends JsonObject {
   task: string;
   domain: string;
@@ -863,6 +944,10 @@ export interface AutonomousSelectionRequest extends JsonObject {
   min_selection_confidence?: number | null;
   /** Whether the provider response must be valid JSON at the transport boundary. */
   require_json?: boolean;
+  /** Explicit multi-objective utility policy; defaults to the Rust kernel's policy. */
+  weights?: AutonomousSelectionWeights;
+  /** Optional global online-learning observations used by the deterministic ranker. */
+  observations?: AutonomousModelObservation[];
   candidates: AutonomousModelCandidate[];
   provider_health: Record<string, ProviderHealth>;
   model_health: Record<string, ProviderHealth>;
@@ -874,6 +959,12 @@ export interface AutonomousModelRanking extends JsonObject {
   score: number;
   eligible: boolean;
   reasons: string[];
+  /** Utility before exploration; retained for decision audits and replay diagnostics. */
+  base_score?: number;
+  /** Exploration contribution for this model arm. */
+  exploration_bonus?: number;
+  /** Number of caller-supplied observations used for the arm. */
+  observed_pulls?: number;
 }
 
 export interface AutonomousSelectionDecision extends JsonObject {
@@ -919,6 +1010,8 @@ export interface AutonomousExecutionPlan {
   maxLatencyMs?: number;
   minQuality?: number;
   minSelectionConfidence?: number;
+  selectionWeights?: Partial<AutonomousSelectionWeights>;
+  selectionObservations?: readonly AutonomousModelObservation[];
   candidates: readonly AutonomousModelCandidate[];
   request: ProviderRequest;
 }
@@ -937,6 +1030,10 @@ export type AutonomousModelSelector = (request: AutonomousSelectionRequest) => A
 export interface ProviderHealth extends JsonObject {
   provider: string;
   circuit: "closed" | "open";
+  /** Optional registration projection used by cross-runtime selection adapters. */
+  registered?: boolean;
+  /** Optional aggregate eligibility projection; false can only narrow a live decision. */
+  eligible?: boolean;
   consecutive_failures: number;
   attempts: number;
   successes: number;
@@ -3580,6 +3677,8 @@ export class AutonomousRuntime {
       min_quality: plan.minQuality,
       min_selection_confidence: plan.minSelectionConfidence,
     });
+    const weights = normalizeAutonomousSelectionWeights(plan.selectionWeights);
+    const observations = normalizeAutonomousModelObservations(plan.selectionObservations);
     const excluded = new Set(excludedProviders.map((provider) => boundedIdentifier("excluded provider", provider, 128)));
     const excludedModelIds = new Set(excludedModels.map((modelId) => boundedText("excluded model", modelId, 768)));
     const candidates = plan.candidates.map((candidate) => {
@@ -3626,6 +3725,8 @@ export class AutonomousRuntime {
       min_quality: plan.minQuality ?? null,
       min_selection_confidence: plan.minSelectionConfidence ?? null,
       require_json: plan.request.requireJson === true,
+      weights,
+      observations,
       candidates,
       provider_health: providerHealth,
       model_health: this.llm.modelHealthSnapshot(),
@@ -3697,15 +3798,44 @@ function validateSelectionOutputRequirements(request: Pick<AutonomousSelectionRe
 export function rankAutonomousModels(request: AutonomousSelectionRequest): AutonomousModelRanking[] {
   validateSelectionConstraints(request);
   validateSelectionOutputRequirements(request);
+  const weights = normalizeAutonomousSelectionWeights(request.weights);
+  const observations = normalizeAutonomousModelObservations(request.observations);
+  const observationByArm = new Map(observations.map((observation) => [observation.arm_id, observation]));
+  const maxCost = Math.max(1, ...request.candidates.map((candidate) => candidate.cost_per_million_tokens));
+  const effectiveMetrics = new Map(request.candidates.map((candidate) => {
+    const armId = `${candidate.provider}/${candidate.model}`;
+    const health = request.model_health[armId];
+    const attempts = health?.attempts ?? 0;
+    const evidence = attempts > 0 && typeof health?.success_rate === "number"
+      ? { successRate: health.success_rate, latency: health.last_latency_ms ?? health.mean_latency_ms }
+      : null;
+    if (!evidence) return [armId, { reliability: candidate.reliability, latency: candidate.latency_ms }] as const;
+    const confidence = Math.min(attempts / 12, 0.75);
+    return [armId, {
+      reliability: (1 - confidence) * candidate.reliability + confidence * evidence.successRate,
+      latency: evidence.latency === null || evidence.latency === undefined
+        ? candidate.latency_ms
+        : (1 - confidence) * candidate.latency_ms + confidence * evidence.latency,
+    }] as const;
+  }));
+  const maxLatency = Math.max(1, ...[...effectiveMetrics.values()].map((metrics) => metrics.latency));
+  const totalPulls = observations.reduce((sum, observation) => sum + observation.pulls, 0);
+  const logTotal = Math.log(totalPulls + 1);
   return request.candidates.map((candidate) => {
     const reasons: string[] = [];
     const provider = request.provider_health[candidate.provider];
-    const model = request.model_health[`${candidate.provider}/${candidate.model}`];
+    const armId = `${candidate.provider}/${candidate.model}`;
+    const model = request.model_health[armId];
+    const metrics = effectiveMetrics.get(armId) ?? { reliability: candidate.reliability, latency: candidate.latency_ms };
+    const observation = observationByArm.get(armId);
     if (candidate.enabled === false) reasons.push("candidate disabled");
     if (!provider) reasons.push("provider not registered");
+    if (provider?.registered === false) reasons.push("provider not registered");
     if (provider?.circuit === "open") reasons.push("provider circuit open");
     if (model?.circuit === "open") reasons.push("model circuit open");
     if (provider?.credential_required !== false && provider?.credential_ready !== true) reasons.push("credential not ready");
+    if (provider?.eligible === false) reasons.push("provider health ineligible");
+    if (observation?.disabled === true) reasons.push("disabled by learning policy");
     if (candidate.max_output_tokens < request.requested_output_tokens) reasons.push("model output capacity is below the request");
     if (candidate.context_window_tokens < request.estimated_input_tokens + request.requested_output_tokens) reasons.push("model context capacity is below the request");
     if (request.required_capabilities.some((required) => !(candidate.capabilities ?? []).includes(required))) reasons.push("model lacks a required capability");
@@ -3713,16 +3843,29 @@ export function rankAutonomousModels(request: AutonomousSelectionRequest): Auton
     if (request.require_json === true && provider && provider.structured_output_mode === undefined) reasons.push("provider structured output capability is unknown");
     if (request.require_json === true && provider?.structured_output_mode === "disabled") reasons.push("provider structured output is disabled");
     if (request.max_cost_per_million_tokens !== undefined && request.max_cost_per_million_tokens !== null && candidate.cost_per_million_tokens > request.max_cost_per_million_tokens) reasons.push("model cost exceeds the caller budget");
-    if (request.max_latency_ms !== undefined && request.max_latency_ms !== null && candidate.latency_ms > request.max_latency_ms) reasons.push("model latency exceeds the caller bound");
+    if (request.max_latency_ms !== undefined && request.max_latency_ms !== null && metrics.latency > request.max_latency_ms) reasons.push("model latency exceeds the caller bound");
     if (request.min_quality !== undefined && request.min_quality !== null && candidate.quality < request.min_quality) reasons.push("model quality is below the caller floor");
-    const healthRate = typeof model?.success_rate === "number" && model.attempts && model.attempts > 0 ? model.success_rate : 0.5;
-    const qualityObservations = model?.quality_observations ?? 0;
-    const qualityRate = typeof model?.quality_mean === "number" && qualityObservations > 0 ? model.quality_mean : null;
-    const latencyUtility = 1 - Math.min(1, candidate.latency_ms / 60_000);
-    const costUtility = 1 - Math.min(1, candidate.cost_per_million_tokens / 10_000);
-    const adaptiveHealth = qualityRate === null ? healthRate * 0.15 : healthRate * 0.1 + qualityRate * 0.05;
-    const score = candidate.quality * 0.4 + candidate.reliability * 0.3 + adaptiveHealth + latencyUtility * 0.1 + costUtility * 0.05;
-    return { provider: candidate.provider, model: candidate.model, score: Number(score.toFixed(12)), eligible: reasons.length === 0, reasons };
+    const pulls = observation?.pulls ?? 0;
+    const meanReward = pulls > 0 ? observation!.reward_sum / pulls : 0;
+    const explorationBonus = pulls === 0
+      ? weights.exploration
+      : weights.exploration * Math.sqrt(logTotal / pulls);
+    const baseScore = weights.quality * candidate.quality
+      + weights.reliability * metrics.reliability
+      + weights.exploration * meanReward
+      - weights.cost * (candidate.cost_per_million_tokens / maxCost)
+      - weights.latency * (metrics.latency / maxLatency);
+    const score = baseScore + explorationBonus;
+    return {
+      provider: candidate.provider,
+      model: candidate.model,
+      score: Number(score.toFixed(12)),
+      eligible: reasons.length === 0,
+      reasons,
+      base_score: Number(baseScore.toFixed(12)),
+      exploration_bonus: Number(explorationBonus.toFixed(12)),
+      observed_pulls: pulls,
+    };
   }).sort((left, right) => Number(right.eligible) - Number(left.eligible) || right.score - left.score || left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model));
 }
 

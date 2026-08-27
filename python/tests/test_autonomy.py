@@ -1685,9 +1685,11 @@ def test_model_selection_preview_is_keyless_provider_free_and_covers_every_domai
             domain="coding",
             capability="debugging",
             credentials={},
+            selection_weights={"quality": 1, "reliability": 0, "cost": 0, "latency": 0, "exploration": 0},
         )
         assert focused["capability"] == "debugging"
         assert len(focused["capability_contract_digest"]) == 64
+        assert focused["selection_contract"]["selection_weights"]["quality"] == 1.0
         assert focused["selection_audit"]["retention"] == "metadata_only_no_task_or_provider_payloads"
         assert "brain_prompt_assemble" not in [name for name, _ in workspace.calls]
         assert "brain_plan" not in [name for name, _ in workspace.calls]
@@ -3194,6 +3196,44 @@ def test_selection_confidence_floor_is_forwarded_for_every_builtin_domain():
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_selection_weights_are_normalized_and_conflicts_fail_closed():
+    runtime, credentials, server, thread = _runtime()
+    brain = AutonomousBrain(_Workspace(), runtime)
+    handle = credentials.register("openai", "selection-policy-secret")
+    try:
+        request = brain.build_adaptive_model_selection(
+            task="choose a model with an explicit policy",
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            selection_weights={"quality": 1, "reliability": 0, "cost": 0, "latency": 0, "exploration": 0},
+        )
+        assert request["weights"] == {
+            "quality": 1.0,
+            "reliability": 0.0,
+            "cost": 0.0,
+            "latency": 0.0,
+            "exploration": 0.0,
+        }
+        override_request = brain.build_adaptive_model_selection(
+            task="choose a model from a persisted policy",
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            selection_overrides={"weights": {"cost": 3}},
+        )
+        assert override_request["weights"]["cost"] == 3.0
+        with pytest.raises(BrainRunError, match="conflicts"):
+            brain.build_adaptive_model_selection(
+                task="reject conflicting policies",
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                selection_weights={"quality": 1},
+                selection_overrides={"weights": {"cost": 3}},
+            )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
 
 
 def test_run_autonomous_tool_loop_learning_records_loop_metadata_only(tmp_path: Path):

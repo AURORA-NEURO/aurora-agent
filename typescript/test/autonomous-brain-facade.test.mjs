@@ -277,6 +277,38 @@ test("brain facade revalidates approved model previews and invokes one exact loc
   assert.equal(runtime.providerStatus("offline").attempts, AUTONOMOUS_DOMAIN_NAMES.length);
 });
 
+test("brain facade binds weighted selection policy and observations into approval integrity", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const weights = { quality: 1, reliability: 0, cost: 0, latency: 0, exploration: 0 };
+  const observations = [{ arm_id: "offline/offline-model", pulls: 2, reward_sum: 1.5, failures: 0 }];
+  const preview = await brain.modelSelectionPreview(
+    { task: tasks.evaluation, domain: "evaluation" },
+    { selectionWeights: weights, selectionObservations: observations },
+  );
+  assert.deepEqual(preview.selection_contract.selection_weights, weights);
+  assert.equal(preview.selection_contract.selection_observations_digest.length, 64);
+  await assert.rejects(
+    () => brain.executeApprovedSelection(
+      { task: tasks.evaluation, domain: "evaluation" },
+      preview,
+      { run: { selectionWeights: { cost: 1 }, selectionObservations: observations } },
+    ),
+    /weights changed|re-review required/,
+  );
+  await assert.rejects(
+    () => brain.executeApprovedSelection(
+      { task: tasks.evaluation, domain: "evaluation" },
+      preview,
+      { run: { selectionWeights: weights, selectionObservations: [] } },
+    ),
+    /observations changed|re-review required/,
+  );
+  assert.equal(runtime.providerStatus("offline").attempts, 0);
+});
+
 test("brain facade closed-loop execution accepts every built-in domain through one provider-neutral entry point", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);
