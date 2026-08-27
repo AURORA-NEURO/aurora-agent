@@ -7232,3 +7232,15 @@ __all__ += [
     "assure_mechanism_portfolio",
     "bioevalx_mechanism_assurance_digest",
 ]
+
+from .hubapi_context_compilation_assurance import (
+    HubapiContextAssuranceReport,
+    assure_context_compilation,
+    hubapi_context_assurance_digest,
+)
+
+__all__ += [
+    "HubapiContextAssuranceReport",
+    "assure_context_compilation",
+    "hubapi_context_assurance_digest",
+]

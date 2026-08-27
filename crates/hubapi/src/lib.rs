@@ -112,6 +112,7 @@
 //! entirely in two sections: `Responsibilities` (16.7% shared) and `Detailed design` (8.3%).
 
 pub mod catalog;
+pub mod context_compilation_assurance;
 pub mod deps;
 pub mod federation;
 pub mod interpretation_assurance;
@@ -124,6 +125,14 @@ pub mod resolve;
 pub mod search;
 
 pub use catalog::{Catalog, CatalogError, Dependency, PackRelease};
+pub use context_compilation_assurance::{
+    assure_context_compilation, context_compilation_assurance_manifest, ContextAssuranceError,
+    ContextAssuranceReport, ContextFact, DecisionQuery,
+    CONTRACT_VERSION as CONTEXT_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_ASSURANCE_FEATURE_ID,
+    INPUT_SCHEMA as CONTEXT_ASSURANCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as CONTEXT_ASSURANCE_OUTPUT_SCHEMA,
+};
 pub use deps::{
     resolve_dependencies, Collision, DependencyError, Lock, Locked, Requirement, Source,
 };

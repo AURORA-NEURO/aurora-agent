@@ -4003,3 +4003,13 @@ export {
   validateBioevalxMechanismAssuranceReport,
 } from "./research-contracts.js";
 export type { BioevalxMechanismAssuranceReport } from "./research-contracts.js";
+
+export {
+  HUBAPI_CONTEXT_ASSURANCE_FEATURE_ID,
+  HUBAPI_CONTEXT_ASSURANCE_CONTRACT_VERSION,
+  HUBAPI_CONTEXT_ASSURANCE_INPUT_SCHEMA,
+  HUBAPI_CONTEXT_ASSURANCE_OUTPUT_SCHEMA,
+  hubapiContextAssuranceReportDigest,
+  validateHubapiContextAssuranceReport,
+} from "./research-contracts.js";
+export type { HubapiContextAssuranceReport } from "./research-contracts.js";
