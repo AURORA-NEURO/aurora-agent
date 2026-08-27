@@ -7387,6 +7387,20 @@ __all__ += [
     "ids_resource_interoperability_manifest",
 ]
 
+from .worldfactory_protocol_simulation_federated_control_plane import (
+    ProtocolSimulationReport8 as WorldfactoryProtocolSimulationReport8,
+    protocol_simulation_manifest as worldfactory_protocol_simulation_manifest,
+    simulate_protocol as simulate_worldfactory_protocol,
+    worldfactoryProtocolSimulationDigest,
+)
+
+__all__ += [
+    "WorldfactoryProtocolSimulationReport8",
+    "worldfactory_protocol_simulation_manifest",
+    "simulate_worldfactory_protocol",
+    "worldfactoryProtocolSimulationDigest",
+]
+
 from .bioir_performance_reliability_control_plane import (
     BioirReliableCapabilityResult,
     performance_reliability_control_plane_manifest,

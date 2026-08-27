@@ -284,6 +284,10 @@ pub use research_contracts::{
     interoperate_ids_resources_json, validate_ids_resource_interoperability_json,
     IDS_RESOURCE_INTEROPERABILITY_TOOL,
 };
+pub use research_contracts::{
+    simulate_worldfactory_protocol_json, validate_worldfactory_protocol_simulation_json,
+    WORLDFACTORY_PROTOCOL_SIMULATION_TOOL,
+};
 pub use resource_discovery_contract::{
     compile_resource_discovery_contract_v2, ResourceDiscoveryContractError,
     ResourceDiscoveryContractRequest, ResourceDiscoveryContractResponse,

@@ -518,6 +518,10 @@ use bioprism_ids::{
     interoperate_resources, PeerResourceSummary4, QualifiedResourceSet6, ResourceEndpoint4,
     ResourceNeed4, IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
 };
+use bioprism_worldfactory::{
+    simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
+    PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
+};
 use serde_json::Value;
 
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
@@ -2877,6 +2881,31 @@ pub fn validate_ids_resource_interoperability_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID {
         return Err("ids resource interoperability feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const WORLDFACTORY_PROTOCOL_SIMULATION_TOOL: &str = "worldfactory_protocol_simulation_federated_control_plane";
+
+pub fn simulate_worldfactory_protocol_json(value: &Value) -> Result<Value, String> {
+    let draft: ProtocolDraft4 = serde_json::from_value(
+        value.get("request").cloned().unwrap_or_else(|| value.clone()),
+    )
+    .map_err(|error| format!("invalid worldfactory protocol simulation request: {error}"))?;
+    let receipt = simulate_protocol(&draft)
+        .map_err(|error| format!("worldfactory protocol simulation failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize worldfactory protocol simulation receipt: {error}"))
+}
+
+pub fn validate_worldfactory_protocol_simulation_json(
+    value: &Value,
+) -> Result<ProtocolSimulationReport8, String> {
+    let receipt: ProtocolSimulationReport8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid worldfactory protocol simulation receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID {
+        return Err("worldfactory protocol simulation feature id mismatch".into());
     }
     Ok(receipt)
 }

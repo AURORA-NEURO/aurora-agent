@@ -1811,6 +1811,9 @@ impl Server {
             "ids_federated_resource_discovery_interoperability" => {
                 self.ids_federated_resource_discovery_interoperability(&arguments)
             }
+            "worldfactory_protocol_simulation_federated_control_plane" => {
+                self.worldfactory_protocol_simulation_federated_control_plane(&arguments)
+            }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -24715,6 +24718,29 @@ impl Server {
         }))
     }
 
+    fn worldfactory_protocol_simulation_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt = crate::research_contracts::simulate_worldfactory_protocol_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_worldfactory::PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
+            "contract_version": bioprism_worldfactory::PROTOCOL_SIMULATION_FEDERATED_CONTROL_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "protocol stages and fault scenarios are simulated deterministically with checkpoint and replay identities",
+                "policy, quorum, protected-closure, approval, federation, locality, aggregate-only, and evidence gates fail closed",
+                "simulation produces no instrument, network, or raw-data effect"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied protocol declarations and does not run laboratory actions",
+                "simulation robustness is evidence for planning, not biological validity or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -40754,6 +40780,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "peers": { "type": "array", "description": "Aggregate-only signed peer capability summaries." }
                 },
                 "required": ["request", "endpoints", "peers"]
+            }
+        }),
+        json!({
+            "name": "worldfactory_protocol_simulation_federated_control_plane",
+            "description": "Simulate a typed preclinical protocol state machine across bounded fault scenarios and federated peer summaries. The control plane preserves recovery, contradiction, uncertainty, quorum, replay, provenance, and policy evidence and never dispatches laboratory actions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ProtocolDraft4 with stages, fault scenarios, peer summaries, checkpoint, budgets, policy, approval, federation, locality, and replay identity." }
+                },
+                "required": ["request"]
             }
         }),
         json!({
