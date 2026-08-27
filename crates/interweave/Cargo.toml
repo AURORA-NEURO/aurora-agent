@@ -11,6 +11,7 @@ bioprism-fabric = { workspace = true }
 bioprism-choreography = { workspace = true }
 bioprism-epistemic = { workspace = true }
 bioprism-ids = { workspace = true }
+bioprism-foundation = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

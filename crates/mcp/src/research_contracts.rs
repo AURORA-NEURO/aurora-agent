@@ -428,6 +428,7 @@ use bioprism_foundation::{
     FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_oraclex::publication_release_contract_model::{compile_publication_release, PublicationReleaseReceipt, PublicationReleaseRequest, feature_id as PUBLICATION_RELEASE_FEATURE_ID};
+use bioprism_interweave::interweave_contract_frontier_federated_control_plane::{feature_id as INTERWEAVE_FRONTIER_FEATURE_ID, operate_interweave_frontier, InterweaveControlPlaneRequest, InterweaveControlReceipt};
 use bioprism_influence::{
     run_federated_continual_interpretation, EvidenceBackedResult4,
     FederatedInterpretationError, InteractiveInterpretation,
@@ -567,6 +568,7 @@ pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &
 pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str = "adapter_federated_continual_retrieval_synthesis_federated_control_plane";
 pub const FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_TOOL: &str = "foundation_mechanism_exploration_assurance";
 pub const ORACLEX_PUBLICATION_RELEASE_TOOL: &str = "oraclex_publication_release";
+pub const INTERWEAVE_FRONTIER_CONTROL_TOOL: &str = "interweave_frontier_control";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_multimodal_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str = "adapter_throughput_retrieval_synthesis_inference_engine";
 pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str = "adapter_throughput_retrieval_synthesis_contract_model";
@@ -1743,6 +1745,25 @@ pub fn run_oraclex_publication_release_json(value: &Value) -> Result<Value, Stri
     let request: PublicationReleaseRequest = serde_json::from_value(value.clone()).map_err(|error| format!("invalid oraclex publication release request: {error}"))?;
     let receipt = compile_publication_release(&request).map_err(|error| error.to_string())?;
     serde_json::to_value(receipt).map_err(|error| format!("cannot serialize oraclex publication release receipt: {error}"))
+}
+
+pub fn run_interweave_frontier_control_json(value: &Value) -> Result<Value, String> {
+    let request: InterweaveControlPlaneRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid interweave frontier control request: {error}"))?;
+    let receipt = operate_interweave_frontier(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize interweave frontier control receipt: {error}")
+    })
+}
+
+pub fn validate_interweave_frontier_control_json(value: &Value) -> Result<InterweaveControlReceipt, String> {
+    let receipt: InterweaveControlReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid interweave frontier control receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != INTERWEAVE_FRONTIER_FEATURE_ID {
+        return Err("interweave frontier control feature id mismatch".into());
+    }
+    Ok(receipt)
 }
 pub fn validate_oraclex_publication_release_json(value: &Value) -> Result<PublicationReleaseReceipt, String> {
     let receipt: PublicationReleaseReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid oraclex publication release receipt: {error}"))?;

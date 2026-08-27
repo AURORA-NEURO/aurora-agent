@@ -983,6 +983,15 @@ export {
 } from "./research-contracts.js";
 export type { OraclexPublicationReleaseReceipt } from "./research-contracts.js";
 export {
+  INTERWEAVE_FRONTIER_CONTROL_FEATURE_ID,
+  INTERWEAVE_FRONTIER_CONTROL_CONTRACT_VERSION,
+  INTERWEAVE_FRONTIER_CONTROL_INPUT_SCHEMA,
+  INTERWEAVE_FRONTIER_CONTROL_OUTPUT_SCHEMA,
+  interweaveFrontierControlReceiptDigest,
+  validateInterweaveFrontierControlReceipt,
+} from "./research-contracts.js";
+export type { InterweaveFrontierControlReceipt } from "./research-contracts.js";
+export {
   THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
   THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
   brainThroughputKnowledgeRepresentationContractModelReceiptDigest,

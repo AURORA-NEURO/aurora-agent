@@ -158,6 +158,7 @@ pub mod component;
 pub mod conformance;
 pub mod credit;
 pub mod human;
+pub mod interweave_contract_frontier_federated_control_plane;
 pub mod microbench;
 pub mod packs;
 pub mod threat;

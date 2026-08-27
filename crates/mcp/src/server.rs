@@ -266,6 +266,7 @@ use bioprism_interweave::workflow_execution::{
     WorkflowExecutionReceipt as InterweaveWorkflowExecutionReceipt,
     WORKFLOW_EXECUTION_SCHEMA as INTERWEAVE_WORKFLOW_EXECUTION_SCHEMA,
 };
+use bioprism_interweave::interweave_contract_frontier_federated_control_plane::feature_id as INTERWEAVE_FRONTIER_FEATURE_ID;
 use bioprism_lab::{
     evolution::{ChangeProposal, ContaminationRecord, EvolutionCard},
     expand as expand_acquisitions,
@@ -1952,6 +1953,7 @@ impl Server {
                 self.foundation_mechanism_exploration_assurance(&arguments)
             },
             "oraclex_publication_release" => self.oraclex_publication_release(&arguments),
+            "interweave_frontier_control" => self.interweave_frontier_control(&arguments),
             "influence_federated_continual_interpretation" => {
                 self.influence_federated_continual_interpretation(&arguments)
             },
@@ -25465,6 +25467,28 @@ impl Server {
         Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_oraclex::publication_release_contract_model::feature_id(), "receipt": receipt, "guarantees": ["A2 release admission requires typed artifact, provenance, workflow replay, evaluation baseline, standards, reproducibility, policy, protected closure, signed authority, federation permission, and raw-locality gates", "unknown and speculative evidence become conditional review, contradicted evidence and failed gates block release, and negative findings remain in the signed receipt", "release payloads are content-addressed and digest-only across the federation boundary; contract migration records semantic loss and preserves replay identity"], "limitations": ["the contract model does not mint signatures, upload payloads, or perform publication hosting", "the capability is not a clinical decision system and does not process human-subject or clinical-source data"]}))
     }
 
+    fn interweave_frontier_control(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be an InterweaveControlPlaneRequest")?;
+        let receipt = crate::research_contracts::run_interweave_frontier_control_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": INTERWEAVE_FRONTIER_FEATURE_ID(),
+            "receipt": receipt,
+            "guarantees": [
+                "A2 prospective high-throughput admission is deterministic, digest-bound, and gated by protocol pinning, peer quorum, policy, protected closure, signed approval, capacity, locality, and replay identity",
+                "unknown/speculative evidence remains conditional, contradicted evidence and failed gates block, incompatible peers are explicit, and negative results remain retained",
+                "control-plane artifacts expose only aggregate federation metadata while raw preclinical data remains institution-local"
+            ],
+            "limitations": [
+                "the contract admits and records work but does not execute jobs, mint signatures, or move raw data",
+                "the capability is not a clinical decision system and excludes human-subject and clinical-source data"
+            ]
+        }))
+    }
+
     fn influence_federated_continual_interpretation(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -37824,6 +37848,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "interweave_frontier_control",
+            "domains": ["prospective high-throughput Interweave control plane", "federated peer quorum", "checkpoint and queue continuity", "capacity and health admission", "aggregate-only locality", "bounded A2 operations"],
+            "crates": ["bioprism-interweave", "bioprism-foundation", "bioprism-mcp"],
+            "mcp_tools": ["interweave_frontier_control"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
@@ -40633,6 +40665,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "oraclex_publication_release",
             "description": "Compile an A2 prospective high-throughput publication and research-object release receipt with typed digest, provenance, evaluation baseline, standards, reproducibility, policy, authority, locality, negative-result, and contract-migration gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized PublicationReleaseRequest with release candidates, content/provenance/workflow/evidence/evaluation digests, required standards, capacity, policy and protected-closure controls, signed approval, reproducibility and negative-result disclosure, federation permission, migration version, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "interweave_frontier_control",
+            "description": "Operate an A2 prospective high-throughput Interweave frontier control plane with pinned protocols, federated peer quorum, queue/checkpoint continuity, capacity and health admission, policy/protected-closure/signed-approval gates, deterministic replay, and aggregate-only locality.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized InterweaveControlPlaneRequest with service/federation identity, purpose and batch, pinned protocol/capabilities, jobs and peers, capacity/checkpoint controls, policy/approval/closure/locality permissions, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "influence_federated_continual_interpretation",
