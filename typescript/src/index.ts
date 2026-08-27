@@ -4023,3 +4023,13 @@ export {
   validateCliInterpretationGatewayEnvelope,
 } from "./research-contracts.js";
 export type { CliInterpretationGatewayEnvelope } from "./research-contracts.js";
+
+export {
+  SAFETY_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+  SAFETY_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+  SAFETY_EVIDENCE_SURVEILLANCE_INPUT_SCHEMA,
+  SAFETY_EVIDENCE_SURVEILLANCE_OUTPUT_SCHEMA,
+  safetyEvidenceSurveillanceSetDigest,
+  validateSafetyEvidenceSurveillanceSet,
+} from "./research-contracts.js";
+export type { SafetyQualifiedEvidenceSet } from "./research-contracts.js";

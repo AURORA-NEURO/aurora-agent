@@ -137,6 +137,7 @@
 
 pub mod attest;
 pub mod boundary;
+pub mod evidence_surveillance_copilot;
 pub mod disclosure;
 pub mod error;
 pub mod incident;
@@ -149,6 +150,14 @@ pub mod supply;
 pub mod threat;
 
 pub use error::{ErrorFamily, SafetyError};
+pub use evidence_surveillance_copilot::{
+    assure_evidence_surveillance, evidence_surveillance_copilot_manifest,
+    EvidenceObservation, EvidenceSurveillanceError, EvidenceWatchRequest, QualifiedEvidenceSet,
+    CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SURVEILLANCE_COPILOT_FEATURE_ID,
+    INPUT_SCHEMA as EVIDENCE_SURVEILLANCE_COPILOT_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EVIDENCE_SURVEILLANCE_COPILOT_OUTPUT_SCHEMA,
+};
 pub use mechanism_workflow::{
     orchestrate_mechanism_workflow, safety_workflow_manifest, MechanismCandidate,
     MechanismWorkflowError, MechanismWorkflowReceipt, MechanismWorkflowRequest, SafetyDisposition,

@@ -7256,3 +7256,15 @@ __all__ += [
     "assure_interpretation_exchange",
     "cli_interpretation_gateway_digest",
 ]
+
+from .safety_evidence_surveillance_copilot import (
+    SafetyQualifiedEvidenceSet,
+    assure_evidence_surveillance,
+    safety_evidence_surveillance_digest,
+)
+
+__all__ += [
+    "SafetyQualifiedEvidenceSet",
+    "assure_evidence_surveillance",
+    "safety_evidence_surveillance_digest",
+]
