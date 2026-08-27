@@ -7180,3 +7180,13 @@ __all__ += [
     "FederatedProtocolSimulationReport",
     "assure_federated_protocol",
 ]
+
+from .federated_execution_interoperability import (
+    FederatedExecutionInteroperabilityEnvelope,
+    assure_federated_execution,
+)
+
+__all__ += [
+    "FederatedExecutionInteroperabilityEnvelope",
+    "assure_federated_execution",
+]

@@ -5198,3 +5198,22 @@ export function validateFiberFederatedProtocolSimulationReceipt(receipt:FiberFed
   if(receipt.effect_receipts.some(effect=>!effect.startsWith("verify:fiber-protocol-simulation:")&&effect!=="block:unsafe-release")) throw new Error("federated protocol simulation effect is outside verification gate");
 }
 export function fiberFederatedProtocolSimulationReceiptDigest(receipt:FiberFederatedProtocolSimulationReceipt):string { validateFiberFederatedProtocolSimulationReceipt(receipt); return digestJsonSync(receipt); }
+
+export const FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_FEATURE_ID = "AFA-fiber-P12-F24" as const;
+export const FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_CONTRACT_VERSION = "fiber-federated-continual-computational-execution-interoperability-gateway/1.0" as const;
+export const FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_INPUT_SCHEMA = "ExecutionRun8@1" as const;
+export const FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_OUTPUT_SCHEMA = "FederationEnvelope8@1" as const;
+export interface FiberFederatedExecutionInteroperabilityEnvelope {
+  schema_version:string; contract_version:string; feature_id:string; request_id:string; federation_id:string; source_institution:string; target_institution:string; purpose:string; workflow_schema:string; semantic_profile:string; protocol_version:string; disposition:"qualified"|"unresolved"|"blocked";
+  required_capability_order:string[]; offered_capability_order:string[]; missing_capability_order:string[]; violation_order:string[]; omissions:string[]; uncertainty:string[]; negative_evidence:string[]; artifact_digest:string; replay_identity:string; envelope_digest:string; effect_receipts:string[]; artifact:Record<string,unknown>; raw_data_local:true; aggregate_only:true; boundary:string;
+}
+export function validateFiberFederatedExecutionInteroperabilityEnvelope(receipt:FiberFederatedExecutionInteroperabilityEnvelope):void {
+  const ordered=(values:string[])=>JSON.stringify([...new Set(values)].sort())===JSON.stringify(values);
+  if(receipt.schema_version!==RESEARCH_CONTRACT_SCHEMA_VERSION||receipt.contract_version!==FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_CONTRACT_VERSION||receipt.feature_id!==FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_FEATURE_ID||receipt.workflow_schema!==FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_INPUT_SCHEMA||receipt.boundary!==PRECLINICAL_BOUNDARY||receipt.raw_data_local!==true||receipt.aggregate_only!==true||!receipt.request_id.trim()||!receipt.federation_id.trim()||!receipt.source_institution.trim()||!receipt.target_institution.trim()||receipt.source_institution===receipt.target_institution||!receipt.purpose.trim()||!receipt.semantic_profile.trim()||!receipt.protocol_version.trim()||!receipt.required_capability_order.length||!receipt.effect_receipts.length) throw new Error("federated execution envelope identity, schema, locality, capabilities, or effects are incomplete");
+  for(const values of[receipt.required_capability_order,receipt.offered_capability_order,receipt.missing_capability_order,receipt.violation_order,receipt.omissions,receipt.uncertainty,receipt.negative_evidence,receipt.effect_receipts]) if(!ordered(values)) throw new Error("federated execution envelope ordering is not canonical");
+  const required=new Set(receipt.required_capability_order); const offered=new Set(receipt.offered_capability_order); const missing=new Set(receipt.missing_capability_order); if(required.size!==receipt.required_capability_order.length||offered.size!==receipt.offered_capability_order.length||JSON.stringify([...missing].sort())!==JSON.stringify([...required].filter(item=>!offered.has(item)).sort())) throw new Error("federated execution capability closure is invalid");
+  for(const digest of[receipt.artifact_digest,receipt.replay_identity,receipt.envelope_digest,receipt.artifact.content_hash]) if(typeof digest!=="string"||!/^[0-9a-f]{64}$/.test(digest)) throw new Error("federated execution digest is invalid");
+  if(receipt.artifact.content_type!=="application/vnd.aurora.execution-federation-envelope+json") throw new Error("federated execution artifact type is invalid");
+  if(receipt.effect_receipts.some(effect=>!effect.startsWith("exchange:execution-envelope:")&&effect!=="block:unsafe-release")) throw new Error("federated execution effect is outside digest-only gate");
+}
+export function fiberFederatedExecutionInteroperabilityEnvelopeDigest(receipt:FiberFederatedExecutionInteroperabilityEnvelope):string { validateFiberFederatedExecutionInteroperabilityEnvelope(receipt); return digestJsonSync(receipt); }

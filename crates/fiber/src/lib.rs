@@ -56,6 +56,7 @@ pub mod research_context;
 pub mod resource_workbench;
 pub mod retrieval_assurance;
 pub mod federated_protocol_simulation_assurance;
+pub mod federated_execution_interoperability;
 pub mod slice;
 pub mod temporal;
 
@@ -112,6 +113,16 @@ pub use federated_protocol_simulation_assurance::{
     FEATURE_ID as FEDERATED_PROTOCOL_SIMULATION_FEATURE_ID,
     INPUT_SCHEMA as FEDERATED_PROTOCOL_SIMULATION_INPUT_SCHEMA,
     OUTPUT_SCHEMA as FEDERATED_PROTOCOL_SIMULATION_OUTPUT_SCHEMA,
+};
+pub use federated_execution_interoperability::{
+    assure as assure_federated_execution_interoperability,
+    capability_manifest as federated_execution_interoperability_manifest,
+    ExecutionArtifactCandidate, ExecutionInteroperabilityEnvelope,
+    ExecutionInteroperabilityError, ExecutionInteroperabilityRequest,
+    CONTRACT_VERSION as FEDERATED_EXECUTION_INTEROPERABILITY_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_EXECUTION_INTEROPERABILITY_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_EXECUTION_INTEROPERABILITY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_EXECUTION_INTEROPERABILITY_OUTPUT_SCHEMA,
 };
 pub use slice::{backward_slice, Slice};
 pub use temporal::{temporal_cut, TemporalCut};

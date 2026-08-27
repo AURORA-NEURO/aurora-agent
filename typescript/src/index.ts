@@ -3957,3 +3957,12 @@ export {
   validateFiberFederatedProtocolSimulationReceipt,
 } from "./research-contracts.js";
 export type { FiberFederatedProtocolSimulationReceipt } from "./research-contracts.js";
+export {
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_FEATURE_ID,
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_CONTRACT_VERSION,
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_INPUT_SCHEMA,
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_OUTPUT_SCHEMA,
+  fiberFederatedExecutionInteroperabilityEnvelopeDigest,
+  validateFiberFederatedExecutionInteroperabilityEnvelope,
+} from "./research-contracts.js";
+export type { FiberFederatedExecutionInteroperabilityEnvelope } from "./research-contracts.js";
