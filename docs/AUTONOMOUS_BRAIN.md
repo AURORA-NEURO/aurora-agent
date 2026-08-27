@@ -12016,6 +12016,22 @@ must be handed to the existing evidence adapter/execution boundary. This makes t
 closed at the decision layer—integrity finding -> acquisition priority -> reviewed queue—without
 collapsing source truth or authorization into the planner.
 
+The final request handoff is now explicit as well. `bind_claim_integrity_acquisition()` /
+`bindClaimIntegrityAcquisition()` accepts one caller-owned request for every selected candidate,
+rejects duplicate, omitted, out-of-plan, and source-mismatched requests, and returns them in the
+planner's deterministic rank order. It adds the assessment, bridge, acquisition-plan, candidate,
+and candidate-digest identities to transient request metadata, so the runtime's own request
+digest records exactly which integrity decision authorized the queue entry. The serialized binding
+retains only those identities, request digests, domains, and counts; request arguments, locators,
+and source values remain transient. `execute_claim_integrity_acquisition()` /
+`executeClaimIntegrityAcquisition()` then compiles the evidence plan for only the selected domains
+and delegates to the existing readiness recheck and explicit source-approval controller.
+`execute_claim_integrity_acquisition_resumable()` /
+`executeClaimIntegrityAcquisitionResumable()` uses the same binding before entering the existing
+CAS-fenced checkpoint path. This is a composition boundary, not an authorization shortcut:
+`approve_source_dispatch`, provider contracts, evaluator acceptance, and contradiction resolution
+remain independent caller-owned decisions.
+
 ## Cross-domain response integrity and alignment gating
 
 Cross-domain fan-out now has a provider-free gate between specialist completion and synthesis.

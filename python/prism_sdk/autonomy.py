@@ -50,7 +50,9 @@ from .autonomous_claim_integrity import (
     AutonomousClaimIntegrityClaim,
     AutonomousClaimIntegrityEvidence,
     AutonomousClaimIntegrityPolicy,
+    AutonomousClaimIntegrityAcquisitionBinding,
     assess_autonomous_claim_integrity,
+    bind_autonomous_claim_integrity_acquisition_requests,
     plan_autonomous_claim_integrity_acquisition,
     reassess_autonomous_claim_integrity,
 )
@@ -16597,6 +16599,90 @@ class AutonomousAgent:
             candidates=candidates,
             policy=policy,
             requested_domains=requested_domains,
+        )
+
+    def bind_claim_integrity_acquisition(
+        self,
+        bridge: Any,
+        requests: Sequence[Mapping[str, Any]],
+    ) -> AutonomousClaimIntegrityAcquisitionBinding:
+        """Bind one caller-owned request to each candidate selected by an integrity bridge.
+
+        The returned binding is metadata-only when serialized.  Its transient request batch is
+        ordered by the information planner and carries assessment, bridge, plan, candidate, and
+        candidate-digest metadata into the existing reviewed evidence runtime.
+        """
+
+        return bind_autonomous_claim_integrity_acquisition_requests(bridge, requests)
+
+    def execute_claim_integrity_acquisition(
+        self,
+        bridge: Any,
+        registry: Any,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        prepare_options: Mapping[str, Any] | None = None,
+        execute_options: Mapping[str, Any] | None = None,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> Any:
+        """Execute only the reviewed evidence requests selected for unresolved claims.
+
+        This closes the integrity-to-source queue without collapsing authorization boundaries:
+        ``approve_source_dispatch`` remains required by the evidence controller, and provider
+        contracts/evaluators remain caller-owned.  A fresh evidence plan is compiled for exactly
+        the selected candidate domains and the controller rechecks readiness before dispatch.
+        """
+
+        from .autonomous_evidence_execution import AutonomousEvidenceExecutionController
+
+        binding = self.bind_claim_integrity_acquisition(bridge, requests)
+        plan = bridge.acquisition_plan
+        if plan is None:
+            raise ArgumentError("integrity acquisition bridge has no executable plan")
+        evidence_plan = self.evidence_plan(
+            plan.selected_domains,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
+        )
+        preparation = dict(prepare_options or {})
+        health_store = preparation.pop("health_store", None)
+        controller = AutonomousEvidenceExecutionController(registry, health_store)
+        execution_plan = controller.prepare(evidence_plan, **preparation)
+        execution = dict(execute_options or {})
+        if "provider_contracts" not in execution and "provider_contracts" in preparation:
+            execution["provider_contracts"] = preparation["provider_contracts"]
+        return controller.execute(execution_plan, evidence_plan, binding.requests, **execution)
+
+    def execute_claim_integrity_acquisition_resumable(
+        self,
+        bridge: Any,
+        registry: Any,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        checkpoint_store: Any,
+        prepare_options: Mapping[str, Any] | None = None,
+        execute_options: Mapping[str, Any] | None = None,
+        available_evidence: Sequence[str] = (),
+        completed_stages: Mapping[str, Sequence[str]] | None = None,
+    ) -> Any:
+        """Resume the integrity-selected evidence queue through the existing checkpoint fence."""
+
+        binding = self.bind_claim_integrity_acquisition(bridge, requests)
+        plan = bridge.acquisition_plan
+        if plan is None:
+            raise ArgumentError("integrity acquisition bridge has no executable plan")
+        return self.execute_reviewed_evidence_resumable(
+            registry,
+            plan.selected_domains,
+            binding.requests,
+            job_id=job_id,
+            checkpoint_store=checkpoint_store,
+            prepare_options=prepare_options,
+            execute_options=execute_options,
+            available_evidence=available_evidence,
+            completed_stages=completed_stages,
         )
 
     def assess_cross_domain_responses(

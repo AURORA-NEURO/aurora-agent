@@ -11,12 +11,14 @@ from prism_sdk import (
     AutonomousClaimIntegrityPolicy,
     LLMRuntime,
     assess_autonomous_claim_integrity,
+    bind_autonomous_claim_integrity_acquisition_requests,
     content_digest,
     plan_autonomous_claim_integrity_acquisition,
     reassess_autonomous_claim_integrity,
     validate_autonomous_claim_integrity,
     validate_autonomous_claim_integrity_snapshot,
     validate_autonomous_claim_integrity_acquisition_bridge,
+    validate_autonomous_claim_integrity_acquisition_binding,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -269,3 +271,67 @@ def test_integrity_bridge_is_explicitly_empty_or_blocked_without_dispatch() -> N
     no_queue = plan_autonomous_claim_integrity_acquisition(blocked, candidates=())
     assert no_queue.status == "blocked"
     assert no_queue.unmatched_action_count == len(blocked.actions)
+
+
+def test_integrity_binding_is_ordered_digest_bound_and_source_exact() -> None:
+    assessment = assess_autonomous_claim_integrity(
+        context_digest=digest("binding-task"),
+        claims=(claim("binding-claim", "science"),),
+        evidence=(),
+        reference_time=REFERENCE,
+    )
+    candidate = AutonomousInformationAcquisitionCandidate(
+        candidate_id="binding-candidate",
+        domain="science",
+        capability="evidence_acquisition",
+        source_id="science-source",
+        information_gain=0.8,
+        uncertainty_reduction=0.8,
+        reliability=0.9,
+        freshness=0.9,
+        coverage=0.9,
+        cost=0.1,
+        latency_ms=100,
+        risk=0.01,
+        conflict_risk=0.01,
+        metadata={"claim_ids": ["binding-claim"]},
+    )
+    bridge = plan_autonomous_claim_integrity_acquisition(
+        assessment,
+        candidates=(candidate,),
+        policy={"max_items": 1, "exploration": 0.0},
+    )
+    binding = bind_autonomous_claim_integrity_acquisition_requests(
+        bridge,
+        ({
+            "candidate_id": "binding-candidate",
+            "requirement_id": "science-evidence",
+            "source_id": "science-source",
+            "metadata": {"caller_locator": "caller-owned"},
+        },),
+    )
+    assert binding.candidate_ids == ("binding-candidate",)
+    assert binding.domains == ("science",)
+    assert binding.requests[0]["metadata"]["claim_integrity_bridge_digest"] == bridge.bridge_digest
+    assert binding.to_dict()["request_count"] == 1
+    assert "caller-owned" not in str(binding.to_dict())
+    assert validate_autonomous_claim_integrity_acquisition_binding(binding) is binding
+    with pytest.raises(ArgumentError):
+        bind_autonomous_claim_integrity_acquisition_requests(
+            bridge,
+            ({
+                "candidate_id": "binding-candidate",
+                "requirement_id": "science-evidence",
+                "source_id": "wrong-source",
+            },),
+        )
+    with pytest.raises(ArgumentError):
+        bind_autonomous_claim_integrity_acquisition_requests(
+            bridge,
+            ({
+                "candidate_id": "binding-candidate",
+                "requirement_id": "science-evidence",
+                "source_id": "science-source",
+                "metadata": {"claim_integrity_bridge_digest": "tampered"},
+            },),
+        )

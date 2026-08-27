@@ -164,6 +164,7 @@ import {
 import type { AutonomousInformationAcquisitionCandidateInput } from "./autonomous-information-acquisition.js";
 import {
   assessAutonomousClaimIntegrity,
+  bindAutonomousClaimIntegrityAcquisitionRequests,
   planAutonomousClaimIntegrityAcquisition,
   reassessAutonomousClaimIntegrity,
   type AssessAutonomousClaimIntegrityOptions,
@@ -175,7 +176,7 @@ import {
   type AutonomousClaimIntegrityPolicy,
   type AutonomousClaimIntegrityPolicyInput,
 } from "./autonomous-claim-integrity.js";
-import type { PlanAutonomousClaimIntegrityAcquisitionOptions } from "./autonomous-claim-integrity.js";
+import type { AutonomousClaimIntegrityAcquisitionBinding, AutonomousClaimIntegrityAcquisitionRequestInput, PlanAutonomousClaimIntegrityAcquisitionOptions } from "./autonomous-claim-integrity.js";
 import {
   assessAutonomousCrossDomainResponseSet,
   type AutonomousCrossDomainResponseAssessment,
@@ -6598,6 +6599,56 @@ export class AutonomousAgent {
     options: PlanAutonomousClaimIntegrityAcquisitionOptions,
   ) {
     return planAutonomousClaimIntegrityAcquisition(assessment, options);
+  }
+
+  /** Bind caller-owned requests to the exact candidates selected by a claim-integrity bridge. */
+  bindClaimIntegrityAcquisition(
+    bridge: Parameters<typeof bindAutonomousClaimIntegrityAcquisitionRequests>[0],
+    requests: readonly (AutonomousClaimIntegrityAcquisitionRequestInput | Record<string, unknown>)[],
+  ): AutonomousClaimIntegrityAcquisitionBinding {
+    return bindAutonomousClaimIntegrityAcquisitionRequests(bridge, requests);
+  }
+
+  /** Execute only the integrity-selected evidence queue through the reviewed source boundary. */
+  async executeClaimIntegrityAcquisition(
+    bridge: Parameters<typeof bindAutonomousClaimIntegrityAcquisitionRequests>[0],
+    registry: AutonomousEvidenceAdapterRegistry,
+    requests: readonly (AutonomousClaimIntegrityAcquisitionRequestInput | Record<string, unknown>)[],
+    options: {
+      prepare?: AutonomousReviewedEvidencePreparationOptions;
+      execute?: AutonomousEvidenceExecutionOptions;
+      availableEvidence?: readonly string[];
+      completedStages?: Readonly<Record<string, readonly string[]>>;
+    } = {},
+  ): Promise<AutonomousEvidenceExecutionResult> {
+    const binding = this.bindClaimIntegrityAcquisition(bridge, requests);
+    const acquisitionPlan = bridge.acquisitionPlan;
+    if (acquisitionPlan === null) throw new ArgumentError("integrity acquisition bridge has no executable plan");
+    const plan = await this.evidencePlan(acquisitionPlan.selectedDomains, { availableEvidence: options.availableEvidence, completedStages: options.completedStages });
+    const prepareOptions = options.prepare ?? {};
+    const { healthStore, ...controllerPrepareOptions } = prepareOptions;
+    const controller = await this.createEvidenceExecutionController(registry, healthStore);
+    const executionPlan = await controller.prepare(plan, controllerPrepareOptions);
+    const executeOptions: AutonomousEvidenceExecutionOptions = {
+      ...(options.execute ?? {}),
+      ...(controllerPrepareOptions.providerContracts !== undefined && options.execute?.providerContracts === undefined
+        ? { providerContracts: controllerPrepareOptions.providerContracts }
+        : {}),
+    };
+    return controller.execute(executionPlan, plan, binding.requests, executeOptions);
+  }
+
+  /** Resume the integrity-selected evidence queue through the existing CAS-fenced checkpoint. */
+  async executeClaimIntegrityAcquisitionResumable(
+    bridge: Parameters<typeof bindAutonomousClaimIntegrityAcquisitionRequests>[0],
+    registry: AutonomousEvidenceAdapterRegistry,
+    requests: readonly (AutonomousClaimIntegrityAcquisitionRequestInput | Record<string, unknown>)[],
+    options: AutonomousReviewedEvidenceResumableExecutionOptions,
+  ): Promise<AutonomousEvidenceExecutionResumableRun> {
+    const binding = this.bindClaimIntegrityAcquisition(bridge, requests);
+    const acquisitionPlan = bridge.acquisitionPlan;
+    if (acquisitionPlan === null) throw new ArgumentError("integrity acquisition bridge has no executable plan");
+    return this.executeReviewedEvidenceResumable(registry, acquisitionPlan.selectedDomains, binding.requests, options);
   }
 
   /** Gate structured specialist outputs before cross-domain synthesis. */

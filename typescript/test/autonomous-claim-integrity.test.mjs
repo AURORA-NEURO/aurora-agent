@@ -9,12 +9,14 @@ import {
   AutonomousInformationAcquisitionCandidate,
   LLMRuntime,
   assessAutonomousClaimIntegrity,
+  bindAutonomousClaimIntegrityAcquisitionRequests,
   digestJsonSync,
   planAutonomousClaimIntegrityAcquisition,
   reassessAutonomousClaimIntegrity,
   validateAutonomousClaimIntegrity,
   validateAutonomousClaimIntegritySnapshot,
   validateAutonomousClaimIntegrityAcquisitionBridge,
+  validateAutonomousClaimIntegrityAcquisitionBinding,
 } from "../dist/index.js";
 
 const REFERENCE = "2026-08-26T12:00:00Z";
@@ -127,4 +129,19 @@ test("integrity bridge is explicitly empty or blocked without dispatch", () => {
   const noQueue = planAutonomousClaimIntegrityAcquisition(blocked, { candidates: [] });
   assert.equal(noQueue.status, "blocked");
   assert.equal(noQueue.unmatchedActionCount, blocked.actions.length);
+});
+
+test("integrity binding is ordered, digest-bound, and source-exact", () => {
+  const assessment = assessAutonomousClaimIntegrity({ contextDigest: digest("binding-task"), claims: [claim("binding-claim", "science")], evidence: [], referenceTime: REFERENCE });
+  const candidate = new AutonomousInformationAcquisitionCandidate({ candidateId: "binding-candidate", domain: "science", capability: "evidence_acquisition", sourceId: "science-source", informationGain: 0.8, uncertaintyReduction: 0.8, reliability: 0.9, freshness: 0.9, coverage: 0.9, cost: 0.1, latencyMs: 100, risk: 0.01, conflictRisk: 0.01, metadata: { claim_ids: ["binding-claim"] } });
+  const bridge = planAutonomousClaimIntegrityAcquisition(assessment, { candidates: [candidate], policy: { maxItems: 1, exploration: 0 } });
+  const binding = bindAutonomousClaimIntegrityAcquisitionRequests(bridge, [{ candidate_id: "binding-candidate", requirement_id: "science-evidence", source_id: "science-source", metadata: { caller_locator: "caller-owned" } }]);
+  assert.deepEqual(binding.candidateIds, ["binding-candidate"]);
+  assert.deepEqual(binding.domains, ["science"]);
+  assert.equal(binding.requests[0].metadata.claim_integrity_bridge_digest, bridge.bridgeDigest);
+  assert.equal(binding.toJSON().request_count, 1);
+  assert.equal(JSON.stringify(binding.toJSON()).includes("caller-owned"), false);
+  assert.equal(validateAutonomousClaimIntegrityAcquisitionBinding(binding), binding);
+  assert.throws(() => bindAutonomousClaimIntegrityAcquisitionRequests(bridge, [{ candidate_id: "binding-candidate", requirement_id: "science-evidence", source_id: "wrong-source" }]));
+  assert.throws(() => bindAutonomousClaimIntegrityAcquisitionRequests(bridge, [{ candidate_id: "binding-candidate", requirement_id: "science-evidence", source_id: "science-source", metadata: { claim_integrity_bridge_digest: "tampered" } }]));
 });

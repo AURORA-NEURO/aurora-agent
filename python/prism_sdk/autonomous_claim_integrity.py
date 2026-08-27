@@ -37,6 +37,7 @@ AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_SCHEMA = "bioprism-python-autonomous-claim-i
 AUTONOMOUS_CLAIM_INTEGRITY_ASSESSMENT_SCHEMA = "bioprism-python-autonomous-claim-integrity-assessment/0.1"
 AUTONOMOUS_CLAIM_INTEGRITY_ACTION_SCHEMA = "bioprism-python-autonomous-claim-integrity-action/0.1"
 AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA = "bioprism-python-autonomous-claim-integrity-acquisition-bridge/0.1"
+AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BINDING_SCHEMA = "bioprism-python-autonomous-claim-integrity-acquisition-binding/0.1"
 
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_CLAIMS = 128
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_EVIDENCE = 512
@@ -46,6 +47,7 @@ AUTONOMOUS_CLAIM_INTEGRITY_MAX_MODALITIES = 16
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_TEXT_BYTES = 256
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_METADATA_BYTES = 16_384
 AUTONOMOUS_CLAIM_INTEGRITY_MAX_AGE_SECONDS = 31_536_000
+AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS = 64
 
 AUTONOMOUS_CLAIM_INTEGRITY_STATUSES = (
     "supported",
@@ -720,6 +722,79 @@ class AutonomousClaimIntegrityAcquisitionBridge:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousClaimIntegrityAcquisitionBinding:
+    """An exact, ordered request batch bound to one integrity acquisition bridge.
+
+    The request payloads are intentionally transient.  The binding's durable projection keeps
+    only request digests and the selected candidate identities; the evidence runtime remains the
+    sole owner of source approval, request validation, adapter dispatch, evaluation, and journal
+    settlement.
+    """
+
+    assessment_digest: str
+    bridge_digest: str
+    acquisition_plan_digest: str
+    candidate_ids: tuple[str, ...]
+    domains: tuple[str, ...]
+    request_digests: tuple[str, ...]
+    status: str
+    _requests: tuple[Mapping[str, Any], ...] = field(default=(), repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        _digest("acquisition binding assessment_digest", self.assessment_digest)
+        _digest("acquisition binding bridge_digest", self.bridge_digest)
+        _digest("acquisition binding acquisition_plan_digest", self.acquisition_plan_digest)
+        _identifiers("acquisition binding candidate_ids", self.candidate_ids, AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS)
+        if not isinstance(self.domains, Sequence) or isinstance(self.domains, (str, bytes, bytearray)) or not self.domains:
+            raise ArgumentError("acquisition binding domains must be a non-empty sequence")
+        for index, domain in enumerate(self.domains):
+            normalized_domain = _identifier(f"acquisition binding domain {index}", domain, 64)
+            if normalized_domain not in AUTONOMOUS_DOMAIN_NAMES:
+                raise ArgumentError(f"acquisition binding domain {index} is unsupported")
+        _identifiers("acquisition binding request_digests", self.request_digests, AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS)
+        if len(self.candidate_ids) != len(self.domains) or len(self.candidate_ids) != len(self.request_digests):
+            raise ArgumentError("acquisition binding candidate, domain, and request counts must align")
+        if not self.candidate_ids:
+            raise ArgumentError("acquisition binding must contain at least one selected candidate")
+        if self.status != "ready":
+            raise ArgumentError("acquisition binding status is unsupported")
+        if not isinstance(self._requests, Sequence) or len(self._requests) != len(self.candidate_ids):
+            raise ArgumentError("acquisition binding transient request count does not align")
+
+    @property
+    def requests(self) -> tuple[Mapping[str, Any], ...]:
+        """Return a defensive copy of transient requests for the reviewed runtime."""
+
+        return tuple(dict(request) for request in self._requests)
+
+    def _payload(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BINDING_SCHEMA,
+            "assessment_digest": self.assessment_digest,
+            "bridge_digest": self.bridge_digest,
+            "acquisition_plan_digest": self.acquisition_plan_digest,
+            "candidate_ids": list(self.candidate_ids),
+            "domains": list(self.domains),
+            "request_digests": list(self.request_digests),
+            "request_count": len(self.request_digests),
+            "status": self.status,
+        }
+
+    @property
+    def binding_digest(self) -> str:
+        return content_digest(self._payload())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._payload(),
+            "binding_digest": self.binding_digest,
+            "execution": "bound_reviewed_evidence_request_batch;source_dispatch_requires_separate_approval",
+            "retention": "metadata_only;request_values_locators_and_source_payloads_caller_owned",
+            "secret_material": "never_returned",
+        }
+
+
 def _claim_value(value: AutonomousClaimIntegrityClaim | Mapping[str, Any]) -> AutonomousClaimIntegrityClaim:
     return value if isinstance(value, AutonomousClaimIntegrityClaim) else AutonomousClaimIntegrityClaim.from_mapping(value)
 
@@ -926,6 +1001,121 @@ def validate_autonomous_claim_integrity_acquisition_bridge(value: AutonomousClai
         raise ArgumentError("integrity acquisition bridge validation requires a typed bridge")
     if content_digest(value._payload()) != value.bridge_digest:
         raise ArgumentError("integrity acquisition bridge digest does not match its fields")
+    return value
+
+
+def bind_autonomous_claim_integrity_acquisition_requests(
+    bridge: AutonomousClaimIntegrityAcquisitionBridge,
+    requests: Sequence[Mapping[str, Any]],
+) -> AutonomousClaimIntegrityAcquisitionBinding:
+    """Bind caller-owned evidence requests to the bridge's exact selected candidates.
+
+    A request must identify its candidate with ``candidate_id`` and use the source selected by
+    the information-acquisition planner.  The helper strips the binding-only candidate field
+    before handing the request to ``AutonomousEvidenceRuntime`` and injects digest metadata that
+    survives the runtime's request digest.  It never dispatches a source or infers a requirement
+    ID: the existing reviewed evidence runtime validates those fields against its evidence plan.
+    """
+
+    validate_autonomous_claim_integrity_acquisition_bridge(bridge)
+    if bridge.status != "planned" or bridge.acquisition_plan is None:
+        raise ArgumentError("integrity acquisition request binding requires a planned bridge")
+    plan = bridge.acquisition_plan
+    selections = tuple(plan.selected)
+    if not 1 <= len(selections) <= AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS:
+        raise ArgumentError("integrity acquisition plan selections are outside the binding limit")
+    if isinstance(requests, (str, bytes, bytearray)) or not isinstance(requests, Sequence) or len(requests) != len(selections):
+        raise ArgumentError("integrity acquisition requests must contain exactly one request per selected candidate")
+    selected_by_id = {selection.candidate_id: selection for selection in selections}
+    supplied: dict[str, dict[str, Any]] = {}
+    reserved = {
+        "claim_integrity_assessment_digest",
+        "claim_integrity_bridge_digest",
+        "claim_integrity_acquisition_plan_digest",
+        "claim_integrity_candidate_id",
+        "claim_integrity_candidate_digest",
+    }
+    for index, raw in enumerate(requests):
+        if not isinstance(raw, Mapping):
+            raise ArgumentError(f"integrity acquisition request {index} must be a mapping")
+        allowed = {"candidate_id", "candidateId", "requirement_id", "source_id", "source_digest", "request_id", "metadata"}
+        unknown = set(raw).difference(allowed)
+        if unknown:
+            raise ArgumentError(f"integrity acquisition request {index} contains unsupported fields")
+        candidate_id = raw.get("candidate_id", raw.get("candidateId"))
+        candidate_id = _identifier(f"integrity acquisition request {index} candidate_id", candidate_id)
+        selection = selected_by_id.get(candidate_id)
+        if selection is None:
+            raise ArgumentError(f"integrity acquisition request {index} targets a candidate outside the selected plan")
+        if candidate_id in supplied:
+            raise ArgumentError(f"integrity acquisition candidate {candidate_id} is duplicated")
+        source_id = _identifier(f"integrity acquisition request {index} source_id", raw.get("source_id"))
+        if source_id != selection.source_id:
+            raise ArgumentError(f"integrity acquisition candidate {candidate_id} source does not match the selected source")
+        requirement_id = _identifier(f"integrity acquisition request {index} requirement_id", raw.get("requirement_id"))
+        source_digest = raw.get("source_digest")
+        _digest(f"integrity acquisition request {index} source_digest", source_digest, allow_none=True)
+        request_id = raw.get("request_id")
+        if request_id is not None:
+            request_id = _identifier(f"integrity acquisition request {index} request_id", request_id)
+        metadata = raw.get("metadata", {})
+        if not isinstance(metadata, Mapping):
+            raise ArgumentError(f"integrity acquisition request {index} metadata must be a mapping")
+        metadata = dict(metadata)
+        if reserved.intersection(metadata):
+            raise ArgumentError(f"integrity acquisition request {index} attempts to override binding metadata")
+        bound_metadata = {
+            **metadata,
+            "claim_integrity_assessment_digest": bridge.assessment_digest,
+            "claim_integrity_bridge_digest": bridge.bridge_digest,
+            "claim_integrity_acquisition_plan_digest": plan.plan_digest,
+            "claim_integrity_candidate_id": candidate_id,
+            "claim_integrity_candidate_digest": selection.candidate_digest,
+        }
+        _safe_metadata(bound_metadata, name=f"integrity acquisition request {index} metadata")
+        bound = {
+            "requirement_id": requirement_id,
+            "source_id": source_id,
+            "source_digest": source_digest,
+            "request_id": request_id,
+            "metadata": bound_metadata,
+        }
+        try:
+            content_digest(bound)
+        except Exception as error:
+            raise ArgumentError(f"integrity acquisition request {index} is not canonical JSON") from error
+        supplied[candidate_id] = bound
+    if set(supplied) != set(selected_by_id):
+        missing = sorted(set(selected_by_id).difference(supplied))
+        raise ArgumentError(f"integrity acquisition requests are missing selected candidates: {', '.join(missing)}")
+    ordered = tuple(supplied[selection.candidate_id] for selection in selections)
+    request_digests = tuple(content_digest(request) for request in ordered)
+    domains = tuple(selection.domain for selection in selections)
+    binding = AutonomousClaimIntegrityAcquisitionBinding(
+        assessment_digest=bridge.assessment_digest,
+        bridge_digest=bridge.bridge_digest,
+        acquisition_plan_digest=plan.plan_digest,
+        candidate_ids=tuple(selection.candidate_id for selection in selections),
+        domains=domains,
+        request_digests=request_digests,
+        status="ready",
+        _requests=ordered,
+    )
+    return binding
+
+
+def validate_autonomous_claim_integrity_acquisition_binding(
+    value: AutonomousClaimIntegrityAcquisitionBinding,
+) -> AutonomousClaimIntegrityAcquisitionBinding:
+    """Validate the metadata digest and transient request digests of a bound batch."""
+
+    if not isinstance(value, AutonomousClaimIntegrityAcquisitionBinding):
+        raise ArgumentError("integrity acquisition binding validation requires a typed binding")
+    if content_digest(value._payload()) != value.binding_digest:
+        raise ArgumentError("integrity acquisition binding digest does not match its fields")
+    requests = value.requests
+    if tuple(content_digest(request) for request in requests) != value.request_digests:
+        raise ArgumentError("integrity acquisition binding request digest does not match its request")
     return value
 
 
@@ -1187,12 +1377,14 @@ __all__ = [
     "AUTONOMOUS_CLAIM_INTEGRITY_ASSESSMENT_SCHEMA",
     "AUTONOMOUS_CLAIM_INTEGRITY_ACTION_SCHEMA",
     "AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA",
+    "AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BINDING_SCHEMA",
     "AUTONOMOUS_CLAIM_INTEGRITY_STATUSES",
     "AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_STATUSES",
     "AUTONOMOUS_CLAIM_INTEGRITY_STANCES",
     "AUTONOMOUS_CLAIM_INTEGRITY_REPRODUCIBILITY",
     "AUTONOMOUS_CLAIM_INTEGRITY_TEMPORAL_STATES",
     "AUTONOMOUS_CLAIM_INTEGRITY_ACTION_TYPES",
+    "AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS",
     "AutonomousClaimIntegrityPolicy",
     "AutonomousClaimIntegrityClaim",
     "AutonomousClaimIntegrityEvidence",
@@ -1201,10 +1393,13 @@ __all__ = [
     "AutonomousClaimIntegrityAction",
     "AutonomousClaimIntegrityAssessment",
     "AutonomousClaimIntegrityAcquisitionBridge",
+    "AutonomousClaimIntegrityAcquisitionBinding",
     "assess_autonomous_claim_integrity",
     "reassess_autonomous_claim_integrity",
     "plan_autonomous_claim_integrity_acquisition",
     "validate_autonomous_claim_integrity",
     "validate_autonomous_claim_integrity_snapshot",
     "validate_autonomous_claim_integrity_acquisition_bridge",
+    "bind_autonomous_claim_integrity_acquisition_requests",
+    "validate_autonomous_claim_integrity_acquisition_binding",
 ]

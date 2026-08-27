@@ -19,6 +19,7 @@ import {
 } from "./autonomous-information-acquisition.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
+import type { AutonomousEvidenceAcquisitionRequest } from "./autonomous-evidence-runtime.js";
 
 export const AUTONOMOUS_CLAIM_INTEGRITY_SCHEMA = "bioprism-typescript-autonomous-claim-integrity/0.1" as const;
 export const AUTONOMOUS_CLAIM_INTEGRITY_POLICY_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-policy/0.1" as const;
@@ -27,6 +28,7 @@ export const AUTONOMOUS_CLAIM_INTEGRITY_EVIDENCE_SCHEMA = "bioprism-typescript-a
 export const AUTONOMOUS_CLAIM_INTEGRITY_ASSESSMENT_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-assessment/0.1" as const;
 export const AUTONOMOUS_CLAIM_INTEGRITY_ACTION_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-action/0.1" as const;
 export const AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-acquisition-bridge/0.1" as const;
+export const AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BINDING_SCHEMA = "bioprism-typescript-autonomous-claim-integrity-acquisition-binding/0.1" as const;
 
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_CLAIMS = 128;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_EVIDENCE = 512;
@@ -34,6 +36,7 @@ export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACTIONS = 128;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_CLAIM_LINKS = 32;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_MODALITIES = 16;
 export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_AGE_SECONDS = 31_536_000;
+export const AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS = 64;
 
 export const AUTONOMOUS_CLAIM_INTEGRITY_STATUSES = ["supported", "partially_supported", "missing", "stale", "conflicted", "contradicted", "insufficient_independence", "insufficient_modalities", "unreproducible", "blocked"] as const;
 export type AutonomousClaimIntegrityStatus = typeof AUTONOMOUS_CLAIM_INTEGRITY_STATUSES[number];
@@ -282,6 +285,121 @@ export class AutonomousClaimIntegrityAcquisitionBridge {
   get digestDescriptor(): JsonObject { return { schema: AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BRIDGE_SCHEMA, assessment_digest: this.assessmentDigest, action_ids: [...this.actionIds], targeted_candidate_ids: [...this.targetedCandidateIds], candidate_action_matches: [...this.candidateActionMatches], acquisition_plan_digest: this.acquisitionPlan?.planDigest ?? null, unmatched_action_count: this.unmatchedActionCount, status: this.status, generation: this.generation }; }
   get bridgeDigest(): string { return digestJsonSync(this.digestDescriptor); }
   toJSON(): AutonomousClaimIntegrityAcquisitionBridgeJSON { return { ...this.digestDescriptor, bridge_digest: this.bridgeDigest, actions_are: "proposals_only;source_dispatch_requires_reviewed_evidence_approval", acquisition_plan: this.acquisitionPlan?.toJSON() ?? null, retention: "metadata_only;raw_claim_text_evidence_values_and_source_payloads_caller_owned", secret_material: "never_returned" } as unknown as AutonomousClaimIntegrityAcquisitionBridgeJSON; }
+}
+
+export interface AutonomousClaimIntegrityAcquisitionRequestInput extends JsonObject {
+  candidate_id: string;
+  requirement_id: string;
+  source_id: string;
+  source_digest?: string | null;
+  request_id?: string | null;
+  metadata?: JsonObject;
+}
+
+export interface AutonomousClaimIntegrityAcquisitionBindingJSON extends JsonObject {
+  schema: string;
+  assessment_digest: string;
+  bridge_digest: string;
+  acquisition_plan_digest: string;
+  candidate_ids: string[];
+  domains: string[];
+  request_digests: string[];
+  request_count: number;
+  status: "ready";
+  binding_digest?: string;
+}
+
+/** Exact transient request batch emitted from one reviewed integrity acquisition bridge. */
+export class AutonomousClaimIntegrityAcquisitionBinding {
+  readonly assessmentDigest: string;
+  readonly bridgeDigest: string;
+  readonly acquisitionPlanDigest: string;
+  readonly candidateIds: readonly string[];
+  /** Domain is aligned to candidateIds and may repeat for multiple candidates in one domain. */
+  readonly domains: readonly AutonomousDomainName[];
+  readonly requestDigests: readonly string[];
+  readonly status = "ready" as const;
+  private readonly transientRequests: readonly AutonomousEvidenceAcquisitionRequest[];
+
+  constructor(input: { assessmentDigest: string; bridgeDigest: string; acquisitionPlanDigest: string; candidateIds: readonly string[]; domains: readonly AutonomousDomainName[]; requestDigests: readonly string[]; requests: readonly AutonomousEvidenceAcquisitionRequest[] }) {
+    this.assessmentDigest = digest("acquisition binding assessmentDigest", input.assessmentDigest)!;
+    this.bridgeDigest = digest("acquisition binding bridgeDigest", input.bridgeDigest)!;
+    this.acquisitionPlanDigest = digest("acquisition binding acquisitionPlanDigest", input.acquisitionPlanDigest)!;
+    this.candidateIds = identifiers("acquisition binding candidateIds", input.candidateIds, AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS);
+    if (!Array.isArray(input.domains) || input.domains.length !== this.candidateIds.length) fail("acquisition binding domains must align with candidates");
+    this.domains = input.domains.map((domain, index) => {
+      const normalized = identifier(`acquisition binding domain ${index}`, domain, 64) as AutonomousDomainName;
+      if (!AUTONOMOUS_DOMAIN_NAMES.includes(normalized)) fail(`acquisition binding domain ${index} is unsupported`);
+      return normalized;
+    });
+    this.requestDigests = input.requestDigests.map((value, index) => digest(`acquisition binding requestDigest ${index}`, value)!);
+    if (this.requestDigests.length !== this.candidateIds.length || new Set(this.requestDigests).size !== this.requestDigests.length) fail("acquisition binding request digests must align with unique requests");
+    if (!Array.isArray(input.requests) || input.requests.length !== this.candidateIds.length || this.candidateIds.length < 1) fail("acquisition binding requests are malformed");
+    this.transientRequests = input.requests.map((request) => ({ ...request, metadata: request.metadata === undefined ? {} : { ...request.metadata } }));
+  }
+
+  get requests(): readonly AutonomousEvidenceAcquisitionRequest[] {
+    return this.transientRequests.map((request) => ({ ...request, metadata: request.metadata === undefined ? {} : { ...request.metadata } }));
+  }
+
+  private payload(): JsonObject {
+    return { schema: AUTONOMOUS_CLAIM_INTEGRITY_ACQUISITION_BINDING_SCHEMA, assessment_digest: this.assessmentDigest, bridge_digest: this.bridgeDigest, acquisition_plan_digest: this.acquisitionPlanDigest, candidate_ids: [...this.candidateIds], domains: [...this.domains], request_digests: [...this.requestDigests], request_count: this.requestDigests.length, status: this.status };
+  }
+
+  get digestDescriptor(): JsonObject { return this.payload(); }
+  get bindingDigest(): string { return digestJsonSync(this.payload()); }
+
+  toJSON(): AutonomousClaimIntegrityAcquisitionBindingJSON {
+    return { ...this.payload(), binding_digest: this.bindingDigest, execution: "bound_reviewed_evidence_request_batch;source_dispatch_requires_separate_approval", retention: "metadata_only;request_values_locators_and_source_payloads_caller_owned", secret_material: "never_returned" } as unknown as AutonomousClaimIntegrityAcquisitionBindingJSON;
+  }
+}
+
+export function bindAutonomousClaimIntegrityAcquisitionRequests(
+  bridge: AutonomousClaimIntegrityAcquisitionBridge,
+  requests: readonly (AutonomousClaimIntegrityAcquisitionRequestInput | Record<string, unknown>)[],
+): AutonomousClaimIntegrityAcquisitionBinding {
+  validateAutonomousClaimIntegrityAcquisitionBridge(bridge);
+  if (bridge.status !== "planned" || bridge.acquisitionPlan === null) fail("request binding requires a planned bridge");
+  const selections = [...bridge.acquisitionPlan.selected];
+  if (selections.length < 1 || selections.length > AUTONOMOUS_CLAIM_INTEGRITY_MAX_ACQUISITION_REQUESTS) fail("acquisition plan selections are outside the binding limit");
+  if (!Array.isArray(requests) || requests.length !== selections.length) fail("requests must contain exactly one request per selected candidate");
+  const selectedById = new Map(selections.map((selection) => [selection.candidate_id, selection]));
+  const supplied = new Map<string, AutonomousEvidenceAcquisitionRequest>();
+  const reserved = new Set(["claim_integrity_assessment_digest", "claim_integrity_bridge_digest", "claim_integrity_acquisition_plan_digest", "claim_integrity_candidate_id", "claim_integrity_candidate_digest"]);
+  for (const [index, raw] of requests.entries()) {
+    if (!isObject(raw)) fail(`request ${index} must be an object`);
+    const allowed = new Set(["candidate_id", "candidateId", "requirement_id", "source_id", "source_digest", "request_id", "metadata"]);
+    if (Object.keys(raw).some((key) => !allowed.has(key))) fail(`request ${index} contains unsupported fields`);
+    const candidateId = identifier(`request ${index} candidate_id`, read(raw, "candidate_id", "candidateId"));
+    const selection = selectedById.get(candidateId);
+    if (!selection) fail(`request ${index} targets a candidate outside the selected plan`);
+    if (supplied.has(candidateId)) fail(`candidate ${candidateId} is duplicated`);
+    const sourceId = identifier(`request ${index} source_id`, read(raw, "source_id", "sourceId"));
+    if (sourceId !== selection.source_id) fail(`candidate ${candidateId} source does not match the selected source`);
+    const requirementId = identifier(`request ${index} requirement_id`, read(raw, "requirement_id", "requirementId"));
+    const sourceDigest = digest(`request ${index} source_digest`, read(raw, "source_digest", "sourceDigest", null), true);
+    const requestIdValue = read(raw, "request_id", "requestId", null);
+    const requestId = requestIdValue === null || requestIdValue === undefined ? null : identifier(`request ${index} request_id`, requestIdValue);
+    const metadataValue = read(raw, "metadata", "metadata", {});
+    if (!isObject(metadataValue)) fail(`request ${index} metadata must be an object`);
+    if ([...reserved].some((key) => Object.prototype.hasOwnProperty.call(metadataValue, key))) fail(`request ${index} attempts to override binding metadata`);
+    const metadata = { ...metadataValue, claim_integrity_assessment_digest: bridge.assessmentDigest, claim_integrity_bridge_digest: bridge.bridgeDigest, claim_integrity_acquisition_plan_digest: bridge.acquisitionPlan.planDigest, claim_integrity_candidate_id: candidateId, claim_integrity_candidate_digest: selection.candidate_digest };
+    safeMetadata(metadata, `request ${index} metadata`);
+    const bound = { requirement_id: requirementId, source_id: sourceId, source_digest: sourceDigest, request_id: requestId, metadata } as AutonomousEvidenceAcquisitionRequest;
+    try { digestJsonSync(bound); } catch (error) { fail(`request ${index} is not canonical JSON`); }
+    supplied.set(candidateId, bound);
+  }
+  if (supplied.size !== selections.length) fail("requests are missing selected candidates");
+  const ordered = selections.map((selection) => supplied.get(selection.candidate_id)!);
+  return new AutonomousClaimIntegrityAcquisitionBinding({ assessmentDigest: bridge.assessmentDigest, bridgeDigest: bridge.bridgeDigest, acquisitionPlanDigest: bridge.acquisitionPlan.planDigest, candidateIds: selections.map((selection) => selection.candidate_id), domains: selections.map((selection) => selection.domain as AutonomousDomainName), requestDigests: ordered.map((request) => digestJsonSync(request)), requests: ordered });
+}
+
+export function validateAutonomousClaimIntegrityAcquisitionBinding(value: AutonomousClaimIntegrityAcquisitionBinding): AutonomousClaimIntegrityAcquisitionBinding {
+  if (!(value instanceof AutonomousClaimIntegrityAcquisitionBinding)) fail("binding validation requires a typed binding");
+  if (digestJsonSync(value.digestDescriptor) !== value.bindingDigest) fail("binding digest does not match its fields");
+  const requestDigests = value.requests.map((request) => digestJsonSync(request));
+  if (JSON.stringify(requestDigests) !== JSON.stringify(value.requestDigests)) fail("binding request digest does not match its request");
+  return value;
 }
 
 function normalizePolicy(value: AutonomousClaimIntegrityPolicy | AutonomousClaimIntegrityPolicyInput | undefined): AutonomousClaimIntegrityPolicy { return value instanceof AutonomousClaimIntegrityPolicy ? value : new AutonomousClaimIntegrityPolicy(value); }
