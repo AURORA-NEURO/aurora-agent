@@ -7170,3 +7170,13 @@ __all__ += [
     "FederatedRetrievalAssuranceReceipt",
     "assure_federated_retrieval",
 ]
+
+from .federated_protocol_simulation_assurance import (
+    FederatedProtocolSimulationReport,
+    assure_federated_protocol,
+)
+
+__all__ += [
+    "FederatedProtocolSimulationReport",
+    "assure_federated_protocol",
+]

@@ -55,6 +55,7 @@ pub mod qir;
 pub mod research_context;
 pub mod resource_workbench;
 pub mod retrieval_assurance;
+pub mod federated_protocol_simulation_assurance;
 pub mod slice;
 pub mod temporal;
 
@@ -101,6 +102,16 @@ pub use retrieval_assurance::{
     FederatedRetrievalAssuranceRequest, RetrievalAssuranceDisposition, RetrievalAssuranceError,
     CONTRACT_VERSION as FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID,
+};
+pub use federated_protocol_simulation_assurance::{
+    assure as assure_federated_protocol_simulation,
+    capability_manifest as federated_protocol_simulation_manifest,
+    PeerProtocolSummary, ProtocolDraft, ProtocolSimulationAssuranceError,
+    ProtocolSimulationReport,
+    CONTRACT_VERSION as FEDERATED_PROTOCOL_SIMULATION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_PROTOCOL_SIMULATION_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_PROTOCOL_SIMULATION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_PROTOCOL_SIMULATION_OUTPUT_SCHEMA,
 };
 pub use slice::{backward_slice, Slice};
 pub use temporal::{temporal_cut, TemporalCut};

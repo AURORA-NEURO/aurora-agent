@@ -5176,3 +5176,25 @@ export function validateCliFederatedRetrievalAssuranceReceipt(receipt:CliFederat
   if(receipt.effect_receipts.some(effect=>!effect.startsWith("exchange:aggregate-evidence:")&&effect!=="block:unsafe-release")) throw new Error("federated retrieval effect is outside aggregate-only exchange gate");
 }
 export function cliFederatedRetrievalAssuranceReceiptDigest(receipt:CliFederatedRetrievalAssuranceReceipt):string { validateCliFederatedRetrievalAssuranceReceipt(receipt); return digestJsonSync(receipt); }
+
+export const FIBER_FEDERATED_PROTOCOL_SIMULATION_FEATURE_ID = "AFA-fiber-P10-F28" as const;
+export const FIBER_FEDERATED_PROTOCOL_SIMULATION_CONTRACT_VERSION = "fiber-federated-continual-protocol-simulation-assurance/1.0" as const;
+export const FIBER_FEDERATED_PROTOCOL_SIMULATION_INPUT_SCHEMA = "ProtocolDraft4@1" as const;
+export const FIBER_FEDERATED_PROTOCOL_SIMULATION_OUTPUT_SCHEMA = "ProtocolSimulationReport7@1" as const;
+export interface FiberFederatedProtocolSimulationReceipt {
+  schema_version:string; contract_version:string; feature_id:string; request_id:string; federation_id:string; purpose:string; protocol_schema:string; semantic_profile:string; disposition:"qualified"|"unresolved"|"blocked";
+  required_step_order:string[]; observed_step_order:string[]; missing_step_order:string[]; violation_order:string[]; peer_order:string[]; qualified_peer_order:string[]; unresolved_peer_order:string[]; blocked_peer_order:string[]; adversarial_event_order:string[];
+  omissions:string[]; uncertainty:string[]; negative_evidence:string[]; protocol_digest:string; replay_identity:string; provenance_digest:string|null; peer_envelope_digest:string; verdict_digest:string; effect_receipts:string[]; artifact:Record<string,unknown>; raw_data_local:true; boundary:string;
+}
+export function validateFiberFederatedProtocolSimulationReceipt(receipt:FiberFederatedProtocolSimulationReceipt):void {
+  const ordered=(values:string[])=>JSON.stringify([...new Set(values)].sort())===JSON.stringify(values);
+  if(receipt.schema_version!==RESEARCH_CONTRACT_SCHEMA_VERSION||receipt.contract_version!==FIBER_FEDERATED_PROTOCOL_SIMULATION_CONTRACT_VERSION||receipt.feature_id!==FIBER_FEDERATED_PROTOCOL_SIMULATION_FEATURE_ID||receipt.protocol_schema!==FIBER_FEDERATED_PROTOCOL_SIMULATION_INPUT_SCHEMA||receipt.boundary!==PRECLINICAL_BOUNDARY||receipt.raw_data_local!==true||!receipt.request_id.trim()||!receipt.federation_id.trim()||!receipt.purpose.trim()||!receipt.semantic_profile.trim()||!receipt.required_step_order.length||!receipt.peer_order.length||!receipt.effect_receipts.length) throw new Error("federated protocol simulation identity, schema, locality, peers, or effects are incomplete");
+  for(const values of[receipt.required_step_order,receipt.observed_step_order,receipt.missing_step_order,receipt.violation_order,receipt.peer_order,receipt.qualified_peer_order,receipt.unresolved_peer_order,receipt.blocked_peer_order,receipt.adversarial_event_order,receipt.omissions,receipt.uncertainty,receipt.negative_evidence,receipt.effect_receipts]) if(!ordered(values)) throw new Error("federated protocol simulation ordering is not canonical");
+  const required=new Set(receipt.required_step_order); const steps=[...receipt.observed_step_order,...receipt.missing_step_order]; if(required.size!==receipt.required_step_order.length||steps.some(step=>!required.has(step))||new Set(steps).size!==required.size||JSON.stringify([...new Set(steps)].sort())!==JSON.stringify([...required].sort())) throw new Error("federated protocol simulation steps do not partition required steps");
+  const peers=[...receipt.qualified_peer_order,...receipt.unresolved_peer_order,...receipt.blocked_peer_order]; if(new Set(receipt.peer_order).size!==receipt.peer_order.length||new Set(peers).size!==peers.length||JSON.stringify([...new Set(peers)].sort())!==JSON.stringify([...new Set(receipt.peer_order)].sort())) throw new Error("federated protocol simulation peers do not partition peer order");
+  for(const digest of[receipt.protocol_digest,receipt.replay_identity,receipt.peer_envelope_digest,receipt.verdict_digest,receipt.artifact.content_hash]) if(typeof digest!=="string"||!/^[0-9a-f]{64}$/.test(digest)) throw new Error("federated protocol simulation digest is invalid");
+  if(receipt.provenance_digest!==null&&(!/^[0-9a-f]{64}$/.test(receipt.provenance_digest))) throw new Error("federated protocol simulation provenance digest is invalid");
+  if(receipt.artifact.content_type!=="application/vnd.aurora.protocol-simulation-report+json") throw new Error("federated protocol simulation artifact type is invalid");
+  if(receipt.effect_receipts.some(effect=>!effect.startsWith("verify:fiber-protocol-simulation:")&&effect!=="block:unsafe-release")) throw new Error("federated protocol simulation effect is outside verification gate");
+}
+export function fiberFederatedProtocolSimulationReceiptDigest(receipt:FiberFederatedProtocolSimulationReceipt):string { validateFiberFederatedProtocolSimulationReceipt(receipt); return digestJsonSync(receipt); }

@@ -3947,3 +3947,13 @@ export type {
   AutonomousMemorySnapshot,
   AutonomousMemoryStats,
 } from "./autonomous-memory.js";
+
+export {
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_FEATURE_ID,
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_CONTRACT_VERSION,
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_INPUT_SCHEMA,
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_OUTPUT_SCHEMA,
+  fiberFederatedProtocolSimulationReceiptDigest,
+  validateFiberFederatedProtocolSimulationReceipt,
+} from "./research-contracts.js";
+export type { FiberFederatedProtocolSimulationReceipt } from "./research-contracts.js";
