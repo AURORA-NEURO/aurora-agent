@@ -10,6 +10,16 @@ are excluded from the coverage denominator — they specify no behaviour.
 A module leaves this list when a crate cites it, which is the same weak criterion coverage
 uses. This file tracks *attention*, not completeness.
 
+The SDK trace boundary now has an explicit operator projection in both languages through
+`AutonomousRunTraceRegistry`. It imports only a validated source snapshot, indexes every run by
+status/domain/provider/model, provides deterministic cursor pages and retained-event inspection,
+and supports summary-only retention when event metadata should be discarded. Retention evicts
+only the oldest eligible terminal runs; active/partial/paused/unknown runs are protected by
+default, and an over-capacity import fails atomically when no safe eviction exists. Registry
+snapshots and records are digest-bound, canonical JSON, and CAS-fenced. This is a local/caller-owned
+query and retention projection, not distributed consensus, external authorization, trace truth,
+provider replay, or effect reconciliation.
+
 Automatic batch execution now has a shared metadata-only trace boundary in both SDKs. The
 TypeScript facade exposes `executeAutoBatchWithTrace()` and its launch-admitted variant; Python
 exposes `run_auto_batch_with_trace()` and the corresponding admission wrapper. The trace covers

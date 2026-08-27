@@ -7,11 +7,15 @@ import {
   AutonomousRunTraceSession,
   AutonomousRunTracePersistenceCoordinator,
   JsonAutonomousRunTracePersistence,
+  AutonomousRunTraceRegistry,
+  AutonomousRunTraceRegistryPersistenceCoordinator,
+  JsonAutonomousRunTraceRegistryPersistence,
   InMemoryAutonomousRunTraceStore,
   LLMRuntime,
   autonomousRunTraceStatus,
   digestJson,
   TransactionalJsonAutonomousRunTracePersistence,
+  TransactionalJsonAutonomousRunTraceRegistryPersistence,
   WebStorageAutonomousRunTraceTextStore,
   validateAutonomousRunTraceSnapshot,
 } from "../dist/index.js";
@@ -241,4 +245,82 @@ test("trace status mapping and terminal boundaries remain explicit", async () =>
   await assert.rejects(() => reused.started(), /already has events/);
   await assert.rejects(() => session.record({ phase: "started", status: "running" }), /already terminal/);
   await assert.rejects(() => session.complete({ status: "completed" }), /already terminal/);
+});
+
+test("trace registry indexes every domain, paginates deterministically, and enforces metadata-only retention", async () => {
+  const source = new InMemoryAutonomousRunTraceStore({ clock: (() => { let now = 900; return () => now++; })() });
+  for (const [index, domain] of AUTONOMOUS_DOMAIN_NAMES.entries()) {
+    const session = new AutonomousRunTraceSession(source, { run_id: `registry-${domain}`, task_digest: digest(index % 2 === 0 ? "c" : "d"), domains: [domain] });
+    await session.started();
+    await session.record({ phase: "plan_compiled", status: "running", plan_digest: digest("a") });
+    await session.record({ phase: "provider_invocation_finished", status: "running", provider: "registry-provider", model: "registry-model", input_tokens: 4, output_tokens: 3, tool_count: 1 });
+    await session.complete({ status: "completed", route_digest: digest("b"), plan_digest: digest("a") });
+  }
+
+  const registry = new AutonomousRunTraceRegistry({ max_runs: 32, max_events: 512, max_bytes: 2_000_000 });
+  const imported = registry.importSnapshot(source.snapshot());
+  assert.equal(imported.imported_run_ids.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(registry.size, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(registry.query({ domain: "biomedical" }).records[0].run_id, "registry-biomedical");
+  assert.equal(registry.query({ provider: "registry-provider" }).total_matches, AUTONOMOUS_DOMAIN_NAMES.length);
+  const firstPage = registry.query({ limit: 5 });
+  assert.equal(firstPage.records.length, 5);
+  assert.equal(firstPage.total_matches, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(firstPage.next_after_run_id);
+  const secondPage = registry.query({ after_run_id: firstPage.next_after_run_id, limit: 20 });
+  assert.equal(secondPage.records.length, AUTONOMOUS_DOMAIN_NAMES.length - 5);
+  assert.equal(new Set([...firstPage.records, ...secondPage.records].map((record) => record.run_id)).size, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(registry.events({ phase: "provider_invocation_finished" }).length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(registry.verifyIntegrity().verified, true);
+
+  let persistedText = null;
+  const textStore = {
+    read: () => persistedText,
+    write: (value) => { persistedText = value; },
+    writeIfUnchanged: (expected, value) => {
+      const observed = persistedText === null ? null : JSON.parse(persistedText).snapshot_digest;
+      if (observed !== expected) return false;
+      persistedText = value;
+      return true;
+    },
+  };
+  const persistence = new TransactionalJsonAutonomousRunTraceRegistryPersistence(textStore, { maxBytes: 2_000_000 });
+  const coordinator = new AutonomousRunTraceRegistryPersistenceCoordinator(registry, persistence);
+  const persisted = await coordinator.flush();
+  const restored = new AutonomousRunTraceRegistry({ max_runs: 32, max_events: 512, max_bytes: 2_000_000 });
+  const restoredCoordinator = new AutonomousRunTraceRegistryPersistenceCoordinator(restored, persistence);
+  await restoredCoordinator.restore();
+  assert.deepEqual(restored.snapshot(), persisted);
+  assert.doesNotMatch(await textStore.read(), /private provider output|bounded offline result|sk-[A-Za-z0-9]/i);
+
+  const staleRegistry = new AutonomousRunTraceRegistry({ max_runs: 32, max_events: 512, max_bytes: 2_000_000 });
+  const staleCoordinator = new AutonomousRunTraceRegistryPersistenceCoordinator(staleRegistry, persistence);
+  await staleCoordinator.restore();
+  const freshSession = new AutonomousRunTraceSession(source, { run_id: "registry-fresh", task_digest: digest("e"), domains: ["evaluation"] });
+  await freshSession.started();
+  await freshSession.complete({ status: "completed" });
+  registry.importSnapshot(source.snapshot());
+  await coordinator.flush();
+  await assert.rejects(() => staleCoordinator.flush(), /compare-and-swap conflict/);
+
+  const summaryOnly = new AutonomousRunTraceRegistry({ max_runs: 32, max_events: 512, max_bytes: 2_000_000, retain_events: false });
+  summaryOnly.importSnapshot(source.snapshot());
+  assert.equal(summaryOnly.query({ model: "registry-model" }).total_matches, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(summaryOnly.events().length, 0);
+  assert.equal(summaryOnly.get("registry-coding").retained_event_count, 0);
+
+  const retained = new AutonomousRunTraceRegistry({ max_runs: 2, max_events: 512, max_bytes: 2_000_000 });
+  const retainedReport = retained.importSnapshot(source.snapshot());
+  assert.equal(retained.size, 2);
+  assert.equal(retainedReport.evicted_run_ids.length, AUTONOMOUS_DOMAIN_NAMES.length + 1 - 2);
+  assert.equal(retained.verifyIntegrity().runs, 2);
+
+  const activeSource = new InMemoryAutonomousRunTraceStore({ clock: () => 1_200 });
+  const activeA = new AutonomousRunTraceSession(activeSource, { run_id: "active-a", task_digest: digest("a"), domains: ["coding"] });
+  await activeA.started();
+  const activeB = new AutonomousRunTraceSession(activeSource, { run_id: "active-b", task_digest: digest("b"), domains: ["data"] });
+  await activeB.started();
+  const activeRegistry = new AutonomousRunTraceRegistry({ max_runs: 1, max_events: 32, max_bytes: 100_000 });
+  assert.throws(() => activeRegistry.importSnapshot(activeSource.snapshot()), /cannot evict an eligible terminal run/);
+  assert.equal(activeRegistry.size, 0, "failed retention import must be atomic");
 });

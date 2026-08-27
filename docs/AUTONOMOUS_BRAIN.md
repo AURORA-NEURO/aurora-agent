@@ -2424,6 +2424,33 @@ with a typed failure event. `JsonAutonomousRunTracePersistence`, its transaction
 `InMemoryAutonomousRunTraceTextStore`, and `FileAutonomousRunTraceTextStore` are adapters only;
 they do not resume provider work or grant effect authority during restore.
 
+For an operator-facing index across many runs, use `AutonomousRunTraceRegistry` in either SDK.
+Importing a source snapshot first verifies its complete hash chain, then creates one bounded
+metadata record per run. Records can be queried by run, domain, status, provider, or model with a
+deterministic `after_run_id` cursor; retained event metadata can be inspected separately. A
+`retain_events: false` policy keeps summary counters and provider/model identities while dropping
+event rows. `max_runs`, `max_events`, and `max_bytes` are enforced together: the registry evicts
+the oldest eligible terminal record, protects running/partial/paused/unknown runs by default, and
+rejects the import atomically if satisfying the policy would require evicting protected work.
+`JsonAutonomousRunTraceRegistryPersistence` and its transactional CAS variant make this projection
+restart-safe. Registry restoration validates policy, record, summary, event, and snapshot digests;
+it never restores prompts, responses, credentials, evidence, tool arguments, effects, or execution
+authority.
+
+```typescript
+const registry = new AutonomousRunTraceRegistry({
+  max_runs: 2_000,
+  max_events: 100_000,
+  max_bytes: 20_000_000,
+  keep_incomplete: true,
+});
+registry.importSnapshot(traceStore.snapshot());
+const page = registry.query({ domain: "biomedical", status: "completed", limit: 100 });
+const next = page.next_after_run_id
+  ? registry.query({ after_run_id: page.next_after_run_id, limit: 100 })
+  : null;
+```
+
 The live bridge is also available when an application owns orchestration. Pass an
 `AutonomousRunTraceSession.record`-compatible callback as `trace_event_callback` to
 `run_connector_workflow()`, `run_connector_mission()`,

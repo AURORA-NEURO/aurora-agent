@@ -578,6 +578,7 @@ export {
   TransactionalJsonAutonomousRunTracePersistence,
   WebStorageAutonomousRunTraceTextStore,
   AutonomousRunTracePersistenceCoordinator,
+  validateAutonomousRunTraceEvent,
   validateAutonomousRunTraceSnapshot,
   autonomousRunTraceStatus,
 } from "./autonomous-run-trace.js";
@@ -596,6 +597,32 @@ export type {
   AutonomousRunTraceSessionInput,
   AutonomousRunTraceCompletion,
 } from "./autonomous-run-trace.js";
+export {
+  AUTONOMOUS_RUN_TRACE_REGISTRY_SCHEMA,
+  AUTONOMOUS_RUN_TRACE_REGISTRY_SNAPSHOT_SCHEMA,
+  AUTONOMOUS_RUN_TRACE_REGISTRY_RETENTION,
+  AUTONOMOUS_RUN_TRACE_REGISTRY_AUTHORITY,
+  AUTONOMOUS_RUN_TRACE_REGISTRY_SECRET_MATERIAL,
+  MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_RUNS,
+  MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_EVENTS,
+  MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_BYTES,
+  AutonomousRunTraceRegistry,
+  JsonAutonomousRunTraceRegistryPersistence,
+  TransactionalJsonAutonomousRunTraceRegistryPersistence,
+  AutonomousRunTraceRegistryPersistenceCoordinator,
+  validateAutonomousRunTraceRegistrySnapshot,
+} from "./autonomous-run-trace-registry.js";
+export type {
+  AutonomousRunTraceRetentionPolicy,
+  AutonomousRunTraceRetentionPolicyInput,
+  AutonomousRunTraceRegistryRecord,
+  AutonomousRunTraceRegistrySnapshot,
+  AutonomousRunTraceRegistryQuery,
+  AutonomousRunTraceRegistryPage,
+  AutonomousRunTraceRegistryEventQuery,
+  AutonomousRunTraceRegistryImportReport,
+  AutonomousRunTraceRegistryIntegrity,
+} from "./autonomous-run-trace-registry.js";
 export {
   AUTONOMOUS_RUN_TRACE_ANALYTICS_AUTHORITY,
   AUTONOMOUS_RUN_TRACE_ANALYTICS_MEASUREMENT_STATES,

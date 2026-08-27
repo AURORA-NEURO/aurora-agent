@@ -286,6 +286,30 @@ function verifyEventChain(events: readonly AutonomousRunTraceEvent[], maximum: n
   return { verified: true, events: events.length, head_digest: previous };
 }
 
+/**
+ * Validate one event without requiring it to be the first event in a snapshot.
+ *
+ * Trace registries retain per-run projections from a larger append-only journal.  The
+ * projection keeps the original sequence and previous digest so an operator can inspect it,
+ * while the source snapshot remains the authority for contiguous chain verification.
+ */
+export function validateAutonomousRunTraceEvent(raw: unknown): AutonomousRunTraceEvent {
+  if (!isObject(raw)) throw new ArgumentError("autonomous run trace event is malformed");
+  const allowedKeys = [
+    "schema", "sequence", "run_id", "task_digest", "domains", "phase", "status", "route_digest", "plan_digest",
+    "selection_digest", "provider", "model", "attempt", "turn", "latency_ms", "input_tokens", "output_tokens",
+    "tool_count", "status_code", "failure_class", "failure_code", "retryable", "detail_digest", "recorded_at",
+    "previous_digest", "event_digest", "retention", "secret_material",
+  ];
+  if (Object.keys(raw).some((key) => !allowedKeys.includes(key))) throw new ArgumentError("autonomous run trace event contains unsupported metadata");
+  const supplied = raw.event_digest;
+  if (typeof supplied !== "string" || !/^[0-9a-f]{64}$/.test(supplied)) throw new ArgumentError("autonomous run trace event digest is invalid");
+  const { event_digest: _eventDigest, ...body } = raw;
+  const normalized = normalizeEventInput(body as unknown as AutonomousRunTraceEventInput, raw.sequence as number, raw.previous_digest as string, raw.recorded_at as number);
+  if (eventDigest(normalized) !== supplied) throw new ArgumentError("autonomous run trace event digest is invalid");
+  return structuredClone({ ...normalized, event_digest: supplied } as AutonomousRunTraceEvent);
+}
+
 function snapshotBody(events: readonly AutonomousRunTraceEvent[], options: { schema: typeof AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA | typeof LEGACY_AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA; snapshotGeneration?: number; previousSnapshotDigest?: string | null }): Omit<AutonomousRunTraceSnapshot, "snapshot_digest"> {
   const lineage = options.schema === AUTONOMOUS_RUN_TRACE_SNAPSHOT_SCHEMA
     ? { snapshot_generation: options.snapshotGeneration!, previous_snapshot_digest: options.previousSnapshotDigest! }

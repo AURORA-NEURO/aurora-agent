@@ -1386,6 +1386,22 @@ const traced = await runtime.runWithTrace({
 console.log(traced.trace.status, traced.trace.provider_invocations);
 ```
 
+For a bounded operator index over many trace runs, import each validated trace snapshot into
+`AutonomousRunTraceRegistry`. It supports deterministic cursor pagination and filters for run,
+domain, status, provider, and model. `retain_events: false` keeps only summary/provider/model
+metadata; otherwise retained event rows remain individually inspectable. `max_runs`,
+`max_events`, and `max_bytes` are enforced together, with oldest-terminal eviction and protected
+incomplete runs. `JsonAutonomousRunTraceRegistryPersistence` plus its transactional CAS variant
+provide restart-safe canonical storage; restoring the registry never resumes work or authorizes a
+provider/tool/effect.
+
+```typescript
+const registry = new AutonomousRunTraceRegistry({ max_runs: 2_000, max_events: 100_000, max_bytes: 20_000_000 });
+registry.importSnapshot(traceStore.snapshot());
+const page = registry.query({ domain: "biomedical", status: "completed", limit: 100 });
+const events = registry.events({ run_id: page.records[0]?.run_id, phase: "provider_invocation_finished" });
+```
+
 Long-running loops can add `run_id`, `checkpoint`, and `resume_snapshot` to make the outer
 decision process restart-safe:
 

@@ -226,6 +226,25 @@ learning metadata, and the final loop status across all twelve domains. The retu
 identifiers, and failure metadata. Task text, prompts, parameters, credentials, provider
 responses, and live results are never serialized, and caller observers/callbacks remain composed.
 
+For an operator index across many runs, import validated snapshots into
+`AutonomousRunTraceRegistry`. It provides deterministic cursor pages and filters for run, domain,
+status, provider, and model, plus separate retained-event inspection. Set `retain_events=False`
+to keep summary counters and provider/model identities without retaining event rows. The bounded
+`max_runs`/`max_events`/`max_bytes` policy evicts only the oldest eligible terminal records and
+protects running, partial, paused, and unknown work by default; if no safe eviction exists, the
+import fails without mutating the registry. JSON and transactional-CAS persistence adapters are
+available, and restoration is an observability operation only—it never resumes provider work or
+authorizes a tool or effect.
+
+```python
+from prism_sdk import AutonomousRunTraceRegistry
+
+registry = AutonomousRunTraceRegistry({"max_runs": 2_000, "max_events": 100_000, "max_bytes": 20_000_000})
+registry.import_snapshot(trace_store.snapshot())
+page = registry.query({"domain": "biomedical", "status": "completed", "limit": 100})
+events = registry.events({"run_id": page.records[0].run_id, "phase": "provider_invocation_finished"})
+```
+
 For deployments that already have an operator-approved action record, add an
 `action_handoff_resolver(goal, row, task)` to the runtime (or to
 `run_goal_control_loop`). It may return the verified handoff directly, or
