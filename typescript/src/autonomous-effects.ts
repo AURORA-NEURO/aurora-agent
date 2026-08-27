@@ -14,6 +14,7 @@ export const AUTONOMOUS_EFFECT_EVENT_SCHEMA = "bioprism-typescript-autonomous-ef
 export const AUTONOMOUS_EFFECT_JOURNAL_SCHEMA = "bioprism-typescript-autonomous-effect-journal/0.1" as const;
 export const AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-effect-snapshot/0.1" as const;
 export const AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA = "bioprism-typescript-provider-effect-reconciliation/0.1" as const;
+export const AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA = "bioprism-typescript-provider-effect-reconciliation-admission/0.1" as const;
 
 export const AUTONOMOUS_EFFECT_STATUSES = [
   "prepared",
@@ -1076,6 +1077,16 @@ export interface AutonomousProviderEffectReconciliationReport extends JsonObject
   secret_material: "never_returned";
 }
 
+export interface AutonomousProviderEffectReconciliationAdmission extends JsonObject {
+  schema: typeof AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA;
+  status: "allowed" | "blocked";
+  reason: "no_pending_effects" | "pending_effects_reconciled" | "uncertain_effect_state" | "reconciliation_errors";
+  report: AutonomousProviderEffectReconciliationReport;
+  admission_digest: string;
+  retention: "metadata_only_no_arguments_outputs_credentials_or_provider_material";
+  secret_material: "never_returned";
+}
+
 /**
  * Scan restored provider effects and ask a caller-owned resolver about each one.
  * The worker never retries a provider call itself; `prepared` is reported as retry-ready and
@@ -1139,6 +1150,89 @@ export class AutonomousProviderEffectReconciliationWorker {
       retention: "metadata_only_no_arguments_outputs_credentials_or_provider_material",
       secret_material: "never_returned",
     };
+  }
+}
+
+/**
+ * Owns one restart-time reconciliation pass and turns its result into an execution admission.
+ *
+ * A worker process should create one coordinator for its lifecycle and invoke `admit()` before
+ * claiming or dispatching new brain work. The result is cached so concurrent callers cannot run
+ * duplicate provider-status lookups. A caller that has resolved the outstanding external state
+ * may explicitly call `reset()` before requesting another pass. This class never invents external
+ * truth and never performs a fresh provider request.
+ */
+export class AutonomousProviderEffectReconciliationCoordinator {
+  readonly worker: AutonomousProviderEffectReconciliationWorker;
+  private admissionPromise: Promise<AutonomousProviderEffectReconciliationAdmission> | null = null;
+  private running = false;
+
+  constructor(worker: AutonomousProviderEffectReconciliationWorker) {
+    if (!(worker instanceof AutonomousProviderEffectReconciliationWorker)) throw new AutonomousEffectError("provider reconciliation coordinator requires a reconciliation worker");
+    this.worker = worker;
+  }
+
+  async admit(): Promise<AutonomousProviderEffectReconciliationAdmission> {
+    if (this.admissionPromise !== null) return this.admissionPromise;
+    this.running = true;
+    const promise = (async () => {
+      let report: AutonomousProviderEffectReconciliationReport;
+      try {
+        report = await this.worker.runOnce();
+      } catch (_error) {
+        report = {
+          schema: AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
+          inspected: 0,
+          reconciled: 0,
+          failed: 0,
+          retry_ready: 0,
+          uncertain: 0,
+          errors: 1,
+          outcomes: [{ status: "coordinator_error", error_class: "reconciliation_error" }],
+          retention: "metadata_only_no_arguments_outputs_credentials_or_provider_material",
+          secret_material: "never_returned",
+        };
+      }
+      const blocked = report.uncertain > 0 || report.errors > 0;
+      const reason: AutonomousProviderEffectReconciliationAdmission["reason"] = report.errors > 0
+        ? "reconciliation_errors"
+        : report.uncertain > 0
+          ? "uncertain_effect_state"
+          : report.inspected === 0
+            ? "no_pending_effects"
+            : "pending_effects_reconciled";
+      const status: AutonomousProviderEffectReconciliationAdmission["status"] = blocked ? "blocked" : "allowed";
+      const admission: AutonomousProviderEffectReconciliationAdmission = {
+        schema: AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA,
+        status,
+        reason,
+        report,
+        admission_digest: await digestJson({
+          schema: AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA,
+          status,
+          reason,
+          inspected: report.inspected,
+          reconciled: report.reconciled,
+          failed: report.failed,
+          retry_ready: report.retry_ready,
+          uncertain: report.uncertain,
+          errors: report.errors,
+          outcomes: report.outcomes,
+        }),
+        retention: "metadata_only_no_arguments_outputs_credentials_or_provider_material",
+        secret_material: "never_returned",
+      };
+      this.running = false;
+      return admission;
+    })();
+    this.admissionPromise = promise;
+    return promise;
+  }
+
+  /** Clear a completed pass after the caller has resolved the reported external state. */
+  reset(): void {
+    if (this.running) throw new AutonomousEffectError("provider reconciliation coordinator cannot reset while a pass is running");
+    this.admissionPromise = null;
   }
 }
 

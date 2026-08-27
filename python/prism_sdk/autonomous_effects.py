@@ -34,6 +34,7 @@ AUTONOMOUS_EFFECT_EVENT_SCHEMA = "bioprism-python-autonomous-effect-event/0.1"
 AUTONOMOUS_EFFECT_JOURNAL_SCHEMA = "bioprism-python-autonomous-effect-journal/0.1"
 AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-effect-snapshot/0.1"
 AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA = "bioprism-python-provider-effect-reconciliation/0.1"
+AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA = "bioprism-python-provider-effect-reconciliation-admission/0.1"
 AUTONOMOUS_EFFECT_STATUSES = (
     "prepared",
     "dispatching",
@@ -1312,6 +1313,90 @@ class AutonomousProviderEffectReconciliationWorker:
         }
 
 
+class AutonomousProviderEffectReconciliationCoordinator:
+    """Turn one bounded restart pass into a cached fresh-dispatch admission.
+
+    Construct one coordinator per worker lifecycle and call :meth:`admit` before claiming or
+    dispatching new brain work. Concurrent callers share the same pass, so a multi-stage worker
+    cannot accidentally issue duplicate provider-status lookups. The coordinator blocks only on
+    unresolved or errored reconciliation; it never performs a new provider request or claims that
+    a caller-owned resolver has established external truth. Call :meth:`reset` after the caller
+    has explicitly resolved the reported external state and wants to begin another pass.
+    """
+
+    def __init__(self, worker: AutonomousProviderEffectReconciliationWorker) -> None:
+        if not isinstance(worker, AutonomousProviderEffectReconciliationWorker):
+            raise AutonomousEffectError("provider reconciliation coordinator requires a reconciliation worker")
+        self.worker = worker
+        self._lock = threading.Lock()
+        self._admission: dict[str, Any] | None = None
+        self._running = False
+
+    def admit(self) -> dict[str, Any]:
+        with self._lock:
+            if self._admission is not None:
+                return _clone(self._admission)
+            self._running = True
+            try:
+                try:
+                    report = self.worker.run_once()
+                except Exception:
+                    report = {
+                        "schema": AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
+                        "inspected": 0,
+                        "reconciled": 0,
+                        "failed": 0,
+                        "retry_ready": 0,
+                        "uncertain": 0,
+                        "errors": 1,
+                        "outcomes": [{"status": "coordinator_error", "error_class": "reconciliation_error"}],
+                        "retention": EFFECT_RETENTION,
+                        "secret_material": "never_returned",
+                    }
+                blocked = int(report.get("uncertain", 0)) > 0 or int(report.get("errors", 0)) > 0
+                if int(report.get("errors", 0)) > 0:
+                    reason = "reconciliation_errors"
+                elif int(report.get("uncertain", 0)) > 0:
+                    reason = "uncertain_effect_state"
+                elif int(report.get("inspected", 0)) == 0:
+                    reason = "no_pending_effects"
+                else:
+                    reason = "pending_effects_reconciled"
+                status = "blocked" if blocked else "allowed"
+                admission = {
+                    "schema": AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA,
+                    "status": status,
+                    "reason": reason,
+                    "report": _clone(report),
+                    "admission_digest": content_digest({
+                        "schema": AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA,
+                        "status": status,
+                        "reason": reason,
+                        "inspected": report.get("inspected", 0),
+                        "reconciled": report.get("reconciled", 0),
+                        "failed": report.get("failed", 0),
+                        "retry_ready": report.get("retry_ready", 0),
+                        "uncertain": report.get("uncertain", 0),
+                        "errors": report.get("errors", 0),
+                        "outcomes": report.get("outcomes", []),
+                    }),
+                    "retention": EFFECT_RETENTION,
+                    "secret_material": "never_returned",
+                }
+                self._admission = admission
+                return _clone(admission)
+            finally:
+                self._running = False
+
+    def reset(self) -> None:
+        """Clear the cached decision after caller-owned external reconciliation."""
+
+        with self._lock:
+            if self._running:
+                raise AutonomousEffectError("provider reconciliation coordinator cannot reset while a pass is running")
+            self._admission = None
+
+
 __all__ = [
-    "AUTONOMOUS_EFFECT_SCHEMA", "AUTONOMOUS_EFFECT_EVENT_SCHEMA", "AUTONOMOUS_EFFECT_JOURNAL_SCHEMA", "AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA", "AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA", "AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA", "AUTONOMOUS_EFFECT_STATUSES", "MAX_AUTONOMOUS_EFFECT_EVENTS", "MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES", "MAX_AUTONOMOUS_EFFECT_EVENT_BYTES", "MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES", "MAX_AUTONOMOUS_EFFECT_REASON_BYTES", "EFFECT_RETENTION", "EFFECT_SNAPSHOT_RETENTION", "AutonomousEffectError", "AutonomousEffectPolicyError", "AutonomousEffectReconciliationRequiredError", "AutonomousEffectExecutionError", "AutonomousEffectRequest", "AutonomousEffectExecutionContext", "AutonomousEffectRecord", "AutonomousEffectEvent", "AutonomousEffectJournalRow", "AutonomousEffectJournalReceipt", "AutonomousEffectJournalSnapshot", "AutonomousEffectJournal", "AutonomousEffectSnapshotJournal", "AutonomousEffectSnapshotPersistence", "AutonomousEffectTransactionalSnapshotPersistence", "AutonomousEffectResolution", "AutonomousEffectResolver", "AutonomousProviderEffectProtectedRehydrationContext", "AutonomousProviderEffectProtectedReceiptResolver", "AutonomousProtectedProviderEffectResolver", "AutonomousProviderEffectResolver", "AutonomousProviderEffectReconciliationWorker", "InMemoryAutonomousEffectJournal", "InMemoryAutonomousEffectSnapshotTextStore", "JsonAutonomousEffectSnapshotPersistence", "TransactionalJsonAutonomousEffectSnapshotPersistence", "AutonomousEffectPersistenceCoordinator", "AutonomousEffectBoundary", "validate_autonomous_effect_journal_snapshot",
+    "AUTONOMOUS_EFFECT_SCHEMA", "AUTONOMOUS_EFFECT_EVENT_SCHEMA", "AUTONOMOUS_EFFECT_JOURNAL_SCHEMA", "AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA", "AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA", "AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA", "AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA", "AUTONOMOUS_EFFECT_STATUSES", "MAX_AUTONOMOUS_EFFECT_EVENTS", "MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES", "MAX_AUTONOMOUS_EFFECT_EVENT_BYTES", "MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES", "MAX_AUTONOMOUS_EFFECT_REASON_BYTES", "EFFECT_RETENTION", "EFFECT_SNAPSHOT_RETENTION", "AutonomousEffectError", "AutonomousEffectPolicyError", "AutonomousEffectReconciliationRequiredError", "AutonomousEffectExecutionError", "AutonomousEffectRequest", "AutonomousEffectExecutionContext", "AutonomousEffectRecord", "AutonomousEffectEvent", "AutonomousEffectJournalRow", "AutonomousEffectJournalReceipt", "AutonomousEffectJournalSnapshot", "AutonomousEffectJournal", "AutonomousEffectSnapshotJournal", "AutonomousEffectSnapshotPersistence", "AutonomousEffectTransactionalSnapshotPersistence", "AutonomousEffectResolution", "AutonomousEffectResolver", "AutonomousProviderEffectProtectedRehydrationContext", "AutonomousProviderEffectProtectedReceiptResolver", "AutonomousProtectedProviderEffectResolver", "AutonomousProviderEffectResolver", "AutonomousProviderEffectReconciliationWorker", "AutonomousProviderEffectReconciliationCoordinator", "InMemoryAutonomousEffectJournal", "InMemoryAutonomousEffectSnapshotTextStore", "JsonAutonomousEffectSnapshotPersistence", "TransactionalJsonAutonomousEffectSnapshotPersistence", "AutonomousEffectPersistenceCoordinator", "AutonomousEffectBoundary", "validate_autonomous_effect_journal_snapshot",
 ]

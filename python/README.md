@@ -251,6 +251,14 @@ The high-level traced bridge can publish the projection as part of the same boun
 eviction count, or a sanitized failure. Publication is idempotent and best-effort, so an index
 outage never changes provider settlement or causes an already-dispatched goal to retry.
 
+`AutonomousProviderEffectReconciliationCoordinator` provides the corresponding restart admission.
+Pass it to `BrainWorker`, `RemoteBrainJobWorker`, or `AsyncRemoteBrainJobWorker` as
+`effect_reconciliation`; the lifecycle runs one bounded status pass before claiming work, caches
+the result for concurrent stages, and blocks fresh provider dispatch while any external effect is
+uncertain or reconciliation errors remain. After caller-owned resolution, call
+`reset_effect_reconciliation()`. Only bounded counts, statuses, and digests cross the worker
+boundary.
+
 For deployments that already have an operator-approved action record, add an
 `action_handoff_resolver(goal, row, task)` to the runtime (or to
 `run_goal_control_loop`). It may return the verified handoff directly, or

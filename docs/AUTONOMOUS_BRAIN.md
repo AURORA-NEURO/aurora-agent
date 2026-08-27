@@ -5411,6 +5411,29 @@ This worker is intentionally domain-neutral: provider effects created by every b
 specialist fan-out, and synthesis share the same recovery contract. Domain identity remains in
 the execution envelope and is not used to weaken provider uncertainty handling.
 
+For an actual brain worker lifecycle, wrap that reconciliation worker in
+`AutonomousProviderEffectReconciliationCoordinator` and pass the coordinator as
+`effectReconciliation` to `AutonomousBrainJobWorker` or
+`AutonomousDurableBrainJobWorker`. The worker calls `admit()` before claiming work, caches the
+single bounded pass so concurrent stages do not duplicate status lookups, and refuses to begin a
+new provider dispatch when any prior effect remains uncertain or reconciliation produced an error.
+The returned `effect_reconciliation` projection contains the admission digest and bounded counts;
+it never contains a prompt, response, provider key, effect arguments, or raw resolver error. After
+the caller resolves the external state, call `resetEffectReconciliation()` and start a new explicit
+reconciliation cycle. This is a lifecycle gate, not a claim that the SDK can independently observe
+an external provider's truth.
+
+```typescript
+const reconciliation = new AutonomousProviderEffectReconciliationCoordinator(
+  new AutonomousProviderEffectReconciliationWorker(effectBoundary, providerResolver),
+);
+const worker = new AutonomousBrainJobWorker({
+  brain, scheduler, workerId: "brain-worker-1", resolve,
+  effectReconciliation: reconciliation,
+});
+await worker.runOnce(); // reconciliation admission precedes any fresh provider dispatch
+```
+
 The TypeScript high-level result also exposes this audit seam directly. A completed
 `AutonomousRuntime.invoke()`, `invokeToolLoop()`, or `AutonomousAgent.run()` result carries an
 ordered `provider_invocations` array using

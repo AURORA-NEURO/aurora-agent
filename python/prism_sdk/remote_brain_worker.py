@@ -23,6 +23,7 @@ from .autonomous_action_execution import AutonomousActionAdmission
 from .autonomous_action_plan import AutonomousActionPlan
 from .autonomous_action_admission_controller import validate_autonomous_action_dispatch_handoff
 from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
+from .autonomous_effects import AutonomousProviderEffectReconciliationCoordinator
 
 
 AUTONOMOUS_REMOTE_BRAIN_WORKER_SCHEMA = "bioprism-python-autonomous-remote-brain-worker/0.1"
@@ -123,6 +124,7 @@ class RemoteBrainJobRun:
     failure_code: str | None = None
     error_retryable: bool | None = None
     result_digest: str | None = None
+    effect_reconciliation: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -137,6 +139,7 @@ class RemoteBrainJobRun:
             "error_class": self.error_class,
             "failure_code": self.failure_code,
             "error_retryable": self.error_retryable,
+            **({"effect_reconciliation": dict(self.effect_reconciliation)} if self.effect_reconciliation is not None else {}),
             "retention": "remote_job_metadata_only;brain_result_transient_to_caller",
             "secret_material": "never_returned",
         }
@@ -771,6 +774,7 @@ class RemoteBrainJobWorker:
         heartbeat_ms: int | None = None,
         retry_preflight_failures: bool = True,
         credential_scope: RemoteBrainCredentialScope | None = None,
+        effect_reconciliation: AutonomousProviderEffectReconciliationCoordinator | None = None,
     ) -> None:
         if brain is None:
             raise RemoteBrainWorkerError("remote brain worker requires a brain facade")
@@ -800,8 +804,22 @@ class RemoteBrainJobWorker:
             raise RemoteBrainWorkerError("remote brain retry_preflight_failures must be boolean")
         if credential_scope is not None and not callable(getattr(credential_scope, "open", None)):
             raise RemoteBrainWorkerError("remote brain credential_scope must expose open(context)")
+        if effect_reconciliation is not None and not isinstance(effect_reconciliation, AutonomousProviderEffectReconciliationCoordinator):
+            raise RemoteBrainWorkerError("remote brain effect_reconciliation is malformed")
         self.retry_preflight_failures = retry_preflight_failures
         self.credential_scope = credential_scope
+        self.effect_reconciliation = effect_reconciliation
+
+    def reconcile_effects(self) -> Mapping[str, Any] | None:
+        """Run or return the cached restart reconciliation admission for this worker lifecycle."""
+
+        return None if self.effect_reconciliation is None else self.effect_reconciliation.admit()
+
+    def reset_effect_reconciliation(self) -> None:
+        """Re-open the caller-owned reconciliation cycle after resolving external state."""
+
+        if self.effect_reconciliation is not None:
+            self.effect_reconciliation.reset()
 
     def submit(
         self,
@@ -957,6 +975,9 @@ class RemoteBrainJobWorker:
         return dict(payload)
 
     def run_once(self, job_id: str | None = None) -> RemoteBrainJobRun | None:
+        effect_reconciliation = self.reconcile_effects()
+        if effect_reconciliation is not None and effect_reconciliation.get("status") == "blocked":
+            raise RemoteBrainWorkerError("remote brain worker effect reconciliation admission is blocked")
         if job_id is None:
             claimed_payload = self.control.claim_next_job({"worker_id": self.worker_id, "lease_ms": self.lease_ms})
             _assert_no_private_fields(claimed_payload)
@@ -1003,7 +1024,7 @@ class RemoteBrainJobWorker:
                 # lease needed to attach that request.
                 self._checkpoint(job["job_id"], "provider_approval_required", "preflight", {"spec_digest": job["spec_digest"], "mode": resolution.mode})
                 parked = self._request_approval(job["job_id"], reason="provider approval is required before dispatch")
-                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode)
+                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, effect_reconciliation=effect_reconciliation)
             if self.credential_scope is not None:
                 _assert_scope_resolution_clean(resolution)
                 opened = self.credential_scope.open({
@@ -1029,17 +1050,17 @@ class RemoteBrainJobWorker:
             if status in _APPROVAL_STATUSES:
                 self._checkpoint(job["job_id"], status, "unknown", {"result_digest": result_digest})
                 parked = self._request_approval(job["job_id"], reason="brain execution requires caller approval before continuing")
-                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             if status == "reconciliation_required":
                 self._checkpoint(job["job_id"], status, "unknown", {"result_digest": result_digest})
                 failed = self._fail(job["job_id"], "remote brain execution requires caller reconciliation", retryable=False)
-                return RemoteBrainJobRun(status="reconciliation_required", job=failed, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="reconciliation_required", job=failed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             if _is_success_status(status):
                 completed = self._complete(job["job_id"], result_digest)
-                return RemoteBrainJobRun(status="succeeded", job=completed, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="succeeded", job=completed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             self._checkpoint(job["job_id"], f"terminal_{status}", "unknown", {"result_digest": result_digest})
             failed = self._fail(job["job_id"], f"remote brain execution ended with {status}", retryable=False)
-            return RemoteBrainJobRun(status="reconciliation_required" if failed.get("state") == "reconciliation_required" else "failed", job=failed, mode=resolution.mode, result=result, result_digest=result_digest)
+            return RemoteBrainJobRun(status="reconciliation_required" if failed.get("state") == "reconciliation_required" else "failed", job=failed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
         except Exception as error:
             error_class, failure_code, error_retryable = _error_projection(error)
             try:
@@ -1047,7 +1068,7 @@ class RemoteBrainJobWorker:
                 self._checkpoint(job["job_id"], "worker_execution_error", "unknown" if started else "preflight", {"error_class": error_class, "failure_code": failure_code})
                 failed = self._fail(job["job_id"], "remote brain execution outcome is uncertain; reconciliation required" if started else "remote brain execution failed before dispatch", retryable=retryable)
                 status = "reconciliation_required" if failed.get("state") == "reconciliation_required" else "retry_scheduled" if failed.get("state") == "queued" else "failed"
-                return RemoteBrainJobRun(status=status, job=failed, mode=None if resolution is None else resolution.mode, error_class=error_class, failure_code=failure_code, error_retryable=error_retryable, result_digest=None)
+                return RemoteBrainJobRun(status=status, job=failed, mode=None if resolution is None else resolution.mode, error_class=error_class, failure_code=failure_code, error_retryable=error_retryable, result_digest=None, effect_reconciliation=effect_reconciliation)
             except Exception as settlement_error:
                 raise RemoteBrainWorkerError("remote brain worker failure could not be settled", code="configuration") from settlement_error
         finally:
@@ -1249,6 +1270,7 @@ class AsyncRemoteBrainJobWorker:
         heartbeat_ms: int | None = None,
         retry_preflight_failures: bool = True,
         credential_scope: RemoteBrainCredentialScope | None = None,
+        effect_reconciliation: AutonomousProviderEffectReconciliationCoordinator | None = None,
     ) -> None:
         if brain is None:
             raise RemoteBrainWorkerError("async remote brain worker requires a brain facade")
@@ -1278,8 +1300,22 @@ class AsyncRemoteBrainJobWorker:
             raise RemoteBrainWorkerError("async remote brain retry_preflight_failures must be boolean")
         if credential_scope is not None and not callable(getattr(credential_scope, "open", None)):
             raise RemoteBrainWorkerError("async remote brain credential_scope must expose open(context)")
+        if effect_reconciliation is not None and not isinstance(effect_reconciliation, AutonomousProviderEffectReconciliationCoordinator):
+            raise RemoteBrainWorkerError("async remote brain effect_reconciliation is malformed")
         self.retry_preflight_failures = retry_preflight_failures
         self.credential_scope = credential_scope
+        self.effect_reconciliation = effect_reconciliation
+
+    async def reconcile_effects(self) -> Mapping[str, Any] | None:
+        """Run or return the cached restart reconciliation admission without blocking the loop."""
+
+        return None if self.effect_reconciliation is None else await asyncio.to_thread(self.effect_reconciliation.admit)
+
+    def reset_effect_reconciliation(self) -> None:
+        """Re-open the caller-owned reconciliation cycle after resolving external state."""
+
+        if self.effect_reconciliation is not None:
+            self.effect_reconciliation.reset()
 
     async def submit(
         self,
@@ -1452,6 +1488,9 @@ class AsyncRemoteBrainJobWorker:
         return dict(payload)
 
     async def run_once(self, job_id: str | None = None) -> RemoteBrainJobRun | None:
+        effect_reconciliation = await self.reconcile_effects()
+        if effect_reconciliation is not None and effect_reconciliation.get("status") == "blocked":
+            raise RemoteBrainWorkerError("async remote brain worker effect reconciliation admission is blocked")
         if job_id is None:
             claimed_payload = await self.control.claim_next_job({"worker_id": self.worker_id, "lease_ms": self.lease_ms})
             _assert_no_private_fields(claimed_payload)
@@ -1512,7 +1551,7 @@ class AsyncRemoteBrainJobWorker:
                     {"spec_digest": job["spec_digest"], "mode": resolution.mode},
                 )
                 parked = await self._request_approval(job["job_id"], reason="provider approval is required before dispatch")
-                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode)
+                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, effect_reconciliation=effect_reconciliation)
             if self.credential_scope is not None:
                 _assert_scope_resolution_clean(resolution)
                 credential_binding = await _open_async_credential_scope(
@@ -1537,26 +1576,26 @@ class AsyncRemoteBrainJobWorker:
             if status in _APPROVAL_STATUSES:
                 await self._checkpoint(job["job_id"], status, "unknown", {"result_digest": result_digest})
                 parked = await self._request_approval(job["job_id"], reason="brain execution requires caller approval before continuing")
-                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="waiting_approval", job=parked, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             if status == "reconciliation_required":
                 await self._checkpoint(job["job_id"], status, "unknown", {"result_digest": result_digest})
                 failed = await self._fail(job["job_id"], "remote brain execution requires caller reconciliation", retryable=False)
-                return RemoteBrainJobRun(status="reconciliation_required", job=failed, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="reconciliation_required", job=failed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             if _is_success_status(status):
                 completed = await self._complete(job["job_id"], result_digest)
-                return RemoteBrainJobRun(status="succeeded", job=completed, mode=resolution.mode, result=result, result_digest=result_digest)
+                return RemoteBrainJobRun(status="succeeded", job=completed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
             await self._checkpoint(job["job_id"], f"terminal_{status}", "unknown", {"result_digest": result_digest})
             failed = await self._fail(job["job_id"], f"remote brain execution ended with {status}", retryable=False)
-            return RemoteBrainJobRun(status="reconciliation_required" if failed.get("state") == "reconciliation_required" else "failed", job=failed, mode=resolution.mode, result=result, result_digest=result_digest)
+            return RemoteBrainJobRun(status="reconciliation_required" if failed.get("state") == "reconciliation_required" else "failed", job=failed, mode=resolution.mode, result=result, result_digest=result_digest, effect_reconciliation=effect_reconciliation)
         except asyncio.CancelledError as error:
             # Cancellation is not evidence that a provider call did not start.  Persist the
             # same conservative boundary before propagating cancellation to the host.
             try:
-                await self._settle_error(job, started, resolution, error)
+                await self._settle_error(job, started, resolution, error, effect_reconciliation)
             finally:
                 raise
         except Exception as error:
-            return await self._settle_error(job, started, resolution, error)
+            return await self._settle_error(job, started, resolution, error, effect_reconciliation)
         finally:
             stop.set()
             heartbeat_task.cancel()
@@ -1693,6 +1732,7 @@ class AsyncRemoteBrainJobWorker:
         started: bool,
         resolution: RemoteBrainJobResolution | None,
         error: BaseException,
+        effect_reconciliation: Mapping[str, Any] | None,
     ) -> RemoteBrainJobRun:
         error_class, failure_code, error_retryable = _error_projection(error)
         try:
@@ -1713,6 +1753,7 @@ class AsyncRemoteBrainJobWorker:
                 failure_code=failure_code,
                 error_retryable=error_retryable,
                 result_digest=None,
+                effect_reconciliation=effect_reconciliation,
             )
         except Exception as settlement_error:
             raise RemoteBrainWorkerError("async remote brain worker failure could not be settled", code="configuration") from settlement_error

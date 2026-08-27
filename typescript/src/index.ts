@@ -2583,6 +2583,7 @@ export {
   AUTONOMOUS_EFFECT_STATUSES,
   AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA,
   AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
+  AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA,
   AutonomousEffectBoundary,
   AutonomousEffectError,
   AutonomousEffectExecutionError,
@@ -2591,6 +2592,7 @@ export {
   AutonomousProtectedProviderEffectResolver,
   AutonomousProviderEffectResolver,
   AutonomousProviderEffectReconciliationWorker,
+  AutonomousProviderEffectReconciliationCoordinator,
   AutonomousEffectReconciliationRequiredError,
   InMemoryAutonomousEffectJournal,
   JsonAutonomousEffectSnapshotPersistence,
@@ -2617,6 +2619,7 @@ export type {
   AutonomousEffectTransactionalSnapshotTextStore,
   AutonomousEffectStatus,
   AutonomousProviderEffectReconciliationReport,
+  AutonomousProviderEffectReconciliationAdmission,
   ProviderToolResultLike,
 } from "./autonomous-effects.js";
 export {

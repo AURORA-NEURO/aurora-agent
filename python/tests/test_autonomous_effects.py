@@ -20,6 +20,7 @@ from prism_sdk import (
     AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
     AutonomousProviderEffectResolver,
     AutonomousProviderEffectReconciliationWorker,
+    AutonomousProviderEffectReconciliationCoordinator,
     AutonomousExecutionController,
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
@@ -240,6 +241,40 @@ def test_provider_reconciliation_worker_recovers_pending_effects_across_every_do
     assert "status-key-" not in encoded
     second_report = worker.run_once()
     assert second_report["inspected"] == 0
+
+
+def test_provider_reconciliation_admission_is_cached_blocks_uncertainty_and_reopens_explicitly() -> None:
+    journal = InMemoryAutonomousEffectJournal()
+    boundary = AutonomousEffectBoundary(journal=journal)
+    with pytest.raises(AutonomousEffectReconciliationRequiredError):
+        boundary.execute(
+            {"execution_id": "admission", "tool": "provider.offline.invoke", "call_id": "uncertain", "risk_class": "provider_invocation", "arguments": {}},
+            lambda _context: (_ for _ in ()).throw(RuntimeError("lost")),
+            cache_result=False,
+        )
+    lookups = 0
+
+    def lookup(_provider: str, _operation: str, _key: str, _record: object) -> dict[str, object]:
+        nonlocal lookups
+        lookups += 1
+        return {"status": "unknown"}
+
+    coordinator = AutonomousProviderEffectReconciliationCoordinator(
+        AutonomousProviderEffectReconciliationWorker(boundary, AutonomousProviderEffectResolver(lookup))
+    )
+    blocked = coordinator.admit()
+    assert blocked["status"] == "blocked"
+    assert blocked["reason"] == "uncertain_effect_state"
+    assert lookups == 1
+    assert coordinator.admit() == blocked
+    assert lookups == 1
+    coordinator.reset()
+    reopened = coordinator.admit()
+    assert reopened["status"] == "blocked"
+    assert lookups == 2
+    encoded = json.dumps(reopened, sort_keys=True)
+    assert "never_returned" in encoded
+    assert "lost" not in encoded
 
 
 def test_effect_snapshot_persistence_is_canonical_and_cas_fenced() -> None:

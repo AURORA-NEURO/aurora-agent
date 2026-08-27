@@ -32,6 +32,10 @@ import { AUTONOMOUS_DOMAIN_NAMES, type AutonomousDomainName } from "./autonomous
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 import {
+  AutonomousProviderEffectReconciliationCoordinator,
+  type AutonomousProviderEffectReconciliationAdmission,
+} from "./autonomous-effects.js";
+import {
   AutonomousActionAdmission,
   AutonomousActionPlan,
   buildAutonomousActionPlan,
@@ -199,6 +203,8 @@ export interface AutonomousBrainJobWorkerOptions {
   traceStore?: AutonomousRunTraceStore;
   /** Optional metadata-only trace projection; publication failures never replay execution. */
   traceRegistry?: AutonomousRunTraceRegistry;
+  /** Optional restart-time gate; unresolved external effects block fresh provider dispatch. */
+  effectReconciliation?: AutonomousProviderEffectReconciliationCoordinator;
   persistence?: AutonomousBrainJobSchedulerPersistenceCoordinator;
   leaseMs?: number;
   heartbeatMs?: number;
@@ -220,6 +226,7 @@ export interface AutonomousBrainJobWorkerRun {
   adaptive: AutonomousBrainAdaptiveCycleExecution | null;
   trace: AutonomousRunTraceSummary | null;
   trace_registry?: AutonomousRunTraceRegistryPublication;
+  effect_reconciliation?: AutonomousProviderEffectReconciliationAdmission;
   error_class: string | null;
   failure_code: string | null;
   error_retryable: boolean | null;
@@ -379,6 +386,7 @@ export class AutonomousBrainJobWorker {
   readonly protectedRehydration?: AutonomousBrainJobProtectedRehydrator;
   readonly traceStore?: AutonomousRunTraceStore;
   readonly traceRegistry?: AutonomousRunTraceRegistry;
+  readonly effectReconciliation?: AutonomousProviderEffectReconciliationCoordinator;
   readonly persistence?: AutonomousBrainJobSchedulerPersistenceCoordinator;
   readonly leaseMs: number;
   readonly heartbeatMs: number;
@@ -402,6 +410,8 @@ export class AutonomousBrainJobWorker {
     if (options.traceRegistry !== undefined && options.traceStore === undefined) throw new ArgumentError("autonomous brain job worker traceRegistry requires traceStore");
     this.traceStore = options.traceStore;
     this.traceRegistry = options.traceRegistry;
+    if (options.effectReconciliation !== undefined && !(options.effectReconciliation instanceof AutonomousProviderEffectReconciliationCoordinator)) throw new ArgumentError("autonomous brain job worker effectReconciliation is malformed");
+    this.effectReconciliation = options.effectReconciliation;
     if (options.persistence !== undefined && (!(options.persistence instanceof AutonomousBrainJobSchedulerPersistenceCoordinator) || options.persistence.scheduler !== this.scheduler)) throw new ArgumentError("autonomous brain job worker persistence must own the supplied scheduler");
     this.persistence = options.persistence;
     this.leaseMs = boundedInteger("autonomous brain worker leaseMs", options.leaseMs ?? 60_000, 1, 600_000);
@@ -447,15 +457,27 @@ export class AutonomousBrainJobWorker {
     return job;
   }
 
+  /** Run or return the cached restart reconciliation admission for this worker lifecycle. */
+  async reconcileEffects(): Promise<AutonomousProviderEffectReconciliationAdmission | null> {
+    return this.effectReconciliation === undefined ? null : this.effectReconciliation.admit();
+  }
+
+  /** Re-open the caller-owned reconciliation cycle after resolving external state. */
+  resetEffectReconciliation(): void {
+    this.effectReconciliation?.reset();
+  }
+
   async runOnce(jobId?: string, now?: number): Promise<AutonomousBrainJobWorkerRun | null> {
     this.assertRestored();
+    const effectReconciliation = await this.reconcileEffects();
+    if (effectReconciliation?.status === "blocked") throw new ProviderRuntimeError("autonomous brain worker effect reconciliation admission is blocked", { code: "configuration" });
     const claimed = jobId === undefined
       ? this.scheduler.claimNext(this.workerId, this.leaseMs, now)
       : this.scheduler.claim(jobId, this.workerId, this.leaseMs, now);
     await this.persist();
     if (claimed === null) return null;
     if (["succeeded", "failed", "dead_lettered", "cancelled", "reconciliation_required"].includes(claimed.state)) {
-      return this.envelope(claimed, "already_terminal", null, null, null, null, null, null);
+      return this.envelope(claimed, "already_terminal", null, null, null, null, null, null, undefined, effectReconciliation ?? undefined);
     }
 
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -513,7 +535,7 @@ export class AutonomousBrainJobWorker {
       }
       if (plan.status === "route_review_required") {
         await this.checkpoint(claimed.job_id, { phase: "route_review_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "preflight", waitingForApproval: true });
-        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null);
+        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null, undefined, effectReconciliation ?? undefined);
       }
       planCompiled = true;
       await this.checkpoint(claimed.job_id, { phase: "plan_compiled", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, route_digest: plan.route.route_digest, mode: resolution.mode, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "preflight" });
@@ -522,7 +544,7 @@ export class AutonomousBrainJobWorker {
       // prevents a connector or provider-planning callback from doing work during a pause.
       if (!approvalReleased) {
         await this.checkpoint(claimed.job_id, { phase: "provider_approval_required", checkpointDigest: digestJsonSync({ plan_digest: plan.plan_digest, mode: resolution.mode, action_plan_digest: actionPlan?.plan_digest ?? null, action_admission_digest: actionAdmission?.admission_digest ?? null, action_handoff_digest: actionHandoff?.handoff_digest ?? null }), sideEffectBoundary: "preflight", waitingForApproval: true });
-        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null);
+        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, null, null, null, null, null, undefined, effectReconciliation ?? undefined);
       }
       let approvedResolution = this.approvalBoundResolution(resolution, approvalReleased);
       if (this.credentialScope) {
@@ -566,20 +588,20 @@ export class AutonomousBrainJobWorker {
       const status = statusOf(result);
       if (APPROVAL_STATUSES.has(status)) {
         await this.checkpoint(claimed.job_id, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: approvalBoundary(result), waitingForApproval: true });
-        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, result, null, null, trace, null, traceRegistryPublication);
+        return this.envelope(this.scheduler.get(claimed.job_id)!, "waiting_approval", resolution.mode, result, null, null, trace, null, traceRegistryPublication, effectReconciliation ?? undefined);
       }
       if (status === "reconciliation_required") {
         await this.checkpoint(claimed.job_id, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "unknown" });
         const quarantined = await this.fail(claimed.job_id, { reason: "brain execution requires caller reconciliation", retryable: false });
-        return this.envelope(quarantined, "reconciliation_required", resolution.mode, result, null, null, trace, null, traceRegistryPublication);
+        return this.envelope(quarantined, "reconciliation_required", resolution.mode, result, null, null, trace, null, traceRegistryPublication, effectReconciliation ?? undefined);
       }
       if (status !== "completed") {
         await this.checkpoint(claimed.job_id, { phase: `terminal_${status}`, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "dispatched" });
         const failed = await this.fail(claimed.job_id, { reason: `brain execution ended with ${status}`, retryable: false });
-        return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : "failed", resolution.mode, result, null, null, trace, null, traceRegistryPublication);
+        return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : "failed", resolution.mode, result, null, null, trace, null, traceRegistryPublication, effectReconciliation ?? undefined);
       }
       const completed = await this.complete(claimed.job_id, resultDigest(result, trace));
-      return this.envelope(completed, "succeeded", resolution.mode, result, null, null, trace, null, traceRegistryPublication);
+      return this.envelope(completed, "succeeded", resolution.mode, result, null, null, trace, null, traceRegistryPublication, effectReconciliation ?? undefined);
     } catch (error) {
       if (this.traceRegistry !== undefined && this.traceStore !== undefined && traceRegistryPublication === undefined) {
         traceRegistryPublication = await publishAutonomousRunTraceRegistrySnapshot(
@@ -608,7 +630,7 @@ export class AutonomousBrainJobWorker {
           : failed.state === "queued"
             ? "retry_scheduled"
             : "failed";
-        return this.envelope(failed, workerStatus, resolution?.mode ?? null, null, null, null, trace, projection, traceRegistryPublication);
+        return this.envelope(failed, workerStatus, resolution?.mode ?? null, null, null, null, trace, projection, traceRegistryPublication, effectReconciliation ?? undefined);
       } catch (persistenceError) {
         const wrapped = new ProviderRuntimeError("autonomous brain worker failure could not be durably recorded", { code: "configuration" });
         (wrapped as Error & { cause?: unknown }).cause = persistenceError;
@@ -772,10 +794,11 @@ export class AutonomousBrainJobWorker {
     trace: AutonomousRunTraceSummary | null,
     error: { errorClass: string; failureCode: string; retryable: boolean | null } | null,
     traceRegistryPublication?: AutonomousRunTraceRegistryPublication,
+    effectReconciliation?: AutonomousProviderEffectReconciliationAdmission,
   ): AutonomousBrainJobWorkerRun {
     const resolvedExecution = execution ?? (result && "run" in result ? result as AutonomousBrainExecution : null);
     const resolvedCycle = cycle ?? (result && "cycle" in result ? result as AutonomousBrainCycleExecution : null);
     const resolvedAdaptive = result && "adaptive" in result ? result as AutonomousBrainAdaptiveCycleExecution : null;
-    return { schema: AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA, worker_id: this.workerId, job_id: job.job_id, status, job, mode: selectedMode, execution: resolvedExecution, cycle: resolvedCycle, adaptive: resolvedAdaptive, trace, ...(traceRegistryPublication === undefined ? {} : { trace_registry: traceRegistryPublication }), error_class: error?.errorClass ?? null, failure_code: error?.failureCode ?? null, error_retryable: error?.retryable ?? null, retention: RETENTION, secret_material: SECRET_MATERIAL };
+    return { schema: AUTONOMOUS_BRAIN_JOB_WORKER_SCHEMA, worker_id: this.workerId, job_id: job.job_id, status, job, mode: selectedMode, execution: resolvedExecution, cycle: resolvedCycle, adaptive: resolvedAdaptive, trace, ...(traceRegistryPublication === undefined ? {} : { trace_registry: traceRegistryPublication }), ...(effectReconciliation === undefined ? {} : { effect_reconciliation: effectReconciliation }), error_class: error?.errorClass ?? null, failure_code: error?.failureCode ?? null, error_retryable: error?.retryable ?? null, retention: RETENTION, secret_material: SECRET_MATERIAL };
   }
 }

@@ -24,6 +24,11 @@ import {
   AutonomousProtectedRehydrationBoundary,
   AutonomousProtectedRehydrationContext,
   protectedValueDigest,
+  AutonomousEffectBoundary,
+  InMemoryAutonomousEffectJournal,
+  AutonomousProviderEffectResolver,
+  AutonomousProviderEffectReconciliationWorker,
+  AutonomousProviderEffectReconciliationCoordinator,
 } from "../dist/index.js";
 
 const tasks = {
@@ -94,6 +99,12 @@ test("durable brain worker preserves approval gates and completes every domain t
   const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 32, clock: () => 1_000 });
   const traces = new InMemoryAutonomousRunTraceStore();
   const traceRegistry = new AutonomousRunTraceRegistry({ max_runs: 64, max_events: 4_096, max_bytes: 2_000_000 });
+  const effectReconciliation = new AutonomousProviderEffectReconciliationCoordinator(
+    new AutonomousProviderEffectReconciliationWorker(
+      new AutonomousEffectBoundary({ journal: new InMemoryAutonomousEffectJournal() }),
+      new AutonomousProviderEffectResolver(() => ({ status: "not_found", retry_safe: true })),
+    ),
+  );
   const policies = new Map();
   for (let index = 0; index < AUTONOMOUS_DOMAIN_NAMES.length; index += 1) {
     const domain = AUTONOMOUS_DOMAIN_NAMES[index];
@@ -108,6 +119,7 @@ test("durable brain worker preserves approval gates and completes every domain t
     workerId: "worker-a",
     traceStore: traces,
     traceRegistry,
+    effectReconciliation,
     resolve: ({ job }) => {
       const domain = job.domain;
       const request = requestFor(domain);
@@ -139,6 +151,8 @@ test("durable brain worker preserves approval gates and completes every domain t
     assert.equal(completed.trace.status, "completed", jobId);
     assert.equal(completed.trace_registry.status, "published", jobId);
     assert.equal(completed.trace_registry.run_import_state, "imported", jobId);
+    assert.equal(completed.effect_reconciliation.status, "allowed", jobId);
+    assert.equal(completed.effect_reconciliation.reason, "no_pending_effects", jobId);
     assert.ok(completed.trace.provider_invocations >= 1, jobId);
     assert.ok(completed.trace.plan_digest, jobId);
     assert.equal(JSON.stringify(completed.trace).includes(tasks[domain]), false, jobId);
@@ -155,6 +169,38 @@ test("durable brain worker preserves approval gates and completes every domain t
   assert.equal(traceRegistry.verifyIntegrity().runs, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(JSON.stringify(scheduler.snapshot()).includes("private-task-never-retained"), false);
   assert.equal(scheduler.inventory({ limit: 32 }).every((job) => job.state === "succeeded"), true);
+});
+
+test("brain worker refuses to claim fresh work while an external effect is unresolved", async () => {
+  let providerCalls = 0;
+  const { brain } = makeBrain(() => { providerCalls += 1; });
+  const effectBoundary = new AutonomousEffectBoundary({ journal: new InMemoryAutonomousEffectJournal() });
+  await assert.rejects(
+    () => effectBoundary.execute({ execution_id: "worker-gate", tool: "provider.offline.invoke", call_id: "worker-gate-call", risk_class: "provider_invocation", arguments: {} }, async () => { throw new Error("uncertain provider outcome"); }, { cacheResult: false }),
+  );
+  const effectReconciliation = new AutonomousProviderEffectReconciliationCoordinator(
+    new AutonomousProviderEffectReconciliationWorker(effectBoundary, new AutonomousProviderEffectResolver(() => ({ status: "unknown" }))),
+  );
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 2, clock: () => 5_000 });
+  const request = requestFor("coding");
+  scheduler.submit(jobFor(900, request, "execute", policyDigest("c")), 5_000);
+  const worker = new AutonomousBrainJobWorker({
+    brain,
+    scheduler,
+    workerId: "blocked-worker",
+    effectReconciliation,
+    resolve: ({ job }) => ({
+      specDigest: job.spec_digest,
+      policyDigest: policyDigest("c"),
+      request,
+      mode: "execute",
+      execute: { approveProviderCall: true, run: { candidates: [model] } },
+    }),
+  });
+  await assert.rejects(() => worker.runOnce("worker-job-900", 5_000), /effect reconciliation admission is blocked/);
+  assert.equal(scheduler.get("worker-job-900").state, "queued");
+  assert.equal(providerCalls, 0);
+  assert.equal((await worker.reconcileEffects()).status, "blocked");
 });
 
 test("durable brain worker rehydrates protected private resolutions and preserves explicit resolver precedence", async () => {

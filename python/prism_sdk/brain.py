@@ -1581,6 +1581,7 @@ class BrainJobRunResult:
     cycle: BrainLearningCycleResult | None
     error_class: str | None = None
     workflow: Any | None = None
+    effect_reconciliation: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1590,6 +1591,7 @@ class BrainJobRunResult:
             "cycle": None if self.cycle is None else self.cycle.to_dict(),
             "workflow": None if self.workflow is None else self.workflow.to_dict(),
             "error_class": self.error_class,
+            **({"effect_reconciliation": dict(self.effect_reconciliation)} if self.effect_reconciliation is not None else {}),
             "retention": "job_metadata_and_learning_digests_only; workflow_checkpoint_caller_owned",
         }
 

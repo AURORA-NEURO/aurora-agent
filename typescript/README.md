@@ -1390,6 +1390,11 @@ Pass `traceRegistry` when the same run should be indexed immediately for operato
 idempotent and best-effort; `traced.traceRegistry` reports its run state, source/registry digests,
 evictions, or a sanitized failure without changing provider settlement or retry behavior.
 
+For restart safety, `AutonomousProviderEffectReconciliationCoordinator` turns the bounded provider
+effect reconciliation pass into a cached admission. Supply it as `effectReconciliation` to a local
+or durable brain worker; unresolved or errored external effects block fresh dispatch until the
+caller resolves them and calls `resetEffectReconciliation()`. The projection is metadata-only.
+
 For a bounded operator index over many trace runs, import each validated trace snapshot into
 `AutonomousRunTraceRegistry`. It supports deterministic cursor pagination and filters for run,
 domain, status, provider, and model. `retain_events: false` keeps only summary/provider/model

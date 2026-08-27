@@ -16,6 +16,7 @@ import {
   AutonomousProtectedRehydrationContext,
   AutonomousProviderEffectResolver,
   AutonomousProviderEffectReconciliationWorker,
+  AutonomousProviderEffectReconciliationCoordinator,
   AutonomousExecutionController,
   InMemoryAutonomousExecutionJournal,
   InMemoryAutonomousEffectJournal,
@@ -261,6 +262,30 @@ test("provider reconciliation worker recovers pending effects across every domai
   assert.ok(seen.every((row) => row.provider === "offline" && row.operation === "invoke"));
   assert.doesNotMatch(JSON.stringify(await journal.snapshot()), /status-key-/);
   assert.equal((await worker.runOnce()).inspected, 0);
+});
+
+test("provider reconciliation admission is cached, blocks uncertainty, and reopens explicitly", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const boundary = new AutonomousEffectBoundary({ journal });
+  await assert.rejects(() => boundary.execute({ execution_id: "admission", tool: "provider.offline.invoke", call_id: "uncertain", risk_class: "provider_invocation", arguments: {} }, async () => { throw new Error("lost"); }, { cacheResult: false }), AutonomousEffectReconciliationRequiredError);
+  let lookups = 0;
+  const worker = new AutonomousProviderEffectReconciliationWorker(boundary, new AutonomousProviderEffectResolver(() => {
+    lookups += 1;
+    return { status: "unknown" };
+  }));
+  const coordinator = new AutonomousProviderEffectReconciliationCoordinator(worker);
+  const blocked = await coordinator.admit();
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.reason, "uncertain_effect_state");
+  assert.equal(lookups, 1);
+  assert.deepEqual(await coordinator.admit(), blocked);
+  assert.equal(lookups, 1);
+  coordinator.reset();
+  const reopened = await coordinator.admit();
+  assert.equal(reopened.status, "blocked");
+  assert.equal(lookups, 2);
+  assert.match(JSON.stringify(reopened), /never_returned/);
+  assert.doesNotMatch(JSON.stringify(reopened), /lost/);
 });
 
 test("custom tool adapters receive approval before the idempotency-aware executor", async () => {
