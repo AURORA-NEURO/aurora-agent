@@ -52,6 +52,7 @@
 //!   compile time and peak memory. Slices assert *what* was compiled, never how fast, because a
 //!   wall-clock assertion in a test suite is a flake generator rather than a measurement.
 
+pub mod adversarial_recovery_contract;
 pub mod bundle;
 pub mod catalog;
 pub mod error;
@@ -63,6 +64,14 @@ pub mod scenario;
 pub mod slice;
 pub mod walk;
 
+pub use adversarial_recovery_contract::{
+    capability_manifest as adversarial_recovery_capability_manifest,
+    classify as classify_adversarial_recovery, ExamplesAdversarialCase, ExamplesRecoveryRecord,
+    RecoveryError, RecoveryEvent, CONTRACT_VERSION as ADVERSARIAL_RECOVERY_CONTRACT_VERSION,
+    FEATURE_ID as ADVERSARIAL_RECOVERY_FEATURE_ID,
+    INPUT_SCHEMA as ADVERSARIAL_RECOVERY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as ADVERSARIAL_RECOVERY_OUTPUT_SCHEMA,
+};
 pub use bundle::BundleInputs;
 pub use error::ExampleError;
 pub use expectation::{

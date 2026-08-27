@@ -14,6 +14,7 @@ bioprism-world = { workspace = true }
 bioprism-worldgen = { workspace = true }
 bioprism-fiber = { workspace = true }
 bioprism-section = { workspace = true }
+bioprism-foundation = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

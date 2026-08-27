@@ -7120,3 +7120,13 @@ __all__ += [
     "LaboratoryWorkflowReceipt",
     "orchestrate_laboratory_workflow",
 ]
+
+from .adversarial_recovery_contract import (
+    ExamplesRecoveryRecord,
+    classify_adversarial_recovery,
+)
+
+__all__ += [
+    "ExamplesRecoveryRecord",
+    "classify_adversarial_recovery",
+]
