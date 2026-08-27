@@ -28,7 +28,10 @@ import json
 import math
 from threading import Lock
 import uuid
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
+
+if TYPE_CHECKING:
+    from .workflow_cycle import AutonomousWorkflowCycleResult
 
 from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
@@ -155,6 +158,7 @@ from .autonomous_connectors import (
     AutonomousConnectorRuntime,
     AutonomousConnectorSelectionPlan,
 )
+from .autonomous_connector_worker import AutonomousConnectorOperationRegistry
 from .autonomous_capabilities import (
     AUTONOMOUS_CAPABILITY_JOURNAL_SNAPSHOT_SCHEMA,
     AutonomousCapabilityExecutionResult,
@@ -8062,11 +8066,13 @@ def _decision_cycle_task_metadata(blueprint: AutonomousAutoBlueprint) -> dict[st
 def _decision_cycle_task_metadata_from_result(result: Any) -> dict[str, str] | None:
     """Read the public value-only task decision identity from a rehydrated result."""
 
-    field = lambda name: result.get(name) if isinstance(result, Mapping) else getattr(result, name, None)
+    def read_field(name: str) -> Any:
+        return result.get(name) if isinstance(result, Mapping) else getattr(result, name, None)
+
     values = {
-        "task_intent_digest": field("task_intent_digest"),
-        "task_decision_digest": field("task_decision_digest"),
-        "task_decision_posture": field("task_decision_posture"),
+        "task_intent_digest": read_field("task_intent_digest"),
+        "task_decision_digest": read_field("task_decision_digest"),
+        "task_decision_posture": read_field("task_decision_posture"),
     }
     if all(value is None for value in values.values()):
         return None
@@ -11931,8 +11937,10 @@ class AutonomousTaskOrchestrator:
         notes = structured.get("notes", "")
         if not isinstance(notes, str) or len(notes.encode("utf-8")) > MAX_AUTONOMY_TEXT_BYTES:
             errors.append("provider stage notes are malformed or exceed their bound")
-        if declared == "completed" and not evidence:
-            errors.append("completed stage returned no evidence")
+        # Evidence presence is evaluated by the digest-bound stage response evaluator below.
+        # Keeping it out of the syntactic validator means a missing-evidence completion is
+        # recorded as a quality-gated block with replayable evaluator feedback, rather than
+        # disappearing as an unscored provider parse failure.
         if declared == "completed" and not stage.evidence_outputs:
             errors.append("workflow stage has no declared evidence outputs")
         return declared, evidence, uncertainty, tuple(errors)
@@ -12036,6 +12044,7 @@ class AutonomousTaskOrchestrator:
         selection_overrides: Mapping[str, Any] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
+        approved_stage_ids: Sequence[str] = (),
         run_id: str | None = None,
         max_output_tokens: int = 2_048,
         temperature: float | None = None,
@@ -12407,6 +12416,7 @@ class AutonomousTaskOrchestrator:
         selection_overrides: Mapping[str, Any] | None = None,
         approve_provider_call: bool = False,
         approve_mission_dispatch: bool = False,
+        approved_stage_ids: Sequence[str] = (),
         run_id: str | None = None,
         max_output_tokens: int = 2_048,
         temperature: float | None = None,
@@ -12474,6 +12484,19 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("max_stage_calls must be between 1 and 16")
         if not isinstance(auto_route, bool):
             raise BrainRunError("auto_route must be a boolean")
+        approved_stage_ids = _sequence(
+            "workflow approved_stage_ids",
+            approved_stage_ids,
+            maximum=len(blueprint.workflow.stages),
+        )
+        unknown_approved_stages = sorted(
+            set(approved_stage_ids).difference(stage.id for stage in blueprint.workflow.stages)
+        )
+        if unknown_approved_stages:
+            raise BrainRunError(
+                "workflow approved_stage_ids contains unknown stages: "
+                + ", ".join(unknown_approved_stages)
+            )
         if execution_plan_context is not None:
             if not isinstance(execution_plan_context, Mapping):
                 raise BrainRunError("workflow execution_plan_context must be a mapping or None")
@@ -12733,6 +12756,22 @@ class AutonomousTaskOrchestrator:
                     workflow_digest=blueprint.workflow.workflow_digest,
                     stage_id=ready.id,
                 ).to_dict()
+            quality_gate_failed = (
+                execution_status == "completed"
+                and not errors
+                and declared == "completed"
+                and response_evaluation is not None
+                and response_evaluation["passed"] is False
+            )
+            stage_validation_errors = tuple(errors)
+            if quality_gate_failed:
+                missing = response_evaluation.get("missing_signals", ())
+                stage_validation_errors = (
+                    *stage_validation_errors,
+                    "workflow stage quality gate failed: "
+                    + (", ".join(str(item) for item in missing) or "integrity evaluation"),
+                )
+                execution_status = "blocked"
             stage_report = AutonomousWorkflowStageResult(
                 stage=ready,
                 execution_status=execution_status,
@@ -12741,7 +12780,7 @@ class AutonomousTaskOrchestrator:
                 structured=structured,
                 evidence=evidence,
                 uncertainty=uncertainty,
-                validation_errors=errors,
+                validation_errors=stage_validation_errors,
                 response_digest=response_digest,
                 attempt=1,
                 stage_execution_plan=stage_execution_plan.to_dict(),
@@ -12753,16 +12792,44 @@ class AutonomousTaskOrchestrator:
                 status="running",
                 plan_digest=stage_execution_plan.stage_plan_digest,
                 detail_digest=response_digest,
-                failure_code="workflow_stage_validation_failed" if errors else None,
+                failure_code=(
+                    "workflow_stage_quality_gate_failed"
+                    if quality_gate_failed
+                    else "workflow_stage_validation_failed"
+                    if errors
+                    else None
+                ),
             )
             stage_results.append(stage_report)
             snapshot = stage_report.checkpoint_snapshot()
             if snapshot is not None and not errors:
+                if quality_gate_failed:
+                    # Preserve the evaluator and transient structured output for an explicit
+                    # retry, while making the stage non-completable until retry_blocked=True.
+                    snapshot = {
+                        **snapshot,
+                        "status": "blocked",
+                        "execution_status": "blocked",
+                    }
                 snapshots[ready.id] = snapshot
             if execution_status == "approval_required":
                 return AutonomousWorkflowRun(
                     workflow_run_id,
                     "approval_required",
+                    blueprint,
+                    tuple(stage_results),
+                    self._workflow_checkpoint(
+                        run_id=workflow_run_id,
+                        blueprint=blueprint,
+                        snapshots=tuple(snapshots.values()),
+                        plan_refinement_digest=plan_refinement_digest,
+                    ),
+                    (ready.id,),
+                )
+            if quality_gate_failed:
+                return AutonomousWorkflowRun(
+                    workflow_run_id,
+                    "stage_blocked",
                     blueprint,
                     tuple(stage_results),
                     self._workflow_checkpoint(
@@ -16159,11 +16226,11 @@ class AutonomousAgent:
             return supplied
         merged = dict(historical)
         merged.update(dict(supplied))
-        for field in ("provider_health", "model_health"):
-            historical_rows = historical.get(field)
-            supplied_rows = supplied.get(field)
+        for field_name in ("provider_health", "model_health"):
+            historical_rows = historical.get(field_name)
+            supplied_rows = supplied.get(field_name)
             if isinstance(historical_rows, Mapping) and isinstance(supplied_rows, Mapping):
-                merged[field] = {**dict(historical_rows), **dict(supplied_rows)}
+                merged[field_name] = {**dict(historical_rows), **dict(supplied_rows)}
         return merged
 
     def credential_status(self, provider: str) -> dict[str, Any]:
@@ -18095,14 +18162,14 @@ class AutonomousAgent:
             min_selection_confidence=min_selection_confidence,
             selection_overrides=selection_overrides,
         )
-        for field in (
+        for field_name in (
             "task_digest", "domain", "capability", "risk_class", "workflow_id",
             "workflow_digest", "domain_pack_digest", "task_intent_digest", "task_decision_digest",
             "task_decision_posture", "selection_context_digest",
             "execution_plan_digest", "required_model_capabilities", "selection_contract",
             "selection_audit",
         ):
-            if fresh.get(field) != selection_preview.get(field):
+            if fresh.get(field_name) != selection_preview.get(field_name):
                 raise BrainRunError("approved model selection is stale; re-review required")
         fresh_selected = fresh["selection_audit"].get("selected_model")
         if not isinstance(fresh_selected, Mapping) or fresh_selected.get("model_id") != selected_id:
@@ -21088,7 +21155,6 @@ class AutonomousAgent:
             )
         if self.tool_registry is not None and "provider_tools" not in resolved_options:
             selected_tools = self.tool_registry.tools_for(tool_domains or None)
-            registered_tool_names = {tool.name for tool in selected_tools}
             reviewed_tool_bindings = {
                 (binding.name, binding.capability)
                 for profile in builtin_autonomous_domain_tool_profiles()

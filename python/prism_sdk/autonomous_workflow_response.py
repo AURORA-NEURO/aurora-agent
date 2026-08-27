@@ -191,20 +191,27 @@ def evaluate_autonomous_workflow_stage_response(
     workflow_digest = _digest("workflow stage evaluation workflow_digest", workflow_digest)
     normalized = _normalize_stage_response(value, stage_id=stage_id)
     response_digest = content_digest(normalized)
+    # A completed stage may legitimately have no unresolved uncertainty or follow-up action.
+    # The required notes field is the explicit bounded declaration that the stage has no such
+    # disclosure. Non-completed stages must still report both fields themselves.
+    completed_without_disclosure = normalized["status"] == "completed" and bool(normalized["notes"].strip())
     signals = {
         "schema_valid": 1.0,
         "stage_identity": 1.0,
         "status_declared": 1.0,
         "evidence_present": float(bool(normalized["evidence"])),
-        "uncertainty_reported": float(bool(normalized["uncertainty"])),
+        "uncertainty_reported": float(bool(normalized["uncertainty"]) or completed_without_disclosure),
         "notes_present": float(bool(normalized["notes"])),
-        "next_actions_present": float(bool(normalized["next_actions"])),
+        "next_actions_present": float(bool(normalized["next_actions"]) or completed_without_disclosure),
         "response_digest_bound": 1.0,
     }
     total_weight = sum(_SIGNAL_WEIGHTS.values())
     reward = round(sum(signals[name] * weight for name, weight in _SIGNAL_WEIGHTS.items()) / total_weight, 12)
     missing = tuple(name for name, score in signals.items() if score < 1.0)
-    passed = reward >= AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_PASS_THRESHOLD
+    # The aggregate reward is useful for learning, but it must never hide a missing integrity
+    # signal at a continuation boundary. A stage is therefore passable only when every signal
+    # is satisfied and the score clears the documented floor.
+    passed = reward >= AUTONOMOUS_WORKFLOW_STAGE_RESPONSE_PASS_THRESHOLD and not missing
     evaluator_id = f"autonomous-{domain}-workflow-stage-integrity"
     feedback_digest = content_digest({"workflow_digest": workflow_digest, "stage_id": stage_id, "response_digest": response_digest, "signals": signals})
     failure_class = None if passed else "workflow_stage_response_integrity_gate"

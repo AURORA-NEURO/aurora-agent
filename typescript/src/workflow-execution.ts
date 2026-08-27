@@ -1036,7 +1036,7 @@ function validateWorkflowStageOutput(stage: AutonomousWorkflowStage, value: unkn
 }
 
 function blockedWorkflowExecutionStatus(errorClass: string | null): Extract<AutonomousWorkflowExecutionStatus, "stage_blocked" | "stage_proposed" | "stage_not_attempted"> | null {
-  if (errorClass === "stage_blocked") return "stage_blocked";
+  if (errorClass === "stage_blocked" || errorClass === "stage_quality_gate") return "stage_blocked";
   if (errorClass === "stage_proposed") return "stage_proposed";
   if (errorClass === "stage_not_attempted") return "stage_not_attempted";
   return null;
@@ -1525,7 +1525,15 @@ export class AutonomousWorkflowExecutor {
           stageId: stage.id,
         });
       }
-      if (run.status === "completed" && validation.errors.length === 0 && validation.declaredStatus === "completed" && this.learning) {
+      const qualityGateFailed = run.status === "completed"
+        && validation.errors.length === 0
+        && validation.declaredStatus === "completed"
+        && responseEvaluation !== null
+        && !responseEvaluation.passed;
+      const stageValidationErrors = qualityGateFailed
+        ? [...validation.errors, `workflow stage quality gate failed: ${responseEvaluation!.missing_signals.join(", ") || "integrity evaluation"}`]
+        : validation.errors;
+      if (run.status === "completed" && validation.errors.length === 0 && validation.declaredStatus === "completed" && !qualityGateFailed && this.learning) {
         const episodeId = `workflow:${checkpoint.job_id}:${stage.id}:g${checkpoint.generation + 1}`;
         const episode = await this.learning.prepareRun(run, { episodeId, runId: episodeId, stageId: stage.id, parentJobId: checkpoint.job_id, planRefinementDigest });
         learningEpisodeId = episode.episode_id;
@@ -1547,7 +1555,7 @@ export class AutonomousWorkflowExecutor {
         uncertainty: validation.uncertainty,
         notes: validation.notes,
         next_actions: validation.nextActions,
-        validation_errors: validation.errors,
+        validation_errors: stageValidationErrors,
       });
       if (run.status === "approval_required") {
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, stage_plan_digest: stagePlanDigest, status: "approval_required", run_status: run.status, selection_digest: selectionDigest, response_digest: null, output_bytes: 0, error_class: null, learning_episode_id: null }], "paused", contractDigest, checkpoint, stageOrder, planRefinementDigest);
@@ -1561,6 +1569,12 @@ export class AutonomousWorkflowExecutor {
         await this.appendEvent(checkpoint.job_id, "checkpointed", stage.id, checkpoint);
         return this.result("paused", checkpoint, blueprint, stageResults, route, semanticStatus);
       }
+      if (qualityGateFailed) {
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, stage_plan_digest: stagePlanDigest, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: "stage_quality_gate", error_code: "invalid_response", retryable: false, status_code: null, learning_episode_id: null, response_learning_episode_id: null, response_evaluation: responseEvaluation }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);
+        await this.store.save(checkpoint);
+        await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
+        return this.result("stage_blocked", checkpoint, blueprint, stageResults, route, semanticStatus);
+      }
       if (run.status !== "completed") {
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, stage_plan_digest: stagePlanDigest, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: null, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);
         await this.store.save(checkpoint);
@@ -1569,7 +1583,7 @@ export class AutonomousWorkflowExecutor {
       }
       if (validation.errors.length > 0 || validation.declaredStatus !== "completed") {
         const errorClass = validation.errors.length > 0 ? "stage_output_invalid" : blockedWorkflowErrorClass(validation.declaredStatus) ?? "stage_not_completed";
-        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, stage_plan_digest: stagePlanDigest, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: errorClass, error_code: "invalid_response", retryable: false, status_code: null, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);
+        checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, stage_plan_digest: stagePlanDigest, status: "failed", run_status: run.status, selection_digest: selectionDigest, response_digest: outputDigest, output_bytes: outputBytes, error_class: errorClass, error_code: "invalid_response", retryable: false, status_code: null, learning_episode_id: null, response_learning_episode_id: null, response_evaluation: responseEvaluation }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);
         await this.store.save(checkpoint);
         await this.appendEvent(checkpoint.job_id, "stage_failed", stage.id, checkpoint);
         return this.result(blockedWorkflowExecutionStatus(errorClass) ?? "failed", checkpoint, blueprint, stageResults, route, semanticStatus);

@@ -806,6 +806,56 @@ test("workflow executor runs every built-in single-domain workflow through the s
   }
 });
 
+test("workflow executor blocks an evidence-free completion and requires an explicit quality retry", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (_url, init) => {
+      calls += 1;
+      const payload = workflowStagePayload(init);
+      if (calls === 1) payload.evidence = [];
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(payload) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow-quality-gate", "https://workflow-quality-gate.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  const candidate = { ...model(), provider: "workflow-quality-gate", model: "workflow-quality-gate-model" };
+  agent.registerModel(candidate);
+  const executor = new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore());
+
+  const blocked = await executor.start("Require reviewable stage evidence", {
+    domain: "coding",
+    jobId: "workflow-quality-gate-1",
+    candidates: [candidate],
+    approveProviderCall: true,
+    maxStages: 32,
+  });
+  assert.equal(blocked.status, "stage_blocked");
+  assert.equal(blocked.completed_stage_count, 0);
+  assert.equal(blocked.stage_results[0].response_evaluation.passed, false);
+  assert.match(blocked.stage_results[0].validation_errors.join(" "), /quality gate failed.*evidence_present/);
+  assert.equal(blocked.checkpoint.stage_outcomes.at(-1).error_class, "stage_quality_gate");
+  assert.equal(blocked.execution_receipt.next_action, "retry_stage");
+  await validateAutonomousWorkflowExecutionReceipt(blocked.execution_receipt);
+
+  const held = await executor.resume("workflow-quality-gate-1", "Require reviewable stage evidence", {
+    candidates: [candidate],
+    approveProviderCall: true,
+  });
+  assert.equal(held.status, "stage_blocked");
+  assert.equal(calls, 1, "a quality-gated stage must not replay without an explicit retry");
+
+  const retried = await executor.resume("workflow-quality-gate-1", "Require reviewable stage evidence", {
+    candidates: [candidate],
+    approveProviderCall: true,
+    maxStages: 32,
+    retryBlocked: true,
+  });
+  assert.equal(retried.status, "completed");
+  assert.equal(retried.completed_stage_count, 5);
+  assert.equal(calls, 6, "the explicit retry redispatches the failed stage and completes the DAG");
+});
+
 test("workflow executor forwards reviewed stage identity into live adapter dispatch", async () => {
   let calls = 0;
   const llm = new LLMRuntime({

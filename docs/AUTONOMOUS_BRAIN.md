@@ -167,6 +167,18 @@ Policies and reports are digest-bound, provider-free, and secret-free. Python ex
 decision readiness; they are not medical, scientific, operational, enterprise, or external-world
 truth evaluators, and they never authorize an effect.
 
+Workflow continuation now has its own fail-closed quality boundary. A completed stage must pass
+the digest-bound `AutonomousWorkflowStageResponseEvaluation` before its output becomes a
+checkpoint dependency, feeds a later stage, or creates a learning episode. Evidence-free or
+notes-free completion claims are retained as a blocked stage with the evaluator's missing-signal
+and replan metadata; they are never treated as a successful stage merely because the provider
+transport returned HTTP success. Completed stages may leave uncertainty and next-actions empty
+when their bounded notes explicitly close those disclosures, while proposed/blocked stages still
+need to disclose them. Resuming a quality-gated stage is held until the caller supplies the
+explicit retry control (`retryBlocked` in TypeScript or `retry_blocked` in Python). This gate is
+about stage-report integrity only: it does not prove task correctness, source truth, or an
+external effect.
+
 Semantic provider routing is covered by the same boundary. `route_with_provider`,
 `prepare_auto_with_provider`, and Python `run_auto(..., semantic_routing=True)` perform a
 provider-free cross-domain admission before model selection or classifier invocation. A strict

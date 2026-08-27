@@ -277,12 +277,15 @@ class _StructuredWorkflowProviderHandler(BaseHTTPRequestHandler):
                 stage_id = content.split("Execute workflow stage ", 1)[1].split(":", 1)[0]
                 break
         blocked = getattr(self.server, "block_stage", None) == stage_id
+        quality_failed = getattr(self.server, "quality_fail_stage", None) == stage_id
         large_checkpoint = getattr(self.server, "large_checkpoint", False)
         evidence = (
             [f"evidence for {stage_id} {index} " + ("x" * 480) for index in range(32)]
-            if large_checkpoint and not blocked
+            if large_checkpoint and not blocked and not quality_failed
             else [] if blocked else [f"evidence for {stage_id}"]
         )
+        if quality_failed:
+            evidence = []
         response = {
             "id": f"workflow-{stage_id}",
             "model": "test-model",
@@ -3950,6 +3953,98 @@ def test_run_workflow_stage_contract_is_executable_for_every_builtin_domain():
             assert result.execution_receipt.completed_stage_ids == (blueprint.workflow.stages[0].id,)
             assert result.execution_receipt.next_action == "continue_workflow"
             assert result.execution_receipt.progress == 1 / len(blueprint.workflow.stages)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_blocks_an_evidence_free_completion_and_requires_an_explicit_quality_retry():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "workflow-quality-gate-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Require reviewable stage evidence.",
+            domain="coding",
+        )
+        server.quality_fail_stage = "scope"  # type: ignore[attr-defined]
+        blocked = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            run_id="workflow-quality-gate",
+        )
+        assert blocked.status == "stage_blocked"
+        assert blocked.checkpoint.completed_stage_ids == ()
+        assert blocked.stage_results[0].execution_status == "blocked"
+        assert blocked.stage_results[0].response_evaluation is not None
+        assert blocked.stage_results[0].response_evaluation["passed"] is False
+        assert "evidence_present" in " ".join(blocked.stage_results[0].validation_errors)
+        assert blocked.checkpoint.stages[0]["status"] == "blocked"
+        assert blocked.checkpoint.stages[0]["execution_status"] == "blocked"
+        assert blocked.execution_receipt.next_action == "retry_stage"
+
+        server.quality_fail_stage = None  # type: ignore[attr-defined]
+        held = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            checkpoint=blocked.checkpoint,
+            run_id="workflow-quality-gate",
+        )
+        assert held.status == "stage_blocked"
+
+        retried = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            checkpoint=blocked.checkpoint,
+            retry_blocked=True,
+            run_id="workflow-quality-gate",
+        )
+        assert retried.status == "completed"
+        assert retried.checkpoint.completed_stage_ids == ("scope", "inspect", "implement", "verify", "handoff")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_run_workflow_honors_stage_approval_allowlist_without_runtime_name_error():
+    runtime, store, server, thread = _structured_runtime()
+    handle = store.register("openai", "workflow-stage-approval-secret")
+    brain = AutonomousBrain(_Workspace(), runtime)
+    try:
+        blueprint = brain.prepare_autonomous(
+            task="Prepare a reversible operations workflow.",
+            domain="operations",
+        )
+        waiting = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            run_id="workflow-stage-approval",
+        )
+        assert waiting.status == "approval_required"
+        assert waiting.checkpoint.completed_stage_ids == ("observe", "impact", "rollback")
+        assert waiting.execution_receipt.next_action == "approve_provider_call"
+
+        approved = brain.run_workflow(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            approve_provider_call=True,
+            approved_stage_ids=("approval",),
+            checkpoint=waiting.checkpoint,
+            run_id="workflow-stage-approval",
+        )
+        assert approved.status == "completed"
+        assert approved.checkpoint.completed_stage_ids == ("observe", "impact", "rollback", "approval", "handoff")
     finally:
         server.shutdown()
         thread.join(timeout=2)
