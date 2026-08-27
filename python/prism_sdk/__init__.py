@@ -6629,6 +6629,16 @@ __all__ += [
     "run_multimodal_evidence_surveillance",
 ]
 
+from .retrieval_synthesis_assurance import (
+    RetrievalSynthesisReceipt,
+    assure_retrieval_synthesis,
+)
+
+__all__ += [
+    "RetrievalSynthesisReceipt",
+    "assure_retrieval_synthesis",
+]
+
 from .adapter_throughput_evidence_surveillance_inference_engine import (
     ThroughputEvidenceObservation,
     ThroughputEvidenceSurveillanceReceipt,

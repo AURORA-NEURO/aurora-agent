@@ -107,6 +107,10 @@ COMMANDS
                     Verify a federated continual protocol-simulation report;
                     retain release evidence without executing a protocol runner or instrument.
 
+  retrieval assure   --request <path> [--receipt-out <path>] [--dry-run]
+                    Verify a bounded retrieval corpus summary against freshness, provenance,
+                    source-quorum, policy, and replay gates; no provider or external effect runs.
+
   readiness audit --request <path>
                     Run the offline structural decision-readiness audit in a JSON request.
                     Catalogue binding and artifact retention remain transport responsibilities.
@@ -284,6 +288,11 @@ pub enum Command {
         dry_run: bool,
     },
     ProtocolSimulationVerify {
+        request: PathBuf,
+        receipt_out: Option<PathBuf>,
+        dry_run: bool,
+    },
+    RetrievalSynthesisAssure {
         request: PathBuf,
         receipt_out: Option<PathBuf>,
         dry_run: bool,
@@ -581,6 +590,11 @@ pub fn parse<I: IntoIterator<Item = String>>(arguments: I) -> CliResult<Parsed> 
             dry_run: options.take_switch("--dry-run"),
         },
         ("protocol", "simulate-verify") => Command::ProtocolSimulationVerify {
+            request: options.take_path("--request")?,
+            receipt_out: options.take_optional_path("--receipt-out"),
+            dry_run: options.take_switch("--dry-run"),
+        },
+        ("retrieval", "assure") => Command::RetrievalSynthesisAssure {
             request: options.take_path("--request")?,
             receipt_out: options.take_optional_path("--receipt-out"),
             dry_run: options.take_switch("--dry-run"),
@@ -944,6 +958,40 @@ mod tests {
     #[test]
     fn help_documents_knowledge_interoperability_verification() {
         assert!(super::help().contains("knowledge interop-verify --request <path>"));
+    }
+
+    #[test]
+    fn retrieval_synthesis_assurance_parses_retention_and_dry_run() {
+        let parsed = parse(
+            [
+                "retrieval",
+                "assure",
+                "--request",
+                "retrieval.json",
+                "--receipt-out",
+                "receipt.json",
+                "--dry-run",
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .expect("parse retrieval synthesis assurance");
+        assert_eq!(
+            parsed,
+            Parsed::Run(super::Invocation {
+                json: false,
+                command: Command::RetrievalSynthesisAssure {
+                    request: PathBuf::from("retrieval.json"),
+                    receipt_out: Some(PathBuf::from("receipt.json")),
+                    dry_run: true,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn help_documents_retrieval_synthesis_assurance() {
+        assert!(super::help().contains("retrieval assure --request <path>"));
     }
 
     #[test]

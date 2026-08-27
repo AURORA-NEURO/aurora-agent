@@ -3624,6 +3624,15 @@ export type { AdapterLocalEvidenceSurveillanceWorkflowFabricReceipt } from "./re
 export type { AdapterMultimodalEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
 export type { AdapterThroughputEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
 export {
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_INPUT_SCHEMA,
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_OUTPUT_SCHEMA,
+  cliRetrievalSynthesisAssuranceReceiptDigest,
+  validateCliRetrievalSynthesisAssuranceReceipt,
+} from "./research-contracts.js";
+export type { CliRetrievalEvidenceCandidate, CliRetrievalSynthesisAssuranceReceipt } from "./research-contracts.js";
+export {
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
   adapterFederatedContinualEvidenceSurveillanceWorkflowFabricReceiptDigest,
