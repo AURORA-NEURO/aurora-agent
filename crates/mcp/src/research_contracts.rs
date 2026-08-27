@@ -781,6 +781,16 @@ pub fn validate_multimodal_ingestion_assurance_json(
     crate::multimodal_ingestion_assurance::validate_multimodal_ingestion_json(value)
 }
 
+pub fn assure_weavelang_computational_execution_json(value: &Value) -> Result<Value, String> {
+    bioprism_weavelang::assure_computational_execution_json(value)
+}
+
+pub fn validate_weavelang_computational_execution_json(
+    value: &Value,
+) -> Result<bioprism_weavelang::ExecutionRunReceipt, String> {
+    bioprism_weavelang::validate_computational_execution_json(value)
+}
+
 pub fn validate_harmonized_research_object_json(
     value: &Value,
 ) -> Result<HarmonizedResearchObject, String> {

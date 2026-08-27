@@ -2011,6 +2011,7 @@ impl Server {
             "instrument_preflight" => self.instrument_preflight(&arguments),
             "multimodal_harmonize" => self.multimodal_harmonize(&arguments),
             "mcp_multimodal_ingestion_assurance" => self.mcp_multimodal_ingestion_assurance(&arguments),
+            "weavelang_computational_execution_assurance" => self.weavelang_computational_execution_assurance(&arguments),
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
             "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
@@ -26403,6 +26404,31 @@ impl Server {
         }))
     }
 
+    fn weavelang_computational_execution_assurance(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized ResearchWorkflowSpec")?;
+        let receipt = crate::research_contracts::assure_weavelang_computational_execution_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_weavelang::COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "workflow nodes are deterministically ordered and graph defects are explicit",
+                "only local read, local computation, and local-artifact effects are admitted",
+                "unknown, unmeasured, contradictory, omitted, budget, and adversarial states fail closed"
+            ],
+            "limitations": [
+                "the route verifies a caller-declared graph and never dispatches tools or processes",
+                "a qualified execution receipt is not a scientific or clinical conclusion"
+            ]
+        }))
+    }
+
     fn analysis_qualify(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -38100,7 +38126,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "agent_orchestration",
             "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
             "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
-            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "interweave_workflow_execute", "interweave_workflow_execution_evidence", "interweave_workflow_execution_evidence_import", "interweave_workflow_execution_evidence_query", "interweave_workflow_execution_evidence_get", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "weavelang_computational_execution_assurance", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "interweave_workflow_execute", "interweave_workflow_execution_evidence", "interweave_workflow_execution_evidence_import", "interweave_workflow_execution_evidence_query", "interweave_workflow_execution_evidence_get", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -41478,6 +41504,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-runtime WorkflowExecutionRequest containing workflow, capability manifest, autonomy grant, policy receipt, run_id, declarative actions, and dry_run or execute mode." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "weavelang_computational_execution_assurance",
+            "description": "Verify a local single-study WeaveLang computational-execution graph before dispatch. It deterministically orders typed nodes, checks local-effect allow-lists, evidence closure, replay identity, dependencies, cycles, and budgets, and returns an ExecutionRun7 assurance receipt without invoking tools or moving data.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized weavelang ResearchWorkflowSpec." }
                 },
                 "required": ["request"]
             }

@@ -4233,3 +4233,13 @@ export {
   validateMcpMultimodalIngestionReceipt,
 } from "./research-contracts.js";
 export type { McpMultimodalIngestionReceipt } from "./research-contracts.js";
+
+export {
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_INPUT_SCHEMA,
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_OUTPUT_SCHEMA,
+  weavelangComputationalExecutionAssuranceDigest,
+  validateWeavelangExecutionRunReceipt,
+} from "./research-contracts.js";
+export type { WeavelangExecutionRunReceipt } from "./research-contracts.js";

@@ -7532,3 +7532,15 @@ __all__ += [
     "assure_multimodal_ingestion",
     "validate_multimodal_ingestion_receipt",
 ]
+
+from .weavelang_computational_execution_assurance import (
+    ExecutionRunReceipt as WeavelangExecutionRunReceipt,
+    assure_computational_execution,
+    validate_computational_execution_receipt,
+)
+
+__all__ += [
+    "WeavelangExecutionRunReceipt",
+    "assure_computational_execution",
+    "validate_computational_execution_receipt",
+]

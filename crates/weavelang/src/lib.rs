@@ -132,6 +132,7 @@ pub mod printer;
 pub mod reference;
 pub mod release_assurance;
 pub mod limitation_closure_control_plane;
+pub mod computational_execution_assurance;
 pub mod semantics;
 
 pub use compile::{compile, CompileError};
@@ -153,5 +154,14 @@ pub use limitation_closure_control_plane::{
     WeavelangClosureRequest, WeavelangLimitationCase,
     CONTRACT_VERSION as WEAVELANG_LIMITATION_CLOSURE_CONTRACT_VERSION,
     FEATURE_ID as WEAVELANG_LIMITATION_CLOSURE_FEATURE_ID,
+};
+pub use computational_execution_assurance::{
+    assure_computational_execution, assure_computational_execution_json,
+    computational_execution_assurance_manifest, validate_computational_execution_json,
+    ComputationalExecutionError, ExecutionEvidenceState, ExecutionNode,
+    ExecutionRunDisposition, ExecutionRunReceipt, ResearchWorkflowSpec,
+    CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+    TOOL_NAME as COMPUTATIONAL_EXECUTION_ASSURANCE_TOOL,
 };
 pub use semantics::{ExecutionMode, Invariant, LivenessReport, Machine, Trace};
