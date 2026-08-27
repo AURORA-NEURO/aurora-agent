@@ -7130,3 +7130,13 @@ __all__ += [
     "ExamplesRecoveryRecord",
     "classify_adversarial_recovery",
 ]
+
+from .semantic_parity_copilot import (
+    SemanticParityWitness,
+    compare_semantic_parity,
+)
+
+__all__ += [
+    "SemanticParityWitness",
+    "compare_semantic_parity",
+]
