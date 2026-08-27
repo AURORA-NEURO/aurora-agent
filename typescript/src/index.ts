@@ -4153,3 +4153,13 @@ export {
   validateBioethicsCompositionReceipt,
 } from "./research-contracts.js";
 export type { BioethicsCompositionReceipt } from "./research-contracts.js";
+
+export {
+  FIBER_MECHANISM_CONTRACT_MODEL_FEATURE_ID,
+  FIBER_MECHANISM_CONTRACT_MODEL_CONTRACT_VERSION,
+  FIBER_MECHANISM_CONTRACT_MODEL_INPUT_SCHEMA,
+  FIBER_MECHANISM_CONTRACT_MODEL_OUTPUT_SCHEMA,
+  fiberMechanismContractDigest,
+  validateFiberMechanismPortfolioContract,
+} from "./research-contracts.js";
+export type { FiberMechanismPortfolioContract } from "./research-contracts.js";

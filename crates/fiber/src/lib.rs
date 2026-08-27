@@ -47,6 +47,7 @@ pub mod compile;
 pub mod error;
 pub mod influence;
 pub mod mechanism_assurance;
+pub mod mechanism_contract_model;
 pub mod mechanism_gateway;
 pub mod oracle;
 pub mod plan;
@@ -78,6 +79,15 @@ pub use mechanism_gateway::{
     MechanismGatewayReceipt, MechanismGatewayRequest,
     CONTRACT_VERSION as MECHANISM_GATEWAY_CONTRACT_VERSION,
     FEATURE_ID as MECHANISM_GATEWAY_FEATURE_ID,
+};
+pub use mechanism_contract_model::{
+    mechanism_contract_model_manifest, model_mechanism_contract, MechanismContractCandidate,
+    MechanismContractDisposition, MechanismContractError, MechanismPortfolioContract,
+    MechanismQuestionContract,
+    CONTRACT_VERSION as MECHANISM_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_CONTRACT_MODEL_FEATURE_ID,
+    INPUT_SCHEMA as MECHANISM_CONTRACT_MODEL_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as MECHANISM_CONTRACT_MODEL_OUTPUT_SCHEMA,
 };
 pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};
