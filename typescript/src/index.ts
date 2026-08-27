@@ -4193,3 +4193,13 @@ export {
   validateFiberParityWitness,
 } from "./research-contracts.js";
 export type { FiberParityWitness } from "./research-contracts.js";
+
+export {
+  LAB_FEDERATED_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  LAB_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  LAB_FEDERATED_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+  LAB_FEDERATED_RETRIEVAL_SYNTHESIS_OUTPUT_SCHEMA,
+  labFederatedRetrievalSynthesisDigest,
+  validateLabEvidenceSynthesis,
+} from "./research-contracts.js";
+export type { LabEvidenceSynthesis } from "./research-contracts.js";

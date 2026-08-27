@@ -7478,3 +7478,17 @@ __all__ += [
     "assure_semantic_parity",
     "fiberSemanticParityDigest",
 ]
+
+from .lab_federated_retrieval_synthesis_assurance import (
+    EvidenceSynthesis,
+    federated_retrieval_synthesis_manifest,
+    assure_federated_retrieval_synthesis,
+    labFederatedRetrievalSynthesisDigest,
+)
+
+__all__ += [
+    "EvidenceSynthesis",
+    "federated_retrieval_synthesis_manifest",
+    "assure_federated_retrieval_synthesis",
+    "labFederatedRetrievalSynthesisDigest",
+]

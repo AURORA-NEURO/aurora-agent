@@ -133,6 +133,7 @@ pub mod context_value;
 pub mod design_frontier;
 pub mod error;
 pub mod evidence_surveillance;
+pub mod federated_retrieval_synthesis_assurance;
 pub mod evolution;
 pub mod experiment_design;
 pub mod holdout;
@@ -165,6 +166,15 @@ pub use evidence_surveillance::{
     FeedEvidenceState, QualifiedEvidenceSet,
     FEATURE_CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_COPILOT_FEATURE_ID,
+};
+pub use federated_retrieval_synthesis_assurance::{
+    assure_federated_retrieval_synthesis, federated_retrieval_synthesis_manifest,
+    EvidenceSynthesis, PeerSynthesisSummary, RetrievalCandidate, RetrievalSynthesisError,
+    ScopedRetrievalQuery, SynthesisDisposition,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_RETRIEVAL_SYNTHESIS_OUTPUT_SCHEMA,
 };
 pub use evolution::{
     ChangeProposal, ContaminationRecord, EvolutionArchive, EvolutionCard, ImprovementClaim,
