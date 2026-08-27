@@ -7401,6 +7401,20 @@ __all__ += [
     "baselineInterpretationAssuranceDigest",
 ]
 
+from .governance_federated_continual_interpretation_assurance import (
+    GovernanceFederatedInterpretationReceipt,
+    governance_federated_interpretation_manifest,
+    assure_governance_federated_interpretation,
+    governanceFederatedInterpretationDigest,
+)
+
+__all__ += [
+    "GovernanceFederatedInterpretationReceipt",
+    "governance_federated_interpretation_manifest",
+    "assure_governance_federated_interpretation",
+    "governanceFederatedInterpretationDigest",
+]
+
 from .metrics_experiment_design_control_plane import (
     MetricsExecutableExperimentDesign,
     experiment_design_control_plane_manifest,

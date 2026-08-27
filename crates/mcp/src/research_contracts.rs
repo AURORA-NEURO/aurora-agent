@@ -449,6 +449,12 @@ use bioprism_governance::{
     compile_signed_research_object, SignedResearchObject, ValidatedResearchRun,
     RESEARCH_RELEASE_CONTRACT_FEATURE_ID,
 };
+use bioprism_governance::federated_continual_interpretation_assurance::{
+    assure_federated_continual_interpretations,
+    FederatedContinualInterpretationAssuranceReport,
+    FederatedContinualInterpretationAssuranceRequest,
+    FEATURE_ID as GOVERNANCE_FEDERATED_INTERPRETATION_FEATURE_ID,
+};
 use bioprism_lab::{
     evaluate_design_frontier, evaluate_semantic_parity, instrument_preflight,
     simulate_protocol_matrix, DesignFrontierReceipt, DesignFrontierRequest,
@@ -2374,6 +2380,27 @@ pub fn validate_interpretation_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != INTERPRETATION_ASSURANCE_FEATURE_ID {
         return Err("interpretation assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_governance_federated_continual_interpretation_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedContinualInterpretationAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid governance federated interpretation request: {error}"))?;
+    let receipt = assure_federated_continual_interpretations(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize governance federated interpretation receipt: {error}"))
+}
+
+pub fn validate_governance_federated_continual_interpretation_json(
+    value: &Value,
+) -> Result<FederatedContinualInterpretationAssuranceReport, String> {
+    let receipt: FederatedContinualInterpretationAssuranceReport = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid governance federated interpretation receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != GOVERNANCE_FEDERATED_INTERPRETATION_FEATURE_ID {
+        return Err("governance federated interpretation feature id mismatch".into());
     }
     Ok(receipt)
 }

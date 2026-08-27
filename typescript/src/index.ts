@@ -4142,6 +4142,15 @@ export {
   validateBaselineInterpretationAssuranceReceipt,
 } from "./research-contracts.js";
 export type { BaselineInterpretationAssuranceReceipt } from "./research-contracts.js";
+export {
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_CONTRACT_VERSION,
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_INPUT_SCHEMA,
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_OUTPUT_SCHEMA,
+  governanceFederatedInterpretationDigest,
+  validateGovernanceFederatedInterpretationReceipt,
+} from "./research-contracts.js";
+export type { GovernanceFederatedInterpretationReceipt } from "./research-contracts.js";
 
 export {
   METRICS_EXPERIMENT_DESIGN_FEATURE_ID,

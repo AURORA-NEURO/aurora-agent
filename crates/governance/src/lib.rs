@@ -66,6 +66,7 @@ pub mod deprecation;
 pub mod descriptor;
 pub mod diff;
 pub mod error;
+pub mod federated_continual_interpretation_assurance;
 pub mod interpretation_assurance;
 pub mod known;
 pub mod migration;
@@ -88,6 +89,13 @@ pub use diff::{diff, FieldChange, SchemaDiff};
 pub use error::{
     CompatibilityError, DeprecationError, DescriptorError, DigestBreach, GovernanceError,
     MigrationError, VersionError,
+};
+pub use federated_continual_interpretation_assurance::{
+    assure_federated_continual_interpretations,
+    federated_continual_interpretation_assurance_manifest,
+    FederatedContinualInterpretationAssuranceError,
+    FederatedContinualInterpretationAssuranceReport,
+    FederatedContinualInterpretationAssuranceRequest,
 };
 pub use interpretation_assurance::{
     assure_interpretations, interpretation_assurance_manifest, InterpretationAssuranceError,
