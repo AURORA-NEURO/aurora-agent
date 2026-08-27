@@ -3494,6 +3494,15 @@ export {
   validateServicesFederatedPublicationReleaseInferenceReceipt,
 } from "./research-contracts.js";
 export type { ServicesFederatedPublicationReleaseInferenceReceipt } from "./research-contracts.js";
+export {
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID,
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_CONTRACT_VERSION,
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_INPUT_SCHEMA,
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_OUTPUT_SCHEMA,
+  mutationKnowledgeFederatedReceiptDigest,
+  validateMutationKnowledgeFederatedReceipt,
+} from "./research-contracts.js";
+export type { MutationKnowledgeFederatedReceipt } from "./research-contracts.js";
 
 export {
   ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,

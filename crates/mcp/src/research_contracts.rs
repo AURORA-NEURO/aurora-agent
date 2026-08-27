@@ -350,7 +350,7 @@ use bioprism_adapter::{
 use bioprism_adapter::{
     schedule_local_evidence_surveillance_workflow,
     LocalEvidenceSurveillanceWorkflowReceipt,
-    ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+    ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
 use bioprism_adapter::{
     schedule_multimodal_evidence_surveillance_workflow,
@@ -360,7 +360,7 @@ use bioprism_adapter::{
 use bioprism_adapter::{
     schedule_throughput_evidence_surveillance_workflow,
     ThroughputEvidenceSurveillanceWorkflowReceipt,
-    ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+    ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
 use bioprism_adapter::{
     schedule_federated_continual_evidence_surveillance_workflow,
@@ -432,6 +432,11 @@ use bioprism_conformance::context_compilation_federated_control_plane::{
     ContextCompilationFederatedControlReceipt,
     ContextCompilationFederatedControlRequest,
     FEATURE_ID as CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,
+};
+use bioprism_mutation::knowledge_representation_federated_control_plane::{
+    operate_mutation_knowledge_federated_control, MutationKnowledgeFederatedReceipt,
+    MutationKnowledgeFederatedControlRequest,
+    FEATURE_ID as MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID,
 };
 use bioprism_oraclex::publication_release_contract_model::{compile_publication_release, PublicationReleaseReceipt, PublicationReleaseRequest, feature_id as PUBLICATION_RELEASE_FEATURE_ID};
 use bioprism_interweave::interweave_contract_frontier_federated_control_plane::{feature_id as INTERWEAVE_FRONTIER_FEATURE_ID, operate_interweave_frontier, InterweaveControlPlaneRequest, InterweaveControlReceipt};
@@ -2682,6 +2687,29 @@ pub fn validate_context_compilation_federated_control_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID {
         return Err("conformance context control feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const MUTATION_KNOWLEDGE_FEDERATED_CONTROL_TOOL: &str = "mutation_knowledge_federated_control";
+
+pub fn run_mutation_knowledge_federated_control_json(value: &Value) -> Result<Value, String> {
+    let request: MutationKnowledgeFederatedControlRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid mutation knowledge federation request: {error}"))?;
+    let receipt = operate_mutation_knowledge_federated_control(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize mutation knowledge federation receipt: {error}"))
+}
+
+pub fn validate_mutation_knowledge_federated_control_json(
+    value: &Value,
+) -> Result<MutationKnowledgeFederatedReceipt, String> {
+    let receipt: MutationKnowledgeFederatedReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid mutation knowledge federation receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID {
+        return Err("mutation knowledge federation feature id mismatch".into());
     }
     Ok(receipt)
 }

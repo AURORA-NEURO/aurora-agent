@@ -2091,6 +2091,9 @@ impl Server {
             "federated_publication_release_inference" => {
                 self.federated_publication_release_inference(&arguments)
             }
+            "mutation_knowledge_federated_control" => {
+                self.mutation_knowledge_federated_control(&arguments)
+            }
             "provider_capability_gate" => self.provider_capability_gate(&arguments),
             "sdk_registry_check" => self.sdk_registry_check(&arguments),
             "governance_schema_check" => self.governance_schema_check(&arguments),
@@ -26332,6 +26335,28 @@ impl Server {
         }))
     }
 
+    fn mutation_knowledge_federated_control(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a MutationKnowledgeFederatedControlRequest")?;
+        let receipt = crate::research_contracts::run_mutation_knowledge_federated_control_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_mutation::knowledge_representation_federated_control_plane::FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "mutation knowledge candidates are ranked deterministically with origin quorum and continual checkpoint identity",
+                "policy, protected-closure, signed-approval, locality, replay, oracle, and evidence gates fail closed",
+                "negative, contradicted, unknown, speculative, and omitted states remain explicit in the receipt"
+            ],
+            "limitations": [
+                "the control plane exchanges lineage and digest metadata only; raw experimental data remains institution-local",
+                "admission is a governed research automation outcome, not a clinical conclusion or treatment decision"
+            ]
+        }))
+    }
+
     fn multimodal_harmonize(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -38001,6 +38026,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "mutation_knowledge_federated_control",
+            "domains": ["federated mutation knowledge representation", "continual candidate admission", "origin quorum", "deterministic ranking", "negative evidence", "aggregate-only locality"],
+            "crates": ["bioprism-mutation", "bioprism-oracle", "bioprism-foundation", "bioprism-mcp"],
+            "mcp_tools": ["mutation_knowledge_federated_control"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "oncoworlds_models_and_assays",
             "domains": ["patient-derived models", "methylation classification", "classifier versioning", "radiogenomics"],
             "crates": ["bioprism-oncoworlds", "bioprism-onco", "bioprism-scope"],
@@ -42147,6 +42180,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "federated_publication_release_inference",
             "description": "Rank digest-only federated continual research-object release attestations and emit a qualified, degraded, unknown, or blocked recommendation while preserving provenance, omissions, negative evidence, locality, and fail-closed gates. Signing and publication remain separate authorized effects.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedPublicationReleaseInferenceRequest with origin attestations, semantic profile, quorum, capacity/checkpoint, policy, locality, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "mutation_knowledge_federated_control",
+            "description": "Operate an A2 federated continual mutation-knowledge control plane with typed lineage, oracle verification, origin quorum, deterministic admission ranking, checkpoint continuity, policy and protected-closure gates, explicit omission/uncertainty/negative evidence, and aggregate-only locality.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MutationKnowledgeFederatedControlRequest with typed mutation candidates, federation quorum, checkpoint/capacity controls, policy/approval/closure/locality permissions, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "provider_capability_gate",

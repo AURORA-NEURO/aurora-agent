@@ -13,6 +13,7 @@ pub mod apply;
 pub mod diversity;
 pub mod error;
 pub mod lineage;
+pub mod knowledge_representation_federated_control_plane;
 
 pub mod relation;
 
@@ -21,6 +22,15 @@ pub use diversity::{measure, Diversity};
 pub use error::{MutationError, RejectionReason};
 pub use lineage::{generate, verdict_of, Family, Instance, Rejection};
 pub use relation::{Mechanism, PostconditionResult, Relation};
+pub use knowledge_representation_federated_control_plane::{
+    mutation_knowledge_federated_control_manifest,
+    operate_mutation_knowledge_federated_control,
+    MutationKnowledgeCandidate, MutationKnowledgeDecision,
+    MutationKnowledgeFederatedControlError, MutationKnowledgeFederatedControlRequest,
+    MutationKnowledgeFederatedReceipt,
+    FEATURE_ID as MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID,
+    FEATURE_VERSION as MUTATION_KNOWLEDGE_FEDERATED_CONTROL_VERSION,
+};
 
 /// A standard suite covering every relation kind.
 ///

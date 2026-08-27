@@ -217,6 +217,8 @@ dependencies = [
 name = "bioprism-brain"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
+ "bioprism-ids",
  "serde",
  "serde_json",
  "sha2",
@@ -274,6 +276,7 @@ name = "bioprism-conformance"
 version = "0.1.0"
 dependencies = [
  "bioprism-fiber",
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-section",
  "bioprism-world",
@@ -505,6 +508,8 @@ name = "bioprism-influence"
 version = "0.1.0"
 dependencies = [
  "bioprism-backends",
+ "bioprism-foundation",
+ "bioprism-ids",
  "bioprism-section",
  "bioprism-world",
  "serde",
@@ -530,6 +535,7 @@ dependencies = [
  "bioprism-choreography",
  "bioprism-epistemic",
  "bioprism-fabric",
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-section",
  "bioprism-weave",
@@ -700,6 +706,7 @@ name = "bioprism-mutation"
 version = "0.1.0"
 dependencies = [
  "bioprism-fiber",
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-section",
  "bioprism-world",
@@ -781,6 +788,7 @@ dependencies = [
 name = "bioprism-oraclex"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-mutation",
  "bioprism-oracle",
@@ -935,6 +943,7 @@ dependencies = [
 name = "bioprism-section"
 version = "0.1.0"
 dependencies = [
+ "bioprism-foundation",
  "bioprism-ids",
  "serde",
  "serde_json",

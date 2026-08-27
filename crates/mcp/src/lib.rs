@@ -235,6 +235,11 @@ pub use research_contracts::{
     validate_federated_publication_release_inference_json,
     FEDERATED_PUBLICATION_RELEASE_INFERENCE_TOOL,
 };
+pub use research_contracts::{
+    run_mutation_knowledge_federated_control_json,
+    validate_mutation_knowledge_federated_control_json,
+    MUTATION_KNOWLEDGE_FEDERATED_CONTROL_TOOL,
+};
 pub use resource_discovery_contract::{
     compile_resource_discovery_contract_v2, ResourceDiscoveryContractError,
     ResourceDiscoveryContractRequest, ResourceDiscoveryContractResponse,
