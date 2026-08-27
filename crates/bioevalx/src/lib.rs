@@ -182,6 +182,7 @@ pub mod evaluator;
 pub mod federation_release;
 pub mod grounding;
 pub mod mesh;
+pub mod mechanism_exploration_assurance;
 pub mod metamorphic;
 pub mod plane;
 pub mod quality_assurance;
@@ -215,6 +216,15 @@ pub use federation_release::{
 pub use grounding::{ClaimState, EdgeKind, Evidence, Grounding, LocatorStatus, SupportEdge};
 pub use mesh::{
     Census, Disagreement, EvaluatorDecl, EvaluatorKind, EvaluatorVerdict, Mesh, Witness,
+};
+pub use mechanism_exploration_assurance::{
+    assure_mechanism_portfolio, mechanism_exploration_assurance_manifest,
+    MechanismAssuranceError, MechanismAssuranceReport, MechanismCandidate,
+    MechanismPortfolioRequest,
+    CONTRACT_VERSION as MECHANISM_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_ASSURANCE_FEATURE_ID,
+    INPUT_SCHEMA as MECHANISM_ASSURANCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as MECHANISM_ASSURANCE_OUTPUT_SCHEMA,
 };
 pub use metamorphic::{
     verdict, Direction, Family, FamilyReport, Relation, Response, Suite, Trial, TrialVerdict,

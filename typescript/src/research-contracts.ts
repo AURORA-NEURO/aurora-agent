@@ -5272,3 +5272,25 @@ export function validateCliQualityControlWorkflowRun(receipt:CliQualityControlWo
   if(receipt.effect_receipts.some(effect=>!effect.startsWith("retain:quality-workflow:")&&!effect.startsWith("quarantine:quality-workflow:")&&effect!=="block:unsafe-release")) throw new Error("quality workflow effect is outside retention gate");
 }
 export function cliQualityControlWorkflowRunDigest(receipt:CliQualityControlWorkflowRun):string { validateCliQualityControlWorkflowRun(receipt); return digestJsonSync(receipt); }
+
+export const BIOEVALX_MECHANISM_ASSURANCE_FEATURE_ID = "AFA-bioevalx-P08-F28" as const;
+export const BIOEVALX_MECHANISM_ASSURANCE_CONTRACT_VERSION = "bioevalx-federated-continual-mechanism-exploration-assurance-harness/1.0" as const;
+export const BIOEVALX_MECHANISM_ASSURANCE_INPUT_SCHEMA = "MechanismPortfolio5@1" as const;
+export const BIOEVALX_MECHANISM_ASSURANCE_OUTPUT_SCHEMA = "MechanismAssuranceReport8@1" as const;
+export interface BioevalxMechanismAssuranceReport {
+  schema_version:string; contract_version:string; feature_id:string; request_id:string; federation_id:string; purpose:string; semantic_profile:string; disposition:"qualified"|"unresolved"|"blocked";
+  candidate_order:string[]; ranked_order:string[]; qualified_order:string[]; unresolved_order:string[]; blocked_order:string[]; missing_candidate_order:string[]; missing_study_order:string[]; missing_modality_order:string[];
+  omission_order:string[]; uncertainty_order:string[]; competing_explanation_order:string[]; negative_evidence_order:string[]; adversarial_event_order:string[]; checkpoint_order:string[];
+  replay_identity:string; portfolio_digest:string; artifact:Record<string,unknown>; effect_receipts:string[]; raw_data_local:true; aggregate_only:true; boundary:string;
+}
+export function validateBioevalxMechanismAssuranceReport(receipt:BioevalxMechanismAssuranceReport):void {
+  const ordered=(values:string[])=>JSON.stringify([...new Set(values)].sort())===JSON.stringify(values);
+  if(receipt.schema_version!==RESEARCH_CONTRACT_SCHEMA_VERSION||receipt.contract_version!==BIOEVALX_MECHANISM_ASSURANCE_CONTRACT_VERSION||receipt.feature_id!==BIOEVALX_MECHANISM_ASSURANCE_FEATURE_ID||receipt.boundary!==PRECLINICAL_BOUNDARY||receipt.raw_data_local!==true||receipt.aggregate_only!==true||!receipt.request_id.trim()||!receipt.federation_id.trim()||!receipt.purpose.trim()||!receipt.semantic_profile.trim()||!receipt.candidate_order.length||receipt.ranked_order.length!==receipt.candidate_order.length||!receipt.effect_receipts.length||JSON.stringify(receipt.checkpoint_order)!==JSON.stringify(["admit-typed-portfolio","check-evidence-and-baseline","check-provenance-and-replay","check-policy-and-federation","retain-omission-and-negative-receipt"])) throw new Error("mechanism assurance identity, locality, ranking, checkpoints, or effects are incomplete");
+  for(const values of[receipt.candidate_order,receipt.qualified_order,receipt.unresolved_order,receipt.blocked_order,receipt.missing_candidate_order,receipt.missing_study_order,receipt.missing_modality_order,receipt.omission_order,receipt.uncertainty_order,receipt.competing_explanation_order,receipt.negative_evidence_order,receipt.adversarial_event_order,receipt.effect_receipts]) if(!ordered(values)) throw new Error("mechanism assurance ordering is not canonical");
+  const candidates=new Set(receipt.candidate_order); const partitions=[...receipt.qualified_order,...receipt.unresolved_order,...receipt.blocked_order]; if(new Set(receipt.ranked_order).size!==receipt.ranked_order.length||JSON.stringify([...new Set(receipt.ranked_order)].sort())!==JSON.stringify([...candidates].sort())||partitions.some(id=>!candidates.has(id))||partitions.length!==candidates.size||new Set(partitions).size!==partitions.length||receipt.missing_candidate_order.some(id=>candidates.has(id))) throw new Error("mechanism assurance states do not partition candidates");
+  for(const digest of[receipt.replay_identity,receipt.portfolio_digest,receipt.artifact.content_hash]) if(typeof digest!=="string"||!/^[0-9a-f]{64}$/.test(digest)) throw new Error("mechanism assurance digest is invalid");
+  if(receipt.artifact.content_type!=="application/vnd.aurora.bioevalx-mechanism-assurance-report+json") throw new Error("mechanism assurance artifact type is invalid");
+  if(receipt.disposition==="qualified"&&(!receipt.effect_receipts[0].startsWith("verify:bioevalx-mechanism-assurance:")||receipt.effect_receipts.length!==1)) throw new Error("qualified mechanism assurance effect is invalid");
+  if(receipt.disposition!=="qualified"&&JSON.stringify(receipt.effect_receipts)!==JSON.stringify(["block:unsafe-release"])) throw new Error("non-qualified mechanism assurance must block release");
+}
+export function bioevalxMechanismAssuranceReportDigest(receipt:BioevalxMechanismAssuranceReport):string { validateBioevalxMechanismAssuranceReport(receipt); return digestJsonSync(receipt); }
