@@ -417,6 +417,8 @@ AUTONOMOUS_PROVISIONED_RUN_SCHEMA = "bioprism-python-autonomous-provisioned-run/
 AUTONOMOUS_WORKFLOW_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-learning/0.1"
 AUTONOMOUS_WORKFLOW_TRAJECTORY_LEARNING_SCHEMA = "bioprism-python-autonomous-workflow-trajectory-learning/0.1"
 AUTONOMOUS_ROUTE_SCHEMA = "bioprism-python-autonomous-route/0.1"
+AUTONOMOUS_DECISION_CYCLE_SCHEMA = "bioprism-python-autonomous-decision-cycle/0.1"
+AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA = "bioprism-python-autonomous-auto-decision-cycle/0.1"
 AUTONOMOUS_REPLAN_CYCLE_SCHEMA = "bioprism-python-autonomous-auto-replan-cycle/0.1"
 AUTONOMOUS_REPLAN_CONTEXT_SCHEMA = "bioprism-python-autonomous-replan-context/0.1"
 AUTONOMOUS_DOMAIN_PACK_SCHEMA = "bioprism-python-autonomous-domain-pack/0.1"
@@ -3901,6 +3903,245 @@ class AutonomousAutoResult:
             "task_decision_digest": self.task_decision_digest,
             "task_decision_posture": self.task_decision_posture,
             "retention": "route_metadata_only; provider_result_caller_owned",
+        }
+
+
+def _autonomous_decision_cycle_public_status(status: str) -> str:
+    """Normalize successful execution variants to the cross-runtime cycle status."""
+
+    if status in {
+        "completed",
+        "completed_provider_call",
+        "completed_tool_loop",
+        "completed_mission",
+        "completed_workflow",
+        "children_completed",
+        "succeeded",
+    }:
+        return "completed"
+    return status
+
+
+def _autonomous_decision_cycle_next_action(status: str) -> str:
+    """Map a terminal/review status to a safe caller action.
+
+    This is intentionally a small policy table rather than a generic ``status == completed``
+    check.  Provider, routing, planning, approval, and reconciliation failures have different
+    owners; collapsing them into ``retry`` would make an automatic host repeat an unsafe or
+    already-invalid boundary.
+    """
+
+    if status in {
+        "route_review_required",
+        "provider_abstained",
+        "policy_review_required",
+        "policy_blocked",
+    }:
+        return "review_route"
+    if status in {"planning_review_required", "provider_invalid", "provider_disagreement", "plan_refused"}:
+        return "review_plan"
+    if status in {"approval_required", "reconciliation_required"}:
+        return "review_provider_or_effect_approval"
+    if status == "completed":
+        return "complete"
+    return "inspect_result"
+
+
+def _autonomous_decision_cycle_result_projection(value: Any, route: AutonomousRouteProposal) -> dict[str, Any]:
+    """Project a private execution result into restart-safe metadata.
+
+    ``AutonomousAutoResult.to_dict`` is intentionally caller-facing and may contain a provider
+    response.  Decision-cycle journals have a stricter contract, so this helper only follows
+    known selection/evaluation identities and never calls an arbitrary result serializer.
+    """
+
+    status = getattr(value, "status", None)
+    if not isinstance(status, str) or not status:
+        status = "unknown"
+    outcome_digest = getattr(value, "outcome_digest", None)
+    if not isinstance(outcome_digest, str) or len(outcome_digest) != 64:
+        outcome_digest = content_digest(
+            {
+                "status": status,
+                "route_digest": route.route_digest,
+                "result_kind": type(value).__name__,
+            }
+        )
+    return {
+        "status": status,
+        "selection_digest": _decision_cycle_selection_digest(value),
+        "outcome_digest": outcome_digest,
+        "result_kind": type(value).__name__,
+        "retention": "metadata_only;provider_result_caller_owned",
+    }
+
+
+def _autonomous_decision_cycle_evaluation_projection(value: Any) -> dict[str, Any] | None:
+    """Return only value-only evaluator fields from any supported learning envelope."""
+
+    projection = _goal_learning_value_projection(value)
+    evaluations = projection.get("evaluations")
+    if not isinstance(evaluations, Sequence) or isinstance(evaluations, (str, bytes)) or not evaluations:
+        return None
+    normalized = [dict(item) for item in evaluations if isinstance(item, Mapping)]
+    if not normalized:
+        return None
+    return {
+        "evaluation_digest": content_digest({"evaluations": normalized}),
+        "evaluations": normalized,
+        "evaluation_count": len(normalized),
+        "retention": "value_only_evaluation;provider_evidence_caller_owned",
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousDecisionCycleResult:
+    """One route-frozen execution/evaluation boundary.
+
+    ``run`` remains caller-owned and can contain a provider response.  ``to_dict`` deliberately
+    emits only a bounded run projection, evaluator values, and settlement identities.  This
+    makes the object useful both as an in-process result and as the public shape attached to a
+    queue event or restart journal without accidentally persisting credentials, prompts, tool
+    arguments, raw evidence, or provider output.
+    """
+
+    status: str
+    route: AutonomousRouteProposal
+    semantic_route: AutonomousSemanticRouteResult | None = None
+    run: Any | None = None
+    plan_refinement: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult | None = None
+    learning_episode_id: str | None = None
+    evaluation: Mapping[str, Any] | None = None
+    settlement: Mapping[str, Any] | None = None
+    planner_evaluation: Mapping[str, Any] | None = None
+    planner_settlement: Mapping[str, Any] | None = None
+    memory: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, str) or not self.status.strip() or len(self.status) > 128:
+            raise BrainRunError("decision-cycle status must be bounded non-empty text")
+        if not isinstance(self.route, AutonomousRouteProposal):
+            raise BrainRunError("decision cycle requires an AutonomousRouteProposal")
+        if self.semantic_route is not None and not isinstance(self.semantic_route, AutonomousSemanticRouteResult):
+            raise BrainRunError("decision-cycle semantic route is malformed")
+        if self.semantic_route is not None and self.semantic_route.status == "completed" and self.semantic_route.route.route_digest != self.route.route_digest:
+            raise BrainRunError("completed decision-cycle semantic route must match the route")
+        if self.plan_refinement is not None and not isinstance(
+            self.plan_refinement,
+            (AutonomousPlanRefinementResult, AutonomousCrossDomainPlanRefinementResult),
+        ):
+            raise BrainRunError("decision-cycle plan refinement is malformed")
+        if self.learning_episode_id is not None:
+            _identifier("decision-cycle learning_episode_id", self.learning_episode_id)
+        for name, value in (
+            ("evaluation", self.evaluation),
+            ("settlement", self.settlement),
+            ("planner_evaluation", self.planner_evaluation),
+            ("planner_settlement", self.planner_settlement),
+            ("memory", self.memory),
+        ):
+            if value is not None and not isinstance(value, Mapping):
+                raise BrainRunError(f"decision-cycle {name} must be a mapping or None")
+
+    def to_dict(self) -> dict[str, Any]:
+        learning_episode_ids: list[str] = []
+        settlement_digests: list[str] = []
+        if self.learning_episode_id is not None:
+            learning_episode_ids.append(self.learning_episode_id)
+        if self.settlement is not None:
+            raw = self.settlement.get("settlement_digests")
+            if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+                settlement_digests.extend(
+                    value for value in raw if isinstance(value, str) and len(value) == 64
+                )
+        return {
+            "schema": AUTONOMOUS_DECISION_CYCLE_SCHEMA,
+            "status": self.status,
+            "route": self.route.to_dict(),
+            "semantic_route": None if self.semantic_route is None else self.semantic_route.to_dict(),
+            "run": None if self.run is None else _autonomous_decision_cycle_result_projection(self.run, self.route),
+            "plan_refinement": None
+            if self.plan_refinement is None
+            else {
+                "plan_refinement_digest": content_digest(self.plan_refinement.to_dict()),
+                "status": self.plan_refinement.status,
+                "retention": "metadata_only;plan_payload_caller_owned",
+            },
+            "learning_episode_id": self.learning_episode_id,
+            "learning_episode_ids": learning_episode_ids,
+            "evaluation": None if self.evaluation is None else dict(self.evaluation),
+            "settlement": None if self.settlement is None else dict(self.settlement),
+            "planner_evaluation": None if self.planner_evaluation is None else dict(self.planner_evaluation),
+            "planner_settlement": None if self.planner_settlement is None else dict(self.planner_settlement),
+            "memory": None if self.memory is None else dict(self.memory),
+            "settlement_digests": settlement_digests,
+            "retention": "provider_response_local;value_only_evaluation_and_learning_projection",
+            "authorization": "routing_planning_provider_effects_and_evaluator_settlement_remain_explicit",
+            "secret_material": "never_returned",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousAutoDecisionCycleResult:
+    """Automatic route-once selection of the single- or cross-domain cycle kernel.
+
+    ``private_result`` is an in-process escape hatch for callers that own restart storage.  It
+    is intentionally excluded from :meth:`to_dict`; applications may retain it in a protected
+    result store and return it from ``decision_cycle_rehydrate_result`` without placing provider
+    output in a queue event, snapshot, or log.
+    """
+
+    status: str
+    mode: str | None
+    route: AutonomousRouteProposal
+    cycle: AutonomousDecisionCycleResult | None = None
+    semantic_route: AutonomousSemanticRouteResult | None = None
+    private_result: AutonomousAutoResult | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, str) or not self.status.strip() or len(self.status) > 128:
+            raise BrainRunError("automatic decision-cycle status must be bounded non-empty text")
+        if not isinstance(self.route, AutonomousRouteProposal):
+            raise BrainRunError("automatic decision cycle requires a route proposal")
+        if self.mode not in {None, "single_domain", "cross_domain"}:
+            raise BrainRunError("automatic decision-cycle mode is invalid")
+        expected_mode = (
+            "cross_domain"
+            if self.route.cross_domain and len(self.route.selected_domains) > 1
+            else "single_domain"
+        ) if not self.route.abstained else None
+        if self.mode != expected_mode:
+            raise BrainRunError("automatic decision-cycle mode does not match its route")
+        if self.cycle is not None:
+            if not isinstance(self.cycle, AutonomousDecisionCycleResult):
+                raise BrainRunError("automatic decision-cycle kernel result is malformed")
+            if self.cycle.route.route_digest != self.route.route_digest:
+                raise BrainRunError("automatic decision-cycle kernel route does not match its outer route")
+        if self.private_result is not None:
+            if not isinstance(self.private_result, AutonomousAutoResult):
+                raise BrainRunError("automatic decision-cycle private result is malformed")
+            if self.private_result.route.route_digest != self.route.route_digest:
+                raise BrainRunError("automatic decision-cycle private result route does not match its outer route")
+        if self.semantic_route is not None:
+            if not isinstance(self.semantic_route, AutonomousSemanticRouteResult):
+                raise BrainRunError("automatic decision-cycle semantic route is malformed")
+            if self.semantic_route.status == "completed" and self.semantic_route.route.route_digest != self.route.route_digest:
+                raise BrainRunError("automatic decision-cycle semantic route does not match its route")
+        if self.status == "completed" and self.cycle is None:
+            raise BrainRunError("completed automatic decision cycle requires a kernel result")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA,
+            "status": self.status,
+            "mode": self.mode,
+            "route": self.route.to_dict(),
+            "semantic_route": None if self.semantic_route is None else self.semantic_route.to_dict(),
+            "cycle": None if self.cycle is None else self.cycle.to_dict(),
+            "next_action": _autonomous_decision_cycle_next_action(self.status),
+            "retention": "provider_response_local;route_and_cycle_metadata_value_only;execution_result_caller_owned",
+            "authorization": "routing_planning_provider_effects_and_evaluator_settlement_remain_explicit",
+            "secret_material": "never_returned",
         }
 
 
@@ -24719,6 +24960,280 @@ class AutonomousAgent:
             )
         return automatic_result
 
+    def run_auto_cycle(
+        self,
+        *,
+        task: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        domain: str | None = None,
+        route_override: AutonomousRouteProposal | None = None,
+        hints: Sequence[str] = (),
+        min_confidence: float = 0.25,
+        min_margin: float = 0.10,
+        max_domains: int = 3,
+        allow_cross_domain: bool = True,
+        semantic_routing: bool = False,
+        semantic_weight: float = 0.65,
+        semantic_bandit_state: Mapping[str, Any] | None = None,
+        semantic_contextual_observations: Sequence[Mapping[str, Any]] = (),
+        semantic_selection_overrides: Mapping[str, Any] | None = None,
+        semantic_selection_weights: Mapping[str, Any] | None = None,
+        semantic_selection_observations: Sequence[Mapping[str, Any]] | None = None,
+        semantic_input_tokens: int = 4_096,
+        semantic_requested_output_tokens: int = 1_024,
+        semantic_max_cost_per_million_tokens: int | None = None,
+        semantic_max_latency_ms: int | None = None,
+        semantic_min_quality: float | None = None,
+        semantic_run_id: str | None = None,
+        semantic_max_output_tokens: int = 1_024,
+        semantic_temperature: float | None = None,
+        learning_mode: str = "off",
+        evaluator: BrainOutcomeEvaluator | DomainEvaluatorRegistry | None = None,
+        evaluator_bridge: AutonomousCycleEvaluatorBridge | None = None,
+        decision_cycle_id: str | None = None,
+        decision_cycle_store: AutonomousDecisionCycleStateStore | None = None,
+        resume_decision_cycle: bool = False,
+        decision_cycle_rehydrate_result: Callable[[AutonomousDecisionCycleRehydrationContext], Any] | None = None,
+        retry_semantic_routing_on_restart: bool = False,
+        **kwargs: Any,
+    ) -> AutonomousAutoDecisionCycleResult:
+        """Resolve one route and enter the matching autonomous decision-cycle kernel.
+
+        This is the Python application-facing counterpart to the TypeScript automatic cycle.
+        Routing occurs exactly once: deterministic routing is provider-free, and semantic routing
+        is an explicitly approved classifier boundary.  The reviewed route is then passed as an
+        exact override to :meth:`run_auto`, which retains the existing planning, model selection,
+        prompt assembly, provider approval, tool/effect, evaluator, learning, and persistence
+        contracts.  A cross-domain route therefore enters the existing fan-out/fan-in learning
+        kernel automatically instead of making callers guess which execution API to choose.
+
+        ``evaluator`` is optional.  When supplied, the cycle opts into online learning unless the
+        caller chooses ``learning_mode="trajectory"``; its value-only result is projected into
+        ``evaluation`` and no provider response is promoted to reward.  An
+        :class:`AutonomousCycleEvaluatorBridge` may be used instead when evaluator selection is
+        itself caller-owned metadata.  Restart callbacks rehydrate private results at the
+        persisted boundary and must return an :class:`AutonomousAutoResult`; the public cycle
+        envelope never stores that private value.
+        """
+
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("automatic decision-cycle task must be non-empty text")
+        if not isinstance(semantic_routing, bool):
+            raise BrainRunError("semantic_routing must be a boolean")
+        if not isinstance(retry_semantic_routing_on_restart, bool):
+            raise BrainRunError("retry_semantic_routing_on_restart must be a boolean")
+        if learning_mode not in AUTONOMOUS_LEARNING_MODES:
+            raise BrainRunError(
+                "learning_mode must be one of: " + ", ".join(AUTONOMOUS_LEARNING_MODES)
+            )
+        if evaluator is not None and not isinstance(evaluator, (BrainOutcomeEvaluator, DomainEvaluatorRegistry)):
+            raise BrainRunError(
+                "evaluator must be a BrainOutcomeEvaluator, DomainEvaluatorRegistry, or None"
+            )
+        if evaluator_bridge is not None and not isinstance(evaluator_bridge, AutonomousCycleEvaluatorBridge):
+            raise BrainRunError("evaluator_bridge must be an AutonomousCycleEvaluatorBridge or None")
+        if evaluator is not None and evaluator_bridge is not None:
+            raise BrainRunError("evaluator and evaluator_bridge are mutually exclusive")
+        if decision_cycle_store is None and decision_cycle_id is not None and self.decision_cycle_persistence is not None:
+            decision_cycle_store = self.decision_cycle_persistence.store
+        if (decision_cycle_id is None) != (decision_cycle_store is None):
+            raise BrainRunError("decision_cycle_id and decision_cycle_store must be supplied together")
+        if resume_decision_cycle and (decision_cycle_id is None or decision_cycle_store is None):
+            raise BrainRunError("resume_decision_cycle requires decision_cycle_id and decision_cycle_store")
+        if route_override is not None and semantic_routing:
+            raise BrainRunError("route_override cannot be combined with semantic_routing")
+        if route_override is not None and domain is not None:
+            raise BrainRunError("route_override cannot be combined with domain")
+        if route_override is not None and route_override.task_digest != content_digest({"task": task}):
+            raise BrainRunError("route_override task does not match the automatic task")
+
+        effective_learning_mode = learning_mode
+        if (evaluator is not None or evaluator_bridge is not None) and effective_learning_mode == "off":
+            effective_learning_mode = "online"
+        if effective_learning_mode != "off" and evaluator is None and evaluator_bridge is None:
+            raise BrainRunError(
+                "automatic decision-cycle learning requires evaluator or evaluator_bridge"
+            )
+
+        # A persisted semantic route is a private provider boundary.  Do not silently issue a
+        # second classifier request on restart; callers must supply the reviewed route, opt into a
+        # deliberate retry, or use the lower-level rehydration API.
+        if (
+            resume_decision_cycle
+            and semantic_routing
+            and route_override is None
+            and not retry_semantic_routing_on_restart
+            and decision_cycle_store is not None
+            and decision_cycle_store.load(decision_cycle_id) is not None  # type: ignore[arg-type]
+        ):
+            raise BrainRunError(
+                "restart resume of provider-assisted semantic routing requires route_override or "
+                "retry_semantic_routing_on_restart=True"
+            )
+
+        def route_mode(value: AutonomousRouteProposal) -> str | None:
+            if value.abstained:
+                return None
+            return "cross_domain" if value.cross_domain and len(value.selected_domains) > 1 else "single_domain"
+
+        def explicit_domain_route(value: str) -> AutonomousRouteProposal:
+            if value not in AUTONOMOUS_DOMAINS:
+                raise BrainRunError(
+                    "domain must be one of: " + ", ".join(AUTONOMOUS_DOMAINS)
+                )
+            routed = self.route(
+                task=task,
+                hints=(value,),
+                min_confidence=0.0,
+                min_margin=0.0,
+                max_domains=1,
+                allow_cross_domain=False,
+            )
+            candidate = next((item for item in routed.candidates if item.domain == value), None)
+            if candidate is None:
+                profile = self.orchestrator.registry.resolve(value)
+                workflow = self.orchestrator.workflow_registry.resolve(value)
+                candidate = AutonomousRouteCandidate(
+                    domain=value,
+                    score=1.0,
+                    matched_terms=("explicit_domain",),
+                    capability=profile.default_capability,
+                    risk_class=profile.risk_class,
+                    workflow_id=workflow.workflow_id,
+                )
+            return AutonomousRouteProposal(
+                task_digest=routed.task_digest,
+                candidates=(candidate,),
+                selected_domains=(value,),
+                confidence=max(1.0, candidate.score),
+                abstained=False,
+                reason="routed",
+                cross_domain=False,
+                source=routed.source,
+            )
+
+        semantic_route: AutonomousSemanticRouteResult | None = None
+        if route_override is not None:
+            route = route_override
+        elif semantic_routing:
+            domain_policy_mode = kwargs.get("domain_policy_mode", "audit")
+            semantic_route = self.route_with_provider(
+                task=task,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                hints=hints,
+                context=kwargs.get("context"),
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+                semantic_weight=semantic_weight,
+                bandit_state=semantic_bandit_state,
+                contextual_observations=semantic_contextual_observations,
+                selection_overrides=semantic_selection_overrides,
+                selection_weights=semantic_selection_weights,
+                selection_observations=semantic_selection_observations,
+                input_tokens=semantic_input_tokens,
+                requested_output_tokens=semantic_requested_output_tokens,
+                max_cost_per_million_tokens=semantic_max_cost_per_million_tokens,
+                max_latency_ms=semantic_max_latency_ms,
+                min_quality=semantic_min_quality,
+                approve_provider_call=bool(kwargs.get("approve_provider_call", False)),
+                run_id=semantic_run_id,
+                max_output_tokens=semantic_max_output_tokens,
+                temperature=semantic_temperature,
+                domain_policy_mode=domain_policy_mode,
+                domain_policy_evidence_ready=kwargs.get("domain_policy_evidence_ready"),
+                domain_policy_evaluator_configured=kwargs.get("domain_policy_evaluator_configured"),
+                domain_policy_effects_requested=kwargs.get("domain_policy_effects_requested"),
+                domain_policy_effects_approved=kwargs.get("domain_policy_effects_approved"),
+            )
+            route = semantic_route.route
+            if semantic_route.status != "completed":
+                return AutonomousAutoDecisionCycleResult(
+                    status=semantic_route.status,
+                    mode=route_mode(route),
+                    route=route,
+                    semantic_route=semantic_route,
+                )
+        elif domain is not None:
+            route = explicit_domain_route(domain)
+        else:
+            route = self.route(
+                task=task,
+                hints=hints,
+                min_confidence=min_confidence,
+                min_margin=min_margin,
+                max_domains=max_domains,
+                allow_cross_domain=allow_cross_domain,
+            )
+
+        call_options = dict(kwargs)
+        call_options.update(
+            {
+                "route_override": route,
+                "semantic_routing": False,
+                "learning_mode": effective_learning_mode,
+                "decision_cycle_id": decision_cycle_id,
+                "decision_cycle_store": decision_cycle_store,
+                "resume_decision_cycle": resume_decision_cycle,
+                "decision_cycle_rehydrate_result": decision_cycle_rehydrate_result,
+            }
+        )
+        if evaluator_bridge is not None:
+            call_options["evaluator_bridge"] = evaluator_bridge
+        if evaluator is not None:
+            if route_mode(route) == "cross_domain":
+                call_options["cross_domain_evaluator"] = evaluator
+            elif isinstance(evaluator, DomainEvaluatorRegistry):
+                call_options["evaluator_registry"] = evaluator
+            else:
+                call_options["evaluator"] = evaluator
+
+        final = self.run_auto(
+            task=task,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            **call_options,
+        )
+        status = _autonomous_decision_cycle_public_status(
+            final.execution_status if final.status == "completed" else final.status
+        )
+        episode_ids: tuple[str, ...] = ()
+        settlement_digests: tuple[str, ...] = ()
+        if final.result is not None:
+            episode_ids, settlement_digests = _decision_cycle_learning_metadata(final.result)
+        inner = AutonomousDecisionCycleResult(
+            status=status,
+            route=route,
+            semantic_route=semantic_route,
+            run=final.result if final.status == "completed" else None,
+            plan_refinement=final.planning,
+            learning_episode_id=episode_ids[0] if episode_ids else None,
+            evaluation=(
+                _autonomous_decision_cycle_evaluation_projection(final.result)
+                if final.result is not None
+                else None
+            ),
+            settlement=(
+                {
+                    "settlement_digests": list(settlement_digests),
+                    "retention": "value_only_settlement_identity;provider_result_caller_owned",
+                }
+                if settlement_digests
+                else None
+            ),
+        )
+        return AutonomousAutoDecisionCycleResult(
+            status=status,
+            mode=route_mode(route),
+            route=route,
+            semantic_route=semantic_route,
+            cycle=inner,
+            private_result=final,
+        )
+
     def run_auto_replan_cycle(
         self,
         *,
@@ -25754,6 +26269,8 @@ __all__ = [
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA",
     "AUTONOMOUS_REPLAN_CYCLE_SCHEMA",
+    "AUTONOMOUS_DECISION_CYCLE_SCHEMA",
+    "AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA",
     "AUTONOMOUS_REPLAN_CONTEXT_SCHEMA",
     "AUTONOMOUS_PLANNING_QUALITY_SETTLEMENT_SCHEMA",
     "AUTONOMOUS_PROVISIONED_RUN_SCHEMA",
@@ -25835,6 +26352,8 @@ __all__ = [
     "AutonomousCrossDomainReplanCheckpoint",
     "AutonomousAutoBlueprint",
     "AutonomousAutoResult",
+    "AutonomousDecisionCycleResult",
+    "AutonomousAutoDecisionCycleResult",
     "AutonomousAutoReplanResult",
     "AUTONOMOUS_MISSION_REPLAN_SCHEMA",
     "AUTONOMOUS_MISSION_REPLAN_CHECKPOINT_SCHEMA",

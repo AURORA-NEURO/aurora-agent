@@ -1626,6 +1626,14 @@ cross-domain execution, and semantic approval refusal are covered by offline Typ
 credentials, evaluator evidence, effects, and durable stores remain explicit application
 responsibilities.
 
+Python now reaches the same application-facing automatic-cycle boundary through
+`run_auto_cycle()`, `AutonomousDecisionCycleResult`, and
+`AutonomousAutoDecisionCycleResult`. It route-freezes explicit, deterministic, or approved
+semantic intake, selects single-domain versus cross-domain execution, projects evaluator and
+settlement identities without provider payloads, and exposes protected in-process rehydration for
+caller-owned restart storage. Focused offline tests exercise all twelve domains, cross-domain
+online learning, semantic approval refusal, route tamper rejection, and no-duplicate-call resume.
+
 That automatic-cycle parity gap is now closed for evaluator-guided replanning as well. The
 TypeScript `runAutoReplanCycle()` / `runAutonomousAutoReplanCycle()` facade resolves the route
 once, dispatches to the matching replan kernel, preserves evaluator-driven bounded attempts,

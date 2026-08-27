@@ -352,3 +352,149 @@ def test_auto_replan_cycle_rejects_tampered_route_and_evaluator_payload(tmp_path
         assert calls == ["replan-model"]
     finally:
         memory.close()
+
+
+def test_auto_decision_cycle_selects_single_and_cross_domain_kernels_without_leaking_provider_values(tmp_path: Any) -> None:
+    calls: list[str] = []
+    memory = BrainEpisodicMemory(tmp_path / "auto-cycle.sqlite3")
+    agent = _agent(calls, memory)
+
+    single = agent.run_auto_cycle(
+        task="debug this repository implementation",
+        credentials={},
+        model_candidates=[_candidate()],
+        approve_provider_call=True,
+    )
+    assert single.status == "completed"
+    assert single.mode == "single_domain"
+    assert single.cycle is not None
+    assert single.cycle.run is not None
+    assert single.private_result is not None
+
+    seen: list[dict[str, Any]] = []
+    cross = agent.run_auto_cycle(
+        task="write python code for the dataset pipeline",
+        credentials={},
+        model_candidates=[_candidate()],
+        evaluator=_evaluator(seen, request_replan=False),
+        approve_provider_call=True,
+    )
+    assert cross.status == "completed"
+    assert cross.mode == "cross_domain"
+    assert cross.cycle is not None
+    assert cross.cycle.evaluation is not None
+    assert len(seen) == 3
+    public = json.dumps(cross.to_dict())
+    assert "private provider response" not in public
+    assert "api_key" not in public.lower()
+    assert cross.to_dict()["next_action"] == "complete"
+    memory.close()
+
+
+def test_auto_decision_cycle_covers_every_builtin_domain_and_review_boundaries() -> None:
+    calls: list[str] = []
+    agent = _agent(calls)
+    tasks = {
+        "coding": "debug this repository implementation",
+        "browser": "compare browser research sources",
+        "data": "validate this dataset schema",
+        "science": "design a scientific experiment hypothesis",
+        "biomedical": "review biomedical clinical evidence",
+        "neuroscience": "analyze neuroscience neural signals",
+        "operations": "plan an operations incident rollback",
+        "enterprise": "review enterprise governance compliance",
+        "multi_agent": "delegate a multi agent specialist subtask",
+        "multimodal": "align multimodal image audio evidence",
+        "cross_domain": "synthesize cross domain evidence",
+        "evaluation": "run an evaluation benchmark holdout",
+    }
+    assert set(tasks) == set(AUTONOMOUS_DOMAINS)
+    for domain, task in tasks.items():
+        result = agent.run_auto_cycle(
+            task=task,
+            domain=domain,
+            credentials={},
+            model_candidates=[_candidate()],
+            approve_provider_call=True,
+        )
+        assert result.status == "completed", domain
+        assert result.mode == "single_domain", (domain, result.mode)
+        assert result.route.selected_domains == (domain,)
+
+    before_review = len(calls)
+    review = agent.run_auto_cycle(
+        task="please explain an entirely unclassified household question",
+        credentials={},
+        model_candidates=[_candidate()],
+        approve_provider_call=True,
+    )
+    assert review.status == "route_review_required"
+    assert review.mode is None
+    assert review.cycle is not None
+    assert review.cycle.run is None
+    assert review.to_dict()["next_action"] == "review_route"
+    assert len(calls) == before_review
+
+    semantic_review = agent.run_auto_cycle(
+        task="debug this repository implementation",
+        credentials={},
+        model_candidates=[_candidate()],
+        semantic_routing=True,
+        approve_provider_call=False,
+    )
+    assert semantic_review.status == "approval_required"
+    assert semantic_review.cycle is None
+    assert semantic_review.semantic_route is not None
+    assert len(calls) == before_review
+
+
+def test_auto_decision_cycle_rehydrates_private_result_without_reinvoking_provider() -> None:
+    calls: list[str] = []
+    agent = _agent(calls)
+    task = "debug this repository implementation"
+    route = agent.route(task=task)
+    store = InMemoryAutonomousDecisionCycleStateStore()
+
+    first = agent.run_auto_cycle(
+        task=task,
+        route_override=route,
+        credentials={},
+        model_candidates=[_candidate()],
+        decision_cycle_id="auto-cycle-restart",
+        decision_cycle_store=store,
+        approve_provider_call=True,
+    )
+    assert first.status == "completed"
+    assert first.private_result is not None
+    before_resume = len(calls)
+    persisted = store.load("auto-cycle-restart")
+    assert persisted is not None
+    assert persisted.phase == "terminal"
+    assert persisted.route_digest == route.route_digest
+
+    resumed = agent.run_auto_cycle(
+        task=task,
+        route_override=route,
+        credentials={},
+        model_candidates=[_candidate()],
+        decision_cycle_id="auto-cycle-restart",
+        decision_cycle_store=store,
+        resume_decision_cycle=True,
+        decision_cycle_rehydrate_result=lambda _context: first.private_result,
+        approve_provider_call=True,
+    )
+    assert resumed.to_dict() == first.to_dict()
+    assert len(calls) == before_resume
+
+
+def test_auto_decision_cycle_rejects_route_reuse_for_a_different_task() -> None:
+    agent = _agent([])
+    route = agent.route(task="debug this repository implementation")
+    with pytest.raises(BrainRunError, match="route_override task"):
+        agent.run_auto_cycle(
+            task="validate this dataset schema",
+            route_override=route,
+            credentials={},
+            model_candidates=[_candidate()],
+            approve_provider_call=True,
+        )

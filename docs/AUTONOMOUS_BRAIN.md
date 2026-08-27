@@ -12122,3 +12122,52 @@ else:
 The same contract is available in TypeScript. This closes the response-level seam for all twelve
 domain contracts, including the `cross_domain` synthesis contract, without claiming that a
 structural response score or caller alignment record establishes external-world truth.
+
+## One-shot automatic decision cycles across every domain
+
+Python now exposes `AutonomousAgent.run_auto_cycle()` alongside the existing lower-level
+`run_auto()` and bounded `run_auto_replan_cycle()` surfaces. The method is the application-facing
+route-once kernel: it resolves a deterministic provider-free route or an explicitly approved
+semantic route, then chooses the single-domain or cross-domain execution path from that exact
+route. Callers no longer need to duplicate route-shape logic or risk classifying the task again
+after a provider response.
+
+```python
+cycle = agent.run_auto_cycle(
+    task="compare the data pipeline with the experimental evidence",
+    credentials=caller_owned_opaque_handles,
+    model_candidates=caller_owned_model_catalogue,
+    evaluator=caller_owned_evaluator,
+    approve_provider_call=True,
+)
+if cycle.status == "completed":
+    inspect(cycle.cycle.run)       # transient, caller-owned execution value
+    persist(cycle.to_dict())       # metadata-only route/evaluation projection
+else:
+    follow(cycle.to_dict()["next_action"])
+```
+
+The facade supports explicit domain overrides, deterministic confidence/margin controls,
+provider-assisted semantic routing, provider planning, online or trajectory learning, evaluator
+registries, evaluator bridges, workflow/cross-domain options, and the existing decision-cycle
+restart store. A supplied evaluator opts into online learning by default; trajectory learning
+remains explicit and still requires a workflow or cross-domain path with the required caller-owned
+state. Cross-domain execution retains its specialist and synthesis boundaries, so a three-domain
+route is not silently reduced to one model call.
+
+The outer result exposes `mode`, `route`, `semantic_route`, `cycle`, and a deterministic
+`next_action` (`review_route`, `review_plan`, `review_provider_or_effect_approval`,
+`inspect_result`, or `complete`). Its `to_dict()` never serializes the private execution result,
+provider response, prompt, tool arguments, credentials, evaluator instructions, or raw evidence.
+The returned `private_result` exists only for a caller-owned protected restart store; it can be
+returned from `decision_cycle_rehydrate_result` and is excluded from all public projections.
+Successful provider-specific statuses such as `completed_provider_call` normalize to the shared
+cycle status `completed`, while the underlying status remains available on the transient run.
+
+Restart behavior is fail-closed. A resumed semantic cycle cannot issue a hidden second classifier
+request: the caller must supply the reviewed route or explicitly set
+`retry_semantic_routing_on_restart=True`. The existing hash-chained decision state continues to
+retain only route, plan, selection, outcome, evaluation, episode, and settlement identities;
+rehydration callbacks own all private values. Focused tests cover every built-in domain, single
+and cross-domain selection, approval and abstention boundaries, tampered route rejection,
+metadata-only output, and no-provider-call restart replay.
