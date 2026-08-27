@@ -127,6 +127,7 @@ pub mod oracle;
 pub mod projection;
 pub mod publication_copilot;
 pub mod quality_workbench;
+pub mod contract_frontier_workbench;
 pub mod retrieval_assurance;
 pub mod span;
 pub mod state;
@@ -182,6 +183,12 @@ pub use quality_workbench::{
     FEATURE_ID as QUALITY_WORKBENCH_FEATURE_ID,
     PRECLINICAL_BOUNDARY as QUALITY_WORKBENCH_PRECLINICAL_BOUNDARY,
     SCHEMA_VERSION as QUALITY_WORKBENCH_SCHEMA_VERSION,
+};
+pub use contract_frontier_workbench::{
+    build_contract_frontier_manifest, validate_contract_frontier,
+    BiolangCapabilityManifest, BiolangContractInput, ContractFrontierError,
+    CONTRACT_VERSION as CONTRACT_FRONTIER_CONTRACT_VERSION,
+    FEATURE_ID as CONTRACT_FRONTIER_FEATURE_ID,
 };
 pub use retrieval_assurance::{
     assure_retrieval_synthesis, RetrievalAssuranceDisposition, RetrievalAssuranceError,

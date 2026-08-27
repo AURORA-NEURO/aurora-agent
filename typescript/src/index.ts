@@ -4093,3 +4093,13 @@ export {
   validateBioirInstrumentActionReceipt,
 } from "./research-contracts.js";
 export type { BioirInstrumentActionReceipt } from "./research-contracts.js";
+
+export {
+  BIOLANG_CONTRACT_FRONTIER_FEATURE_ID,
+  BIOLANG_CONTRACT_FRONTIER_CONTRACT_VERSION,
+  BIOLANG_CONTRACT_FRONTIER_INPUT_SCHEMA,
+  BIOLANG_CONTRACT_FRONTIER_OUTPUT_SCHEMA,
+  biolangContractFrontierDigest,
+  validateBiolangCapabilityManifest,
+} from "./research-contracts.js";
+export type { BiolangCapabilityManifest } from "./research-contracts.js";

@@ -7340,3 +7340,15 @@ __all__ += [
     "preflight_instrument_action",
     "bioir_laboratory_control_digest",
 ]
+
+from .biolang_contract_frontier_workbench import (
+    BiolangCapabilityManifest,
+    validate_contract_frontier,
+    biolang_contract_frontier_digest,
+)
+
+__all__ += [
+    "BiolangCapabilityManifest",
+    "validate_contract_frontier",
+    "biolang_contract_frontier_digest",
+]
