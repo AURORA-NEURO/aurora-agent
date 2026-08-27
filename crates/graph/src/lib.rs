@@ -71,6 +71,7 @@
 //! - **Deep links, saved views, receipts.** 42.25 and 42.26 are hub surface, not projection data.
 //! - **Amendment and supersession edges.** See [`vocabulary`].
 
+pub mod computational_execution_gateway;
 pub mod error;
 pub mod factors;
 pub mod fidelity;
@@ -78,6 +79,16 @@ pub mod graph;
 pub mod hypergraph;
 pub mod identity;
 pub mod lint;
+
+pub use computational_execution_gateway::{
+    admit as admit_computational_execution,
+    capability_manifest as computational_execution_capability_manifest, ExecutionNode,
+    ExecutionRun, GatewayError, ResearchWorkflowSpec,
+    CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+    FEATURE_ID as COMPUTATIONAL_EXECUTION_FEATURE_ID,
+    INPUT_SCHEMA as COMPUTATIONAL_EXECUTION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as COMPUTATIONAL_EXECUTION_OUTPUT_SCHEMA,
+};
 pub mod markers;
 pub mod provenance;
 pub mod roundtrip;

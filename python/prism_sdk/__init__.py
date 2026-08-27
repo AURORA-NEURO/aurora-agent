@@ -7150,3 +7150,13 @@ __all__ += [
     "EvidenceSynthesis",
     "render_retrieval_workbench",
 ]
+
+from .computational_execution_gateway import (
+    ExecutionRun,
+    admit_computational_execution,
+)
+
+__all__ += [
+    "ExecutionRun",
+    "admit_computational_execution",
+]
