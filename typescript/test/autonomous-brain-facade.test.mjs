@@ -107,6 +107,108 @@ test("brain facade creates request-free plans for every built-in domain and exec
   assert.doesNotMatch(JSON.stringify(batch.items.map((item) => item.execution?.plan ?? null)), /debug and verify a bounded repository change/);
 });
 
+test("brain facade exposes automatic route-to-invocation execution across every built-in domain", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const held = await brain.executeAuto({ task: tasks[domain], domain }, { approveProviderCall: false });
+    assert.equal(held.status, "approval_required", domain);
+    assert.equal(held.automatic?.planning_mode, "deterministic", domain);
+    assert.equal(held.automatic?.route.route_digest, held.plan.route.route_digest, domain);
+    assert.equal(held.automatic?.next_action, "review_provider_or_effect_approval", domain);
+    assert.equal(held.automatic?.result?.status, "approval_required", domain);
+  }
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const completed = await brain.executeAuto({ task: tasks[domain], domain }, { approveProviderCall: true });
+    assert.equal(completed.status, "completed", domain);
+    assert.equal(completed.automatic?.status, "completed", domain);
+    assert.equal(completed.automatic?.result?.status, "completed", domain);
+    assert.equal(completed.automatic?.route.primary_domain, domain, domain);
+    assert.ok(completed.plan.domain_plan || completed.plan.cross_domain_plan, domain);
+    assert.ok(!JSON.stringify(completed.plan).includes(tasks[domain]), domain);
+  }
+});
+
+test("brain facade automatic execution preserves the separate provider-planning acceptance gate", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("offline", (request) => {
+    const planningMessage = request.messages.find((message) => String(message.content).startsWith("Context planning-contract:\n"));
+    if (!planningMessage) return { output_text: "automatic provider execution" };
+    const contract = JSON.parse(String(planningMessage.content).slice("Context planning-contract:\n".length));
+    const ids = contract.stage_catalogue.map((row) => row.id);
+    return { structured: { priority_order: ids, focus_stage_ids: ids.slice(0, 1), review_required: false, confidence: 0.95, abstain: false } };
+  });
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const held = await brain.executeAuto({ task: tasks.coding, domain: "coding" }, {
+    planningMode: "provider",
+    planning: { approveProviderCall: false },
+    approveProviderCall: false,
+  });
+  assert.equal(held.status, "approval_required");
+  assert.equal(held.automatic?.planning_mode, "provider");
+  assert.equal(held.automatic?.planning?.status, "approval_required");
+  assert.equal(held.automatic?.result, null);
+
+  const completed = await brain.executeAuto({ task: tasks.coding, domain: "coding" }, {
+    planningMode: "provider",
+    planning: { approveProviderCall: true },
+    acceptPlan: true,
+    approveProviderCall: true,
+  });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.automatic?.planning?.status, "completed");
+  assert.equal(completed.automatic?.result?.status, "completed");
+});
+
+test("brain facade automatic execution composes connector observation, launch admission, and metadata tracing", async () => {
+  const seen = [];
+  const runtime = localRuntime((request) => seen.push(request));
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const journal = new InMemoryAutonomousConnectorReceiptJournal();
+  const connector = createBuiltinAutonomousConnectorRuntime({ domainScoped: true, approvalRequired: false, receiptStore: journal });
+  const brain = new AutonomousBrainFacade({ agent, connectorOperations: connector.operationFacade });
+  const request = {
+    task: tasks.science,
+    domain: "science",
+    connector: {
+      domain: "science",
+      capability: "literature",
+      operation_id: "science.reproducible_evidence_acquisition",
+      subject_digest: "a".repeat(64),
+      request: { hypothesis: "automatic-hypothesis", evidence_digests: ["b".repeat(64)], analysis_digest: "c".repeat(64) },
+      approved: true,
+    },
+  };
+  const preflight = await brain.launchPreflight();
+  const heldAdmission = brain.admitLaunchPreflight(preflight, { decision: "hold" });
+  await assert.rejects(
+    () => brain.executeAutoWithLaunchAdmission(request, heldAdmission, { approveProviderCall: true }),
+    /not approved/,
+  );
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+  const executed = await brain.executeAutoWithTrace(request, {
+    approveProviderCall: true,
+    runId: "automatic-facade-trace",
+    traceStore,
+  });
+  assert.equal(executed.execution.status, "completed");
+  assert.equal(executed.execution.automatic?.status, "completed");
+  assert.equal(executed.execution.connector?.status, "observed");
+  assert.ok(seen.some((item) => item.messages.some((message) => message.content.includes("autonomous-connector-observation"))));
+  assert.deepEqual(
+    traceStore.events({ run_id: "automatic-facade-trace" }).map((event) => event.phase),
+    ["started", "plan_compiled", "connector_started", "connector_finished", "model_selection_started", "model_selection_finished", "provider_invocation_started", "provider_invocation_finished", "completed"],
+  );
+  assert.doesNotMatch(JSON.stringify(executed.execution.plan), /automatic-hypothesis|b{64}|c{64}/);
+});
+
 test("brain facade composes semantic routing across every built-in domain and keeps execution approval separate", async () => {
   const payloads = AUTONOMOUS_DOMAIN_NAMES.map((domain) => ({
     selected_domains: [{ domain, score: 0.94, rationale: `catalogue route for ${domain}` }],

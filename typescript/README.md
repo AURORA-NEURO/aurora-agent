@@ -613,6 +613,46 @@ The classifier, provider failovers, fan-out, and cycle attempts can share one ca
 execution. Abstention, disagreement, malformed output, policy holds, and missing approval remain
 typed review states. Cycle/adaptive facade callers configure semantic routing only at the
 top-level boundary so the exact reviewed route is handed into the durable loop.
+
+For applications that want the agent to own the complete route-to-invocation decision, use
+`AutonomousBrainFacade.executeAuto()`. It compiles the request-free facade plan, resolves the
+provider-free route, builds the domain or cross-domain blueprint, selects the capability portfolio,
+and delegates to `AutonomousAgent.runAuto()`. The returned `automatic` envelope distinguishes
+deterministic execution from provider-assisted planning, exposes `next_action`, and keeps the
+final single-domain or fan-out/fan-in result caller-owned:
+
+```typescript
+const automatic = await brain.executeAuto(
+  { task: "compare experiment evidence and report reproducibility gaps" },
+  {
+    approveProviderCall: true,
+    planningMode: "deterministic", // use "provider" for a separately approved plan proposal
+    maxProviderFailovers: 1,
+    maxTotalCostUnits: 12,
+  },
+);
+
+if (automatic.status !== "completed") {
+  console.log(automatic.automatic?.next_action, automatic.plan.route.route_digest);
+}
+```
+
+`executeAuto()` accepts every built-in domain and automatically chooses cross-domain fan-out when
+the reviewed route selects multiple domains. A connector in the request is executed first when
+`connectorFirst` is enabled (the default), and its bounded observation is included in the
+transient provider context when `includeConnectorObservation` is enabled. Connector approval,
+provider approval, model credentials, tool authorization, evaluator settlement, and effect
+approval remain independent gates. `executeAutoWithTrace()` adds the same metadata-only trace
+boundary used by direct and adaptive execution. For deployments with a completed launch review,
+`executeAutoWithLaunchAdmission()` validates the exact route against the admission immediately
+before connector/provider dispatch; semantic routing is intentionally a separate approval
+boundary for that method.
+
+The automatic facade is deliberately additive: `execute()` remains the lower-level direct
+provider/cross-domain path, while `executeAuto()` is the explicit route -> blueprint -> automatic
+planning path. This makes the chosen autonomy level visible in application code instead of
+silently changing the behavior of existing callers.
+
 For `executeBatchResumable()`, the checkpoint adds a non-secret digest of the semantic-routing
 thresholds, inherited selection gates, and candidate metadata. A changed policy—or adding
 semantic routing to a legacy deterministic checkpoint—is rejected before rehydration or a new
