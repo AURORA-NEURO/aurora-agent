@@ -42,6 +42,7 @@ use bioprism_ids::{
 use bioprism_ids::{
     IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
 };
+use bioprism_ids::{IDS_QUALITY_CONTROL_CONTRACT_VERSION, IDS_QUALITY_CONTROL_FEATURE_ID};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -1842,6 +1843,7 @@ impl Server {
             "ids_multimodal_ingestion_research_copilot" => {
                 self.ids_multimodal_ingestion_research_copilot(&arguments)
             }
+            "ids_quality_control_assurance" => self.ids_quality_control_assurance(&arguments),
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -24884,6 +24886,26 @@ impl Server {
         }))
     }
 
+    fn ids_quality_control_assurance(&self, arguments: &Value) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_ids_quality_control_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_QUALITY_CONTROL_FEATURE_ID,
+            "contract_version": IDS_QUALITY_CONTROL_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "metric summaries are deterministically partitioned into passed, failed, unknown, unmeasured, and blocked states",
+                "required modality closure, quality fraction, replay, provenance, policy, approval, and locality gates are explicit",
+                "failed and negative QC evidence cannot be silently promoted to a release"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied QC summaries and never reads raw arrays, images, sequencing reads, or instrument state",
+                "a qualified QC report is not biological validity or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -40997,6 +41019,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "properties": {
                     "request": { "type": "object", "description": "Serialized MultimodalIngestionRequest4 with study, required modalities, quality threshold, budget, policy, approval, locality, and replay declarations." },
                     "observations": { "type": "array", "description": "Typed ModalityObservation4 summaries; raw imaging or omics payloads are not accepted." }
+                },
+                "required": ["request", "observations"]
+            }
+        }),
+        json!({
+            "name": "ids_quality_control_assurance",
+            "description": "Evaluate typed multimodal QC metric summaries against thresholds and required modality closure for preclinical research. The assurance harness preserves failed, unknown, unmeasured, contradicted, omitted, and negative evidence and never reads raw experiment data.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized QualityControlBatch4 with required modalities, minimum pass fraction, checkpoint, budget, policy, approval, locality, and replay declarations." },
+                    "observations": { "type": "array", "description": "Typed QualityObservation4 metric summaries with modality, baseline, threshold, artifact, provenance, and evidence state." }
                 },
                 "required": ["request", "observations"]
             }

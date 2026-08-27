@@ -4363,3 +4363,13 @@ export {
   validateIdsHarmonizedResearchObject8,
 } from "./research-contracts.js";
 export type { IdsHarmonizedResearchObject8 } from "./research-contracts.js";
+
+export {
+  IDS_QUALITY_CONTROL_FEATURE_ID,
+  IDS_QUALITY_CONTROL_CONTRACT_VERSION,
+  IDS_QUALITY_CONTROL_INPUT_SCHEMA,
+  IDS_QUALITY_CONTROL_OUTPUT_SCHEMA,
+  idsQualityControlDigest,
+  validateIdsQualityControlReport8,
+} from "./research-contracts.js";
+export type { IdsQualityControlReport8 } from "./research-contracts.js";

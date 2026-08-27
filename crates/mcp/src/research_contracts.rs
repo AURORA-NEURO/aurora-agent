@@ -530,6 +530,10 @@ use bioprism_ids::{
     operate_multimodal_ingestion, HarmonizedResearchObject8, ModalityObservation4,
     MultimodalIngestionRequest4, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
 };
+use bioprism_ids::{
+    assure_quality_control, QualityControlBatch4, QualityControlReport8,
+    QualityObservation4, IDS_QUALITY_CONTROL_FEATURE_ID,
+};
 use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
     PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
@@ -3057,6 +3061,26 @@ pub fn validate_ids_multimodal_ingestion_json(value: &Value) -> Result<Harmonize
         .map_err(|error| format!("invalid ids ingestion receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_MULTIMODAL_INGESTION_FEATURE_ID { return Err("ids multimodal ingestion feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub const IDS_QUALITY_CONTROL_TOOL: &str = "ids_quality_control_assurance";
+
+pub fn operate_ids_quality_control_json(value: &Value) -> Result<Value, String> {
+    let request: QualityControlBatch4 = serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+        .map_err(|error| format!("invalid ids quality request: {error}"))?;
+    let observations: Vec<QualityObservation4> = serde_json::from_value(value.get("observations").cloned().ok_or("observations are required")?)
+        .map_err(|error| format!("invalid ids quality observations: {error}"))?;
+    let receipt = assure_quality_control(&request, &observations)
+        .map_err(|error| format!("ids quality control failed: {error}"))?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize ids quality receipt: {error}"))
+}
+
+pub fn validate_ids_quality_control_json(value: &Value) -> Result<QualityControlReport8, String> {
+    let receipt: QualityControlReport8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids quality receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_QUALITY_CONTROL_FEATURE_ID { return Err("ids quality-control feature id mismatch".into()); }
     Ok(receipt)
 }
 

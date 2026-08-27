@@ -16,6 +16,7 @@ pub mod id;
 pub mod interpretation_plane;
 pub mod knowledge_representation_federated_control_plane;
 pub mod multimodal_ingestion_research_copilot;
+pub mod quality_control_assurance;
 pub mod throughput_evidence_surveillance_contract_model;
 
 pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
@@ -64,6 +65,13 @@ pub use multimodal_ingestion_research_copilot::{
     MultimodalIngestionError, MultimodalIngestionRequest4,
     CONTRACT_VERSION as IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION,
     FEATURE_ID as IDS_MULTIMODAL_INGESTION_FEATURE_ID,
+};
+pub use quality_control_assurance::{
+    assure_quality_control, quality_control_manifest, QualityControlBatch4,
+    QualityControlError, QualityControlReport8, QualityControlReport8Artifact,
+    QualityEvidenceState, QualityObservation4,
+    CONTRACT_VERSION as IDS_QUALITY_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as IDS_QUALITY_CONTROL_FEATURE_ID,
 };
 pub use throughput_evidence_surveillance_contract_model::{
     model_throughput_evidence_surveillance_contract,

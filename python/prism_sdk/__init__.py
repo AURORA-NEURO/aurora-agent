@@ -7697,3 +7697,17 @@ __all__ += [
     "operate_ids_multimodal_ingestion",
     "idsMultimodalIngestionDigest",
 ]
+
+from .ids_quality_control_assurance import (
+    QualityControlReport8 as IdsQualityControlReport8,
+    quality_control_manifest as ids_quality_control_manifest,
+    assure_quality_control as assure_ids_quality_control,
+    idsQualityControlDigest,
+)
+
+__all__ += [
+    "IdsQualityControlReport8",
+    "ids_quality_control_manifest",
+    "assure_ids_quality_control",
+    "idsQualityControlDigest",
+]
