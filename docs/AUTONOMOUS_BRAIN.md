@@ -209,6 +209,38 @@ that transport success is not durable mission success. Quality projections are s
 digest-replay, and feed into explicit learning settlement; raw results, prompts, arguments,
 credentials, and external-world evidence remain caller-owned.
 
+### Bounded recovery planning
+
+Held and failed runs should not force every queue or UI to reverse-engineer meaning from a status
+string. Both SDKs now expose `planAutonomousRecovery(...)` / `plan_autonomous_recovery(...)`, a
+provider-free recovery handoff over an explicit value-only observation. It returns a digest-bound
+status, ordered next actions, retry budget, stable reason codes, and two domain guardrails for all
+twelve built-in domains. Reconciliation takes precedence over retry; missing credentials lead to
+credential collection; route and policy holds lead to review; response-quality and tool-approval
+holds remain explicit; and exhausted or unclassified failures stop and escalate instead of being
+reported as successful or silently retried.
+
+```typescript
+const recovery = planAutonomousRecovery({
+  domain: "operations",
+  capability: "incident_response",
+  status: "failed",
+  failure_code: "transport",
+  retryable: true,
+  retry_count: 1,
+  max_retries: 3,
+});
+// recovery.next_action === "retry_provider"
+// recovery.actions is guidance only; the caller still owns approval and dispatch.
+```
+
+The observation contract rejects task text, prompts, provider requests/responses, credentials,
+headers, arguments, and raw output before planning. `validateAutonomousRecoveryPlan(...)` and its
+Python equivalent recheck the digest and retention markers before a plan enters a queue or durable
+operator record. Recovery planning never invokes a provider, resolves a key, executes a tool,
+settles learning, or reconciles an external effect; it makes the next autonomous decision
+inspectable without turning guidance into authority.
+
 Semantic provider routing is covered by the same boundary. `route_with_provider`,
 `prepare_auto_with_provider`, and Python `run_auto(..., semantic_routing=True)` perform a
 provider-free cross-domain admission before model selection or classifier invocation. A strict

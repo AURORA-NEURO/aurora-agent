@@ -4354,11 +4354,35 @@ from .tooling import (
     ToolValidationReport,
 )
 from .vcf import VcfAdapter, VcfLoss, VcfParseError, VcfParseResult, parse_vcf
+from .autonomous_recovery import (
+    AUTONOMOUS_RECOVERY_ACTIONS,
+    AUTONOMOUS_RECOVERY_AUTHORITY,
+    AUTONOMOUS_RECOVERY_PLAN_SCHEMA,
+    AUTONOMOUS_RECOVERY_RETENTION,
+    MAX_AUTONOMOUS_RECOVERY_ACTIONS,
+    MAX_AUTONOMOUS_RECOVERY_CAPABILITY_BYTES,
+    MAX_AUTONOMOUS_RECOVERY_REASON_CODES,
+    AutonomousRecoveryObservation,
+    AutonomousRecoveryPlan,
+    plan_autonomous_recovery,
+    validate_autonomous_recovery_plan,
+)
 
 __version__ = "0.1.0"
 
 __all__ = [
     "ArgumentError",
+    "AUTONOMOUS_RECOVERY_ACTIONS",
+    "AUTONOMOUS_RECOVERY_AUTHORITY",
+    "AUTONOMOUS_RECOVERY_PLAN_SCHEMA",
+    "AUTONOMOUS_RECOVERY_RETENTION",
+    "MAX_AUTONOMOUS_RECOVERY_ACTIONS",
+    "MAX_AUTONOMOUS_RECOVERY_CAPABILITY_BYTES",
+    "MAX_AUTONOMOUS_RECOVERY_REASON_CODES",
+    "AutonomousRecoveryObservation",
+    "AutonomousRecoveryPlan",
+    "plan_autonomous_recovery",
+    "validate_autonomous_recovery_plan",
     "ApiEvent",
     "BioCapabilityEvidenceAuditRequest",
     "BioCapabilityEvidenceAuditReport",

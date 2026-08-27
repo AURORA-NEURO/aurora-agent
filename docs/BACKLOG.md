@@ -1955,3 +1955,12 @@ compare-and-swap. A failed refresh persistence operation rolls the live catalogu
 pre-refresh image. All-domain coverage remains provider-discovery metadata only: credentials,
 circuits, quality priors, evaluator evidence, and selection authority are not restored from the
 inventory snapshot.
+
+Both SDKs now expose a bounded recovery planner for the failure path that sits after route,
+provider, tool, response-quality, and mission decisions. `planAutonomousRecovery()` /
+`plan_autonomous_recovery()` converts an explicit value-only status observation into ordered next
+actions, stable reason codes, retry-budget state, and domain-specific escalation guardrails for
+all twelve domains. Reconciliation outranks retry, missing credentials remain a collection step,
+and exhausted/unclassified failures stop and escalate. The plan is digest- and retention-validated
+and contains no task text, prompts, provider values, credentials, tool arguments, or effect data;
+it is a guidance handoff only and does not execute recovery or grant authority.

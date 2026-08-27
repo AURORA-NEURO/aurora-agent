@@ -3405,3 +3405,20 @@ export type {
   AutonomousProtectedRehydrationTextStore,
   AutonomousProtectedRehydrationTransactionalTextStore,
 } from "./autonomous-protected-rehydration.js";
+export {
+  AUTONOMOUS_RECOVERY_ACTIONS,
+  AUTONOMOUS_RECOVERY_AUTHORITY,
+  AUTONOMOUS_RECOVERY_MAX_ACTIONS,
+  AUTONOMOUS_RECOVERY_MAX_CAPABILITY_BYTES,
+  AUTONOMOUS_RECOVERY_MAX_REASON_CODES,
+  AUTONOMOUS_RECOVERY_PLAN_SCHEMA,
+  AUTONOMOUS_RECOVERY_RETENTION,
+  planAutonomousRecovery,
+  validateAutonomousRecoveryPlan,
+} from "./autonomous-recovery.js";
+export type {
+  AutonomousRecoveryAction,
+  AutonomousRecoveryObservation,
+  AutonomousRecoveryPlan,
+  AutonomousRecoveryStatus,
+} from "./autonomous-recovery.js";
