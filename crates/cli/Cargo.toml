@@ -12,6 +12,7 @@ name = "bioprism"
 path = "src/main.rs"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-baseline = { workspace = true }
 bioprism-devplat = { workspace = true }
 bioprism-fiber = { workspace = true }

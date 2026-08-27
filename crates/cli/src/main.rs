@@ -13,6 +13,7 @@ mod exit;
 mod explain;
 mod io;
 mod knowledge_interop;
+mod protocol_simulation_assurance;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
 use bioprism_devplat::{
@@ -211,6 +212,11 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             receipt_out,
             dry_run,
         } => knowledge_interoperability_verify(request, receipt_out.as_deref(), *dry_run),
+        Command::ProtocolSimulationVerify {
+            request,
+            receipt_out,
+            dry_run,
+        } => protocol_simulation_verify(request, receipt_out.as_deref(), *dry_run),
         Command::ReadinessAudit { request } => readiness_audit(request),
         Command::ReadinessQuery {
             store,
@@ -640,6 +646,44 @@ fn knowledge_interoperability_verify(
         outcome.code = ExitCode::AssertionFailed;
     }
     Ok(outcome)
+}
+
+fn protocol_simulation_verify(
+    request_path: &Path,
+    receipt_out: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let receipt = protocol_simulation_assurance::verify_json(&request).map_err(|error| {
+        CliError::invalid(error.to_string()).about(request_path.display().to_string())
+    })?;
+    let artifact = receipt_out
+        .map(|path| io::write_artifact(path, &receipt, dry_run))
+        .transpose()?;
+    let disposition = receipt
+        .get("disposition")
+        .and_then(Value::as_str)
+        .unwrap_or("blocked");
+    let digest = receipt
+        .get("verdict_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let mut document = json!({
+        "ok": true,
+        "feature_id": protocol_simulation_assurance::FEATURE_ID,
+        "receipt": receipt,
+        "dry_run": dry_run,
+        "artifact": artifact.as_ref().map(|value| json!({"path": value.path.display().to_string(), "bytes": value.bytes, "written": value.written})).unwrap_or(Value::Null),
+        "execution": "verification only; no protocol runner, instrument, external provider, or clinical effect started"
+    });
+    document["verdict_digest"] = json!(digest);
+    let human = format!(
+        "protocol simulation assurance: {disposition}\n  request: {}\n  verdict digest: {digest}\n  execution: verification only; no protocol runner or external effect started\n\nNext: bioprism protocol simulate-verify --request {}{}\n",
+        request_path.display(),
+        request_path.display(),
+        receipt_out.map(|path| format!(" --receipt-out {}", path.display())).unwrap_or_default(),
+    );
+    Ok(Outcome::ok(document, human).failing_if(disposition != "qualified"))
 }
 
 fn readiness_audit(request_path: &Path) -> CliResult<Outcome> {

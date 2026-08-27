@@ -257,6 +257,7 @@ dependencies = [
  "bioprism-baseline",
  "bioprism-devplat",
  "bioprism-fiber",
+ "bioprism-foundation",
  "bioprism-ids",
  "bioprism-mcp",
  "bioprism-mutation",

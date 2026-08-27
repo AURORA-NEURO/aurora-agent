@@ -7030,3 +7030,13 @@ __all__ += [
     "MutationKnowledgeFederatedReceipt",
     "operate_mutation_knowledge_federated_control",
 ]
+
+from .protocol_simulation_assurance import (
+    ProtocolSimulationAssuranceReceipt,
+    verify_protocol_simulation,
+)
+
+__all__ += [
+    "ProtocolSimulationAssuranceReceipt",
+    "verify_protocol_simulation",
+]
