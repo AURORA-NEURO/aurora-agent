@@ -4223,3 +4223,13 @@ export {
   validateBundleEvidenceSynthesis,
 } from "./research-contracts.js";
 export type { BundleEvidenceSynthesis } from "./research-contracts.js";
+
+export {
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_FEATURE_ID,
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_CONTRACT_VERSION,
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_INPUT_SCHEMA,
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_OUTPUT_SCHEMA,
+  mcpMultimodalIngestionAssuranceDigest,
+  validateMcpMultimodalIngestionReceipt,
+} from "./research-contracts.js";
+export type { McpMultimodalIngestionReceipt } from "./research-contracts.js";

@@ -12,6 +12,7 @@ bioprism-policy = { workspace = true }
 bioprism-safety = { workspace = true }
 bioprism-onco = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

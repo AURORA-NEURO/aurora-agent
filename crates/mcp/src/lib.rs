@@ -9,6 +9,7 @@
 
 mod brain_control;
 pub mod evolution_assurance;
+pub mod multimodal_ingestion_assurance;
 pub mod research_contracts;
 pub mod resource_discovery_contract;
 pub mod rpc;
@@ -21,6 +22,16 @@ pub use evolution_assurance::{
     FEATURE_ID as EVOLUTION_ASSURANCE_FEATURE_ID,
     REQUIRED_CHECKS as EVOLUTION_ASSURANCE_REQUIRED_CHECKS, TOOL_NAME as EVOLUTION_ASSURANCE_TOOL,
 };
+pub use multimodal_ingestion_assurance::{
+    assure_multimodal_ingestion, assure_multimodal_ingestion_json,
+    multimodal_ingestion_assurance_manifest, validate_multimodal_ingestion_json,
+    HarmonizedResearchObjectReceipt, IngestionDisposition, ModalityState,
+    MultimodalIngestionError, MultimodalIngestionRequest, PeerModalitySummary,
+    RawModalityAttestation,
+    CONTRACT_VERSION as MULTIMODAL_INGESTION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_INGESTION_ASSURANCE_FEATURE_ID,
+    TOOL_NAME as MULTIMODAL_INGESTION_ASSURANCE_TOOL,
+};
 pub use research_contracts::{
     admit_autonomy_batch_json, admit_bounded_evolution_json, admit_computational_execution_json,
     admit_federated_commons_json, admit_federated_knowledge_json, admit_mechanism_gateway_json,
@@ -28,6 +39,7 @@ pub use research_contracts::{
     assure_adapter_context_compilation_json, assure_bounded_evolution_json,
     assure_context_compilation_json, assure_evaluation_run_json, assure_federated_lens_json,
     assure_federated_multimodal_json, assure_federated_retrieval_json, assure_interpretation_json,
+    assure_multimodal_ingestion_assurance_json,
     assure_knowledge_representation_json, assure_provenance_json, assure_release_json,
     assure_replication_json, assure_weavelang_release_json, close_adapter_limitations_json,
     compile_adapter_capability_manifest_json, compile_evaluation_card_json,
@@ -152,6 +164,7 @@ pub use research_contracts::{
     validate_federated_commons_json, validate_federated_continual_retrieval_json,
     validate_federated_evaluation_receipt_json, validate_federated_knowledge_gateway_json,
     validate_federated_lens_assurance_json, validate_federated_multimodal_assurance_json,
+    validate_multimodal_ingestion_assurance_json,
     validate_federated_retrieval_assurance_json, validate_federation_workflow_json,
     validate_governance_research_release_json, validate_harmonized_research_object_json,
     validate_ingestion_gateway_json, validate_instrument_mesh_json,

@@ -7520,3 +7520,15 @@ __all__ += [
     "assure_retrieval_bundle",
     "bundleRetrievalAssuranceDigest",
 ]
+
+from .mcp_multimodal_ingestion_assurance import (
+    HarmonizedResearchObjectReceipt as McpMultimodalIngestionReceipt,
+    assure_multimodal_ingestion,
+    validate_multimodal_ingestion_receipt,
+)
+
+__all__ += [
+    "McpMultimodalIngestionReceipt",
+    "assure_multimodal_ingestion",
+    "validate_multimodal_ingestion_receipt",
+]

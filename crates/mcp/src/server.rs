@@ -2010,6 +2010,7 @@ impl Server {
             "research_release_batch_validate" => self.research_release_batch_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
             "multimodal_harmonize" => self.multimodal_harmonize(&arguments),
+            "mcp_multimodal_ingestion_assurance" => self.mcp_multimodal_ingestion_assurance(&arguments),
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
             "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
@@ -26380,6 +26381,28 @@ impl Server {
         }))
     }
 
+    fn mcp_multimodal_ingestion_assurance(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized MultimodalIngestionRequest")?;
+        let receipt = crate::research_contracts::assure_multimodal_ingestion_assurance_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": crate::multimodal_ingestion_assurance::FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "modality attestations and peer summaries are canonicalized before release",
+                "raw bytes remain institution-local and only aggregate signed metadata crosses federation",
+                "unknown, unmeasured, contradictory, omitted, and adversarial states remain explicit"
+            ],
+            "limitations": [
+                "the MCP route verifies caller-supplied manifests and does not inspect or harmonize raw bytes",
+                "a qualified ingestion receipt is a research-data readiness signal, not a biological or clinical conclusion"
+            ]
+        }))
+    }
+
     fn analysis_qualify(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -38158,7 +38181,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "multimodal_ingestion",
             "domains": ["modality harmonization", "unit alignment", "coordinate systems", "semantic loss", "local research objects"],
             "crates": ["bioprism-adapter", "bioprism-modalities", "bioprism-foundation"],
-            "mcp_tools": ["multimodal_harmonize", "multimodal_replication_evaluate", "quality_drift_evaluate"],
+            "mcp_tools": ["multimodal_harmonize", "mcp_multimodal_ingestion_assurance", "multimodal_replication_evaluate", "quality_drift_evaluate"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -41316,6 +41339,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-adapter MultimodalHarmonizationRequest." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "mcp_multimodal_ingestion_assurance",
+            "description": "Verify a local-first federated multimodal-ingestion manifest before exposing a harmonized research object. The assurance harness checks schema, semantic profile, QC/provenance/replay digests, protected closure, policy, aggregate-only federation, adversarial events, and peer quorum without reading or exporting raw imaging or omics bytes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized mcp MultimodalIngestionRequest." }
                 },
                 "required": ["request"]
             }

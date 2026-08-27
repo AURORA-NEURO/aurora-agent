@@ -768,6 +768,19 @@ pub fn harmonize_multimodal_json(value: &Value) -> Result<Value, String> {
         .map_err(|error| format!("cannot serialize harmonized research object: {error}"))
 }
 
+/// MCP transport wrapper for the federated continual multimodal-ingestion assurance harness.
+/// The domain implementation lives in `multimodal_ingestion_assurance`; this adapter keeps the
+/// JSON boundary consistent with the other research contracts exposed by this crate.
+pub fn assure_multimodal_ingestion_assurance_json(value: &Value) -> Result<Value, String> {
+    crate::multimodal_ingestion_assurance::assure_multimodal_ingestion_json(value)
+}
+
+pub fn validate_multimodal_ingestion_assurance_json(
+    value: &Value,
+) -> Result<crate::multimodal_ingestion_assurance::HarmonizedResearchObjectReceipt, String> {
+    crate::multimodal_ingestion_assurance::validate_multimodal_ingestion_json(value)
+}
+
 pub fn validate_harmonized_research_object_json(
     value: &Value,
 ) -> Result<HarmonizedResearchObject, String> {
