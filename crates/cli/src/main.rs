@@ -18,6 +18,7 @@ mod computational_execution_assurance;
 mod protocol_simulation_assurance;
 mod federated_retrieval_assurance;
 mod quality_control_workflow_fabric;
+mod interpretation_interoperability_gateway;
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
 use bioprism_devplat::{
     audit_domain_decision_readiness, build_domain_workflow_catalogue,

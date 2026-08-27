@@ -7244,3 +7244,15 @@ __all__ += [
     "assure_context_compilation",
     "hubapi_context_assurance_digest",
 ]
+
+from .cli_interpretation_interoperability_gateway import (
+    CliInterpretationGatewayEnvelope,
+    assure_interpretation_exchange,
+    cli_interpretation_gateway_digest,
+)
+
+__all__ += [
+    "CliInterpretationGatewayEnvelope",
+    "assure_interpretation_exchange",
+    "cli_interpretation_gateway_digest",
+]

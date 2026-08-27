@@ -4013,3 +4013,13 @@ export {
   validateHubapiContextAssuranceReport,
 } from "./research-contracts.js";
 export type { HubapiContextAssuranceReport } from "./research-contracts.js";
+
+export {
+  CLI_INTERPRETATION_GATEWAY_FEATURE_ID,
+  CLI_INTERPRETATION_GATEWAY_CONTRACT_VERSION,
+  CLI_INTERPRETATION_GATEWAY_INPUT_SCHEMA,
+  CLI_INTERPRETATION_GATEWAY_OUTPUT_SCHEMA,
+  cliInterpretationGatewayEnvelopeDigest,
+  validateCliInterpretationGatewayEnvelope,
+} from "./research-contracts.js";
+export type { CliInterpretationGatewayEnvelope } from "./research-contracts.js";
