@@ -4203,3 +4203,13 @@ export {
   validateLabEvidenceSynthesis,
 } from "./research-contracts.js";
 export type { LabEvidenceSynthesis } from "./research-contracts.js";
+
+export {
+  WEAVELANG_LIMITATION_CLOSURE_FEATURE_ID,
+  WEAVELANG_LIMITATION_CLOSURE_CONTRACT_VERSION,
+  WEAVELANG_LIMITATION_CLOSURE_INPUT_SCHEMA,
+  WEAVELANG_LIMITATION_CLOSURE_OUTPUT_SCHEMA,
+  weavelangLimitationClosureDigest,
+  validateWeavelangClosureReceipt,
+} from "./research-contracts.js";
+export type { WeavelangClosureReceipt } from "./research-contracts.js";

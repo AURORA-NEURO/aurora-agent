@@ -7492,3 +7492,17 @@ __all__ += [
     "assure_federated_retrieval_synthesis",
     "labFederatedRetrievalSynthesisDigest",
 ]
+
+from .weavelang_limitation_closure_control_plane import (
+    WeavelangClosureReceipt,
+    weavelang_limitation_closure_manifest,
+    assure_weavelang_limitation_closure,
+    weavelangLimitationClosureDigest,
+)
+
+__all__ += [
+    "WeavelangClosureReceipt",
+    "weavelang_limitation_closure_manifest",
+    "assure_weavelang_limitation_closure",
+    "weavelangLimitationClosureDigest",
+]

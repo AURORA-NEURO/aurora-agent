@@ -131,6 +131,7 @@ pub mod parser;
 pub mod printer;
 pub mod reference;
 pub mod release_assurance;
+pub mod limitation_closure_control_plane;
 pub mod semantics;
 
 pub use compile::{compile, CompileError};
@@ -145,5 +146,12 @@ pub use release_assurance::{
     WeaveLangReleaseAssuranceReceipt, WeaveLangReleaseAssuranceRequest,
     CONTRACT_VERSION as WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID,
+};
+pub use limitation_closure_control_plane::{
+    assure_weavelang_limitation_closure, weavelang_limitation_closure_manifest,
+    ClosureDisposition, LimitationClosureError, PeerClosureSummary, WeavelangClosureReceipt,
+    WeavelangClosureRequest, WeavelangLimitationCase,
+    CONTRACT_VERSION as WEAVELANG_LIMITATION_CLOSURE_CONTRACT_VERSION,
+    FEATURE_ID as WEAVELANG_LIMITATION_CLOSURE_FEATURE_ID,
 };
 pub use semantics::{ExecutionMode, Invariant, LivenessReport, Machine, Trace};
