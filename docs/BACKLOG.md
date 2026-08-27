@@ -2014,3 +2014,14 @@ and cross-domain controls now propagate through TypeScript run, automatic, bluep
 gate paths. Semantic routing and caller route overrides remain separately reviewable provider
 boundaries. This closes the SDK execution-admission gap; deployment identity, credential storage,
 and external approval authority remain caller-owned.
+
+Evidence-first execution now composes that admission model with the TypeScript provider boundary.
+Both reviewed evidence facades accept `runMode: "domain" | "cross_domain" | "auto"`; automatic
+and cross-domain modes bind execution to an exact provider-free evidence-scope route, preserve
+source/provider/evaluator/tool/effect approval separation, and expose richer transient result
+handles without leaking them into metadata projections. Cross-domain evidence is bounded to eight
+non-synthesis children, and catalogue-backed execution has the same route and mode semantics as
+adapter-registry execution. Tests exercise every built-in domain, exact coding+data fan-out,
+catalogue parity, and semantic-rerouting refusal. Remaining work is still deployment-owned:
+automatic-result checkpoint rehydration, distributed leases, encrypted raw-value retention, and
+caller-owned source/evaluator truth adapters.

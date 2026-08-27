@@ -1,12 +1,19 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import {
+  AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN,
   AUTONOMOUS_DOMAIN_NAMES,
   type AutonomousAgent,
+  type AutonomousAutoRunOptions,
+  type AutonomousAutoRunNextAction,
+  type AutonomousAutoRunResult,
+  type AutonomousCrossDomainRunResult,
   type AutonomousDomainName,
+  type AutonomousEvidenceExecutionMode,
   type AutonomousEvidenceBackedRunStatus,
+  type AutonomousPlanAndRunStatus,
   type AutonomousPromptChunk,
-  type AutonomousRunOptions,
   type AutonomousRunResult,
+  routeAutonomousEvidenceScope,
 } from "./autonomous.js";
 import type {
   AutonomousDomainEvidenceCatalogueExecuteOptions,
@@ -81,7 +88,11 @@ export interface AutonomousDomainEvidenceBrainRunOptions {
   execute?: Omit<AutonomousDomainEvidenceCatalogueExecuteOptions, "normalizer">;
   /** Bounded source fan-out across independent evidence requirements. */
   maxParallelRequirements?: number;
-  run?: AutonomousRunOptions;
+  /** Select the provider handoff shape; defaults to the historical single-domain handoff. */
+  runMode?: AutonomousEvidenceExecutionMode;
+  run?: AutonomousAutoRunOptions;
+  /** Additional bounded controls for cross-domain fan-out and synthesis. */
+  crossDomain?: Pick<import("./autonomous.js").AutonomousCrossDomainRunOptions, "subtasks" | "allowPartial" | "synthesize" | "maxParallelChildren" | "responseAlignments" | "requireResponseAlignment" | "minimumResponseReward" | "minimumResponseAlignmentConfidence" | "responseContradictionConfidenceThreshold">;
   promptBuilder?: AutonomousDomainEvidenceBrainPromptBuilder;
   beforeProviderRun?: AutonomousDomainEvidenceBrainPreflightHook;
   providerRunOverride?: AutonomousRunResult;
@@ -91,6 +102,7 @@ export interface AutonomousDomainEvidenceBrainRunOptions {
 export interface AutonomousDomainEvidenceBrainRunProjection extends JsonObject {
   schema: typeof AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_RUN_SCHEMA;
   status: AutonomousDomainEvidenceBrainStatus;
+  run_mode: AutonomousEvidenceExecutionMode;
   task_digest: string;
   evidence_plan_digest: string;
   catalogue_digest: string;
@@ -99,6 +111,10 @@ export interface AutonomousDomainEvidenceBrainRunProjection extends JsonObject {
   reconciliations: Array<JsonObject | null>;
   prompt_context_digest: string | null;
   run_status: string | null;
+  cross_domain_run_status: string | null;
+  automatic_status: AutonomousPlanAndRunStatus | null;
+  automatic_route_digest: string | null;
+  automatic_next_action: AutonomousAutoRunNextAction | null;
   selection_digest: string | null;
   response_digest: string | null;
   retention: typeof RETENTION;
@@ -109,11 +125,14 @@ export interface AutonomousDomainEvidenceBrainRunProjection extends JsonObject {
 export interface AutonomousDomainEvidenceBrainRunResult {
   schema: typeof AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_RUN_SCHEMA;
   status: AutonomousDomainEvidenceBrainStatus;
+  run_mode: AutonomousEvidenceExecutionMode;
   task_digest: string;
   plan: AutonomousEvidencePlan;
   prepared: readonly AutonomousDomainEvidenceBrainPreparation[];
   prompt_context: readonly AutonomousPromptChunk[];
   run: AutonomousRunResult | null;
+  cross_domain_run: AutonomousCrossDomainRunResult | null;
+  automatic: AutonomousAutoRunResult | null;
   toJSON(): AutonomousDomainEvidenceBrainRunProjection;
 }
 
@@ -154,6 +173,12 @@ function normalizeDomains(value: readonly AutonomousDomainName[] | undefined): A
   if (domains.some((domain) => !AUTONOMOUS_DOMAIN_NAMES.includes(domain))) throw new ArgumentError("domain evidence brain domains contain an unsupported domain");
   if (new Set(domains).size !== domains.length) throw new ArgumentError("domain evidence brain domains contain duplicates");
   return domains;
+}
+
+function normalizeRunMode(value: unknown): AutonomousEvidenceExecutionMode {
+  if (value === undefined) return "domain";
+  if (value !== "domain" && value !== "cross_domain" && value !== "auto") throw new ArgumentError("domain evidence brain runMode must be domain, cross_domain, or auto");
+  return value;
 }
 
 function normalizePromptContext(value: readonly AutonomousPromptChunk[]): AutonomousPromptChunk[] {
@@ -232,6 +257,10 @@ export async function runAutonomousDomainEvidenceBacked(
   if (!options || typeof options !== "object" || !options.catalogue || typeof options.catalogue.prepare !== "function" || typeof options.catalogue.execute !== "function") throw new ArgumentError("domain evidence brain options require a typed source catalogue");
   const taskText = boundedText("domain evidence brain task", task, 32_000);
   const domains = normalizeDomains(options.domains);
+  const runMode = normalizeRunMode(options.runMode);
+  if (runMode === "cross_domain" && options.domains === undefined) throw new ArgumentError("cross-domain catalogue execution requires an explicit 2..8 domain scope");
+  if (runMode === "cross_domain" && (domains.length < 2 || domains.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN || domains.includes("cross_domain"))) throw new ArgumentError("cross-domain catalogue execution requires 2..8 non-synthesis domains");
+  const evidenceScopeRoute = options.domains === undefined ? null : await routeAutonomousEvidenceScope(taskText, domains);
   const plan = await agent.evidencePlan(domains, { availableEvidence: options.availableEvidence, completedStages: options.completedStages });
   if (plan.requirements.length < 1 || plan.requirements.length > MAX_AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_REQUIREMENTS) throw new ArgumentError("domain evidence brain plan requirements are outside their bound");
   const catalogueDigest = options.catalogue.toJSON().registry_digest;
@@ -250,11 +279,15 @@ export async function runAutonomousDomainEvidenceBacked(
     status: AutonomousDomainEvidenceBrainStatus,
     promptContext: readonly AutonomousPromptChunk[],
     run: AutonomousRunResult | null,
+    crossDomainRun: AutonomousCrossDomainRunResult | null = null,
+    automatic: AutonomousAutoRunResult | null = null,
   ): Promise<AutonomousDomainEvidenceBrainRunResult> => {
     const reconciliations = prepared.map((item) => item.result?.toJSON() ?? null);
+    const metadataRun = run ?? crossDomainRun?.synthesis ?? (automatic?.result?.schema === "bioprism-typescript-autonomous-run/0.1" ? automatic.result : automatic?.result?.synthesis ?? null);
     const descriptor = {
       schema: AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_RUN_SCHEMA,
       status,
+      run_mode: runMode,
       task_digest: await digestJson({ task: taskText }),
       evidence_plan_digest: plan.plan_digest,
       catalogue_digest: catalogueDigest,
@@ -263,8 +296,12 @@ export async function runAutonomousDomainEvidenceBacked(
       reconciliations,
       prompt_context_digest: promptContext.length ? await digestJson(promptContext) : null,
       run_status: run?.status ?? null,
-      selection_digest: run?.selection ? await digestJson(run.selection) : null,
-      response_digest: run?.response ? await digestJson(run.response) : null,
+      cross_domain_run_status: crossDomainRun?.status ?? null,
+      automatic_status: automatic?.status ?? null,
+      automatic_route_digest: automatic?.route.route_digest ?? null,
+      automatic_next_action: automatic?.next_action ?? null,
+      selection_digest: metadataRun?.selection ? await digestJson(metadataRun.selection) : null,
+      response_digest: metadataRun?.response ? await digestJson(metadataRun.response) : null,
       retention: RETENTION,
       secret_material: "never_returned" as const,
     };
@@ -273,6 +310,7 @@ export async function runAutonomousDomainEvidenceBacked(
     return {
       schema: AUTONOMOUS_DOMAIN_EVIDENCE_BRAIN_RUN_SCHEMA,
       status,
+      run_mode: runMode,
       task_digest: descriptor.task_digest,
       plan,
       // Preserve the typed reconciliation/result objects for the caller's transient bridge;
@@ -280,6 +318,8 @@ export async function runAutonomousDomainEvidenceBacked(
       prepared: prepared.map((item) => ({ ...item })),
       prompt_context: structuredClone(promptContext),
       run,
+      cross_domain_run: crossDomainRun,
+      automatic,
       toJSON: () => structuredClone(projection),
     };
   };
@@ -311,14 +351,56 @@ export async function runAutonomousDomainEvidenceBacked(
   const promptContext = normalizePromptContext(options.promptBuilder ? await options.promptBuilder(promptProjection) : defaultPromptContext(prepared, plan));
   const runOptions = options.run ?? {};
   const context = normalizePromptContext([...(runOptions.context ?? []), ...promptContext]);
-  let run: AutonomousRunResult;
+  let run: AutonomousRunResult | null = null;
+  let crossDomainRun: AutonomousCrossDomainRunResult | null = null;
+  let automatic: AutonomousAutoRunResult | null = null;
   if (options.providerRunOverride !== undefined) {
+    if (runMode !== "domain") throw new ArgumentError("domain evidence brain provider run override is supported only for domain mode");
     if (!isObject(options.providerRunOverride) || options.providerRunOverride.schema !== "bioprism-typescript-autonomous-run/0.1") throw new ArgumentError("domain evidence brain provider run override is malformed");
     if (runOptions.approveProviderCall !== true) throw new ArgumentError("domain evidence brain provider run override requires provider approval");
     run = options.providerRunOverride;
   } else {
     await options.beforeProviderRun?.({ plan, prepared, prompt_context: promptContext });
-    run = await agent.run(taskText, { ...runOptions, context, domainPolicyEvidenceReady: true });
+    if (runMode === "domain") {
+      const evidenceDomain = options.domains?.length === 1 ? options.domains[0] : undefined;
+      if (evidenceDomain !== undefined && runOptions.domain !== undefined && runOptions.domain !== evidenceDomain) throw new ArgumentError("catalogue evidence scope does not match the requested provider domain");
+      run = await agent.run(taskText, {
+        ...runOptions,
+        context,
+        ...(evidenceDomain !== undefined && runOptions.domain === undefined ? { domain: evidenceDomain } : {}),
+        domainPolicyEvidenceReady: true,
+      });
+    } else if (runMode === "cross_domain") {
+      if (!evidenceScopeRoute) throw new ProviderRuntimeError("cross-domain catalogue route was not compiled");
+      if (runOptions.semanticRouting !== undefined && runOptions.semanticRouting !== false) throw new ArgumentError("cross-domain catalogue execution requires provider-free route binding");
+      const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...crossRunOptions } = runOptions;
+      crossDomainRun = await agent.runCrossDomain(taskText, {
+        ...crossRunOptions,
+        ...options.crossDomain,
+        context,
+        routeOverride: evidenceScopeRoute,
+        domainPolicyEvidenceReady: true,
+        semanticRouting: false,
+      });
+    } else {
+      if (evidenceScopeRoute) {
+        if (runOptions.routeOverride !== undefined) throw new ArgumentError("automatic catalogue execution owns the evidence-scope route override");
+        if (runOptions.semanticRouting !== undefined && runOptions.semanticRouting !== false) throw new ArgumentError("automatic catalogue execution cannot combine an exact evidence scope with provider-assisted semantic routing");
+        const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...automaticRunOptions } = runOptions;
+        automatic = await agent.runAuto(taskText, {
+          ...automaticRunOptions,
+          context,
+          routeOverride: evidenceScopeRoute,
+          semanticRouting: false,
+          domainPolicyEvidenceReady: true,
+        });
+      } else {
+        automatic = await agent.runAuto(taskText, { ...runOptions, context, domainPolicyEvidenceReady: true });
+      }
+      if (automatic.result?.schema === "bioprism-typescript-autonomous-run/0.1") run = automatic.result;
+      if (automatic.result?.schema === "bioprism-typescript-autonomous-cross-domain-result/0.1") crossDomainRun = automatic.result;
+    }
   }
-  return finish(run.status, promptContext, run);
+  const status = automatic?.status ?? crossDomainRun?.status ?? run?.status ?? "evidence_failed";
+  return finish(status, promptContext, run, crossDomainRun, automatic);
 }

@@ -12225,3 +12225,49 @@ subset denial before malformed credential use, held-admission refusal, semantic-
 route-override refusal, and the safe provider-free authorization helper. The SDK still retains
 only route and admission metadata; deployment identity, credential storage, and external approval
 authorities remain caller-owned.
+
+### Evidence-first automatic execution
+
+The TypeScript evidence bridges now expose an explicit `runMode` on both
+`runWithReviewedEvidence()` and `runWithDomainEvidenceCatalogue()`. The historical default is
+`domain`, preserving the ordinary single-domain provider handoff. `auto` composes the completed
+evidence result with the route -> blueprint -> execution automatic brain, while `cross_domain`
+uses the reviewed evidence domains to create bounded specialist fan-out and synthesis.
+
+When a caller supplies an explicit evidence scope, the bridge creates a digest-bound
+`routeAutonomousEvidenceScope()` proposal before provider execution. Automatic and cross-domain
+execution receive that exact route as an override; they cannot reclassify the task, widen the
+domain set, or invoke provider semantic routing against an unreviewed domain. Cross-domain scopes
+are limited to two through eight non-synthesis domains, and the `cross_domain` profile remains
+reserved for synthesis. Source dispatch, evidence settlement, provider approval, plan acceptance,
+tool authorization, effect approval, and evaluator/learning feedback remain separate gates.
+
+The result keeps the legacy `run` field for single-domain callers and adds `cross_domain_run` and
+`automatic` for the richer modes. Its metadata projection records the selected run mode,
+automatic route/status/next-action, cross-domain status, selection and response digests, and
+evidence-plan identity, while excluding transient source values, prompts, credentials, provider
+responses, and tool/effect payloads.
+
+```ts
+const result = await agent.runWithReviewedEvidence(
+  "synthesize the bounded coding and data findings",
+  {
+    registry,
+    domains: ["coding", "data"],
+    requests,
+    runMode: "cross_domain",
+    crossDomain: { maxParallelChildren: 2 },
+    execute: { approveSourceDispatch: true },
+    run: { candidates, approveProviderCall: true },
+  },
+);
+if (result.automatic) inspect(result.automatic.next_action);
+if (result.cross_domain_run) inspect(result.cross_domain_run.synthesis);
+persist(result.toJSON());
+```
+
+The automatic evidence tests run every built-in domain, prove exact route preservation for
+cross-domain coding+data fan-out, verify catalogue parity, and reject semantic rerouting when an
+evidence scope is already bound. Provider-run overrides remain intentionally limited to the
+legacy direct mode: rehydrating an automatic plan or cross-domain result requires the corresponding
+caller-owned result boundary rather than pretending a single-domain response is a complete run.

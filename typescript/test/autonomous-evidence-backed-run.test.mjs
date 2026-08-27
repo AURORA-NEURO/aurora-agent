@@ -182,6 +182,66 @@ test("evidence-backed execution defaults to metadata-only prompting and blocks u
   assert.equal(calls.provider, 1);
 });
 
+test("evidence-backed automatic execution preserves reviewed scope across every built-in domain", async () => {
+  const { agent, registry, calls } = await setup();
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const plan = await agent.evidencePlan([domain]);
+    const result = await agent.runWithReviewedEvidence(`Run an automatic bounded ${domain} task after evidence review.`, {
+      registry,
+      ...evidenceOptions(plan),
+      runMode: "auto",
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.run_mode, "auto", domain);
+    assert.equal(result.automatic?.status, "completed", domain);
+    assert.deepEqual(result.automatic?.route.selected_domains, [domain], domain);
+    assert.equal(result.run?.status, "completed", domain);
+    assert.equal(result.cross_domain_run, null, domain);
+    assert.equal(result.toJSON().automatic_status, "completed", domain);
+    assert.equal(result.toJSON().automatic_route_digest, result.automatic?.route.route_digest, domain);
+    assert.doesNotMatch(JSON.stringify(result.toJSON()), /transient-evidence-claim/);
+  }
+  assert.equal(calls.provider, AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
+test("evidence-backed cross-domain execution fans out only to the reviewed scope", async () => {
+  const { agent, registry, calls } = await setup();
+  const plan = await agent.evidencePlan(["coding", "data"]);
+  const result = await agent.runWithReviewedEvidence("Synthesize a bounded coding and data task after evidence review.", {
+    registry,
+    ...evidenceOptions(plan),
+    runMode: "cross_domain",
+    crossDomain: {
+      subtasks: [
+        { id: "coding-review", domain: "coding", task: "Review the coding implementation implications." },
+        { id: "data-review", domain: "data", task: "Review the data validation implications." },
+      ],
+      maxParallelChildren: 2,
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.run_mode, "cross_domain");
+  assert.equal(result.run, null);
+  assert.equal(result.cross_domain_run?.status, "completed");
+  assert.deepEqual(result.cross_domain_run?.blueprint?.child_blueprints.map((child) => child.domain_profile.domain), ["coding", "data"]);
+  assert.equal(result.cross_domain_run?.child_runs.length, 2);
+  assert.equal(result.cross_domain_run?.synthesis?.status, "completed");
+  assert.equal(result.toJSON().cross_domain_run_status, "completed");
+  assert.equal(result.toJSON().run_status, null);
+  assert.doesNotMatch(JSON.stringify(result.toJSON()), /transient-evidence-claim/);
+  assert.equal(calls.provider, 3);
+
+  await assert.rejects(
+    agent.runWithReviewedEvidence("Reject semantic rerouting outside the evidence scope.", {
+      registry,
+      ...evidenceOptions(plan),
+      runMode: "auto",
+      run: { ...evidenceOptions(plan).run, semanticRouting: true },
+    }),
+    /cannot combine an exact evidence scope with provider-assisted semantic routing/,
+  );
+});
+
 async function catalogueSetup() {
   const profiles = await builtinAutonomousDomainProfiles();
   const sourceProfiles = builtinAutonomousDomainEvidenceSourceProfiles();
@@ -256,6 +316,60 @@ test("catalogue-backed brain composes normalizers, reconciliation, model selecti
   }
   assert.equal(calls.evidence, expectedEvidenceCalls);
   assert.equal(calls.provider, AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
+test("catalogue-backed brain supports evidence-scoped automatic and cross-domain execution", async () => {
+  const { agent, catalogue, calls } = await catalogueSetup();
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const profile = builtinAutonomousDomainEvidenceSourceProfiles().find((candidate) => candidate.domain === domain);
+    const result = await agent.runWithDomainEvidenceCatalogue(`Automatically review a bounded ${domain} catalogue task.`, {
+      catalogue,
+      domains: [domain],
+      runMode: "auto",
+      prepare: { profileId: profile.profile_id, quorum: 1 },
+      execute: { approveSourceDispatch: true },
+      run: {
+        domain,
+        candidates: [{ ...model(), provider: "catalogue-provider", model: "catalogue-model" }],
+        approveProviderCall: true,
+      },
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.run_mode, "auto", domain);
+    assert.deepEqual(result.automatic?.route.selected_domains, [domain], domain);
+    assert.equal(result.automatic?.status, "completed", domain);
+    assert.equal(result.run?.status, "completed", domain);
+    assert.equal(result.cross_domain_run, null, domain);
+  }
+
+  const cross = await agent.runWithDomainEvidenceCatalogue("Automatically synthesize a bounded coding and data catalogue task.", {
+    catalogue,
+    domains: ["coding", "data"],
+    runMode: "cross_domain",
+    prepare: { profileId: "builtin.coding.evidence", quorum: 1 },
+    prepareForRequirement: (requirement) => ({ profileId: `builtin.${requirement.domain}.evidence`, quorum: 1 }),
+    execute: { approveSourceDispatch: true },
+    crossDomain: {
+      subtasks: [
+        { id: "coding-catalogue-review", domain: "coding", task: "Review the implementation evidence." },
+        { id: "data-catalogue-review", domain: "data", task: "Review the data evidence." },
+      ],
+      maxParallelChildren: 2,
+    },
+    run: {
+      domain: "coding",
+      candidates: [{ ...model(), provider: "catalogue-provider", model: "catalogue-model" }],
+      approveProviderCall: true,
+    },
+  });
+  assert.equal(cross.status, "completed");
+  assert.equal(cross.run_mode, "cross_domain");
+  assert.equal(cross.run, null);
+  assert.equal(cross.cross_domain_run?.status, "completed");
+  assert.deepEqual(cross.cross_domain_run?.blueprint?.child_blueprints.map((child) => child.domain_profile.domain), ["coding", "data"]);
+  assert.equal(cross.cross_domain_run?.child_runs.length, 2);
+  assert.equal(cross.cross_domain_run?.synthesis?.status, "completed");
+  assert.equal(calls.provider, AUTONOMOUS_DOMAIN_NAMES.length + 3);
 });
 
 test("catalogue-backed brain keeps source approval, provider approval, and evidence settlement independent", async () => {

@@ -1171,7 +1171,10 @@ export type AutonomousEvidenceBackedRunStatus =
   | "evidence_blocked"
   | "evidence_failed"
   | "evidence_incomplete"
-  | AutonomousRunStatus;
+  | AutonomousPlanAndRunStatus;
+
+/** Execution modes for the evidence-to-agent bridge. */
+export type AutonomousEvidenceExecutionMode = "domain" | "cross_domain" | "auto";
 
 /** Explicit transient bridge input for callers that want to project raw evidence into a prompt. */
 export interface AutonomousEvidencePromptProjection {
@@ -1202,8 +1205,12 @@ export interface AutonomousEvidenceBackedRunOptions {
   completedStages?: Readonly<Record<string, readonly string[]>>;
   prepare?: AutonomousReviewedEvidencePreparationOptions;
   execute?: AutonomousEvidenceExecutionOptions;
-  /** Normal agent options; provider approval remains separate from source approval. */
-  run?: AutonomousRunOptions;
+  /** Select the provider handoff shape; defaults to the historical single-domain handoff. */
+  runMode?: AutonomousEvidenceExecutionMode;
+  /** Normal agent options; automatic mode may additionally supply reviewed planning controls. */
+  run?: AutonomousAutoRunOptions;
+  /** Additional bounded controls for cross-domain fan-out and synthesis. */
+  crossDomain?: Pick<AutonomousCrossDomainRunOptions, "subtasks" | "allowPartial" | "synthesize" | "maxParallelChildren" | "responseAlignments" | "requireResponseAlignment" | "minimumResponseReward" | "minimumResponseAlignmentConfidence" | "responseContradictionConfidenceThreshold">;
   /** Defaults to a metadata-only context. This callback is the explicit transient value bridge. */
   promptBuilder?: AutonomousEvidencePromptBuilder;
   /** Persist a caller-owned checkpoint immediately before the provider boundary is entered. */
@@ -1223,12 +1230,17 @@ export interface AutonomousEvidenceBackedRunOptions {
 export interface AutonomousEvidenceBackedRunProjection extends JsonObject {
   schema: typeof AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA;
   status: AutonomousEvidenceBackedRunStatus;
+  run_mode: AutonomousEvidenceExecutionMode;
   task_digest: string;
   evidence_plan_digest: string;
   execution_plan_digest: string;
   evidence_result_digest: string | null;
   prompt_projection_digest: string | null;
   run_status: AutonomousRunStatus | null;
+  cross_domain_run_status: AutonomousCrossDomainRunStatus | null;
+  automatic_status: AutonomousPlanAndRunStatus | null;
+  automatic_route_digest: string | null;
+  automatic_next_action: AutonomousAutoRunNextAction | null;
   selection_digest: string | null;
   response_digest: string | null;
   retention: "metadata_only;raw_evidence_prompt_values_and_provider_response_caller_owned";
@@ -1246,11 +1258,14 @@ export interface AutonomousEvidenceBackedRunProjection extends JsonObject {
 export interface AutonomousEvidenceBackedRunResult {
   schema: typeof AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA;
   status: AutonomousEvidenceBackedRunStatus;
+  run_mode: AutonomousEvidenceExecutionMode;
   task_digest: string;
   execution_plan: AutonomousEvidenceExecutionPlan;
   evidence: AutonomousEvidenceExecutionResult | null;
   prompt_context: readonly AutonomousPromptChunk[];
   run: AutonomousRunResult | null;
+  cross_domain_run: AutonomousCrossDomainRunResult | null;
+  automatic: AutonomousAutoRunResult | null;
   toJSON(): AutonomousEvidenceBackedRunProjection;
 }
 
@@ -3169,6 +3184,56 @@ export async function routeAutonomousTask(
   return { ...result, route_digest: await digestJson(result) };
 }
 
+/**
+ * Bind a reviewed evidence scope to an exact provider-free route.
+ *
+ * This is intentionally separate from lexical task routing: the evidence planner has already
+ * established which domains are in scope, so automatic execution must not reclassify the task
+ * and silently widen that scope. The resulting route is still only a proposal; normal provider,
+ * tool, effect, and policy gates remain downstream.
+ */
+export async function routeAutonomousEvidenceScope(
+  task: string,
+  domains: readonly AutonomousDomainName[],
+): Promise<AutonomousRouteProposal> {
+  const taskText = boundedText("evidence route task", task, 32_000);
+  if (!Array.isArray(domains) || domains.length < 1 || domains.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN) {
+    throw new ArgumentError(`evidence route domains must contain between 1 and ${AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN} entries`);
+  }
+  if (new Set(domains).size !== domains.length) throw new ArgumentError("evidence route domains contain duplicates");
+  if (domains.length > 1 && domains.includes("cross_domain")) throw new ArgumentError("cross_domain is a synthesis profile, not an evidence child domain");
+  const profiles = await Promise.all(domains.map((domain) => profileFor(domain)));
+  const candidates: AutonomousRouteCandidate[] = profiles.map((profile) => ({
+    domain: profile.domain,
+    score: 1,
+    matched_terms: ["reviewed_evidence_scope", profile.domain],
+    capability: profile.default_capability,
+    risk_class: profile.risk_class,
+    workflow_id: profile.workflow.workflow_id,
+    evidence: "fixed_catalogue_term_matches_only",
+  }));
+  const crossDomain = domains.length > 1;
+  const descriptor = {
+    schema: AUTONOMOUS_ROUTE_SCHEMA,
+    task_digest: await digestJson({ task: taskText }),
+    candidates,
+    selected_domains: [...domains],
+    primary_domain: domains[0] ?? null,
+    confidence: 1,
+    abstained: false,
+    reason: crossDomain ? "cross_domain" as const : "routed" as const,
+    cross_domain: crossDomain,
+    source: "deterministic_vocabulary" as const,
+    retention: "route_scores_and_digests_only; task_text_is_not_retained_in_route" as const,
+    does_not_claim: [
+      "reviewed evidence scope is caller-owned domain selection, not semantic proof",
+      "evidence scope does not authorize provider calls, tools, or external effects",
+      "automatic planning cannot widen the reviewed evidence scope",
+    ],
+  };
+  return { ...descriptor, route_digest: await digestJson(descriptor) };
+}
+
 /** Validate a caller-owned route handoff before it can influence local planning. */
 export async function validateAutonomousRouteOverride(task: string, route: AutonomousRouteProposal): Promise<AutonomousRouteProposal> {
   if (!isObject(route) || route.schema !== AUTONOMOUS_ROUTE_SCHEMA || typeof route.task_digest !== "string") throw new ArgumentError("autonomous route override is malformed");
@@ -3794,6 +3859,12 @@ function evidenceBackedStatus(status: ReturnType<AutonomousEvidenceExecutionResu
   if (status === "failed") return "evidence_failed";
   if (status === "reconciliation_required") return "evidence_incomplete";
   return "evidence_incomplete";
+}
+
+function normalizeAutonomousEvidenceExecutionMode(value: unknown): AutonomousEvidenceExecutionMode {
+  if (value === undefined) return "domain";
+  if (value !== "domain" && value !== "cross_domain" && value !== "auto") throw new ArgumentError("evidence-backed runMode must be domain, cross_domain, or auto");
+  return value;
 }
 
 /** Assemble the bounded domain prompt locally, retaining exact inclusion/omission evidence. */
@@ -6944,6 +7015,10 @@ export class AutonomousAgent {
     const taskText = boundedText("evidence-backed autonomous task", task, 32_000);
     const taskDigest = await digestJson({ task: taskText });
     const domains = options.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    const runMode = normalizeAutonomousEvidenceExecutionMode(options.runMode);
+    if (runMode === "cross_domain" && options.domains === undefined) throw new ArgumentError("cross-domain evidence execution requires an explicit 2..8 domain scope");
+    if (runMode === "cross_domain" && (domains.length < 2 || domains.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN || domains.includes("cross_domain"))) throw new ArgumentError("cross-domain evidence execution requires 2..8 non-synthesis domains");
+    const evidenceScopeRoute = options.domains === undefined ? null : await routeAutonomousEvidenceScope(taskText, domains);
     const plan = await this.evidencePlan(domains, {
       availableEvidence: options.availableEvidence,
       completedStages: options.completedStages,
@@ -6964,19 +7039,27 @@ export class AutonomousAgent {
       evidence: AutonomousEvidenceExecutionResult | null,
       promptContext: readonly AutonomousPromptChunk[],
       run: AutonomousRunResult | null,
+      crossDomainRun: AutonomousCrossDomainRunResult | null = null,
+      automatic: AutonomousAutoRunResult | null = null,
     ): Promise<AutonomousEvidenceBackedRunResult> => {
       const evidenceResultDigest = evidence?.result_digest ?? null;
-      const selectionDigest = run?.selection ? await digestJson(run.selection) : null;
-      const responseDigest = run?.response ? await digestJson(run.response) : null;
+      const metadataRun = run ?? crossDomainRun?.synthesis ?? (automatic?.result?.schema === "bioprism-typescript-autonomous-run/0.1" ? automatic.result : automatic?.result?.synthesis ?? null);
+      const selectionDigest = metadataRun?.selection ? await digestJson(metadataRun.selection) : null;
+      const responseDigest = metadataRun?.response ? await digestJson(metadataRun.response) : null;
       const descriptor = {
         schema: AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA,
         status,
+        run_mode: runMode,
         task_digest: taskDigest,
         evidence_plan_digest: plan.plan_digest,
         execution_plan_digest: executionPlan.plan_digest,
         evidence_result_digest: evidenceResultDigest,
         prompt_projection_digest: promptContext.length ? await digestJson(promptContext) : null,
         run_status: run?.status ?? null,
+        cross_domain_run_status: crossDomainRun?.status ?? null,
+        automatic_status: automatic?.status ?? null,
+        automatic_route_digest: automatic?.route.route_digest ?? null,
+        automatic_next_action: automatic?.next_action ?? null,
         selection_digest: selectionDigest,
         response_digest: responseDigest,
         retention: "metadata_only;raw_evidence_prompt_values_and_provider_response_caller_owned" as const,
@@ -6987,11 +7070,14 @@ export class AutonomousAgent {
       return {
         schema: AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA,
         status,
+        run_mode: runMode,
         task_digest: taskDigest,
         execution_plan: executionPlan,
         evidence,
         prompt_context: structuredClone(promptContext),
         run,
+        cross_domain_run: crossDomainRun,
+        automatic,
         toJSON: () => structuredClone(projection),
       };
     };
@@ -7027,16 +7113,57 @@ export class AutonomousAgent {
     );
     const runOptions = options.run ?? {};
     const context = normalizeEvidenceBackedPromptContext([...(runOptions.context ?? []), ...projectedContext], 128);
-    let run: AutonomousRunResult;
+    let run: AutonomousRunResult | null = null;
+    let crossDomainRun: AutonomousCrossDomainRunResult | null = null;
+    let automatic: AutonomousAutoRunResult | null = null;
     if (options.providerRunOverride !== undefined) {
+      if (runMode !== "domain") throw new ArgumentError("evidence-backed provider run override is supported only for domain mode");
       if (!isObject(options.providerRunOverride) || options.providerRunOverride.schema !== "bioprism-typescript-autonomous-run/0.1") throw new ArgumentError("evidence-backed provider run override is malformed");
       if (runOptions.approveProviderCall !== true) throw new ArgumentError("evidence-backed provider run override requires provider approval in the reviewed run options");
       run = options.providerRunOverride;
     } else {
       await options.beforeProviderRun?.({ executionPlan, evidence, promptContext: projectedContext });
-      run = await this.run(taskText, { ...runOptions, context });
+      if (runMode === "domain") {
+        const evidenceDomain = options.domains?.length === 1 ? options.domains[0] : undefined;
+        if (evidenceDomain !== undefined && runOptions.domain !== undefined && runOptions.domain !== evidenceDomain) throw new ArgumentError("domain evidence scope does not match the requested provider domain");
+        run = await this.run(taskText, {
+          ...runOptions,
+          context,
+          ...(evidenceDomain !== undefined && runOptions.domain === undefined ? { domain: evidenceDomain } : {}),
+        });
+      } else if (runMode === "cross_domain") {
+        if (!evidenceScopeRoute) throw new ProviderRuntimeError("cross-domain evidence route was not compiled");
+        if (runOptions.semanticRouting !== undefined && runOptions.semanticRouting !== false) throw new ArgumentError("cross-domain evidence execution requires provider-free route binding");
+        const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...crossRunOptions } = runOptions;
+        crossDomainRun = await this.runCrossDomain(taskText, {
+          ...crossRunOptions,
+          ...options.crossDomain,
+          context,
+          routeOverride: evidenceScopeRoute,
+          domainPolicyEvidenceReady: true,
+          semanticRouting: false,
+        });
+      } else {
+        if (evidenceScopeRoute) {
+          if (runOptions.routeOverride !== undefined) throw new ArgumentError("automatic evidence execution owns the evidence-scope route override");
+          if (runOptions.semanticRouting !== undefined && runOptions.semanticRouting !== false) throw new ArgumentError("automatic evidence execution cannot combine an exact evidence scope with provider-assisted semantic routing");
+          const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...automaticRunOptions } = runOptions;
+          automatic = await this.runAuto(taskText, {
+            ...automaticRunOptions,
+            context,
+            routeOverride: evidenceScopeRoute,
+            semanticRouting: false,
+            domainPolicyEvidenceReady: true,
+          });
+        } else {
+          automatic = await this.runAuto(taskText, { ...runOptions, context, domainPolicyEvidenceReady: true });
+        }
+        if (automatic.result?.schema === "bioprism-typescript-autonomous-run/0.1") run = automatic.result;
+        if (automatic.result?.schema === "bioprism-typescript-autonomous-cross-domain-result/0.1") crossDomainRun = automatic.result;
+      }
     }
-    return finish(run.status, evidence, projectedContext, run);
+    const status = automatic?.status ?? crossDomainRun?.status ?? run?.status ?? "evidence_failed";
+    return finish(status, evidence, projectedContext, run, crossDomainRun, automatic);
   }
 
   /**
