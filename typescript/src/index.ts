@@ -4043,3 +4043,13 @@ export {
   validateCliMechanismPortfolio,
 } from "./research-contracts.js";
 export type { CliMechanismPortfolio } from "./research-contracts.js";
+
+export {
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION,
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_INPUT_SCHEMA,
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_OUTPUT_SCHEMA,
+  cliExperimentDesignAssuranceDigest,
+  validateCliExperimentDesignAssurance,
+} from "./research-contracts.js";
+export type { CliExperimentDesignAssurance } from "./research-contracts.js";

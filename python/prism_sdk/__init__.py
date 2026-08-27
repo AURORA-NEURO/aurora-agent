@@ -7280,3 +7280,15 @@ __all__ += [
     "control_mechanism_portfolio",
     "cli_mechanism_control_digest",
 ]
+
+from .cli_experiment_design_assurance import (
+    CliExperimentDesignAssurance,
+    assure_experiment_design,
+    cli_experiment_design_assurance_digest,
+)
+
+__all__ += [
+    "CliExperimentDesignAssurance",
+    "assure_experiment_design",
+    "cli_experiment_design_assurance_digest",
+]
