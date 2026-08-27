@@ -603,6 +603,7 @@ export {
   AUTONOMOUS_RUN_TRACE_REGISTRY_RETENTION,
   AUTONOMOUS_RUN_TRACE_REGISTRY_AUTHORITY,
   AUTONOMOUS_RUN_TRACE_REGISTRY_SECRET_MATERIAL,
+  AUTONOMOUS_RUN_TRACE_REGISTRY_PUBLICATION_SCHEMA,
   MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_RUNS,
   MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_EVENTS,
   MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_BYTES,
@@ -610,6 +611,7 @@ export {
   JsonAutonomousRunTraceRegistryPersistence,
   TransactionalJsonAutonomousRunTraceRegistryPersistence,
   AutonomousRunTraceRegistryPersistenceCoordinator,
+  publishAutonomousRunTraceRegistrySnapshot,
   validateAutonomousRunTraceRegistrySnapshot,
 } from "./autonomous-run-trace-registry.js";
 export type {
@@ -621,6 +623,7 @@ export type {
   AutonomousRunTraceRegistryPage,
   AutonomousRunTraceRegistryEventQuery,
   AutonomousRunTraceRegistryImportReport,
+  AutonomousRunTraceRegistryPublication,
   AutonomousRunTraceRegistryIntegrity,
 } from "./autonomous-run-trace-registry.js";
 export {

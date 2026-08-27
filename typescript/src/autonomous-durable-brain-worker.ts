@@ -4,6 +4,11 @@ import { AutonomousBrainJobProtectedRehydrator, autonomousBrainJobSpecDigest, ty
 import type { ApiClient } from "./client.js";
 import { digestJsonSync } from "./tooling.js";
 import type { AutonomousRunTraceStore, AutonomousRunTraceSummary } from "./autonomous-run-trace.js";
+import {
+  AutonomousRunTraceRegistry,
+  publishAutonomousRunTraceRegistrySnapshot,
+  type AutonomousRunTraceRegistryPublication,
+} from "./autonomous-run-trace-registry.js";
 import type { AutonomousCredentialBinding, AutonomousCredentialScope } from "./autonomous-credential-scope.js";
 import type { AutonomousDomainName } from "./autonomous-domains.js";
 import type {
@@ -74,6 +79,8 @@ export interface AutonomousDurableBrainJobWorkerOptions {
   /** Optional protected receipt fallback for restart-safe caller-owned private specs. */
   protectedRehydration?: AutonomousBrainJobProtectedRehydrator;
   traceStore?: AutonomousRunTraceStore;
+  /** Optional metadata-only trace projection; publication failures never replay execution. */
+  traceRegistry?: AutonomousRunTraceRegistry;
   leaseMs?: number;
   heartbeatMs?: number;
   /** Retry only typed failures that occur before the facade dispatch boundary. */
@@ -93,6 +100,7 @@ export interface AutonomousDurableBrainJobWorkerRun {
   cycle: AutonomousBrainCycleExecution | null;
   adaptive: AutonomousBrainAdaptiveCycleExecution | null;
   trace: AutonomousRunTraceSummary | null;
+  trace_registry?: AutonomousRunTraceRegistryPublication;
   error_class: string | null;
   failure_code: string | null;
   error_retryable: boolean | null;
@@ -242,6 +250,7 @@ export class AutonomousDurableBrainJobWorker {
   readonly resolve?: AutonomousDurableBrainJobResolver;
   readonly protectedRehydration?: AutonomousBrainJobProtectedRehydrator;
   readonly traceStore?: AutonomousRunTraceStore;
+  readonly traceRegistry?: AutonomousRunTraceRegistry;
   readonly leaseMs: number;
   readonly heartbeatMs: number;
   readonly retryPreflightFailures: boolean;
@@ -259,7 +268,10 @@ export class AutonomousDurableBrainJobWorker {
     this.resolve = options.resolve;
     this.protectedRehydration = options.protectedRehydration;
     if (options.traceStore !== undefined && (typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function")) throw new ArgumentError("durable brain worker traceStore is malformed");
+    if (options.traceRegistry !== undefined && !(options.traceRegistry instanceof AutonomousRunTraceRegistry)) throw new ArgumentError("durable brain worker traceRegistry is malformed");
+    if (options.traceRegistry !== undefined && options.traceStore === undefined) throw new ArgumentError("durable brain worker traceRegistry requires traceStore");
     this.traceStore = options.traceStore;
+    this.traceRegistry = options.traceRegistry;
     this.leaseMs = boundedInteger("durable brain worker leaseMs", options.leaseMs ?? 300_000, 100, MAX_AUTONOMOUS_DURABLE_BRAIN_WORKER_LEASE_MS);
     this.heartbeatMs = boundedInteger("durable brain worker heartbeatMs", options.heartbeatMs ?? Math.min(30_000, Math.floor(this.leaseMs / 3)), 1, MAX_AUTONOMOUS_DURABLE_BRAIN_WORKER_HEARTBEAT_MS);
     if (this.heartbeatMs >= this.leaseMs) throw new ArgumentError("durable brain worker heartbeatMs must be less than leaseMs");
@@ -336,6 +348,7 @@ export class AutonomousDurableBrainJobWorker {
     let resolution: AutonomousDurableBrainJobResolution | null = null;
     let credentialBinding: AutonomousCredentialBinding | null = null;
     let trace: AutonomousRunTraceSummary | null = null;
+    let traceRegistryPublication: AutonomousRunTraceRegistryPublication | undefined;
     try {
       const approvalReleased = await this.approvalReleased(job.job_id);
       await this.checkpoint(job.job_id, { phase: "resolving_private_spec", checkpointDigest: digestJsonSync({ schema: AUTONOMOUS_DURABLE_BRAIN_JOB_WORKER_SCHEMA, job_id: job.job_id, spec_digest: job.spec_digest, attempt: job.attempts }), sideEffectBoundary: "not_started" });
@@ -394,33 +407,47 @@ export class AutonomousDurableBrainJobWorker {
         result = await this.brain.executePlannedAdaptiveCycle(plan, resolution.request, approved.adaptive);
       }
       if (heartbeatError !== null) throw new ProviderRuntimeError("durable brain worker lease heartbeat failed after dispatch", { code: "transport" });
+      if (this.traceRegistry !== undefined && this.traceStore !== undefined && trace !== null) {
+        traceRegistryPublication = await publishAutonomousRunTraceRegistrySnapshot(
+          this.traceRegistry,
+          this.traceStore,
+          `${job.job_id}:attempt-${job.attempts}`,
+        );
+      }
       const status = result.status;
       if (APPROVAL_STATUSES.has(status)) {
         // The worker admitted the facade behind an unknown boundary before invocation. Even a
         // provider-free review result must not lower that durable boundary back to preflight.
         await this.checkpoint(job.job_id, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: executionStarted ? "unknown" : approvalBoundary(result), waitingForApproval: true });
-        return this.envelope(validateJob((await this.status(job.job_id)).job), "waiting_approval", resolution.mode, result, null, null, trace, null);
+        return this.envelope(validateJob((await this.status(job.job_id)).job), "waiting_approval", resolution.mode, result, null, null, trace, null, traceRegistryPublication);
       }
       if (status === "reconciliation_required") {
         await this.checkpoint(job.job_id, { phase: status, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "unknown" });
         const quarantined = await this.fail(job, "durable brain execution requires caller reconciliation", false);
-        return this.envelope(quarantined, "reconciliation_required", resolution.mode, result, null, null, trace, null);
+        return this.envelope(quarantined, "reconciliation_required", resolution.mode, result, null, null, trace, null, traceRegistryPublication);
       }
       if (status !== "completed") {
         await this.checkpoint(job.job_id, { phase: `terminal_${status}`, checkpointDigest: resultDigest(result, trace), sideEffectBoundary: "unknown" });
         const failed = await this.fail(job, `durable brain execution ended with ${status}`, false);
-        return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : "failed", resolution.mode, result, null, null, trace, null);
+        return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : "failed", resolution.mode, result, null, null, trace, null, traceRegistryPublication);
       }
       const completed = await this.complete(job, resultDigest(result, trace));
-      return this.envelope(completed, "succeeded", resolution.mode, result, null, null, trace, null);
+      return this.envelope(completed, "succeeded", resolution.mode, result, null, null, trace, null, traceRegistryPublication);
     } catch (error) {
+      if (this.traceRegistry !== undefined && this.traceStore !== undefined && traceRegistryPublication === undefined) {
+        traceRegistryPublication = await publishAutonomousRunTraceRegistrySnapshot(
+          this.traceRegistry,
+          this.traceStore,
+          `${job.job_id}:attempt-${job.attempts}`,
+        );
+      }
       const projection = errorProjection(error);
       try {
         const boundary = executionStarted ? "unknown" : planCompiled ? "preflight" : "not_started";
         await this.checkpoint(job.job_id, { phase: "worker_execution_error", checkpointDigest: digestJsonSync({ error_class: projection.errorClass, failure_code: projection.failureCode }), sideEffectBoundary: boundary });
         const retryable = !executionStarted && this.retryPreflightFailures && error instanceof ProviderRuntimeError && error.retryable;
         const failed = await this.fail(job, executionStarted ? "durable brain execution outcome is uncertain; reconciliation required" : retryable ? "durable brain preflight retry scheduled" : "durable brain execution failed before dispatch", retryable);
-        return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : failed.state === "queued" ? "retry_scheduled" : "failed", resolution?.mode ?? null, null, null, null, trace, projection);
+        return this.envelope(failed, failed.state === "reconciliation_required" ? "reconciliation_required" : failed.state === "queued" ? "retry_scheduled" : "failed", resolution?.mode ?? null, null, null, null, trace, projection, traceRegistryPublication);
       } catch (settlementError) {
         const wrapped = new ProviderRuntimeError("durable brain worker failure could not be settled", { code: "configuration" });
         (wrapped as Error & { cause?: unknown }).cause = settlementError;
@@ -555,10 +582,10 @@ export class AutonomousDurableBrainJobWorker {
     return { ...value, adaptive: { ...value.adaptive, approveProviderCall: true, adaptive: { ...value.adaptive.adaptive, approveProviderCall: true } } };
   }
 
-  private envelope(job: BrainJobRecord, status: AutonomousDurableBrainJobWorkerStatus, modeValue: AutonomousBrainJobExecutionMode | null, result: AutonomousBrainExecution | AutonomousBrainCycleExecution | AutonomousBrainAdaptiveCycleExecution | null, execution: AutonomousBrainExecution | null, cycle: AutonomousBrainCycleExecution | null, trace: AutonomousRunTraceSummary | null, error: { errorClass: string; failureCode: string; retryable: boolean | null } | null): AutonomousDurableBrainJobWorkerRun {
+  private envelope(job: BrainJobRecord, status: AutonomousDurableBrainJobWorkerStatus, modeValue: AutonomousBrainJobExecutionMode | null, result: AutonomousBrainExecution | AutonomousBrainCycleExecution | AutonomousBrainAdaptiveCycleExecution | null, execution: AutonomousBrainExecution | null, cycle: AutonomousBrainCycleExecution | null, trace: AutonomousRunTraceSummary | null, error: { errorClass: string; failureCode: string; retryable: boolean | null } | null, traceRegistryPublication?: AutonomousRunTraceRegistryPublication): AutonomousDurableBrainJobWorkerRun {
     const resolvedExecution = execution ?? (result && "run" in result ? result : null);
     const resolvedCycle = cycle ?? (result && "cycle" in result ? result : null);
     const resolvedAdaptive = result && "adaptive" in result ? result : null;
-    return { schema: AUTONOMOUS_DURABLE_BRAIN_JOB_WORKER_SCHEMA, worker_id: this.workerId, job_id: job.job_id, status, job, mode: modeValue, execution: resolvedExecution, cycle: resolvedCycle, adaptive: resolvedAdaptive, trace, error_class: error?.errorClass ?? null, failure_code: error?.failureCode ?? null, error_retryable: error?.retryable ?? null, retention: RETENTION, secret_material: SECRET_MATERIAL };
+    return { schema: AUTONOMOUS_DURABLE_BRAIN_JOB_WORKER_SCHEMA, worker_id: this.workerId, job_id: job.job_id, status, job, mode: modeValue, execution: resolvedExecution, cycle: resolvedCycle, adaptive: resolvedAdaptive, trace, ...(traceRegistryPublication === undefined ? {} : { trace_registry: traceRegistryPublication }), error_class: error?.errorClass ?? null, failure_code: error?.failureCode ?? null, error_retryable: error?.retryable ?? null, retention: RETENTION, secret_material: SECRET_MATERIAL };
   }
 }

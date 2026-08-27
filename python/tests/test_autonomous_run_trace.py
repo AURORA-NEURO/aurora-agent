@@ -16,6 +16,7 @@ from prism_sdk import (
     AutonomousRunTraceRegistry,
     AutonomousRunTraceRegistryPersistenceCoordinator,
     TransactionalJsonAutonomousRunTraceRegistryPersistence,
+    publish_autonomous_run_trace_registry_snapshot,
     TransactionalJsonAutonomousRunTracePersistence,
     autonomous_run_trace_status,
     validate_autonomous_run_trace_snapshot,
@@ -310,3 +311,28 @@ def test_trace_registry_indexes_every_domain_paginates_and_enforces_retention() 
     with pytest.raises(ArgumentError, match="cannot evict an eligible terminal run"):
         active_registry.import_snapshot(active_source.snapshot())
     assert active_registry.size == 0
+
+
+def test_trace_registry_publication_is_bounded_idempotent_and_isolated_from_source_failures() -> None:
+    source = InMemoryAutonomousRunTraceStore(clock=lambda: 2_000)
+    session = AutonomousRunTraceSession(source, run_id="publication-run", task_digest="f" * 64, domains=AUTONOMOUS_DOMAIN_NAMES)
+    session.started()
+    session.complete(status="completed")
+    registry = AutonomousRunTraceRegistry({"max_runs": 8, "max_events": 64, "max_bytes": 100_000})
+    first = publish_autonomous_run_trace_registry_snapshot(registry, source, "publication-run")
+    assert first.status == "published"
+    assert first.run_import_state == "imported"
+    assert first.evicted_run_count == 0
+    assert registry.query({"run_id": "publication-run"}).total_matches == 1
+    second = publish_autonomous_run_trace_registry_snapshot(registry, source, "publication-run")
+    assert second.status == "published"
+    assert second.run_import_state == "unchanged"
+
+    class BrokenStore:
+        def snapshot(self):
+            raise RuntimeError("source unavailable")
+
+    failed = publish_autonomous_run_trace_registry_snapshot(registry, BrokenStore(), "publication-run")
+    assert failed.status == "failed"
+    assert failed.failure_code == "trace_registry_publication_failed"
+    assert registry.query({"run_id": "publication-run"}).total_matches == 1

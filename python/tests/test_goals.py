@@ -38,6 +38,7 @@ from prism_sdk.autonomous_goal_control_persistence import (
 from prism_sdk.autonomous_goal_recovery import AutonomousGoalRecoveryCoordinator, validate_autonomous_goal_recovery_report
 from prism_sdk.autonomous_goal_agent import AutonomousGoalAgentRuntime
 from prism_sdk.autonomous_run_trace import InMemoryAutonomousRunTraceStore
+from prism_sdk.autonomous_run_trace_registry import AutonomousRunTraceRegistry
 from prism_sdk.autonomous_goal_worker_journal import (
     AutonomousGoalWorkerJournal,
     JsonAutonomousGoalWorkerJournalPersistence,
@@ -979,15 +980,22 @@ def test_goal_agent_runtime_traces_the_complete_adaptive_loop_across_every_domai
         ],
     )
     trace_store = InMemoryAutonomousRunTraceStore(clock=lambda: 650)
+    trace_registry = AutonomousRunTraceRegistry({"max_runs": 4_096, "max_events": 20_000, "max_bytes": 2_000_000})
     traced = runtime.run_with_trace(
         trace_store=trace_store,
         run_id="goal-trace-every-domain",
+        trace_registry=trace_registry,
         schedule_options={"now_ns": 650, "max_selected": len(AUTONOMOUS_DOMAINS), "max_concurrent": len(AUTONOMOUS_DOMAINS), "required_domains": list(AUTONOMOUS_DOMAINS)},
         max_cycles=2,
         max_total_runs=len(AUTONOMOUS_DOMAINS),
     )
     assert traced.result.stop_reason == "all_terminal"
     assert traced.trace.status == "completed"
+    assert traced.trace_registry is not None
+    assert traced.trace_registry.status == "published"
+    assert traced.trace_registry.run_import_state == "imported"
+    assert trace_registry.query({"run_id": "goal-trace-every-domain"}).total_matches == 1
+    assert trace_registry.query({"domain": "neuroscience"}).total_matches == 1
     assert traced.trace.provider_invocations == len(AUTONOMOUS_DOMAINS)
     assert set(traced.trace.domains) == set(AUTONOMOUS_DOMAINS)
     events = trace_store.events({"run_id": "goal-trace-every-domain"})
@@ -1004,6 +1012,7 @@ def test_goal_agent_runtime_traces_the_complete_adaptive_loop_across_every_domai
     assert caller_observer_counts == {"before": len(AUTONOMOUS_DOMAINS), "after": len(AUTONOMOUS_DOMAINS)}
     assert caller_selection_events == len(AUTONOMOUS_DOMAINS) * 2
     assert trace_store.verify_integrity()["verified"] is True
+    assert trace_registry.verify_integrity()["verified"] is True
 
 
 def test_goal_agent_runtime_replays_caller_owned_action_handoffs_before_run_boundary() -> None:

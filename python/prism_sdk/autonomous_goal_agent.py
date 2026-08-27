@@ -36,6 +36,11 @@ from .autonomous_run_trace import (
     AutonomousRunTraceSummary,
     autonomous_run_trace_status,
 )
+from .autonomous_run_trace_registry import (
+    AutonomousRunTraceRegistry,
+    AutonomousRunTraceRegistryPublication,
+    publish_autonomous_run_trace_registry_snapshot,
+)
 from .goals import AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord
 from .llm_runtime import CompositeProviderInvocationObserver
 
@@ -59,6 +64,7 @@ class AutonomousGoalAgentTracedRunResult:
 
     result: AutonomousGoalControlLoopResult
     trace: AutonomousRunTraceSummary
+    trace_registry: AutonomousRunTraceRegistryPublication | None = None
 
     @property
     def status(self) -> str:
@@ -69,6 +75,7 @@ class AutonomousGoalAgentTracedRunResult:
             "schema": GOAL_AGENT_TRACE_SCHEMA,
             "status": self.status,
             "trace": self.trace.to_dict(),
+            **({"trace_registry": self.trace_registry.to_dict()} if self.trace_registry is not None else {}),
             "result": "caller_owned_live_result_not_serialized",
             "retention": GOAL_AGENT_TRACE_RETENTION,
             "secret_material": "never_returned",
@@ -477,6 +484,7 @@ class AutonomousGoalAgentRuntime:
         *,
         trace_store: AutonomousRunTraceStore,
         run_id: str,
+        trace_registry: AutonomousRunTraceRegistry | None = None,
         schedule_options: Mapping[str, Any] | None = None,
         options_factory: GoalLoopOptionsFactory | None = None,
         max_cycles: int = 128,
@@ -486,6 +494,8 @@ class AutonomousGoalAgentRuntime:
     ) -> AutonomousGoalAgentTracedRunResult:
         if not all(callable(getattr(trace_store, name, None)) for name in ("append", "events")):
             _fail("run_with_trace requires a trace store")
+        if trace_registry is not None and not isinstance(trace_registry, AutonomousRunTraceRegistry):
+            _fail("run_with_trace trace_registry must be an AutonomousRunTraceRegistry")
         if self._trace_context is not None:
             _fail("run_with_trace cannot be re-entered while another trace is active")
         goals = self.ledger.list(limit=512)
@@ -555,7 +565,8 @@ class AutonomousGoalAgentRuntime:
                 plan_digest=plan_digest,
                 detail_digest=content_digest(result.to_dict()),
             )
-            return AutonomousGoalAgentTracedRunResult(result=result, trace=session.summary())
+            publication = None if trace_registry is None else publish_autonomous_run_trace_registry_snapshot(trace_registry, trace_store, run_id)
+            return AutonomousGoalAgentTracedRunResult(result=result, trace=session.summary(), trace_registry=publication)
         except Exception as error:
             try:
                 session.fail(
@@ -565,6 +576,8 @@ class AutonomousGoalAgentRuntime:
                 )
             except Exception:
                 pass
+            if trace_registry is not None:
+                publish_autonomous_run_trace_registry_snapshot(trace_registry, trace_store, run_id)
             raise
         finally:
             self._trace_context = None

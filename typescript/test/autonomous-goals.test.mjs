@@ -28,6 +28,7 @@ import {
   InMemoryAutonomousCycleReplanStateStore,
   InMemoryAutonomousGoalLedger,
   InMemoryAutonomousRunTraceStore,
+  AutonomousRunTraceRegistry,
   JsonAutonomousGoalPersistence,
   JsonAutonomousGoalWorkerJournalPersistence,
   LLMRuntime,
@@ -715,8 +716,10 @@ test("goal agent runtime traces the complete adaptive loop across every domain w
     evaluator: (cycle) => cycle.batch.runs.map((run) => ({ goal_id: run.goal_id, evaluator_id: "trace-evaluator", evaluator_version: "1", reward: 1, passed: true })),
   });
   const traceStore = new InMemoryAutonomousRunTraceStore({ clock: () => 650 });
+  const traceRegistry = new AutonomousRunTraceRegistry({ max_runs: 4_096, max_events: 20_000, max_bytes: 2_000_000 });
   const traced = await runtime.runWithTrace({
     traceStore,
+    traceRegistry,
     runId: "goal-trace-every-domain",
     schedule_options: { now_ns: 650, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains },
     max_cycles: 2,
@@ -724,6 +727,10 @@ test("goal agent runtime traces the complete adaptive loop across every domain w
   });
   assert.equal(traced.result.stop_reason, "all_terminal");
   assert.equal(traced.trace.status, "completed");
+  assert.equal(traced.traceRegistry.status, "published");
+  assert.equal(traced.traceRegistry.run_import_state, "imported");
+  assert.equal(traceRegistry.query({ run_id: "goal-trace-every-domain" }).total_matches, 1);
+  assert.equal(traceRegistry.query({ domain: "neuroscience" }).total_matches, 1);
   assert.equal(traced.trace.provider_invocations, domains.length);
   assert.deepEqual(new Set(traced.trace.domains), new Set(domains));
   const events = traceStore.events({ run_id: "goal-trace-every-domain" });
@@ -741,6 +748,7 @@ test("goal agent runtime traces the complete adaptive loop across every domain w
   assert.equal(callerObserverAfter, domains.length);
   assert.equal(callerSelectionEvents, domains.length * 2);
   assert.equal(traceStore.verifyIntegrity().verified, true);
+  assert.equal(traceRegistry.verifyIntegrity().verified, true);
 });
 
 test("goal agent runtime replays caller-owned action handoffs before the run boundary across every domain", async () => {

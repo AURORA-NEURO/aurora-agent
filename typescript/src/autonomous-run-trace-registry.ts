@@ -32,6 +32,7 @@ export const AUTONOMOUS_RUN_TRACE_REGISTRY_SNAPSHOT_SCHEMA = "bioprism-typescrip
 export const AUTONOMOUS_RUN_TRACE_REGISTRY_RETENTION = "metadata_only_no_prompts_responses_tool_payloads_credentials_evidence_or_effect_values" as const;
 export const AUTONOMOUS_RUN_TRACE_REGISTRY_AUTHORITY = "operator_query_and_retention_projection_only;does_not_authorize_execution" as const;
 export const AUTONOMOUS_RUN_TRACE_REGISTRY_SECRET_MATERIAL = "never_returned" as const;
+export const AUTONOMOUS_RUN_TRACE_REGISTRY_PUBLICATION_SCHEMA = "bioprism-typescript-autonomous-run-trace-registry-publication/0.1" as const;
 export const MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_RUNS = 10_000;
 export const MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_EVENTS = MAX_AUTONOMOUS_RUN_TRACE_EVENTS;
 export const MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_BYTES = MAX_AUTONOMOUS_RUN_TRACE_SNAPSHOT_BYTES;
@@ -122,6 +123,21 @@ export interface AutonomousRunTraceRegistryImportReport extends JsonObject {
   unchanged_run_ids: string[];
   evicted_run_ids: string[];
   snapshot: AutonomousRunTraceRegistrySnapshot;
+  retention: typeof AUTONOMOUS_RUN_TRACE_REGISTRY_RETENTION;
+  authority: typeof AUTONOMOUS_RUN_TRACE_REGISTRY_AUTHORITY;
+  secret_material: typeof AUTONOMOUS_RUN_TRACE_REGISTRY_SECRET_MATERIAL;
+}
+
+export interface AutonomousRunTraceRegistryPublication extends JsonObject {
+  schema: typeof AUTONOMOUS_RUN_TRACE_REGISTRY_PUBLICATION_SCHEMA;
+  status: "published" | "failed";
+  run_id: string;
+  run_import_state: "imported" | "replaced" | "unchanged" | "not_present" | "unknown";
+  source_snapshot_digest: string | null;
+  registry_snapshot_digest: string | null;
+  evicted_run_count: number;
+  error_class: string | null;
+  failure_code: "trace_snapshot_invalid" | "trace_registry_rejected" | "trace_registry_publication_failed" | null;
   retention: typeof AUTONOMOUS_RUN_TRACE_REGISTRY_RETENTION;
   authority: typeof AUTONOMOUS_RUN_TRACE_REGISTRY_AUTHORITY;
   secret_material: typeof AUTONOMOUS_RUN_TRACE_REGISTRY_SECRET_MATERIAL;
@@ -612,6 +628,75 @@ export class AutonomousRunTraceRegistry {
   private invalidate(): void {
     this.cachedSnapshot = null;
     this.cachedSignature = null;
+  }
+}
+
+function publicationErrorClass(error: unknown): string {
+  const name = error instanceof Error ? error.constructor.name : "";
+  return /^[A-Za-z0-9_.:-]{1,128}$/.test(name) ? name : "AutonomousRunTraceRegistryPublicationError";
+}
+
+/**
+ * Publish a source trace snapshot as a best-effort metadata projection.
+ *
+ * Publication is deliberately isolated from execution: a registry capacity, persistence, or
+ * source-journal error becomes a bounded report instead of causing a provider retry after an
+ * external effect may already have happened. Callers can alert on ``status === failed`` while
+ * preserving the original run outcome and reconciliation boundary.
+ */
+export async function publishAutonomousRunTraceRegistrySnapshot(
+  registry: AutonomousRunTraceRegistry,
+  traceStore: AutonomousRunTraceStore,
+  runId: string,
+): Promise<AutonomousRunTraceRegistryPublication> {
+  const normalizedRunId = identifier("autonomous run trace registry publication run_id", runId);
+  const base = {
+    schema: AUTONOMOUS_RUN_TRACE_REGISTRY_PUBLICATION_SCHEMA,
+    run_id: normalizedRunId,
+    run_import_state: "unknown" as const,
+    source_snapshot_digest: null,
+    registry_snapshot_digest: null,
+    evicted_run_count: 0,
+    retention: AUTONOMOUS_RUN_TRACE_REGISTRY_RETENTION,
+    authority: AUTONOMOUS_RUN_TRACE_REGISTRY_AUTHORITY,
+    secret_material: AUTONOMOUS_RUN_TRACE_REGISTRY_SECRET_MATERIAL,
+  };
+  let sourceSnapshotDigest: string | null = null;
+  try {
+    if (!(registry instanceof AutonomousRunTraceRegistry)) throw new ArgumentError("autonomous run trace registry publication requires a registry");
+    if (!traceStore || typeof traceStore.snapshot !== "function") throw new ArgumentError("autonomous run trace registry publication requires a trace store");
+    const source = await traceStore.snapshot();
+    sourceSnapshotDigest = source.snapshot_digest;
+    const report = registry.importSnapshot(source);
+    const runImportState = report.imported_run_ids.includes(normalizedRunId)
+      ? "imported"
+      : report.replaced_run_ids.includes(normalizedRunId)
+        ? "replaced"
+        : report.unchanged_run_ids.includes(normalizedRunId)
+          ? "unchanged"
+          : "not_present";
+    return {
+      ...base,
+      status: "published",
+      run_import_state: runImportState,
+      source_snapshot_digest: source.snapshot_digest,
+      registry_snapshot_digest: report.snapshot.snapshot_digest,
+      evicted_run_count: report.evicted_run_ids.length,
+      error_class: null,
+      failure_code: null,
+    };
+  } catch (error) {
+    return {
+      ...base,
+      status: "failed",
+      source_snapshot_digest: sourceSnapshotDigest,
+      error_class: publicationErrorClass(error),
+      failure_code: error instanceof ArgumentError && /trace snapshot/.test(error.message)
+        ? "trace_snapshot_invalid"
+        : error instanceof ArgumentError && /registry/.test(error.message)
+          ? "trace_registry_rejected"
+          : "trace_registry_publication_failed",
+    };
   }
 }
 

@@ -245,6 +245,12 @@ page = registry.query({"domain": "biomedical", "status": "completed", "limit": 1
 events = registry.events({"run_id": page.records[0].run_id, "phase": "provider_invocation_finished"})
 ```
 
+The high-level traced bridge can publish the projection as part of the same boundary with
+`runtime.run_with_trace(trace_store=trace_store, trace_registry=registry, run_id=...)`.
+`traced.trace_registry` reports imported/replaced/unchanged state, source and registry digests,
+eviction count, or a sanitized failure. Publication is idempotent and best-effort, so an index
+outage never changes provider settlement or causes an already-dispatched goal to retry.
+
 For deployments that already have an operator-approved action record, add an
 `action_handoff_resolver(goal, row, task)` to the runtime (or to
 `run_goal_control_loop`). It may return the verified handoff directly, or

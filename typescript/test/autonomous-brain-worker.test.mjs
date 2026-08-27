@@ -11,6 +11,7 @@ import {
   InMemoryAutonomousBrainJobSchedulerPersistence,
   InMemoryAutonomousModelHealthStore,
   InMemoryAutonomousRunTraceStore,
+  AutonomousRunTraceRegistry,
   LLMRuntime,
   AutonomousBrainJobSchedulerPersistenceCoordinator,
   AutonomousActionAdmissionController,
@@ -92,6 +93,7 @@ test("durable brain worker preserves approval gates and completes every domain t
   const { runtime, brain } = makeBrain(() => { providerCalls += 1; }, healthStore);
   const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 32, clock: () => 1_000 });
   const traces = new InMemoryAutonomousRunTraceStore();
+  const traceRegistry = new AutonomousRunTraceRegistry({ max_runs: 64, max_events: 4_096, max_bytes: 2_000_000 });
   const policies = new Map();
   for (let index = 0; index < AUTONOMOUS_DOMAIN_NAMES.length; index += 1) {
     const domain = AUTONOMOUS_DOMAIN_NAMES[index];
@@ -105,6 +107,7 @@ test("durable brain worker preserves approval gates and completes every domain t
     scheduler,
     workerId: "worker-a",
     traceStore: traces,
+    traceRegistry,
     resolve: ({ job }) => {
       const domain = job.domain;
       const request = requestFor(domain);
@@ -134,6 +137,8 @@ test("durable brain worker preserves approval gates and completes every domain t
     assert.equal(completed.status, "succeeded", jobId);
     assert.equal(completed.execution.run.status, "completed", jobId);
     assert.equal(completed.trace.status, "completed", jobId);
+    assert.equal(completed.trace_registry.status, "published", jobId);
+    assert.equal(completed.trace_registry.run_import_state, "imported", jobId);
     assert.ok(completed.trace.provider_invocations >= 1, jobId);
     assert.ok(completed.trace.plan_digest, jobId);
     assert.equal(JSON.stringify(completed.trace).includes(tasks[domain]), false, jobId);
@@ -147,6 +152,7 @@ test("durable brain worker preserves approval gates and completes every domain t
   assert.equal(health[0].failures, 0);
   assert.equal((await healthStore.verifyIntegrity()).events, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(traces.verifyIntegrity().verified, true);
+  assert.equal(traceRegistry.verifyIntegrity().runs, AUTONOMOUS_DOMAIN_NAMES.length);
   assert.equal(JSON.stringify(scheduler.snapshot()).includes("private-task-never-retained"), false);
   assert.equal(scheduler.inventory({ limit: 32 }).every((job) => job.state === "succeeded"), true);
 });

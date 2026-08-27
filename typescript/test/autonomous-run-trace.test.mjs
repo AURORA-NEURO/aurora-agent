@@ -10,6 +10,7 @@ import {
   AutonomousRunTraceRegistry,
   AutonomousRunTraceRegistryPersistenceCoordinator,
   JsonAutonomousRunTraceRegistryPersistence,
+  publishAutonomousRunTraceRegistrySnapshot,
   InMemoryAutonomousRunTraceStore,
   LLMRuntime,
   autonomousRunTraceStatus,
@@ -323,4 +324,24 @@ test("trace registry indexes every domain, paginates deterministically, and enfo
   const activeRegistry = new AutonomousRunTraceRegistry({ max_runs: 1, max_events: 32, max_bytes: 100_000 });
   assert.throws(() => activeRegistry.importSnapshot(activeSource.snapshot()), /cannot evict an eligible terminal run/);
   assert.equal(activeRegistry.size, 0, "failed retention import must be atomic");
+});
+
+test("trace registry publication is bounded, idempotent, and isolated from source failures", async () => {
+  const source = new InMemoryAutonomousRunTraceStore({ clock: () => 2_000 });
+  const session = new AutonomousRunTraceSession(source, { run_id: "publication-run", task_digest: digest("f"), domains: [...AUTONOMOUS_DOMAIN_NAMES] });
+  await session.started();
+  await session.complete({ status: "completed" });
+  const registry = new AutonomousRunTraceRegistry({ max_runs: 8, max_events: 64, max_bytes: 100_000 });
+  const first = await publishAutonomousRunTraceRegistrySnapshot(registry, source, "publication-run");
+  assert.equal(first.status, "published");
+  assert.equal(first.run_import_state, "imported");
+  assert.equal(first.evicted_run_count, 0);
+  assert.equal(registry.query({ run_id: "publication-run" }).total_matches, 1);
+  const second = await publishAutonomousRunTraceRegistrySnapshot(registry, source, "publication-run");
+  assert.equal(second.status, "published");
+  assert.equal(second.run_import_state, "unchanged");
+  const failed = await publishAutonomousRunTraceRegistrySnapshot(registry, { snapshot: () => { throw new Error("source unavailable"); } }, "publication-run");
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.failure_code, "trace_registry_publication_failed");
+  assert.equal(registry.query({ run_id: "publication-run" }).total_matches, 1);
 });

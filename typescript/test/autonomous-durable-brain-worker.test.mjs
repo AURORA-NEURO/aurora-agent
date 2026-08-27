@@ -13,6 +13,8 @@ import {
   LLMRuntime,
   ProviderSetup,
   ProviderRuntimeError,
+  InMemoryAutonomousRunTraceStore,
+  AutonomousRunTraceRegistry,
   autonomousBrainJobSpecDigest,
   protectedValueDigest,
 } from "../dist/index.js";
@@ -221,12 +223,16 @@ test("remote brain worker submits, approval-gates, and executes every built-in s
   const runtime = makeBrain();
   const { brain } = runtime;
   const api = remoteBrainApi();
+  const traceStore = new InMemoryAutonomousRunTraceStore({ clock: () => 500 });
+  const traceRegistry = new AutonomousRunTraceRegistry({ max_runs: 64, max_events: 4_096, max_bytes: 2_000_000 });
   const policies = new Map();
   const requests = new Map();
   const worker = new AutonomousDurableBrainJobWorker({
     brain,
     apiClient: api,
     workerId: "remote-brain-worker",
+    traceStore,
+    traceRegistry,
     resolve: ({ job }) => ({ specDigest: job.spec_digest, policyDigest: policies.get(job.job_id), request: requests.get(job.job_id), mode: "execute", execute: { run: { candidates: [model] } } }),
   });
   const submitted = [];
@@ -247,12 +253,15 @@ test("remote brain worker submits, approval-gates, and executes every built-in s
     const completed = await worker.runOnce(job.job_id);
     assert.equal(completed.status, "succeeded", job.domain);
     assert.equal(completed.execution.status, "completed", job.domain);
+    assert.equal(completed.trace_registry.status, "published", job.domain);
+    assert.equal(completed.trace_registry.run_import_state, "imported", job.domain);
   }
   assert.equal(runtime.providerCalls, submitted.length);
   assert.ok(api.seen.some((row) => row.operation === "claim_next" || row.operation === "claim"));
   assert.ok(api.seen.some((row) => row.operation === "checkpoint" && row.args.side_effect_boundary === "unknown"));
   assert.ok(api.seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "task")));
   assert.ok(api.seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "prompt")));
+  assert.equal(traceRegistry.verifyIntegrity().runs, submitted.length);
 });
 
 test("remote brain worker rehydrates protected receipts across every domain and preserves explicit resolver precedence", async () => {

@@ -37,6 +37,7 @@ AUTONOMOUS_RUN_TRACE_REGISTRY_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-run-
 AUTONOMOUS_RUN_TRACE_REGISTRY_RETENTION = "metadata_only_no_prompts_responses_tool_payloads_credentials_evidence_or_effect_values"
 AUTONOMOUS_RUN_TRACE_REGISTRY_AUTHORITY = "operator_query_and_retention_projection_only;does_not_authorize_execution"
 AUTONOMOUS_RUN_TRACE_REGISTRY_SECRET_MATERIAL = "never_returned"
+AUTONOMOUS_RUN_TRACE_REGISTRY_PUBLICATION_SCHEMA = "bioprism-python-autonomous-run-trace-registry-publication/0.1"
 MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_RUNS = 10_000
 MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_EVENTS = MAX_AUTONOMOUS_RUN_TRACE_EVENTS
 MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_BYTES = MAX_AUTONOMOUS_RUN_TRACE_SNAPSHOT_BYTES
@@ -239,6 +240,36 @@ class AutonomousRunTraceRegistryImportReport:
             "unchanged_run_ids": list(self.unchanged_run_ids),
             "evicted_run_ids": list(self.evicted_run_ids),
             "snapshot": self.snapshot.to_dict(),
+            "retention": AUTONOMOUS_RUN_TRACE_REGISTRY_RETENTION,
+            "authority": AUTONOMOUS_RUN_TRACE_REGISTRY_AUTHORITY,
+            "secret_material": AUTONOMOUS_RUN_TRACE_REGISTRY_SECRET_MATERIAL,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousRunTraceRegistryPublication:
+    """Bounded result of projecting a trace store into the operator registry."""
+
+    status: str
+    run_id: str
+    run_import_state: str
+    source_snapshot_digest: str | None
+    registry_snapshot_digest: str | None
+    evicted_run_count: int
+    error_class: str | None = None
+    failure_code: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_RUN_TRACE_REGISTRY_PUBLICATION_SCHEMA,
+            "status": self.status,
+            "run_id": self.run_id,
+            "run_import_state": self.run_import_state,
+            "source_snapshot_digest": self.source_snapshot_digest,
+            "registry_snapshot_digest": self.registry_snapshot_digest,
+            "evicted_run_count": self.evicted_run_count,
+            "error_class": self.error_class,
+            "failure_code": self.failure_code,
             "retention": AUTONOMOUS_RUN_TRACE_REGISTRY_RETENTION,
             "authority": AUTONOMOUS_RUN_TRACE_REGISTRY_AUTHORITY,
             "secret_material": AUTONOMOUS_RUN_TRACE_REGISTRY_SECRET_MATERIAL,
@@ -709,6 +740,73 @@ class AutonomousRunTraceRegistry:
         self._cached_signature = None
 
 
+def publish_autonomous_run_trace_registry_snapshot(
+    registry: AutonomousRunTraceRegistry,
+    trace_store: Any,
+    run_id: str,
+) -> AutonomousRunTraceRegistryPublication:
+    """Best-effort metadata publication that never turns a completed run into a retry.
+
+    Source-journal validation and registry retention failures are returned as a bounded report.
+    The caller can alert or persist that report while preserving the original provider outcome
+    and its external-effect reconciliation boundary.
+    """
+
+    normalized_run_id = _identifier("autonomous run trace registry publication run_id", run_id)
+    base = {
+        "run_id": normalized_run_id,
+        "run_import_state": "unknown",
+        "source_snapshot_digest": None,
+        "registry_snapshot_digest": None,
+        "evicted_run_count": 0,
+    }
+    source_snapshot_digest: str | None = None
+    try:
+        if not isinstance(registry, AutonomousRunTraceRegistry):
+            raise ArgumentError("autonomous run trace registry publication requires a registry")
+        if not callable(getattr(trace_store, "snapshot", None)):
+            raise ArgumentError("autonomous run trace registry publication requires a trace store")
+        source = trace_store.snapshot()
+        candidate_digest = getattr(source, "snapshot_digest", None)
+        if isinstance(candidate_digest, str) and len(candidate_digest) == 64 and all(character in "0123456789abcdef" for character in candidate_digest):
+            source_snapshot_digest = candidate_digest
+        report = registry.import_snapshot(source)
+        if normalized_run_id in report.imported_run_ids:
+            run_import_state = "imported"
+        elif normalized_run_id in report.replaced_run_ids:
+            run_import_state = "replaced"
+        elif normalized_run_id in report.unchanged_run_ids:
+            run_import_state = "unchanged"
+        else:
+            run_import_state = "not_present"
+        return AutonomousRunTraceRegistryPublication(
+            status="published",
+            run_id=normalized_run_id,
+            run_import_state=run_import_state,
+            source_snapshot_digest=source.snapshot_digest,
+            registry_snapshot_digest=report.snapshot.snapshot_digest,
+            evicted_run_count=len(report.evicted_run_ids),
+        )
+    except Exception as error:
+        if isinstance(error, ArgumentError) and "trace snapshot" in str(error):
+            failure_code = "trace_snapshot_invalid"
+        elif isinstance(error, ArgumentError) and "registry" in str(error):
+            failure_code = "trace_registry_rejected"
+        else:
+            failure_code = "trace_registry_publication_failed"
+        error_class = type(error).__name__ if type(error).__name__.replace("_", "").isalnum() else "AutonomousRunTraceRegistryPublicationError"
+        return AutonomousRunTraceRegistryPublication(
+            status="failed",
+            run_id=normalized_run_id,
+            run_import_state=base["run_import_state"],
+            source_snapshot_digest=source_snapshot_digest,
+            registry_snapshot_digest=base["registry_snapshot_digest"],
+            evicted_run_count=base["evicted_run_count"],
+            error_class=error_class[:128],
+            failure_code=failure_code,
+        )
+
+
 def validate_autonomous_run_trace_registry_snapshot(raw: Mapping[str, Any] | AutonomousRunTraceRegistrySnapshot, *, max_bytes: int = MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_BYTES) -> AutonomousRunTraceRegistrySnapshot:
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 16_000 <= max_bytes <= MAX_AUTONOMOUS_RUN_TRACE_REGISTRY_BYTES:
         raise ArgumentError("autonomous run trace registry validation max_bytes is outside its bounds")
@@ -810,10 +908,13 @@ __all__ = [
     "AutonomousRunTraceRegistrySnapshot",
     "AutonomousRunTraceRegistryPage",
     "AutonomousRunTraceRegistryImportReport",
+    "AutonomousRunTraceRegistryPublication",
     "AutonomousRunTraceRegistryIntegrity",
     "AutonomousRunTraceRegistry",
     "validate_autonomous_run_trace_registry_snapshot",
     "JsonAutonomousRunTraceRegistryPersistence",
     "TransactionalJsonAutonomousRunTraceRegistryPersistence",
     "AutonomousRunTraceRegistryPersistenceCoordinator",
+    "AUTONOMOUS_RUN_TRACE_REGISTRY_PUBLICATION_SCHEMA",
+    "publish_autonomous_run_trace_registry_snapshot",
 ]

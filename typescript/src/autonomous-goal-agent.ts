@@ -51,6 +51,11 @@ import {
   type AutonomousRunTraceSummary,
 } from "./autonomous-run-trace.js";
 import type { ProviderInvocationObserver, AutonomousModelSelectionTraceEventCallback } from "./llm.js";
+import {
+  AutonomousRunTraceRegistry,
+  publishAutonomousRunTraceRegistrySnapshot,
+  type AutonomousRunTraceRegistryPublication,
+} from "./autonomous-run-trace-registry.js";
 
 export const AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA = "bioprism-autonomous-goal-agent-runtime/0.1" as const;
 export const AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION = "metadata_only_goal_agent_bridge;tasks_prompts_parameters_credentials_and_results_not_retained" as const;
@@ -83,6 +88,8 @@ export interface AutonomousGoalAgentLoopRunOptions {
 export interface AutonomousGoalAgentTraceOptions extends Omit<AutonomousGoalAgentLoopRunOptions, "run_id"> {
   traceStore: AutonomousRunTraceStore;
   runId: string;
+  /** Optional metadata-only projection for operator queries and bounded retention. */
+  traceRegistry?: AutonomousRunTraceRegistry;
 }
 
 export interface AutonomousGoalAgentTracedRunResult {
@@ -90,6 +97,7 @@ export interface AutonomousGoalAgentTracedRunResult {
   /** The live loop result is available to the initiating caller only. */
   result: AutonomousGoalControlLoopResult;
   trace: AutonomousRunTraceSummary;
+  traceRegistry?: AutonomousRunTraceRegistryPublication;
   retention: typeof AUTONOMOUS_GOAL_AGENT_TRACE_RETENTION;
   secret_material: "never_returned";
 }
@@ -393,6 +401,7 @@ export class AutonomousGoalAgentRuntime {
   async runWithTrace(options: AutonomousGoalAgentTraceOptions): Promise<AutonomousGoalAgentTracedRunResult> {
     if (!options || typeof options !== "object") fail("runWithTrace options must be an object");
     if (!options.traceStore || typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function") fail("runWithTrace requires a trace store");
+    if (options.traceRegistry !== undefined && !(options.traceRegistry instanceof AutonomousRunTraceRegistry)) fail("runWithTrace traceRegistry must be an AutonomousRunTraceRegistry");
     if (this.trace_context !== undefined) fail("runWithTrace cannot be re-entered while another trace is active");
     const goals = this.ledger.list({ limit: 512 });
     const unsupported = goals.filter((goal) => !(AUTONOMOUS_DOMAIN_NAMES as readonly string[]).includes(goal.domain));
@@ -440,16 +449,21 @@ export class AutonomousGoalAgentRuntime {
         }),
       });
       await session.complete({ status: controlLoopTraceStatus(result), domains, plan_digest: planDigest, detail_digest: digestJsonSync(result.toJSON()) });
+      const traceRegistry = options.traceRegistry === undefined
+        ? undefined
+        : await publishAutonomousRunTraceRegistrySnapshot(options.traceRegistry, options.traceStore, options.runId);
       return {
         schema: AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA,
         result,
         trace: await session.summary(),
+        ...(traceRegistry === undefined ? {} : { traceRegistry }),
         retention: AUTONOMOUS_GOAL_AGENT_TRACE_RETENTION,
         secret_material: "never_returned",
       };
     } catch (error) {
       const failureClass = error instanceof Error ? error.constructor.name : "UnknownError";
       await session.fail({ failure_class: failureClass, failure_code: "goal_control_loop_error", detail_digest: digestJsonSync({ failure_class: failureClass }) }).catch(() => undefined);
+      if (options.traceRegistry !== undefined) await publishAutonomousRunTraceRegistrySnapshot(options.traceRegistry, options.traceStore, options.runId);
       throw error;
     } finally {
       this.trace_context = undefined;

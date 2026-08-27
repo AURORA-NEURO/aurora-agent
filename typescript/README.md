@@ -1386,6 +1386,10 @@ const traced = await runtime.runWithTrace({
 console.log(traced.trace.status, traced.trace.provider_invocations);
 ```
 
+Pass `traceRegistry` when the same run should be indexed immediately for operators. Publication is
+idempotent and best-effort; `traced.traceRegistry` reports its run state, source/registry digests,
+evictions, or a sanitized failure without changing provider settlement or retry behavior.
+
 For a bounded operator index over many trace runs, import each validated trace snapshot into
 `AutonomousRunTraceRegistry`. It supports deterministic cursor pagination and filters for run,
 domain, status, provider, and model. `retain_events: false` keeps only summary/provider/model

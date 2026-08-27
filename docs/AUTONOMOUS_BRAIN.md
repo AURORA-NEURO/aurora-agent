@@ -2451,6 +2451,28 @@ const next = page.next_after_run_id
   : null;
 ```
 
+High-level execution can publish into that index at the trace boundary instead of making every
+worker remember a second observability call. TypeScript `AutonomousGoalAgentRuntime.runWithTrace`
+accepts `traceRegistry`, and the local and durable brain workers accept the same optional
+`traceRegistry` alongside `traceStore`. Python `AutonomousGoalAgentRuntime.run_with_trace` uses
+`trace_registry`. The returned `traceRegistry`/`trace_registry` publication report contains the
+run import state, source and registry snapshot digests, eviction count, and sanitized failure
+category. Publication is best-effort and idempotent: a failed projection is visible as
+`status: "failed"` but never changes the provider result, lifecycle settlement, or retry decision
+after dispatch. This prevents an observability outage from replaying an external effect.
+
+```typescript
+const traced = await goalRuntime.runWithTrace({
+  traceStore,
+  traceRegistry,
+  runId: "goal-batch-2026-08-23",
+  max_total_runs: 64,
+});
+if (traced.traceRegistry?.status === "failed") {
+  // Alert or enqueue bounded metadata for later repair; do not retry the brain run.
+}
+```
+
 The live bridge is also available when an application owns orchestration. Pass an
 `AutonomousRunTraceSession.record`-compatible callback as `trace_event_callback` to
 `run_connector_workflow()`, `run_connector_mission()`,
