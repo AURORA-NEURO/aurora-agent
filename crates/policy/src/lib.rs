@@ -63,6 +63,7 @@ pub mod autonomy_batch;
 pub mod consent;
 pub mod decision;
 pub mod error;
+pub mod federated_commons_interoperability_gateway;
 pub mod flow;
 pub mod interoperability_control;
 pub mod label;
@@ -85,6 +86,14 @@ pub use autonomy_batch::{
 pub use consent::{Consent, ConsentStatus};
 pub use decision::{Admission, Decision, ExecutionMode, Obligation, Refusal};
 pub use error::PolicyError;
+pub use federated_commons_interoperability_gateway::{
+    admit as admit_policy_federation, admit_json as admit_policy_federation_json,
+    capability_manifest as federated_commons_manifest, FederationAdmission,
+    FederationArtifactCandidate, PolicyFederationEnvelope, PolicyFederationError,
+    PolicyFederationRequest, CONTRACT_VERSION as FEDERATED_COMMONS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_COMMONS_FEATURE_ID, INPUT_SCHEMA as FEDERATED_COMMONS_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_COMMONS_OUTPUT_SCHEMA,
+};
 pub use flow::{
     check_flow, derive, DeclassificationReceipt, DeclassificationRegistry, DeclassificationRule,
 };

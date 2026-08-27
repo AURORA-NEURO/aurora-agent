@@ -6649,6 +6649,16 @@ __all__ += [
     "run_interpretation_workflow",
 ]
 
+from .federated_commons_interoperability_gateway import (
+    PolicyFederationEnvelope,
+    admit_policy_federation,
+)
+
+__all__ += [
+    "PolicyFederationEnvelope",
+    "admit_policy_federation",
+]
+
 from .adapter_throughput_evidence_surveillance_inference_engine import (
     ThroughputEvidenceObservation,
     ThroughputEvidenceSurveillanceReceipt,

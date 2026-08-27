@@ -3642,6 +3642,15 @@ export {
 } from "./research-contracts.js";
 export type { ApiInterpretationStudy, ApiMultimodalInterpretationWorkflowReceipt } from "./research-contracts.js";
 export {
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_FEATURE_ID,
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_CONTRACT_VERSION,
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_INPUT_SCHEMA,
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_OUTPUT_SCHEMA,
+  policyFederatedCommonsEnvelopeDigest,
+  validatePolicyFederatedCommonsEnvelope,
+} from "./research-contracts.js";
+export type { PolicyFederationArtifactCandidate, PolicyFederatedCommonsEnvelope } from "./research-contracts.js";
+export {
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
   adapterFederatedContinualEvidenceSurveillanceWorkflowFabricReceiptDigest,
