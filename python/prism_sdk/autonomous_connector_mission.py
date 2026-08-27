@@ -23,7 +23,7 @@ network I/O by itself.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping, Sequence
 
 from .authoring import content_digest
@@ -45,6 +45,7 @@ from .mission import MAX_MISSION_STEPS, MissionRequest, MissionStep, MissionPoli
 
 
 AUTONOMOUS_CONNECTOR_MISSION_SCHEMA = "bioprism-python-autonomous-connector-mission/0.1"
+AUTONOMOUS_CONNECTOR_MISSION_STEP_QUALITY_EVALUATION_SCHEMA = "bioprism-python-autonomous-connector-mission-step-quality-evaluation/0.1"
 MAX_AUTONOMOUS_CONNECTOR_MISSION_STEP_CALLS = 256
 MAX_AUTONOMOUS_CONNECTOR_MISSION_OUTPUT_BYTES = 2_000_000
 AUTONOMOUS_CONNECTOR_MISSION_STEP_STATUSES = (
@@ -54,6 +55,7 @@ AUTONOMOUS_CONNECTOR_MISSION_STEP_STATUSES = (
     "refused",
     "failed",
     "reconciliation_required",
+    "quality_blocked",
 )
 AUTONOMOUS_CONNECTOR_MISSION_RUN_STATUSES = (
     "connector_observed",
@@ -64,6 +66,7 @@ AUTONOMOUS_CONNECTOR_MISSION_RUN_STATUSES = (
     "unknown",
     "failed",
     "reconciliation_required",
+    "quality_blocked",
 )
 
 
@@ -258,6 +261,155 @@ class AutonomousConnectorMissionStepContext:
 
 
 @dataclass(frozen=True, slots=True)
+class AutonomousConnectorMissionStepQualityContext:
+    """Transient raw result context supplied to a caller-owned mission evaluator."""
+
+    mission_id: str
+    goal_digest: str
+    wave: int
+    attempt: int
+    step: MissionStep
+    result: Any
+    result_digest: str
+
+    def __post_init__(self) -> None:
+        _bounded_id("connector mission quality mission_id", self.mission_id)
+        _digest("connector mission quality goal_digest", self.goal_digest)
+        if isinstance(self.wave, bool) or not isinstance(self.wave, int) or self.wave < 0:
+            raise ArgumentError("connector mission quality wave must be a non-negative integer")
+        if isinstance(self.attempt, bool) or not isinstance(self.attempt, int) or self.attempt < 1:
+            raise ArgumentError("connector mission quality attempt must be positive")
+        if not isinstance(self.step, MissionStep):
+            raise ArgumentError("connector mission quality step is invalid")
+        _digest("connector mission quality result_digest", self.result_digest)
+
+
+def _normalize_quality_projection(
+    value: Mapping[str, Any],
+    *,
+    context: AutonomousConnectorMissionStepQualityContext | None = None,
+) -> dict[str, Any]:
+    """Normalize a reward input into a metadata-only, identity-bound quality projection."""
+
+    safe = _safe_object("connector mission quality evaluation", value, maximum=32_000)
+    projection = safe.get("schema") == AUTONOMOUS_CONNECTOR_MISSION_STEP_QUALITY_EVALUATION_SCHEMA
+    allowed = {
+        "schema", "evaluator_id", "evaluator_version", "domain", "mission_id", "goal_digest", "step_id",
+        "step_digest", "result_digest", "reward", "passed", "failed", "failure_class", "feedback_digest",
+        "evidence_digest", "evaluator_authority", "retention", "secret_material", "evaluation_digest",
+    }
+    input_allowed = {
+        "evaluator_id", "evaluator_version", "reward", "passed", "failed", "failure_class",
+        "feedback_digest", "evidence_digest",
+    }
+    if projection and set(safe) != allowed:
+        raise ArgumentError("connector mission quality evaluation is missing or carrying unsupported fields")
+    if not projection and set(safe).difference(input_allowed):
+        raise ArgumentError("connector mission quality evaluator returned unsupported fields")
+    evaluator_id = _bounded_id("connector mission quality evaluator_id", safe.get("evaluator_id"))
+    evaluator_version = _bounded_id("connector mission quality evaluator_version", safe.get("evaluator_version"))
+    domain = _bounded_id(
+        "connector mission quality domain",
+        safe.get("domain") if safe.get("domain") is not None else None if context is None else context.step.domain,
+    )
+    mission_id = _bounded_id(
+        "connector mission quality mission_id",
+        safe.get("mission_id") if safe.get("mission_id") is not None else None if context is None else context.mission_id,
+    )
+    step_id = _bounded_id(
+        "connector mission quality step_id",
+        safe.get("step_id") if safe.get("step_id") is not None else None if context is None else context.step.id,
+    )
+    goal_digest = _digest(
+        "connector mission quality goal_digest",
+        safe.get("goal_digest") if safe.get("goal_digest") is not None else None if context is None else context.goal_digest,
+    )
+    step_digest = _digest(
+        "connector mission quality step_digest",
+        safe.get("step_digest") if safe.get("step_digest") is not None else None if context is None else content_digest(context.step.to_dict()),
+    )
+    result_digest = _digest(
+        "connector mission quality result_digest",
+        safe.get("result_digest") if safe.get("result_digest") is not None else None if context is None else context.result_digest,
+    )
+    if context is not None and (
+        mission_id != context.mission_id
+        or domain != context.step.domain
+        or step_id != context.step.id
+        or goal_digest != context.goal_digest
+        or step_digest != content_digest(context.step.to_dict())
+        or result_digest != context.result_digest
+    ):
+        raise ArgumentError("connector mission quality evaluation is not bound to the scheduled result")
+    reward = safe.get("reward")
+    if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not 0 <= float(reward) <= 1:
+        raise ArgumentError("connector mission quality reward is outside [0, 1]")
+    passed = safe.get("passed")
+    if not isinstance(passed, bool):
+        raise ArgumentError("connector mission quality passed flag is invalid")
+    failed = safe.get("failed", not passed)
+    if not isinstance(failed, bool) or failed == passed:
+        raise ArgumentError("connector mission quality passed and failed flags are inconsistent")
+    failure_class = safe.get("failure_class")
+    if failure_class is None:
+        failure_class = "MissionStepQualityGateRejected" if failed else None
+    else:
+        failure_class = _bounded_id("connector mission quality failure_class", failure_class)
+    if passed and failure_class is not None:
+        raise ArgumentError("passed connector mission quality evaluations cannot contain failure_class")
+    evidence_digest = safe.get("evidence_digest")
+    _digest("connector mission quality evidence_digest", evidence_digest, allow_none=True)
+    feedback_digest = safe.get("feedback_digest")
+    if feedback_digest is None:
+        feedback_digest = content_digest(
+            {
+                "schema": AUTONOMOUS_CONNECTOR_MISSION_STEP_QUALITY_EVALUATION_SCHEMA,
+                "evaluator_id": evaluator_id,
+                "evaluator_version": evaluator_version,
+                "mission_id": mission_id,
+                "step_id": step_id,
+                "result_digest": result_digest,
+                "reward": float(reward),
+                "passed": passed,
+                "failed": failed,
+                "failure_class": failure_class,
+                "evidence_digest": evidence_digest,
+            }
+        )
+    else:
+        _digest("connector mission quality feedback_digest", feedback_digest)
+    descriptor = {
+        "schema": AUTONOMOUS_CONNECTOR_MISSION_STEP_QUALITY_EVALUATION_SCHEMA,
+        "evaluator_id": evaluator_id,
+        "evaluator_version": evaluator_version,
+        "domain": domain,
+        "mission_id": mission_id,
+        "goal_digest": goal_digest,
+        "step_id": step_id,
+        "step_digest": step_digest,
+        "result_digest": result_digest,
+        "reward": float(reward),
+        "passed": passed,
+        "failed": failed,
+        "failure_class": failure_class,
+        "feedback_digest": feedback_digest,
+        "evidence_digest": evidence_digest,
+        "evaluator_authority": "caller_declared_signal_scoring_only",
+        "retention": "value_only;step_result_not_retained",
+        "secret_material": "never_returned",
+    }
+    evaluation_digest = content_digest(descriptor)
+    if projection and (
+        safe.get("evaluator_authority") != descriptor["evaluator_authority"]
+        or safe.get("retention") != descriptor["retention"]
+        or safe.get("secret_material") != descriptor["secret_material"]
+        or safe.get("evaluation_digest") != evaluation_digest
+    ):
+        raise ArgumentError("connector mission quality evaluation authority, retention, or digest is invalid")
+    return {**descriptor, "evaluation_digest": evaluation_digest}
+
+
+@dataclass(frozen=True, slots=True)
 class AutonomousConnectorMissionStepExecution:
     """Transient connector value paired with a metadata-only mission result."""
 
@@ -271,6 +423,7 @@ class AutonomousConnectorMissionStepExecution:
     detail: str | None = None
     decision: Mapping[str, Any] | None = None
     replay_recovery_required: bool = False
+    quality: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _bounded_id("connector mission execution step_id", self.step_id)
@@ -291,6 +444,8 @@ class AutonomousConnectorMissionStepExecution:
             object.__setattr__(self, "decision", safe)
         if not isinstance(self.replay_recovery_required, bool):
             raise ArgumentError("connector mission replay recovery flag must be boolean")
+        if self.quality is not None:
+            object.__setattr__(self, "quality", _normalize_quality_projection(self.quality))
 
     @property
     def receipt(self) -> Any | None:
@@ -311,6 +466,7 @@ class AutonomousConnectorMissionStepExecution:
             "detail": self.detail,
             "decision": None if self.decision is None else dict(self.decision),
             "replay_recovery_required": self.replay_recovery_required,
+            "quality": None if self.quality is None else dict(self.quality),
             "value_retained": False,
             "retention": "metadata_only;connector_value_transient",
             "secret_material": "never_returned",
@@ -604,6 +760,7 @@ def _snapshot(step: MissionStep, execution: AutonomousConnectorMissionStepExecut
         "payload_digest": None if receipt is None else receipt.payload_digest,
         "error_class": execution.error_class,
         "replay_recovery_required": execution.replay_recovery_required,
+        "quality": None if execution.quality is None else dict(execution.quality),
         "retention": "metadata_only_no_request_or_payload",
         "secret_material": "never_returned",
     }
@@ -660,8 +817,9 @@ def _validate_checkpoint(
         "selection_plan_digest", "receipt_digest", "payload_digest", "error_class",
         "replay_recovery_required", "retention", "secret_material",
     }
+    allowed = required | {"quality"}
     for raw in raw_steps:
-        if not isinstance(raw, Mapping) or set(raw) != required:
+        if not isinstance(raw, Mapping) or not required.issubset(raw) or set(raw).difference(allowed):
             raise ArgumentError("connector mission checkpoint step is malformed")
         step_id = _bounded_id("connector mission checkpoint step_id", raw.get("step_id"))
         step = by_id.get(step_id)
@@ -681,6 +839,10 @@ def _validate_checkpoint(
             raise ArgumentError("connector mission checkpoint replay flag is invalid")
         if raw.get("retention") != "metadata_only_no_request_or_payload" or raw.get("secret_material") != "never_returned":
             raise ArgumentError("connector mission checkpoint step retention is invalid")
+        if raw.get("quality") is not None:
+            quality = _normalize_quality_projection(raw["quality"])
+            if quality["mission_id"] != request.mission_id or quality["step_id"] != step_id or quality["domain"] != step.domain or quality["step_digest"] != content_digest(step.to_dict()):
+                raise ArgumentError("connector mission checkpoint quality identity is stale")
         if step_id in snapshots:
             raise ArgumentError("connector mission checkpoint contains duplicate steps")
         snapshots[step_id] = dict(raw)
@@ -766,6 +928,7 @@ def run_autonomous_connector_mission(
     selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
     feedback_ledger: InMemoryAutonomousConnectorFeedbackLedger | None = None,
     feedback_by_step: Mapping[str, Mapping[str, Any]] | None = None,
+    quality_evaluator: Callable[[AutonomousConnectorMissionStepQualityContext], Mapping[str, Any]] | None = None,
     trace_event_callback: Callable[..., Any] | None = None,
 ) -> AutonomousConnectorMissionRun:
     """Execute a typed mission DAG through reviewed connectors without model credentials."""
@@ -782,6 +945,8 @@ def run_autonomous_connector_mission(
         raise ArgumentError("connector mission protected_rehydration adapter is malformed")
     if trace_event_callback is not None and not callable(trace_event_callback):
         raise ArgumentError("connector mission trace_event_callback must be callable")
+    if quality_evaluator is not None and not callable(quality_evaluator):
+        raise ArgumentError("connector mission quality_evaluator must be callable")
     if resume_outputs is not None:
         resume_outputs = _safe_object("connector mission resume_outputs", resume_outputs, maximum=2_000_000)
     if feedback_by_step is not None:
@@ -805,7 +970,7 @@ def run_autonomous_connector_mission(
         checkpoint, request, steps, mission_digest=mission_digest, goal_digest=goal_digest
     )
     prior_attempts = {step_id: int(row["attempt"]) for step_id, row in snapshots.items()}
-    blocked_statuses = {"partial", "approval_required", "refused", "failed", "reconciliation_required"}
+    blocked_statuses = {"partial", "approval_required", "refused", "failed", "reconciliation_required", "quality_blocked"}
     if any(row["status"] in blocked_statuses for row in snapshots.values()) and not retry_blocked:
         blocked = tuple(step.id for step in steps if snapshots.get(step.id, {}).get("status") in blocked_statuses)
         return AutonomousConnectorMissionRun(
@@ -831,7 +996,6 @@ def run_autonomous_connector_mission(
         rehydrate_payload=rehydrate_payload,
         protected_rehydration=protected_rehydration,
     )
-    by_id = {step.id: step for step in steps}
     transient_outputs: dict[str, Any] = {}
     executions: list[AutonomousConnectorMissionStepExecution] = []
     feedback_receipts: list[Mapping[str, Any]] = []
@@ -893,8 +1057,43 @@ def run_autonomous_connector_mission(
             request_payload=payload,
             trace_event_callback=trace_event_callback,
         )
+        if quality_evaluator is not None and execution.status == "completed":
+            quality_context = AutonomousConnectorMissionStepQualityContext(
+                mission_id=request.mission_id,
+                goal_digest=goal_digest,
+                wave=0,
+                attempt=context.execution_attempt,
+                step=ready,
+                result=execution.value,
+                result_digest=content_digest(execution.value),
+            )
+            try:
+                quality = _normalize_quality_projection(
+                    quality_evaluator(quality_context),
+                    context=quality_context,
+                )
+            except Exception as error:
+                execution = replace(
+                    execution,
+                    status="quality_blocked",
+                    run_status="quality_blocked",
+                    value=None,
+                    error_class="QualityEvaluatorError",
+                    detail=str(error)[:512],
+                )
+            else:
+                execution = replace(execution, quality=quality)
+                if not quality["passed"]:
+                    execution = replace(
+                        execution,
+                        status="quality_blocked",
+                        run_status="quality_blocked",
+                        value=None,
+                        error_class=quality["failure_class"] or "MissionStepQualityGateRejected",
+                        detail="connector mission quality gate rejected the result",
+                    )
         executions.append(execution)
-        if feedback_by_step is not None and ready.id in feedback_by_step:
+        if feedback_by_step is not None and ready.id in feedback_by_step and execution.status == "completed":
             feedback_receipts.append(adapter.settle_evaluator_feedback(execution, feedback_by_step[ready.id]))
         snapshots[ready.id] = _snapshot(ready, execution, attempt=context.execution_attempt)
         if execution.status == "completed":
@@ -907,7 +1106,7 @@ def run_autonomous_connector_mission(
                 tuple(sorted(completed)), (ready.id,), tuple(feedback_receipts),
             )
         return AutonomousConnectorMissionRun(
-            request.mission_id, mission_digest, goal_digest, execution.status, tuple(executions),
+            request.mission_id, mission_digest, goal_digest, "blocked" if execution.status == "quality_blocked" else execution.status, tuple(executions),
             _checkpoint(request, steps, snapshots, mission_digest=mission_digest, goal_digest=goal_digest),
             tuple(sorted(completed)), (ready.id,), tuple(feedback_receipts),
         )

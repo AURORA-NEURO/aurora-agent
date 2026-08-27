@@ -225,6 +225,48 @@ test("one mission contract accepts every built-in autonomous domain", async () =
   assert.equal(result.failed_steps, 0);
 });
 
+test("mission quality gates are digest-bound, hold dependents, and require explicit retry", async () => {
+  const steps = [
+    { id: "quality", domain: "coding", capability: "verification", objective: "produce a quality-gated result", tool: "mission_probe", arguments: { value: "first" } },
+    { id: "dependent", domain: "evaluation", capability: "verification", objective: "consume the accepted result", tool: "mission_probe", arguments: { value: "second" }, depends_on: ["quality"] },
+  ];
+  let calls = 0;
+  const executor = new AutonomousMissionExecutor({
+    catalogue: await catalogue(),
+    executeStep: async ({ step }) => {
+      calls += 1;
+      return { status: "succeeded", value: { accepted: calls > 1, step: step.id, secret: "not-persisted" } };
+    },
+    evaluateStep: async ({ step, result }) => ({
+      evaluator_id: "mission-quality-reviewer",
+      evaluator_version: "1",
+      reward: result.accepted ? 1 : 0,
+      passed: result.accepted,
+      evidence_digest: null,
+    }),
+  });
+  const first = await executor.start(mission(steps), { approveProviderCall: true });
+  assert.equal(first.status, "failed");
+  assert.equal(first.checkpoint.next_wave, 0);
+  assert.equal(first.checkpoint.step_states.quality.status, "blocked");
+  assert.equal(first.checkpoint.step_states.quality.quality.passed, false);
+  assert.equal(first.checkpoint.step_states.quality.result_digest, null);
+  assert.equal(first.checkpoint.step_states.dependent.status, "pending");
+  assert.equal(JSON.stringify(first.checkpoint).includes("not-persisted"), false);
+  assert.equal(calls, 1);
+
+  const held = await executor.resume(mission(steps), { approveProviderCall: true });
+  assert.equal(held.status, "failed");
+  assert.equal(calls, 1, "a quality rejection is not retried implicitly");
+
+  const retried = await executor.resume(mission(steps), { approveProviderCall: true, retryBlocked: true });
+  assert.equal(retried.status, "succeeded");
+  assert.equal(retried.completed_steps, 2);
+  assert.equal(retried.checkpoint.step_states.quality.quality.passed, true);
+  assert.equal(retried.checkpoint.step_states.dependent.quality.passed, true);
+  assert.equal(calls, 3);
+});
+
 test("approval and uncertain-effect step states remain resumable", async () => {
   const step = {
     id: "effect-step",

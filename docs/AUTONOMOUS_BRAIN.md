@@ -179,6 +179,36 @@ explicit retry control (`retryBlocked` in TypeScript or `retry_blocked` in Pytho
 about stage-report integrity only: it does not prove task correctness, source truth, or an
 external effect.
 
+Mission execution has the same continuation boundary. TypeScript callers can provide
+`AutonomousMissionExecutorOptions.evaluateStep`, and Python callers can provide
+`quality_evaluator` to `run_connector_mission(...)`. The callback sees the transient result and
+returns the existing evaluator reward shape (`evaluator_id`, `evaluator_version`, `reward`, and
+`passed`, with optional failure/evidence digests). The runtime adds mission, goal, domain, step,
+and result digests, then persists only the resulting
+`AutonomousMissionStepQualityEvaluation` projection. A rejected or unevaluable result is stored
+as a quality-blocked step without saving its output, cannot satisfy dependencies, and cannot
+advance learning-linked mission completion. The checkpoint remains addressable for review and
+requires `retryBlocked: true` (TypeScript) or `retry_blocked=True` (Python) to dispatch again.
+
+```typescript
+const executor = new AutonomousMissionExecutor({
+  catalogue,
+  executeStep,
+  evaluateStep: ({ step, result }) => ({
+    evaluator_id: "reviewer",
+    evaluator_version: "1",
+    reward: result.accepted === true ? 1 : 0,
+    passed: result.accepted === true,
+  }),
+});
+```
+
+This is deliberately an evaluator seam, not an invented correctness oracle. It lets each of the
+twelve built-in domains attach its own reviewed rubric while the runtime enforces the invariant
+that transport success is not durable mission success. Quality projections are safe to replicate,
+digest-replay, and feed into explicit learning settlement; raw results, prompts, arguments,
+credentials, and external-world evidence remain caller-owned.
+
 Semantic provider routing is covered by the same boundary. `route_with_provider`,
 `prepare_auto_with_provider`, and Python `run_auto(..., semantic_routing=True)` perform a
 provider-free cross-domain admission before model selection or classifier invocation. A strict
@@ -1125,6 +1155,34 @@ selection may consume the ledger's health/success/reward projection through weig
 without a feedback packet, the adapter remains on deterministic lexicographic selection. This is
 an online adaptation seam, not an automatic truth oracle: the embedding application owns the
 rubric, evidence retention, evaluator trust, and decision to persist or discard the next signal.
+
+For a connector mission that must not continue on a structurally weak observation, attach the
+quality gate at execution time:
+
+```python
+def evaluate_step(context):
+    return {
+        "evaluator_id": "connector-reviewer",
+        "evaluator_version": "1",
+        "reward": 1.0 if context.result.get("observed") else 0.0,
+        "passed": bool(context.result.get("observed")),
+    }
+
+result = agent.run_connector_mission(
+    mission=mission,
+    approved=True,
+    quality_evaluator=evaluate_step,
+)
+# A failed decision is ``blocked`` and retries are explicit:
+# agent.run_connector_mission(..., checkpoint=result.checkpoint,
+#                             retry_blocked=True, quality_evaluator=evaluate_step)
+```
+
+The quality evaluator is invoked after the connector receipt is obtained but before a completed
+step is admitted to the checkpoint dependency graph. Its projection is bound to the connector
+result digest and carries the same value-only retention markers as the mission checkpoint. A
+quality failure therefore cannot be turned into a transport reward or silently converted into a
+later-step input.
 
 The built-in offline connector is useful for CI and local development across all twelve domains.
 It accepts metadata-shaped fixtures, returns field/shape/digest observations, rejects secret-shaped

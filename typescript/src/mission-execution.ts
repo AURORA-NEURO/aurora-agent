@@ -38,6 +38,7 @@ export const AUTONOMOUS_MISSION_CHECKPOINT_SCHEMA = "bioprism-typescript-autonom
 export const AUTONOMOUS_MISSION_EVENT_SCHEMA = "bioprism-typescript-autonomous-mission-event/0.1" as const;
 export const AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA = "bioprism-typescript-autonomous-mission-snapshot/0.3" as const;
 export const AUTONOMOUS_MISSION_TRACE_SCHEMA_VERSION = "bioprism-typescript-autonomous-mission-trace/0.1" as const;
+export const AUTONOMOUS_MISSION_STEP_QUALITY_EVALUATION_SCHEMA = "bioprism-typescript-autonomous-mission-step-quality-evaluation/0.1" as const;
 
 export const AUTONOMOUS_MISSION_EVENT_TYPES = [
   "mission.started",
@@ -153,6 +154,51 @@ export interface AutonomousMissionStepExecutionResult {
   decision?: AutonomousMissionStepDecision | null;
 }
 
+/**
+ * Value-only quality decision used at the mission continuation boundary.
+ *
+ * The evaluator is caller-owned: this projection can score structural quality or connect to a
+ * separately reviewed evaluator, but it never establishes external truth.  The raw step result
+ * is deliberately available only to the transient callback and is represented durably by its
+ * digest.  A failed decision is a hard continuation gate and requires an explicit retry.
+ */
+export interface AutonomousMissionStepQualityEvaluation extends JsonObject {
+  schema: typeof AUTONOMOUS_MISSION_STEP_QUALITY_EVALUATION_SCHEMA;
+  evaluator_id: string;
+  evaluator_version: string;
+  domain: AutonomousDomainName;
+  mission_id: string;
+  goal_digest: string;
+  step_id: string;
+  step_digest: string;
+  result_digest: string;
+  reward: number;
+  passed: boolean;
+  failed: boolean;
+  failure_class: string | null;
+  feedback_digest: string;
+  evidence_digest: string | null;
+  evaluator_authority: "caller_declared_signal_scoring_only";
+  retention: "value_only;step_result_not_retained";
+  secret_material: "never_returned";
+  evaluation_digest: string;
+}
+
+export interface AutonomousMissionStepQualityContext {
+  mission_id: string;
+  goal_digest: string;
+  wave: number;
+  attempt: number;
+  step: AgentMissionStep;
+  /** The raw value is transient and must never be copied into a quality projection. */
+  result: JsonValue;
+  result_digest: string;
+}
+
+export type AutonomousMissionStepQualityEvaluator = (
+  context: AutonomousMissionStepQualityContext,
+) => Promise<AutonomousEvaluatorRewardInput> | AutonomousEvaluatorRewardInput;
+
 export type AutonomousMissionStepExecutor = (
   context: AutonomousMissionStepExecutionContext,
 ) => Promise<AutonomousMissionStepExecutionResult> | AutonomousMissionStepExecutionResult;
@@ -185,6 +231,8 @@ export interface AutonomousMissionStepCheckpoint {
   run_status: string | null;
   learning_episode_id: string | null;
   decision: AutonomousMissionStepDecision | null;
+  /** Optional for backwards-compatible checkpoints created before mission quality gates. */
+  quality?: AutonomousMissionStepQualityEvaluation | null;
   attempt: number;
   last_event_sequence: number;
 }
@@ -300,6 +348,7 @@ export interface AutonomousMissionStepResult {
   run_status: string | null;
   learning_episode_id: string | null;
   decision: AutonomousMissionStepDecision | null;
+  quality: AutonomousMissionStepQualityEvaluation | null;
   attempt: number;
 }
 
@@ -339,6 +388,8 @@ export interface AutonomousMissionExecuteOptions {
   max_waves?: number;
   /** Stable logical retry/dispatch number supplied by the caller and passed to step adapters. */
   execution_attempt?: number;
+  /** Re-run steps held by the mission quality gate; omitted means hold for operator review. */
+  retryBlocked?: boolean;
   signal?: AbortSignal;
   /** The caller must explicitly approve provider invocation for this local executor. */
   approveProviderCall?: boolean;
@@ -369,6 +420,8 @@ export interface AutonomousMissionExecutorOptions {
   agent?: AutonomousAgent;
   checkpointStore?: AutonomousMissionCheckpointStore;
   resultStore?: AutonomousMissionResultStore;
+  /** Optional caller-owned quality gate invoked after a bounded result is produced and before it is persisted. */
+  evaluateStep?: AutonomousMissionStepQualityEvaluator;
   /** Optional learning/evaluation projection; rewards are caller supplied, never inferred. */
   onStepOutcome?: (outcome: AutonomousMissionStepResult, context: { mission_id: string; wave: number }) => Promise<void> | void;
 }
@@ -514,8 +567,91 @@ function normalizeStepResult(value: unknown): AutonomousMissionStepExecutionResu
   };
 }
 
+function assertQualitySafeValue(value: unknown, depth = 0): void {
+  if (depth > 8) throw new AutonomousMissionExecutionError("mission step quality evaluation is too deeply nested");
+  if (typeof value === "string") {
+    if (/\b(?:gsk_|sk-proj-|sk-[A-Za-z0-9]{16,})/i.test(value)) throw new AutonomousMissionExecutionError("mission step quality evaluation contains credential-shaped material");
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertQualitySafeValue(item, depth + 1);
+    return;
+  }
+  if (isObject(value)) {
+    for (const [key, child] of Object.entries(value)) {
+      const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (["apikey", "authorization", "bearer", "credential", "credentials", "password", "secret", "token", "accesstoken", "refreshtoken", "privatekey"].includes(normalized)) throw new AutonomousMissionExecutionError("mission step quality evaluation contains credential-shaped fields");
+      assertQualitySafeValue(child, depth + 1);
+    }
+  }
+}
+
+/** Normalize a caller reward into a digest-bound, metadata-only mission quality projection. */
+async function normalizeMissionStepQuality(
+  value: unknown,
+  expected?: Pick<AutonomousMissionStepQualityContext, "mission_id" | "goal_digest" | "step" | "result_digest">,
+): Promise<AutonomousMissionStepQualityEvaluation> {
+  if (!isObject(value)) throw new AutonomousMissionExecutionError("mission step quality evaluator must return an object");
+  assertQualitySafeValue(value);
+  const projection = value.schema === AUTONOMOUS_MISSION_STEP_QUALITY_EVALUATION_SCHEMA;
+  const allowed = [
+    "schema", "evaluator_id", "evaluator_version", "domain", "mission_id", "goal_digest", "step_id", "step_digest",
+    "result_digest", "reward", "passed", "failed", "failure_class", "feedback_digest", "evidence_digest",
+    "evaluator_authority", "retention", "secret_material", "evaluation_digest",
+  ] as const;
+  if (projection && (Object.keys(value).length !== allowed.length || Object.keys(value).some((key) => !allowed.includes(key as typeof allowed[number])))) throw new AutonomousMissionExecutionError("mission step quality evaluation contains unsupported or missing fields");
+  if (!projection) {
+    const inputAllowed = new Set(["evaluator_id", "evaluator_version", "reward", "passed", "failed", "failure_class", "feedback_digest", "evidence_digest"]);
+    if (Object.keys(value).some((key) => !inputAllowed.has(key))) throw new AutonomousMissionExecutionError("mission step quality evaluator returned unsupported fields");
+  }
+  const evaluatorId = boundedIdentifier("mission step quality evaluator_id", value.evaluator_id);
+  const evaluatorVersion = boundedIdentifier("mission step quality evaluator_version", value.evaluator_version);
+  const domain = boundedIdentifier("mission step quality domain", value.domain ?? expected?.step.domain);
+  if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new AutonomousMissionExecutionError("mission step quality domain is not supported");
+  const missionId = boundedIdentifier("mission step quality mission_id", value.mission_id ?? expected?.mission_id);
+  const stepId = boundedIdentifier("mission step quality step_id", value.step_id ?? expected?.step.id);
+  const goalDigest = boundedDigest("mission step quality goal_digest", value.goal_digest ?? expected?.goal_digest);
+  const stepDigest = boundedDigest("mission step quality step_digest", value.step_digest ?? (expected ? await digestJson(expected.step) : undefined));
+  const resultDigest = boundedDigest("mission step quality result_digest", value.result_digest ?? expected?.result_digest);
+  if (expected && (missionId !== expected.mission_id || domain !== expected.step.domain || stepId !== expected.step.id || goalDigest !== expected.goal_digest || stepDigest !== await digestJson(expected.step) || resultDigest !== expected.result_digest)) throw new AutonomousMissionExecutionError("mission step quality evaluation is not bound to the scheduled result");
+  if (typeof value.reward !== "number" || !Number.isFinite(value.reward) || value.reward < 0 || value.reward > 1 || typeof value.passed !== "boolean") throw new AutonomousMissionExecutionError("mission step quality reward or passed flag is invalid");
+  const failed = value.failed === undefined ? !value.passed : value.failed;
+  if (typeof failed !== "boolean" || failed === value.passed) throw new AutonomousMissionExecutionError("mission step quality passed and failed flags are inconsistent");
+  const failureClass = value.failure_class === undefined || value.failure_class === null
+    ? (failed ? "MissionStepQualityGateRejected" : null)
+    : boundedIdentifier("mission step quality failure_class", value.failure_class);
+  if (value.passed && failureClass !== null) throw new AutonomousMissionExecutionError("passed mission step quality evaluations cannot contain failure_class");
+  const evidenceDigest = boundedDigest("mission step quality evidence_digest", value.evidence_digest, true);
+  const feedbackDigest = value.feedback_digest === undefined || value.feedback_digest === null
+    ? await digestJson({ schema: AUTONOMOUS_MISSION_STEP_QUALITY_EVALUATION_SCHEMA, evaluator_id: evaluatorId, evaluator_version: evaluatorVersion, mission_id: missionId, step_id: stepId, result_digest: resultDigest, reward: value.reward, passed: value.passed, failed, failure_class: failureClass, evidence_digest: evidenceDigest })
+    : boundedDigest("mission step quality feedback_digest", value.feedback_digest) as string;
+  const descriptor = {
+    schema: AUTONOMOUS_MISSION_STEP_QUALITY_EVALUATION_SCHEMA,
+    evaluator_id: evaluatorId,
+    evaluator_version: evaluatorVersion,
+    domain: domain as AutonomousDomainName,
+    mission_id: missionId,
+    goal_digest: goalDigest as string,
+    step_id: stepId,
+    step_digest: stepDigest as string,
+    result_digest: resultDigest as string,
+    reward: value.reward,
+    passed: value.passed,
+    failed,
+    failure_class: failureClass,
+    feedback_digest: feedbackDigest,
+    evidence_digest: evidenceDigest,
+    evaluator_authority: "caller_declared_signal_scoring_only" as const,
+    retention: "value_only;step_result_not_retained" as const,
+    secret_material: "never_returned" as const,
+  };
+  const evaluationDigest = await digestJson(descriptor);
+  if (projection && value.evaluator_authority !== descriptor.evaluator_authority || projection && value.retention !== descriptor.retention || projection && value.secret_material !== descriptor.secret_material || projection && value.evaluation_digest !== evaluationDigest) throw new AutonomousMissionExecutionError("mission step quality evaluation authority, retention, or digest is invalid");
+  return { ...descriptor, evaluation_digest: evaluationDigest };
+}
+
 function stepState(status: AutonomousMissionStepStatus = "pending"): AutonomousMissionStepCheckpoint {
-  return { status, result_digest: null, output_bytes: 0, error_class: null, run_status: null, learning_episode_id: null, decision: null, attempt: 0, last_event_sequence: 0 };
+  return { status, result_digest: null, output_bytes: 0, error_class: null, run_status: null, learning_episode_id: null, decision: null, quality: null, attempt: 0, last_event_sequence: 0 };
 }
 
 function policyOf(mission: AgentMissionArgs): AgentMissionPolicy {
@@ -595,6 +731,10 @@ async function validateCheckpoint(value: unknown): Promise<AutonomousMissionChec
     if (state.run_status !== null && typeof state.run_status !== "string") throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.run_status is malformed`);
     if (state.learning_episode_id !== null) boundedIdentifier(`mission checkpoint ${id}.learning_episode_id`, state.learning_episode_id);
     if (state.decision !== null && await digestJson(normalizeDecision(state.decision)) !== await digestJson(state.decision)) throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.decision is malformed`);
+    if (state.quality !== undefined && state.quality !== null) {
+      const quality = await normalizeMissionStepQuality(state.quality);
+      if (quality.mission_id !== checkpoint.mission_id || quality.step_id !== id) throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.quality is bound to another mission step`);
+    }
     if (state.error_class !== null && safeLabel(state.error_class, "UnclassifiedStepFailure") !== state.error_class) throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.error_class is not a safe label`);
     if (state.run_status !== null && safeLabel(state.run_status, "unknown") !== state.run_status) throw new AutonomousMissionExecutionError(`mission checkpoint ${id}.run_status is not a safe label`);
   }
@@ -805,6 +945,7 @@ export class AutonomousMissionExecutor {
   readonly agent?: AutonomousAgent;
   readonly store: AutonomousMissionCheckpointStore;
   readonly resultStore: AutonomousMissionResultStore;
+  readonly evaluateStep?: AutonomousMissionStepQualityEvaluator;
   readonly onStepOutcome?: AutonomousMissionExecutorOptions["onStepOutcome"];
   private eventQueue: Promise<void> = Promise.resolve();
 
@@ -817,7 +958,9 @@ export class AutonomousMissionExecutor {
     this.agent = options.agent;
     this.store = options.checkpointStore ?? new InMemoryAutonomousMissionCheckpointStore();
     this.resultStore = options.resultStore ?? new InMemoryAutonomousMissionResultStore();
+    this.evaluateStep = options.evaluateStep;
     this.onStepOutcome = options.onStepOutcome;
+    if (this.evaluateStep !== undefined && typeof this.evaluateStep !== "function") throw new ArgumentError("mission executor evaluateStep must be callable");
     if (!this.store || typeof this.store.load !== "function" || typeof this.store.save !== "function" || typeof this.store.appendEvent !== "function" || typeof this.store.events !== "function") throw new ArgumentError("mission executor checkpoint store is malformed");
   }
 
@@ -851,12 +994,14 @@ export class AutonomousMissionExecutor {
     const policyDigest = await digestJson(policy);
     const orderedSteps = preflight.ordered_steps;
     const waves = preflight.waves;
-    const checkpoint = existing
+    let checkpoint = existing
       ? await this.assertExisting(existing, requestDigest, policyDigest, preflight.catalogue_digest, orderedSteps, waves, route?.route_digest ?? null)
       : await this.makeCheckpoint(preflight.mission_id, requestDigest, policyDigest, preflight.catalogue_digest, orderedSteps, waves, Object.fromEntries(orderedSteps.map((id) => [id, stepState()])), [], 0, 0, "running", null, route?.route_digest ?? null);
     if (!existing) {
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint, "mission.started", null, null, null, "mission execution started");
+    } else if (normalizedOptions.retryBlocked === true) {
+      checkpoint = await this.resetQualityBlocked(checkpoint, mission);
     }
     return this.drive(mission, preflight, checkpoint, normalizedOptions, route, routeResolution.semantic_status);
   }
@@ -929,6 +1074,24 @@ export class AutonomousMissionExecutor {
     return { ...descriptor, checkpoint_digest: await digestJson(descriptor) };
   }
 
+  private async resetQualityBlocked(checkpoint: AutonomousMissionCheckpoint, mission: AgentMissionArgs): Promise<AutonomousMissionCheckpoint> {
+    const states = clone(checkpoint.step_states);
+    let reset = false;
+    for (const step of mission.steps) {
+      const state = states[step.id];
+      if (state?.status !== "blocked" || (state.quality === null || state.quality === undefined) && state.error_class !== "QualityEvaluatorError") continue;
+      states[step.id] = { ...stepState("pending"), attempt: state.attempt, last_event_sequence: state.last_event_sequence };
+      reset = true;
+    }
+    if (!reset) return checkpoint;
+    const completed = checkpoint.completed_step_ids.filter((id) => states[id]?.status === "succeeded");
+    const nextWave = this.nextPendingWave({ ...checkpoint, step_states: states, completed_step_ids: completed });
+    const retried = await this.makeCheckpoint(checkpoint.mission_id, checkpoint.request_digest, checkpoint.policy_digest, checkpoint.catalogue_digest, checkpoint.ordered_steps, checkpoint.waves, states, completed, nextWave, checkpoint.output_bytes, "running", checkpoint);
+    await this.store.save(retried);
+    await this.appendEvent(retried, "checkpointed", nextWave, null, "running", "quality-gated steps reset for explicit retry");
+    return retried;
+  }
+
   private async appendEvent(checkpoint: AutonomousMissionCheckpoint, eventType: AutonomousMissionEventType, wave: number | null, step: AgentMissionStep | null, status: string | null, detail: string | null, outputBytes = 0, argumentsDigest: string | null = null): Promise<AutonomousMissionEvent> {
     const operation = this.eventQueue.then(async () => {
       const prior = await this.store.events(checkpoint.mission_id, 0, AUTONOMOUS_MISSION_MAX_EVENTS);
@@ -989,13 +1152,18 @@ export class AutonomousMissionExecutor {
         return requiredFailure(step, status) && status !== "approval_required" && status !== "reconciliation_required" && status !== "recovery_required";
       });
       const retryRequiredInWave = waveIds.some((id) => ["approval_required", "reconciliation_required", "recovery_required"].includes(checkpoint.step_states[id]?.status ?? "pending"));
+      const qualityFailureInWave = waveIds.some((id) => checkpoint.step_states[id]?.status === "blocked" && (checkpoint.step_states[id]?.quality !== null && checkpoint.step_states[id]?.quality !== undefined || checkpoint.step_states[id]?.error_class === "QualityEvaluatorError"));
       wavesConsumed += 1;
-      const nextWave = retryRequiredInWave ? waveIndex : requiredFailureInWave && policy.stop_on_error !== false ? null : this.nextPendingWave(checkpoint);
-      const statusAfterWave = retryRequiredInWave ? missionStatus({ ...checkpoint, next_wave: nextWave }, mission.steps) : nextWave === null ? missionStatus({ ...checkpoint, next_wave: null }, mission.steps) : "running";
+      // A quality rejection keeps the current wave addressable for an explicit retry.  Leaving
+      // dependents pending is important: they must not be marked as ordinary stop-on-error
+      // blocks before the caller has had a chance to repair or review the result.
+      const nextWave = retryRequiredInWave ? waveIndex : qualityFailureInWave ? waveIndex : requiredFailureInWave && policy.stop_on_error !== false ? null : this.nextPendingWave(checkpoint);
+      const statusAfterWave = retryRequiredInWave ? missionStatus({ ...checkpoint, next_wave: nextWave }, mission.steps) : qualityFailureInWave ? "failed" : nextWave === null ? missionStatus({ ...checkpoint, next_wave: null }, mission.steps) : "running";
       checkpoint = await this.makeCheckpoint(checkpoint.mission_id, checkpoint.request_digest, checkpoint.policy_digest, checkpoint.catalogue_digest, checkpoint.ordered_steps, checkpoint.waves, checkpoint.step_states, checkpoint.completed_step_ids, nextWave, checkpoint.output_bytes, statusAfterWave, checkpoint);
       await this.store.save(checkpoint);
       await this.appendEvent(checkpoint, "wave.completed", waveIndex, null, statusAfterWave, `wave ${waveIndex} completed`);
       if (retryRequiredInWave) break;
+      if (qualityFailureInWave) break;
       if (requiredFailureInWave && policy.stop_on_error !== false && nextWave === null) {
         checkpoint = await this.blockRemaining(mission, checkpoint, "stop_on_error halted later waves");
         break;
@@ -1048,7 +1216,7 @@ export class AutonomousMissionExecutor {
       const states = clone(current.step_states);
       states[step.id] = clone(candidateState);
       const completed = [...current.completed_step_ids, ...(candidateState.status === "succeeded" && !current.completed_step_ids.includes(step.id) ? [step.id] : [])];
-      const mergedStatus = candidateState.status === "reconciliation_required" ? "reconciliation_required" : candidateState.status === "recovery_required" ? "recovery_required" : candidateState.status === "approval_required" ? "approval_required" : "running";
+      const mergedStatus = candidateState.status === "reconciliation_required" ? "reconciliation_required" : candidateState.status === "recovery_required" ? "recovery_required" : candidateState.status === "approval_required" ? "approval_required" : candidateState.status === "blocked" && (candidateState.quality !== null && candidateState.quality !== undefined || candidateState.error_class === "QualityEvaluatorError") ? "failed" : "running";
       current = await this.makeCheckpoint(current.mission_id, current.request_digest, current.policy_digest, current.catalogue_digest, current.ordered_steps, current.waves, states, completed, this.nextPendingWave({ ...current, step_states: states, completed_step_ids: completed }), current.output_bytes + outputDelta, mergedStatus, current);
       await this.store.save(current);
       localResults.push(execution.result);
@@ -1102,8 +1270,37 @@ export class AutonomousMissionExecutor {
       return { checkpoint: failed, result: this.localResult(step, failed.step_states[step.id] as AutonomousMissionStepCheckpoint, null) };
     }
     const resultDigest = await digestJson(execution.value);
+    let quality: AutonomousMissionStepQualityEvaluation | null = null;
+    if (this.evaluateStep) {
+      try {
+        const goalDigest = await digestJson({ goal: mission.goal });
+        quality = await normalizeMissionStepQuality(await this.evaluateStep({
+          mission_id: mission.mission_id,
+          goal_digest: goalDigest,
+          wave,
+          attempt,
+          step: clone(step),
+          result: clone(execution.value),
+          result_digest: resultDigest,
+        }), {
+          mission_id: mission.mission_id,
+          goal_digest: goalDigest,
+          step: clone(step),
+          result_digest: resultDigest,
+        });
+      } catch (error) {
+        const blocked = await this.setStepState(started, step, "blocked", "QualityEvaluatorError", 0, error instanceof Error ? error.message : "mission step quality evaluator failed", execution.run_status ?? null, attempt, null, checkpoint.output_bytes, null, execution.decision ?? null);
+        await this.appendEvent(blocked, "step.blocked", wave, step, "blocked", error instanceof Error ? error.message : "mission step quality evaluator failed", 0, argumentsDigest);
+        return { checkpoint: blocked, result: this.localResult(step, blocked.step_states[step.id] as AutonomousMissionStepCheckpoint, null) };
+      }
+      if (!quality.passed) {
+        const blocked = await this.setStepState(started, step, "blocked", quality.failure_class ?? "MissionStepQualityGateRejected", 0, "mission step quality gate rejected the result", execution.run_status ?? null, attempt, null, checkpoint.output_bytes, null, execution.decision ?? null, quality);
+        await this.appendEvent(blocked, "step.blocked", wave, step, "blocked", quality.failure_class ?? "mission step quality gate rejected the result", 0, argumentsDigest);
+        return { checkpoint: blocked, result: this.localResult(step, blocked.step_states[step.id] as AutonomousMissionStepCheckpoint, null) };
+      }
+    }
     await this.resultStore.save(mission.mission_id, step.id, execution.value, resultDigest);
-    const completed = await this.setStepState(started, step, "succeeded", null, outputBytes, null, execution.run_status ?? null, attempt, resultDigest, currentTotal, execution.learning_episode_id ?? null, execution.decision ?? null);
+    const completed = await this.setStepState(started, step, "succeeded", null, outputBytes, null, execution.run_status ?? null, attempt, resultDigest, currentTotal, execution.learning_episode_id ?? null, execution.decision ?? null, quality);
     await this.appendEvent(completed, "step.completed", wave, step, "succeeded", null, outputBytes, argumentsDigest);
     return { checkpoint: completed, result: this.localResult(step, completed.step_states[step.id] as AutonomousMissionStepCheckpoint, execution.value) };
   }
@@ -1114,10 +1311,10 @@ export class AutonomousMissionExecutor {
     return { checkpoint: updated, result: this.localResult(step, updated.step_states[step.id] as AutonomousMissionStepCheckpoint, null) };
   }
 
-  private async setStepState(checkpoint: AutonomousMissionCheckpoint, step: AgentMissionStep, status: AutonomousMissionStepStatus, errorClass: string | null, outputBytes: number, detail: string | null, runStatus: string | null, attempt: number, resultDigest: string | null = null, totalOutputBytes = checkpoint.output_bytes, learningEpisodeId: string | null = null, decision: AutonomousMissionStepDecision | null = null): Promise<AutonomousMissionCheckpoint> {
+  private async setStepState(checkpoint: AutonomousMissionCheckpoint, step: AgentMissionStep, status: AutonomousMissionStepStatus, errorClass: string | null, outputBytes: number, detail: string | null, runStatus: string | null, attempt: number, resultDigest: string | null = null, totalOutputBytes = checkpoint.output_bytes, learningEpisodeId: string | null = null, decision: AutonomousMissionStepDecision | null = null, quality: AutonomousMissionStepQualityEvaluation | null = null): Promise<AutonomousMissionCheckpoint> {
     const states = clone(checkpoint.step_states);
     const previous = states[step.id] ?? stepState();
-    states[step.id] = { status, result_digest: resultDigest ?? previous.result_digest, output_bytes: outputBytes, error_class: errorClass, run_status: runStatus, learning_episode_id: learningEpisodeId ?? previous.learning_episode_id, decision: decision ?? previous.decision, attempt, last_event_sequence: previous.last_event_sequence };
+    states[step.id] = { status, result_digest: resultDigest ?? previous.result_digest, output_bytes: outputBytes, error_class: errorClass, run_status: runStatus, learning_episode_id: learningEpisodeId ?? previous.learning_episode_id, decision: decision ?? previous.decision, quality: quality ?? (status === "running" ? null : previous.quality ?? null), attempt, last_event_sequence: previous.last_event_sequence };
     const completed = Object.entries(states).filter(([, state]) => state.status === "succeeded").map(([id]) => id).filter((id) => !checkpoint.completed_step_ids.includes(id));
     const next = [...checkpoint.completed_step_ids, ...completed];
     const nextWave = this.nextPendingWave({ ...checkpoint, step_states: states, completed_step_ids: next });
@@ -1152,7 +1349,7 @@ export class AutonomousMissionExecutor {
   }
 
   private localResult(step: AgentMissionStep, state: AutonomousMissionStepCheckpoint, value: JsonValue | null): AutonomousMissionStepResult {
-    return { step: clone(step), status: state.status, value: value === null ? null : clone(value), result_digest: state.result_digest, output_bytes: state.output_bytes, error_class: state.error_class, run_status: state.run_status, learning_episode_id: state.learning_episode_id, decision: state.decision, attempt: state.attempt };
+    return { step: clone(step), status: state.status, value: value === null ? null : clone(value), result_digest: state.result_digest, output_bytes: state.output_bytes, error_class: state.error_class, run_status: state.run_status, learning_episode_id: state.learning_episode_id, decision: state.decision, quality: state.quality ?? null, attempt: state.attempt };
   }
 
   private async result(status: AutonomousMissionStatus, preflight: MissionPreflightResult, checkpoint: AutonomousMissionCheckpoint | null, localResults: AutonomousMissionStepResult[], route: AutonomousRouteProposal | null = null, semanticRouteStatus: AutonomousMissionSemanticRouteStatus | null = null): Promise<AutonomousMissionExecutionResult> {

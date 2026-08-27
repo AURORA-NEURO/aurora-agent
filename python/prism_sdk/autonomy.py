@@ -17200,6 +17200,7 @@ class AutonomousAgent:
         selection_signals: Mapping[str, Mapping[str, Any]] | None = None,
         feedback_ledger: Any | None = None,
         feedback_by_step: Mapping[str, Mapping[str, Any]] | None = None,
+        quality_evaluator: Callable[[Any], Mapping[str, Any]] | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
     ) -> Any:
         """Execute a typed mission DAG through reviewed connectors without model credentials.
@@ -17229,6 +17230,7 @@ class AutonomousAgent:
                 selection_signals=selection_signals,
                 feedback_ledger=feedback_ledger,
                 feedback_by_step=feedback_by_step,
+                quality_evaluator=quality_evaluator,
                 trace_event_callback=trace_event_callback,
             )
         except (ArgumentError, BrainRunError):

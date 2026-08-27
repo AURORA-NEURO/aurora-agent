@@ -2605,6 +2605,7 @@ export {
   AUTONOMOUS_MISSION_MAX_SNAPSHOT_BYTES,
   AUTONOMOUS_MISSION_MAX_STEPS_PER_CALL,
   AUTONOMOUS_MISSION_SNAPSHOT_SCHEMA,
+  AUTONOMOUS_MISSION_STEP_QUALITY_EVALUATION_SCHEMA,
   AUTONOMOUS_MISSION_STATUSES,
   AUTONOMOUS_MISSION_STEP_STATUSES,
   AUTONOMOUS_MISSION_TRACE_SCHEMA_VERSION,
@@ -2645,6 +2646,9 @@ export type {
   AutonomousMissionStepExecutionContext,
   AutonomousMissionStepExecutionResult,
   AutonomousMissionStepExecutor,
+  AutonomousMissionStepQualityContext,
+  AutonomousMissionStepQualityEvaluation,
+  AutonomousMissionStepQualityEvaluator,
   AutonomousMissionStepResult,
   AutonomousMissionStepStatus,
 } from "./mission-execution.js";

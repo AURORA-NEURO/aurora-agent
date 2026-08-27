@@ -61,6 +61,82 @@ def test_connector_mission_executes_all_domains_without_credentials(tmp_path) ->
     assert journal.verify_integrity()["entries"] == len(AUTONOMOUS_DOMAINS)
 
 
+def test_connector_mission_quality_gate_holds_dependents_and_requires_retry(tmp_path) -> None:
+    agent, journal = _agent(tmp_path)
+    operation = AutonomousConnectorOperationRegistry().for_domain("coding")[0]
+    arguments = {field: {"fixture": "coding-quality"} for field in _RECOMMENDED_FIELDS[operation.operation_id]}
+    mission = MissionRequest(
+        mission_id="quality-gated-mission",
+        goal="hold dependent work until the observation is reviewed",
+        steps=(
+            MissionStep("first", "coding", operation.capabilities[0], "first", "fixture", arguments=arguments),
+            MissionStep("second", "coding", operation.capabilities[0], "second", "fixture", arguments=arguments, depends_on=("first",)),
+        ),
+    )
+    evaluations = {"first": 0, "second": 0}
+
+    def quality(context):
+        evaluations[context.step.id] += 1
+        passed = not (context.step.id == "first" and evaluations[context.step.id] == 1)
+        return {
+            "evaluator_id": "connector-quality-reviewer",
+            "evaluator_version": "1",
+            "reward": 1.0 if passed else 0.0,
+            "passed": passed,
+            "evidence_digest": None,
+        }
+
+    first = agent.run_connector_mission(mission=mission, approved=True, quality_evaluator=quality)
+    assert first.status == "blocked"
+    assert first.completed_step_ids == ()
+    assert first.next_step_ids == ("first",)
+    assert first.checkpoint["steps"][0]["status"] == "quality_blocked"
+    assert first.checkpoint["steps"][0]["quality"]["passed"] is False
+    assert "coding-quality" not in json.dumps(first.to_dict())
+    assert evaluations == {"first": 1, "second": 0}
+
+    held = agent.run_connector_mission(
+        mission=mission,
+        checkpoint=first.checkpoint,
+        approved=True,
+        quality_evaluator=quality,
+    )
+    assert held.status == "checkpoint_blocked"
+    assert evaluations == {"first": 1, "second": 0}
+
+    retried = agent.run_connector_mission(
+        mission=mission,
+        checkpoint=first.checkpoint,
+        approved=True,
+        retry_blocked=True,
+        quality_evaluator=quality,
+    )
+    assert retried.status == "completed"
+    assert retried.completed_step_ids == ("first", "second")
+    assert evaluations == {"first": 2, "second": 1}
+    assert retried.step_executions[0].quality["passed"] is True
+    assert journal.verify_integrity()["entries"] == 3
+
+
+def test_connector_mission_quality_evaluator_covers_every_domain(tmp_path) -> None:
+    agent, _journal = _agent(tmp_path)
+    for domain in AUTONOMOUS_DOMAINS:
+        result = agent.run_connector_mission(
+            mission=_mission(domain, mission_id=f"quality-{domain}"),
+            approved=True,
+            quality_evaluator=lambda context: {
+                "evaluator_id": "all-domain-quality",
+                "evaluator_version": "1",
+                "reward": 1.0,
+                "passed": True,
+                "evidence_digest": None,
+            },
+        )
+        assert result.status == "completed", domain
+        assert result.step_executions[0].quality["domain"] == domain
+        assert result.step_executions[0].quality["passed"] is True
+
+
 def test_connector_mission_dependency_outputs_require_explicit_resume_rehydration(tmp_path) -> None:
     agent, journal = _agent(tmp_path)
     operation = AutonomousConnectorOperationRegistry().for_domain("coding")[0]
