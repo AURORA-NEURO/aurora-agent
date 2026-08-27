@@ -7394,3 +7394,17 @@ __all__ += [
     "assure_multimodal_interpretation",
     "baselineInterpretationAssuranceDigest",
 ]
+
+from .metrics_experiment_design_control_plane import (
+    MetricsExecutableExperimentDesign,
+    experiment_design_control_plane_manifest,
+    evaluate_experiment_design,
+    metricsExperimentDesignDigest,
+)
+
+__all__ += [
+    "MetricsExecutableExperimentDesign",
+    "experiment_design_control_plane_manifest",
+    "evaluate_experiment_design",
+    "metricsExperimentDesignDigest",
+]

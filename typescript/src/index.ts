@@ -4133,3 +4133,13 @@ export {
   validateBaselineInterpretationAssuranceReceipt,
 } from "./research-contracts.js";
 export type { BaselineInterpretationAssuranceReceipt } from "./research-contracts.js";
+
+export {
+  METRICS_EXPERIMENT_DESIGN_FEATURE_ID,
+  METRICS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
+  METRICS_EXPERIMENT_DESIGN_INPUT_SCHEMA,
+  METRICS_EXPERIMENT_DESIGN_OUTPUT_SCHEMA,
+  metricsExperimentDesignDigest,
+  validateMetricsExecutableExperimentDesign,
+} from "./research-contracts.js";
+export type { MetricsExecutableExperimentDesign } from "./research-contracts.js";

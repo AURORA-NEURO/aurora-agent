@@ -113,6 +113,7 @@ pub mod analytics;
 pub mod comparability;
 pub mod conditions;
 pub mod error;
+pub mod experiment_design_control_plane;
 pub mod gate;
 pub mod grid;
 pub mod interval;
@@ -139,6 +140,16 @@ pub use conditions::{
     STRATIFICATION_KEY,
 };
 pub use error::{MetricsError, ScoreIncomparability, UnrecordedSide};
+pub use experiment_design_control_plane::{
+    evaluate_experiment_design, experiment_design_control_plane_manifest,
+    DesignCandidate as MetricsDesignCandidate,
+    DesignDisposition as MetricsDesignDisposition,
+    ExecutableExperimentDesign as MetricsExecutableExperimentDesign,
+    ExperimentDesignError as MetricsExperimentDesignError,
+    ExperimentObjective as MetricsExperimentObjective,
+    CONTRACT_VERSION as METRICS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
+    FEATURE_ID as METRICS_EXPERIMENT_DESIGN_FEATURE_ID,
+};
 pub use gate::{
     EvaluabilityGap, GateOutcome, GatePredicate, GateReport, GateVerdict, PredicateOutcome,
     ReleaseGate,

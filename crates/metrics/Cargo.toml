@@ -6,6 +6,7 @@ description = "BioCapability metrics: aggregation rules, comparability of scores
 
 [dependencies]
 bioprism-ids = { workspace = true }
+bioprism-foundation = { workspace = true }
 bioprism-atlas = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
