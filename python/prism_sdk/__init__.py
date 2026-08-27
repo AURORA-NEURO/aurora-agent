@@ -7641,3 +7641,17 @@ from .ops_context_compilation_federated_control_plane import (
 )
 
 __all__ += ["OpsCertifiedDecisionSection", "operate_context_compilation"]
+
+from .epistemic_retrieval_synthesis_federated_control_plane import (
+    EvidenceSynthesis8 as EpistemicEvidenceSynthesis8,
+    retrieval_synthesis_manifest,
+    operate_retrieval_synthesis,
+    epistemicRetrievalSynthesisDigest,
+)
+
+__all__ += [
+    "EpistemicEvidenceSynthesis8",
+    "retrieval_synthesis_manifest",
+    "operate_retrieval_synthesis",
+    "epistemicRetrievalSynthesisDigest",
+]

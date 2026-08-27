@@ -526,6 +526,11 @@ use bioprism_atlashub::{
     operate_replication_control, ClaimAndProtocol1, PeerReplicationSummary4,
     ReplicationObservation4, ReplicationRecord8, REPLICATION_CONTROL_FEATURE_ID,
 };
+use bioprism_epistemic::{
+    operate_retrieval_synthesis, EvidenceSynthesis8, RetrievalCandidate4,
+    ScopedRetrievalQuery3, PeerSynthesisSummary4,
+    RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
+};
 use serde_json::Value;
 
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
@@ -2947,6 +2952,34 @@ pub fn validate_atlashub_replication_control_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != REPLICATION_CONTROL_FEATURE_ID {
         return Err("atlashub replication feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const EPISTEMIC_RETRIEVAL_SYNTHESIS_TOOL: &str = "epistemic_retrieval_synthesis_federated_control_plane";
+
+pub fn operate_epistemic_retrieval_synthesis_json(value: &Value) -> Result<Value, String> {
+    let request: ScopedRetrievalQuery3 = serde_json::from_value(
+        value.get("request").cloned().ok_or("request is required")?,
+    ).map_err(|error| format!("invalid epistemic retrieval synthesis request: {error}"))?;
+    let candidates: Vec<RetrievalCandidate4> = serde_json::from_value(
+        value.get("candidates").cloned().ok_or("candidates are required")?,
+    ).map_err(|error| format!("invalid epistemic retrieval candidates: {error}"))?;
+    let peers: Vec<PeerSynthesisSummary4> = serde_json::from_value(
+        value.get("peers").cloned().ok_or("peers are required")?,
+    ).map_err(|error| format!("invalid epistemic retrieval peers: {error}"))?;
+    let receipt = operate_retrieval_synthesis(&request, &candidates, &peers)
+        .map_err(|error| format!("epistemic retrieval synthesis failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize epistemic retrieval synthesis receipt: {error}"))
+}
+
+pub fn validate_epistemic_retrieval_synthesis_json(value: &Value) -> Result<EvidenceSynthesis8, String> {
+    let receipt: EvidenceSynthesis8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid epistemic retrieval synthesis receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID {
+        return Err("epistemic retrieval synthesis feature id mismatch".into());
     }
     Ok(receipt)
 }

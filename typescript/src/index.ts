@@ -4323,3 +4323,13 @@ export {
   validateOpsCertifiedDecisionSection,
 } from "./research-contracts.js";
 export type { OpsCertifiedDecisionSection } from "./research-contracts.js";
+
+export {
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_OUTPUT_SCHEMA,
+  epistemicRetrievalSynthesisDigest,
+  validateEpistemicEvidenceSynthesis8,
+} from "./research-contracts.js";
+export type { EpistemicEvidenceSynthesis8 } from "./research-contracts.js";

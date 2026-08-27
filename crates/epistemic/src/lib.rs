@@ -152,6 +152,7 @@ pub mod optimal;
 pub mod patterns;
 pub mod quotient;
 pub mod ratedistortion;
+pub mod retrieval_synthesis_federated_control_plane;
 pub mod rng;
 pub mod separator;
 pub mod submodularity;
@@ -183,6 +184,13 @@ pub use quotient::{
 pub use ratedistortion::{
     evaluate_context, frontier, identification, minimal_sufficient_context, DistortionCriterion,
     Frontier, Identification, Sufficiency,
+};
+pub use retrieval_synthesis_federated_control_plane::{
+    operate_retrieval_synthesis, retrieval_synthesis_manifest, EvidenceSynthesis8,
+    EvidenceSynthesisArtifact8, EvidenceState as RetrievalEvidenceState, PeerSynthesisSummary4,
+    RetrievalCandidate4, RetrievalSynthesisError, ScopedRetrievalQuery3,
+    CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
 };
 
 pub use submodularity::{check, SubmodularityReport, Violation};

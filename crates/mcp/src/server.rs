@@ -29,6 +29,10 @@ use bioprism_atlas::{
     WeightingPolicy,
 };
 use bioprism_atlashub::{CiReport, ResultUnderReview, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID};
+use bioprism_epistemic::{
+    RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_CONTRACT_VERSION,
+    RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
+};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -1816,6 +1820,9 @@ impl Server {
             }
             "atlashub_replication_negative_results_federated_control_plane" => {
                 self.atlashub_replication_negative_results_federated_control_plane(&arguments)
+            }
+            "epistemic_retrieval_synthesis_federated_control_plane" => {
+                self.epistemic_retrieval_synthesis_federated_control_plane(&arguments)
             }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
@@ -24767,6 +24774,29 @@ impl Server {
         }))
     }
 
+    fn epistemic_retrieval_synthesis_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_epistemic_retrieval_synthesis_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
+            "contract_version": RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "bounded candidate ranking is deterministic, replay-bound, and source-quorum aware",
+                "unknown, unmeasured, contradicted, omitted, and negative evidence remain explicit",
+                "raw data stays institution-local and policy, approval, federation, provenance, and locality gates fail closed"
+            ],
+            "limitations": [
+                "the route consumes caller-supplied typed summaries and does not fetch documents or export raw text",
+                "a qualified synthesis posture is not biological validity or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -40831,6 +40861,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "peers": { "type": "array", "description": "Signed aggregate-only PeerReplicationSummary4 records." }
                 },
                 "required": ["request_id", "claim", "observations", "peers"]
+            }
+        }),
+        json!({
+            "name": "epistemic_retrieval_synthesis_federated_control_plane",
+            "description": "Rank bounded typed retrieval candidates and aggregate-only peer synthesis summaries for preclinical research. The control plane preserves evidence state, omissions, contradictions, negative results, provenance, replay, source/peer quorums, and fail-closed policy gates without fetching raw documents or exporting raw data.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ScopedRetrievalQuery3 with semantic profile, required terms, checkpoint, budget, policy, approval, federation, locality, aggregate-only, and replay declarations." },
+                    "candidates": { "type": "array", "description": "Typed RetrievalCandidate4 evidence summaries; raw source content is not accepted." },
+                    "peers": { "type": "array", "description": "Signed aggregate-only PeerSynthesisSummary4 records." }
+                },
+                "required": ["request", "candidates", "peers"]
             }
         }),
         json!({
