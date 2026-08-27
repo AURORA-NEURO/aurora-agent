@@ -2023,8 +2023,8 @@ handles without leaking them into metadata projections. Cross-domain evidence is
 non-synthesis children, and catalogue-backed execution has the same route and mode semantics as
 adapter-registry execution. Tests exercise every built-in domain, exact coding+data fan-out,
 catalogue parity, and semantic-rerouting refusal. Remaining work is still deployment-owned:
-automatic-result checkpoint rehydration, distributed leases, encrypted raw-value retention, and
-caller-owned source/evaluator truth adapters.
+distributed leases, encrypted raw-value retention, and caller-owned source/evaluator truth
+adapters.
 
 The evidence-backed restart controller now understands all three TypeScript handoff modes. It
 hash-binds automatic envelopes and cross-domain fan-out results in the existing provider-result
