@@ -2014,6 +2014,7 @@ impl Server {
             "weavelang_computational_execution_assurance" => self.weavelang_computational_execution_assurance(&arguments),
             "mcp_knowledge_representation_contract" => self.mcp_knowledge_representation_contract(&arguments),
             "registry_multimodal_scale_frontier_assurance" => self.registry_multimodal_scale_frontier_assurance(&arguments),
+            "oraclex_context_compilation_research_copilot" => self.oraclex_context_compilation_research_copilot(&arguments),
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
             "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
@@ -26479,6 +26480,32 @@ impl Server {
         }))
     }
 
+    fn oraclex_context_compilation_research_copilot(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized DecisionQuery")?;
+        let receipt = crate::research_contracts::compile_oraclex_context_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_oraclex::context_compilation_research_copilot::FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "fact and peer identities are canonically ordered and partitioned before a decision section is emitted",
+                "only scoped supported local facts and signed aggregate-only peer summaries enter a bounded declared-tool plan",
+                "unknown, speculative, contradictory, omitted, uncertain, policy-denied, approval-missing, and adversarial states fail closed",
+                "raw evidence stays institution-local and the MCP route never invokes tools or makes a biological or clinical conclusion"
+            ],
+            "limitations": [
+                "the copilot compiles caller-supplied attestations and plans declared tools; it does not retrieve evidence or execute a workflow",
+                "a qualified section is an automation-readiness receipt and still requires downstream tool-specific validation and independent research governance"
+            ]
+        }))
+    }
+
     fn analysis_qualify(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -38022,9 +38049,9 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "oraclex_publication_release",
-            "domains": ["publication and research-object release", "RO-Crate and PROV-O metadata", "provenance and evaluation closure", "negative-result disclosure", "digest-only federation", "contract migration"],
+            "domains": ["publication and research-object release", "federated continual context compilation", "bounded research-copilot automation", "RO-Crate and PROV-O metadata", "provenance and evaluation closure", "negative-result disclosure", "digest-only federation", "contract migration"],
             "crates": ["bioprism-oraclex", "bioprism-foundation", "bioprism-mcp"],
-            "mcp_tools": ["oraclex_publication_release"],
+            "mcp_tools": ["oraclex_publication_release", "oraclex_context_compilation_research_copilot"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -40664,6 +40691,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 },
                 "required": ["request"]
             }
+        }),
+        json!({
+            "name": "oraclex_context_compilation_research_copilot",
+            "description": "Compile a federated continual DecisionQuery4 into a deterministic CertifiedDecisionSection3 and bounded declared-tool plan. The route checks scoped evidence, semantic profiles, peer quorum, provenance/replay, policy, approval, protected closure, locality, budgets, and adversarial events without retrieving evidence, invoking tools, moving raw data, or making a biological or clinical conclusion.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized bioprism-oraclex DecisionQuery with typed facts, aggregate-only peer context summaries, required fact order, tool limits, replay identity, policy and authority gates, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "federated_resource_control_plane",

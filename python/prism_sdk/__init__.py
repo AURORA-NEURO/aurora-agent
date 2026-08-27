@@ -7558,3 +7558,10 @@ from .registry_scale_frontier_assurance import (
 )
 
 __all__ += ["RegistryCapacityReport", "assure_registry_scale_frontier"]
+
+from .oraclex_context_compilation_research_copilot import (
+    CertifiedDecisionSection as OraclexCertifiedDecisionSection,
+    compile_context as compile_oraclex_context,
+)
+
+__all__ += ["OraclexCertifiedDecisionSection", "compile_oraclex_context"]

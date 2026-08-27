@@ -4263,3 +4263,13 @@ export {
   validateRegistryCapacityReport,
 } from "./research-contracts.js";
 export type { RegistryCapacityReport } from "./research-contracts.js";
+
+export {
+  ORACLEX_CONTEXT_COMPILATION_FEATURE_ID,
+  ORACLEX_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  ORACLEX_CONTEXT_COMPILATION_INPUT_SCHEMA,
+  ORACLEX_CONTEXT_COMPILATION_OUTPUT_SCHEMA,
+  oraclexContextCompilationDigest,
+  validateOraclexCertifiedDecisionSection,
+} from "./research-contracts.js";
+export type { OraclexCertifiedDecisionSection } from "./research-contracts.js";

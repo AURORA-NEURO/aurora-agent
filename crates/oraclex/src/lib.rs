@@ -91,6 +91,7 @@
 pub mod audit;
 pub mod citation;
 pub mod compose;
+pub mod context_compilation_research_copilot;
 pub mod endpoint;
 pub mod error;
 pub mod execution;
@@ -116,10 +117,14 @@ pub use verdict::{
 /// `crates/modalities` established the pattern: "no invented constants" is not expressible as a type,
 /// so it is expressed as a test over the text. `include_str!` bakes the sources in at compile time, so
 /// the test reads no files at runtime and stays deterministic.
-pub const SOURCES: [(&str, &str); 18] = [
+pub const SOURCES: [(&str, &str); 19] = [
     ("audit.rs", include_str!("audit.rs")),
     ("citation.rs", include_str!("citation.rs")),
     ("compose.rs", include_str!("compose.rs")),
+    (
+        "context_compilation_research_copilot.rs",
+        include_str!("context_compilation_research_copilot.rs"),
+    ),
     ("endpoint.rs", include_str!("endpoint.rs")),
     ("error.rs", include_str!("error.rs")),
     ("execution.rs", include_str!("execution.rs")),

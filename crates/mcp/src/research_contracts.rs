@@ -814,6 +814,17 @@ pub fn validate_registry_scale_frontier_json(
     bioprism_registry::validate_registry_scale_frontier_json(value)
 }
 
+/// MCP transport wrapper for the federated continual context-compilation research copilot.
+pub fn compile_oraclex_context_json(value: &Value) -> Result<Value, String> {
+    bioprism_oraclex::context_compilation_research_copilot::compile_context_json(value)
+}
+
+pub fn validate_oraclex_context_json(
+    value: &Value,
+) -> Result<bioprism_oraclex::context_compilation_research_copilot::CertifiedDecisionSection, String> {
+    bioprism_oraclex::context_compilation_research_copilot::validate_context_json(value)
+}
+
 pub fn validate_harmonized_research_object_json(
     value: &Value,
 ) -> Result<HarmonizedResearchObject, String> {
