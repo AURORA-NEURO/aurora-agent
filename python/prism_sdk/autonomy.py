@@ -332,6 +332,7 @@ AUTONOMY_SCHEMA = "bioprism-python-autonomous-task/0.1"
 AUTONOMOUS_AGENT_BATCH_SCHEMA = "bioprism-python-autonomous-agent-batch/0.1"
 AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-batch-checkpoint/0.1"
 AUTONOMOUS_AUTOMATIC_BATCH_POLICY_SCHEMA = "bioprism-python-autonomous-automatic-batch-policy/0.1"
+AUTONOMOUS_TRACED_AUTO_BATCH_SCHEMA = "bioprism-python-autonomous-traced-auto-batch/0.1"
 AUTONOMOUS_BATCH_CONTROLLER_SCHEMA = "bioprism-python-autonomous-batch-controller/0.1"
 AUTONOMOUS_EXECUTION_MODES = ("provider", "tool_loop", "mission")
 AUTONOMOUS_LEARNING_MODES = ("off", "online", "trajectory")
@@ -24006,6 +24007,181 @@ class AutonomousAgent:
             stop_on_error=stop_on_error,
         )
 
+    def run_auto_batch_with_trace(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousTracedRunResult:
+        """Route and execute an automatic batch with one metadata-only lifecycle trace.
+
+        The trace is deliberately shared by every item so operators can correlate routing,
+        provider selection, failover, learning callbacks, refusals, omissions, and the aggregate
+        terminal state.  The underlying batch still owns deterministic item ordering and bounded
+        concurrency.  A trace request owns the invocation observer and callback slots; callers
+        that need custom observers should compose them outside this high-level helper rather than
+        silently replacing the audit stream.
+        """
+
+        self._trace_store(trace_store)
+        max_parallelism, stop_on_error = self._batch_controls(max_parallelism, stop_on_error)
+        prepared, resolved_credentials = self._prepare_auto_batch_invocations(
+            requests,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options_factory=options_factory,
+        )
+        resolved_run_id = run_id or f"trace-{uuid.uuid4().hex}"
+        task_digest = content_digest({
+            "schema": AUTONOMOUS_TRACED_AUTO_BATCH_SCHEMA,
+            "mode": "auto",
+            "task_digests": [descriptor["task_digest"] for descriptor in prepared],
+        })
+        session = AutonomousRunTraceSession(
+            trace_store,
+            run_id=resolved_run_id,
+            task_digest=task_digest,
+            domains=AUTONOMOUS_DOMAINS,
+        )
+        session.started(detail_digest=content_digest({
+            "mode": "auto",
+            "item_count": len(prepared),
+            "task_digests": [descriptor["task_digest"] for descriptor in prepared],
+        }))
+
+        def invoke(descriptor: Mapping[str, Any]) -> Any:
+            index = descriptor["index"]
+            options = dict(descriptor["options"])
+            if "invocation_observer" in options or "trace_event_callback" in options:
+                raise BrainRunError(
+                    "automatic traced batch options cannot override invocation_observer or trace_event_callback"
+                )
+            options["invocation_observer"] = session.provider_observer()
+            options["trace_event_callback"] = session.record
+            before_provider_events = len(
+                trace_store.events({"run_id": resolved_run_id, "phase": "provider_invocation_finished"})
+            )
+            try:
+                result = self.run_auto(
+                    task=descriptor["task"],
+                    credentials=resolved_credentials,
+                    model_candidates=descriptor["model_candidates"],
+                    execution_id=descriptor["execution_id"],
+                    **options,
+                )
+                metadata = self._trace_execution_metadata(result)
+                session.record(
+                    phase="plan_compiled",
+                    status="running",
+                    route_digest=metadata["route_digest"],
+                    plan_digest=metadata["plan_digest"],
+                    selection_digest=metadata["selection_digest"],
+                    detail_digest=content_digest({
+                        "index": index,
+                        "task_digest": descriptor["task_digest"],
+                        "state": "prepared_and_executed",
+                    }),
+                )
+                after_provider_events = len(
+                    trace_store.events({"run_id": resolved_run_id, "phase": "provider_invocation_finished"})
+                )
+                if after_provider_events == before_provider_events:
+                    session.record_provider_receipts(metadata["receipts"])
+                trace_status = autonomous_run_trace_status(getattr(result, "status", "unknown"))
+                terminal_phase = (
+                    "completed"
+                    if trace_status in {"completed", "partial"}
+                    else trace_status
+                    if trace_status in {"paused", "refused", "failed"}
+                    else "failed"
+                )
+                session.record(
+                    phase=terminal_phase,
+                    status=trace_status,
+                    route_digest=metadata["route_digest"],
+                    plan_digest=metadata["plan_digest"],
+                    selection_digest=metadata["selection_digest"],
+                    detail_digest=content_digest({
+                        "index": index,
+                        "result_status": getattr(result, "status", "unknown"),
+                    }),
+                )
+                return result
+            except Exception as error:
+                session.record(
+                    phase="failed",
+                    status="failed",
+                    detail_digest=content_digest({
+                        "index": index,
+                        "error_class": type(error).__name__,
+                        "failure_code": "execution_error",
+                    }),
+                )
+                raise
+
+        try:
+            result = self._execute_prepared_batch(
+                prepared,
+                invoke=invoke,
+                max_parallelism=max_parallelism,
+                stop_on_error=stop_on_error,
+            )
+            session.complete(
+                status=autonomous_run_trace_status(result.status),
+                detail_digest=content_digest({
+                    "batch_digest": result.batch_digest,
+                    "completed_count": result.completed_count,
+                    "failed_count": result.failed_count,
+                    "omitted_count": result.omitted_count,
+                }),
+            )
+        except Exception as error:
+            session.fail(
+                failure_class=type(error).__name__,
+                failure_code="execution_error",
+                detail_digest=content_digest({"error_class": type(error).__name__}),
+            )
+            raise
+        return AutonomousTracedRunResult(result=result, trace=session.summary())
+
+    def run_auto_batch_with_launch_admission_and_trace(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+    ) -> AutonomousTracedRunResult:
+        """Run the traced automatic batch only after its complete route union is admitted."""
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode="auto",
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_auto_batch_with_trace(
+            requests,
+            credentials=credentials,
+            trace_store=trace_store,
+            run_id=run_id,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+        )
+
     def run_cross_domain_batch(
         self,
         requests: Sequence[Mapping[str, Any]],
@@ -26485,6 +26661,7 @@ __all__ = [
     "AUTONOMOUS_AGENT_BATCH_SCHEMA",
     "AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA",
     "AUTONOMOUS_AUTOMATIC_BATCH_POLICY_SCHEMA",
+    "AUTONOMOUS_TRACED_AUTO_BATCH_SCHEMA",
     "AUTONOMOUS_BATCH_CONTROLLER_SCHEMA",
     "MAX_AUTONOMOUS_AGENT_BATCH",
     "MAX_AUTONOMOUS_AGENT_PARALLELISM",

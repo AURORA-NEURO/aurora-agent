@@ -21,6 +21,7 @@ from prism_sdk import (
     AutonomousProtectedRehydrationBoundary,
     AutonomousProtectedRehydrationContext,
     InMemoryAutonomousBatchCheckpointStore,
+    InMemoryAutonomousRunTraceStore,
     TransactionalJsonAutonomousBatchCheckpointPersistence,
     BrainRunError,
     AutonomousDomainRegistry,
@@ -518,6 +519,68 @@ def test_agent_run_auto_batch_routes_without_preselecting_domains_and_preserves_
     assert result.items[1].status == "refused"
     assert result.items[1].result is not None
     assert result.items[1].result.status == "route_review_required"
+
+
+def test_agent_run_auto_batch_with_trace_preserves_one_redacted_all_domain_lifecycle() -> None:
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "offline",
+        lambda _request: {"output_text": "offline traced routed answer"},
+    )
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(
+            [
+                {
+                    "provider": "offline",
+                    "model": "offline-model",
+                    "capabilities": sorted(required),
+                    "context_window_tokens": 32_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 1,
+                    "cost_per_million_tokens": 0,
+                    "reliability": 0.99,
+                }
+            ]
+        ),
+    )
+    requests = tuple(
+        {"task": f"perform a bounded {domain} review", "domain": domain}
+        for domain in AUTONOMOUS_DOMAINS
+    )
+    trace_store = InMemoryAutonomousRunTraceStore()
+    traced = agent.run_auto_batch_with_trace(
+        requests,
+        credentials={},
+        trace_store=trace_store,
+        run_id="automatic-batch-trace",
+        max_parallelism=1,
+        options_factory=lambda _request, _index: {"approve_provider_call": True},
+    )
+    assert traced.result.status == "completed"
+    assert traced.result.completed_count == len(AUTONOMOUS_DOMAINS)
+    assert traced.trace.status == "completed"
+    assert traced.trace.event_count >= 2 * len(AUTONOMOUS_DOMAINS) + 2
+    assert traced.trace.provider_invocations >= len(AUTONOMOUS_DOMAINS)
+    assert len(traced.trace.trace_digest) == 64
+    phases = [
+        event.phase
+        for event in trace_store.events({"run_id": "automatic-batch-trace"})
+    ]
+    assert phases[0] == "started"
+    assert phases[-1] == "completed"
+    assert phases.count("plan_compiled") >= len(AUTONOMOUS_DOMAINS)
+    serialized = json.dumps(traced.to_dict(), sort_keys=True)
+    assert "offline traced routed answer" not in serialized
+    assert "perform a bounded coding review" not in serialized
 
 
 def test_agent_run_cross_domain_batch_preserves_child_order_and_shared_approval_boundary() -> None:

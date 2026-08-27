@@ -194,6 +194,33 @@ test("brain facade automatic batches preserve per-item policy and deterministic 
   assert.match(batch.batch_digest, /^[0-9a-f]{64}$/);
 });
 
+test("brain facade traced automatic batches expose one redacted all-domain lifecycle", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const inputs = AUTONOMOUS_DOMAIN_NAMES.map((domain) => ({ task: tasks[domain], domain }));
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+  const traced = await brain.executeAutoBatchWithTrace(inputs, {
+    runId: "automatic-batch-trace",
+    traceStore,
+    maxParallelism: 1,
+    execution: (_input, index) => ({ approveProviderCall: true, executionAttempt: index + 1 }),
+  });
+  assert.equal(traced.schema, "bioprism-typescript-autonomous-brain-traced-auto-batch/0.1");
+  assert.equal(traced.batch.status, "completed");
+  assert.equal(traced.batch.completed_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(traced.trace.status, "completed");
+  assert.match(traced.trace.trace_digest, /^[0-9a-f]{64}$/);
+  const phases = traceStore.events({ run_id: "automatic-batch-trace" }).map((event) => event.phase);
+  assert.equal(phases[0], "started");
+  assert.equal(phases.at(-1), "completed");
+  assert.ok(phases.filter((phase) => phase === "plan_compiled").length >= AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(phases.includes("provider_invocation_finished"));
+  const persisted = JSON.stringify(traceStore.snapshot());
+  assert.doesNotMatch(persisted, /debug and verify|offline:offline-model/);
+});
+
 test("brain facade automatic resumable batches rehydrate completed envelopes without direct-run fallback", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

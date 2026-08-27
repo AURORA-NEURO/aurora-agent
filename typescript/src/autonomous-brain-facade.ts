@@ -137,6 +137,7 @@ export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-b
 export const AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomous-brain-execution-policy/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-brain-auto-execution/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-batch/0.1" as const;
+export const AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-traced-auto-batch/0.1" as const;
 export const MAX_AUTONOMOUS_BRAIN_BATCH = 64;
 export const MAX_AUTONOMOUS_BRAIN_PARALLELISM = 8;
 export const MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES = 128_000;
@@ -412,6 +413,21 @@ export interface AutonomousBrainAutoBatchResult {
   stop_on_error: boolean;
   batch_digest: string;
   retention: "metadata_only_tasks_and_automatic_connector_values_transient";
+  secret_material: "never_returned";
+}
+
+/** Automatic batch controls plus a caller-owned metadata-only trace sink. */
+export interface AutonomousBrainAutoBatchTraceOptions extends AutonomousBrainAutoBatchOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+/** Ordered automatic batch result paired with its hash-chained lifecycle trace. */
+export interface AutonomousBrainTracedAutoBatchResult {
+  schema: typeof AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA;
+  batch: AutonomousBrainAutoBatchResult;
+  trace: AutonomousRunTraceSummary;
+  retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads";
   secret_material: "never_returned";
 }
 
@@ -932,6 +948,14 @@ function batchItemProjection(item: { index: number; status: string; task_digest:
 
 function batchItemDigest(item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } }): string {
   return digestJsonSync(batchItemProjection(item));
+}
+
+function automaticBatchTraceTaskDigest(inputs: readonly AutonomousBrainRequest[]): string {
+  return digestJsonSync({
+    schema: AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA,
+    mode: "automatic",
+    task_digests: inputs.map((input) => brainBatchTaskDigest(input)),
+  });
 }
 
 function brainBatchTaskDigest(input: AutonomousBrainRequest): string {
@@ -1994,6 +2018,75 @@ export class AutonomousBrainFacade {
 
   /** Execute automatic route-to-invocation work with bounded concurrency and deterministic order. */
   async executeAutoBatch(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainAutoBatchOptions = {}): Promise<AutonomousBrainAutoBatchResult> {
+    return this.executeAutoBatchCore(inputs, options);
+  }
+
+  /**
+   * Execute an automatic batch while appending one metadata-only hash chain for the entire
+   * batch. The trace is an observability boundary: it records item planning, connector/model/
+   * provider phases emitted by the nested execution, item terminal states, and the aggregate
+   * result, but never receives task text, prompts, credentials, provider output, or tool data.
+   */
+  async executeAutoBatchWithTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoBatchTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoBatchResult> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain automatic traced batch options must be an object");
+    const normalizedInputs = inputs.map((input) => validateRequest(input));
+    const trace = new AutonomousRunTraceSession(options.traceStore, {
+      run_id: options.runId,
+      task_digest: automaticBatchTraceTaskDigest(normalizedInputs),
+      // A batch may route to any reviewed domain. Item events carry the concrete plan digests;
+      // the envelope advertises the complete reviewed vocabulary so a cross-domain dashboard
+      // can safely use one stable trace contract before routing has settled.
+      domains: [...AUTONOMOUS_DOMAIN_NAMES],
+    });
+    await trace.started();
+    try {
+      const { traceStore: _traceStore, runId: _runId, ...batchOptions } = options;
+      const batch = await this.executeAutoBatchCore(normalizedInputs, batchOptions, trace);
+      await trace.complete({
+        status: autonomousRunTraceStatus(batch.status),
+        domains: [...AUTONOMOUS_DOMAIN_NAMES],
+        detail_digest: digestJsonSync({
+          batch_digest: batch.batch_digest,
+          completed_count: batch.completed_count,
+          failed_count: batch.failed_count,
+          omitted_count: batch.omitted_count,
+        }),
+      });
+      return {
+        schema: AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA,
+        batch,
+        trace: await trace.summary(),
+        retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads",
+        secret_material: "never_returned",
+      };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Run the traced automatic batch only after one provider-free admission covers its routes. */
+  async executeAutoBatchWithLaunchAdmissionAndTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoBatchTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic traced batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const policies = inputs.map((input, index) => batchOption(options.execution, input, index) ?? {});
+    for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic traced batch requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeAutoBatchLaunchAdmission(inputs, policies, admission);
+    return this.executeAutoBatchWithTrace(inputs, { ...options, execution: (_input, index) => policies[index]! });
+  }
+
+  private async executeAutoBatchCore(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoBatchOptions,
+    trace?: AutonomousRunTraceSession,
+  ): Promise<AutonomousBrainAutoBatchResult> {
     if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
     const { maxParallelism, stopOnError } = boundedBatchControls(options);
     const items: Array<AutonomousBrainAutoBatchItem | undefined> = new Array(inputs.length);
@@ -2006,17 +2099,44 @@ export class AutonomousBrainFacade {
         if (index >= inputs.length) return;
         if (halted) {
           items[index] = { index, status: "omitted", task_digest: null };
+          if (trace !== undefined) await trace.record({ phase: "paused", status: "paused", detail_digest: digestJsonSync({ index, state: "omitted" }) });
           continue;
         }
         try {
           const policy = batchOption(options.execution, inputs[index]!, index) ?? {};
-          const execution = await this.executeAuto(inputs[index]!, policy);
+          let execution: AutonomousBrainAutoExecution;
+          let prepared: PreparedBrainRequest | undefined;
+          if (trace === undefined) {
+            execution = await this.executeAuto(inputs[index]!, policy);
+          } else {
+            prepared = await this.prepare(inputs[index]!, selectBrainSemanticRouting(policy.semanticRouting, undefined), policy, policy.approveProviderCall);
+            await trace.record({
+              phase: "plan_compiled",
+              status: "running",
+              domains: this.traceDomains(prepared),
+              route_digest: prepared.route.route_digest,
+              plan_digest: prepared.plan.plan_digest,
+              detail_digest: digestJsonSync({ index, state: "prepared" }),
+            });
+            execution = await this.executeAutoPrepared(prepared, policy, trace);
+            const traceStatus = autonomousRunTraceStatus(execution.status);
+            const phase = traceStatus === "completed" || traceStatus === "partial" ? "completed" : traceStatus === "paused" ? "paused" : traceStatus === "refused" ? "refused" : "failed";
+            await trace.record({
+              phase,
+              status: traceStatus,
+              domains: this.traceDomains(prepared),
+              route_digest: prepared.route.route_digest,
+              plan_digest: prepared.plan.plan_digest,
+              detail_digest: digestJsonSync({ index, state: execution.status }),
+            });
+          }
           const succeeded = execution.status === "completed";
-          const refused = batchRefused(execution.status);
+          const refused = automaticBatchRefused(execution.status);
           items[index] = { index, status: succeeded ? "succeeded" : refused ? "refused" : "failed", task_digest: execution.plan.task_digest, execution };
           if (stopOnError && !succeeded) halted = true;
         } catch (error) {
           const projection = errorProjection(error);
+          if (trace !== undefined) await trace.record({ phase: "failed", status: "failed", detail_digest: digestJsonSync({ index, ...projection }) }).catch(() => undefined);
           items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
           if (stopOnError) halted = true;
         }

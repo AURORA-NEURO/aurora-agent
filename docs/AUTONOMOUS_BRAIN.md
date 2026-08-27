@@ -2519,6 +2519,31 @@ only `task` descriptors and delegates deterministic routing, abstention, optiona
 planning, learning-mode selection, and the existing approval gates per item. Route abstentions and
 planning reviews become visible `refused` items rather than silently selecting a domain.
 
+For operational visibility across the whole automatic batch, `run_auto_batch_with_trace()` returns
+the live `AutonomousBatchResult` together with an `AutonomousRunTraceSummary` written to a
+caller-owned `AutonomousRunTraceStore`. The TypeScript façade provides the equivalent
+`executeAutoBatchWithTrace()` and the launch-admitted
+`executeAutoBatchWithLaunchAdmissionAndTrace()` variants. One trace covers every reviewed domain,
+including cross-domain fan-out, and records bounded item planning, connector/model/provider
+phases, provider failures, refusals, omissions, and the aggregate terminal state. Item identity is
+carried only through digests in `detail_digest`; the trace never receives task text, prompts,
+credentials, provider responses, tool arguments, evidence bodies, or evaluator payloads. The
+trace is observability state rather than a resume token: checkpoint recovery and provider/effect
+approval remain separate explicit boundaries.
+
+```python
+traced = agent.run_auto_batch_with_trace(
+    requests,
+    credentials=session,
+    trace_store=trace_store,
+    run_id="automatic-batch-trace-42",
+    options_factory=lambda _request, _index: {"approve_provider_call": True},
+)
+assert traced.result.batch_digest
+assert traced.trace.status in {"completed", "partial", "failed"}
+# traced.result is the live batch; traced.trace is the persisted-safe summary.
+```
+
 For a deployment that has completed the twelve-domain launch review, the admission-aware variants
 (`run_batch_with_launch_admission()`, `run_auto_batch_with_launch_admission()`,
 `run_cross_domain_batch_with_launch_admission()`, and

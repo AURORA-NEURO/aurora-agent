@@ -10,6 +10,14 @@ are excluded from the coverage denominator — they specify no behaviour.
 A module leaves this list when a crate cites it, which is the same weak criterion coverage
 uses. This file tracks *attention*, not completeness.
 
+Automatic batch execution now has a shared metadata-only trace boundary in both SDKs. The
+TypeScript facade exposes `executeAutoBatchWithTrace()` and its launch-admitted variant; Python
+exposes `run_auto_batch_with_trace()` and the corresponding admission wrapper. The trace covers
+all twelve reviewed domains, item planning, nested provider/connector/model phases, refusals,
+omissions, and aggregate completion while persisting only digests and bounded failure metadata.
+Resumable checkpoint recovery remains a separate explicit boundary so restoring observability can
+never authorize provider, tool, source, learner, or effect work.
+
 Both high-level SDK agents now also expose a coordinated persistence lifecycle. Restore and flush
 compose model inventory, runtime health, provider/model health when a coordinator exists, redacted
 activation, selection-promotion authority, evaluator calibration, memory, online learning, prompt
