@@ -4243,3 +4243,13 @@ export {
   validateWeavelangExecutionRunReceipt,
 } from "./research-contracts.js";
 export type { WeavelangExecutionRunReceipt } from "./research-contracts.js";
+
+export {
+  MCP_KNOWLEDGE_REPRESENTATION_CONTRACT_FEATURE_ID,
+  MCP_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+  MCP_KNOWLEDGE_REPRESENTATION_INPUT_SCHEMA,
+  MCP_KNOWLEDGE_REPRESENTATION_OUTPUT_SCHEMA,
+  mcpKnowledgeRepresentationDigest,
+  validateMcpTypedKnowledgeWorldReceipt,
+} from "./research-contracts.js";
+export type { McpTypedKnowledgeWorldReceipt } from "./research-contracts.js";

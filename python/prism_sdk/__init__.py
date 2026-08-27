@@ -7544,3 +7544,10 @@ __all__ += [
     "assure_computational_execution",
     "validate_computational_execution_receipt",
 ]
+
+from .mcp_knowledge_representation_contract_model import (
+    TypedKnowledgeWorldReceipt as McpTypedKnowledgeWorldReceipt,
+    model_knowledge_representation,
+)
+
+__all__ += ["McpTypedKnowledgeWorldReceipt", "model_knowledge_representation"]

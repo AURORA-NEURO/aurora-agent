@@ -10,6 +10,7 @@
 mod brain_control;
 pub mod evolution_assurance;
 pub mod multimodal_ingestion_assurance;
+pub mod knowledge_representation_contract_model;
 pub mod research_contracts;
 pub mod resource_discovery_contract;
 pub mod rpc;
@@ -32,6 +33,15 @@ pub use multimodal_ingestion_assurance::{
     FEATURE_ID as MULTIMODAL_INGESTION_ASSURANCE_FEATURE_ID,
     TOOL_NAME as MULTIMODAL_INGESTION_ASSURANCE_TOOL,
 };
+pub use knowledge_representation_contract_model::{
+    model_knowledge_representation_contract, model_knowledge_representation_contract_json,
+    knowledge_representation_contract_manifest, validate_knowledge_representation_contract_json,
+    KnowledgeClaimAttestation, KnowledgeRepresentationError, KnowledgeRepresentationRequest,
+    KnowledgeWorldDisposition, PeerKnowledgeSummary, TypedKnowledgeWorldReceipt,
+    CONTRACT_VERSION as KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_REPRESENTATION_CONTRACT_FEATURE_ID,
+    TOOL_NAME as KNOWLEDGE_REPRESENTATION_CONTRACT_TOOL,
+};
 pub use research_contracts::{
     admit_autonomy_batch_json, admit_bounded_evolution_json, admit_computational_execution_json,
     admit_federated_commons_json, admit_federated_knowledge_json, admit_mechanism_gateway_json,
@@ -41,6 +51,7 @@ pub use research_contracts::{
     assure_federated_multimodal_json, assure_federated_retrieval_json, assure_interpretation_json,
     assure_multimodal_ingestion_assurance_json,
     assure_weavelang_computational_execution_json,
+    model_mcp_knowledge_representation_contract_json,
     assure_knowledge_representation_json, assure_provenance_json, assure_release_json,
     assure_replication_json, assure_weavelang_release_json, close_adapter_limitations_json,
     compile_adapter_capability_manifest_json, compile_evaluation_card_json,
@@ -167,6 +178,7 @@ pub use research_contracts::{
     validate_federated_lens_assurance_json, validate_federated_multimodal_assurance_json,
     validate_multimodal_ingestion_assurance_json,
     validate_weavelang_computational_execution_json,
+    validate_mcp_knowledge_representation_contract_json,
     validate_federated_retrieval_assurance_json, validate_federation_workflow_json,
     validate_governance_research_release_json, validate_harmonized_research_object_json,
     validate_ingestion_gateway_json, validate_instrument_mesh_json,

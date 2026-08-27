@@ -791,6 +791,16 @@ pub fn validate_weavelang_computational_execution_json(
     bioprism_weavelang::validate_computational_execution_json(value)
 }
 
+pub fn model_mcp_knowledge_representation_contract_json(value: &Value) -> Result<Value, String> {
+    crate::knowledge_representation_contract_model::model_knowledge_representation_contract_json(value)
+}
+
+pub fn validate_mcp_knowledge_representation_contract_json(
+    value: &Value,
+) -> Result<crate::knowledge_representation_contract_model::TypedKnowledgeWorldReceipt, String> {
+    crate::knowledge_representation_contract_model::validate_knowledge_representation_contract_json(value)
+}
+
 pub fn validate_harmonized_research_object_json(
     value: &Value,
 ) -> Result<HarmonizedResearchObject, String> {

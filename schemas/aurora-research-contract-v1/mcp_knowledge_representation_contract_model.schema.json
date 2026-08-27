@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/mcp-knowledge-representation-contract-model.schema.json",
+  "title": "AFA-mcp-P04-F08 federated continual knowledge representation receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "request_id", "federation_id", "semantic_profile", "disposition", "claim_order", "selected_claim_order", "unresolved_claim_order", "blocked_claim_order", "missing_claim_order", "peer_order", "qualified_peer_order", "missing_peer_order", "omission_order", "uncertainty_order", "negative_evidence_order", "replay_identity", "world_digest", "artifact", "effect_receipts", "raw_data_local", "aggregate_only", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "mcp-federated-continual-knowledge-representation-contract-model/1.0"},
+    "feature_id": {"const": "AFA-mcp-P04-F08"},
+    "request_id": {"type": "string", "minLength": 1}, "federation_id": {"type": "string", "minLength": 1}, "semantic_profile": {"type": "string", "minLength": 1},
+    "disposition": {"enum": ["qualified", "unresolved", "blocked"]},
+    "claim_order": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "selected_claim_order": {"type": "array", "items": {"type": "string"}}, "unresolved_claim_order": {"type": "array", "items": {"type": "string"}}, "blocked_claim_order": {"type": "array", "items": {"type": "string"}}, "missing_claim_order": {"type": "array", "items": {"type": "string"}},
+    "peer_order": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "qualified_peer_order": {"type": "array", "items": {"type": "string"}}, "missing_peer_order": {"type": "array", "items": {"type": "string"}},
+    "omission_order": {"type": "array", "items": {"type": "string"}}, "uncertainty_order": {"type": "array", "items": {"type": "string"}}, "negative_evidence_order": {"type": "array", "items": {"type": "string"}},
+    "replay_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "world_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["schema_version", "artifact_id", "content_type", "content_hash", "semantic_loss", "provenance", "boundary"], "properties": {"schema_version": {"const": "aurora-research-contract/1.0"}, "artifact_id": {"type": "string", "minLength": 1}, "content_type": {"const": "application/vnd.aurora.mcp-typed-knowledge-world-2+json"}, "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "semantic_loss": {"type": "array"}, "provenance": {"type": "array"}, "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}}},
+    "effect_receipts": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "raw_data_local": {"const": true}, "aggregate_only": {"const": true}, "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  }
+}

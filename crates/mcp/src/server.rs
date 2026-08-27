@@ -2012,6 +2012,7 @@ impl Server {
             "multimodal_harmonize" => self.multimodal_harmonize(&arguments),
             "mcp_multimodal_ingestion_assurance" => self.mcp_multimodal_ingestion_assurance(&arguments),
             "weavelang_computational_execution_assurance" => self.weavelang_computational_execution_assurance(&arguments),
+            "mcp_knowledge_representation_contract" => self.mcp_knowledge_representation_contract(&arguments),
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
             "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
@@ -26429,6 +26430,28 @@ impl Server {
         }))
     }
 
+    fn mcp_knowledge_representation_contract(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized KnowledgeRepresentationRequest")?;
+        let receipt = crate::research_contracts::model_mcp_knowledge_representation_contract_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": crate::knowledge_representation_contract_model::FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "claim identities and peer summaries are canonically ordered and partitioned",
+                "only semantically comparable, signed aggregate metadata is considered qualified",
+                "unknown, speculative, contradictory, omitted, and denied claims remain explicit"
+            ],
+            "limitations": [
+                "the route validates caller-supplied claim attestations and does not infer relations from raw studies",
+                "a qualified knowledge-world envelope is not a biological, diagnostic, or clinical conclusion"
+            ]
+        }))
+    }
+
     fn analysis_qualify(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -38078,7 +38101,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "mutation_knowledge_federated_control",
             "domains": ["federated mutation knowledge representation", "continual candidate admission", "origin quorum", "deterministic ranking", "negative evidence", "aggregate-only locality"],
             "crates": ["bioprism-mutation", "bioprism-oracle", "bioprism-foundation", "bioprism-mcp"],
-            "mcp_tools": ["mutation_knowledge_federated_control"],
+            "mcp_tools": ["mutation_knowledge_federated_control", "mcp_knowledge_representation_contract"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -40589,6 +40612,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized KnowledgeRepresentationAssuranceRequest with federation/query identity, required and resolved fact ids, optional evidence receipt digest, policy decision, protected closure, and preclinical boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "mcp_knowledge_representation_contract",
+            "description": "Compile purpose-bound federated continual research claims into a typed knowledge-world contract. It verifies semantic-profile, artifact/provenance/replay, evidence-state, peer-quorum, policy, protected-closure, aggregate-only, and raw-locality gates without inferring relations from raw studies.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized mcp KnowledgeRepresentationRequest." }
                 },
                 "required": ["request"]
             }
