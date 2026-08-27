@@ -4,6 +4,7 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   validateAutonomousRouteOverride,
   type AutonomousAgent,
+  type AutonomousAgentMissionReplanOptions,
   type AutonomousApprovedModelSelectionOptions,
   type AutonomousAutoBlueprint,
   type AutonomousDomainToolPlan,
@@ -57,9 +58,10 @@ import {
   type AutonomousRunTraceSummary,
 } from "./autonomous-run-trace.js";
 import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
-import type { ProviderInvocationObserver } from "./llm.js";
+import type { AutonomousModelSelectionTraceEventCallback, ProviderInvocationObserver } from "./llm.js";
 import { AutonomousCostBudget } from "./llm.js";
-import type { JsonObject, JsonValue } from "./types.js";
+import type { AgentMissionArgs, JsonObject, JsonValue } from "./types.js";
+import type { AutonomousMissionReplanResult } from "./mission-replan.js";
 import {
   AutonomousJointExecutionPolicy,
   type AutonomousExecutionPolicyCandidateInput,
@@ -138,6 +140,7 @@ export const AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-aut
 export const AUTONOMOUS_BRAIN_AUTO_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-brain-auto-execution/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-traced-auto-batch/0.1" as const;
+export const AUTONOMOUS_BRAIN_TRACED_MISSION_REPLAN_SCHEMA = "bioprism-typescript-autonomous-brain-traced-mission-replan/0.1" as const;
 export const MAX_AUTONOMOUS_BRAIN_BATCH = 64;
 export const MAX_AUTONOMOUS_BRAIN_PARALLELISM = 8;
 export const MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES = 128_000;
@@ -428,6 +431,21 @@ export interface AutonomousBrainTracedAutoBatchResult {
   batch: AutonomousBrainAutoBatchResult;
   trace: AutonomousRunTraceSummary;
   retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads";
+  secret_material: "never_returned";
+}
+
+/** Restart-safe mission replanning controls plus a caller-owned metadata-only lifecycle trace. */
+export interface AutonomousBrainMissionReplanTraceOptions extends AutonomousAgentMissionReplanOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+/** Full mission values remain transient to the caller; the paired trace is digest-only. */
+export interface AutonomousBrainTracedMissionReplanResult {
+  schema: typeof AUTONOMOUS_BRAIN_TRACED_MISSION_REPLAN_SCHEMA;
+  result: AutonomousMissionReplanResult;
+  trace: AutonomousRunTraceSummary;
+  retention: "mission_execution_values_caller_owned;trace_metadata_only_no_prompts_responses_arguments_or_credentials";
   secret_material: "never_returned";
 }
 
@@ -979,6 +997,69 @@ function tracedAutoBatchResult(batch: AutonomousBrainAutoBatchResult): Autonomou
   };
 }
 
+function validateMissionForBrain(mission: AgentMissionArgs): AgentMissionArgs {
+  if (!isObject(mission)) throw new ArgumentError("autonomous brain mission must be an object");
+  const candidate = mission as unknown as AgentMissionArgs;
+  boundedIdentifier("autonomous brain mission_id", candidate.mission_id);
+  boundedText("autonomous brain mission goal", candidate.goal, 32_000);
+  if (!Array.isArray(candidate.steps) || candidate.steps.length < 1 || candidate.steps.length > 128) throw new ArgumentError("autonomous brain mission steps must contain one to 128 entries");
+  const ids = new Set<string>();
+  for (const [index, raw] of candidate.steps.entries()) {
+    if (!isObject(raw)) throw new ArgumentError(`autonomous brain mission step ${index} must be an object`);
+    const step = raw as unknown as AgentMissionArgs["steps"][number];
+    const id = boundedIdentifier(`autonomous brain mission step ${index} id`, step.id);
+    if (ids.has(id)) throw new ArgumentError(`autonomous brain mission contains duplicate step id: ${id}`);
+    ids.add(id);
+    domain(`autonomous brain mission step ${index} domain`, step.domain);
+    boundedText(`autonomous brain mission step ${index} objective`, step.objective, 32_000);
+    boundedIdentifier(`autonomous brain mission step ${index} tool`, step.tool);
+  }
+  return candidate;
+}
+
+function missionDomains(mission: AgentMissionArgs): AutonomousDomainName[] {
+  const domains = [...new Set(validateMissionForBrain(mission).steps.map((step) => domain("autonomous brain mission domain", step.domain)))];
+  if (domains.length === 0) throw new ArgumentError("autonomous brain mission must declare at least one supported domain");
+  return domains;
+}
+
+function composeSelectionCallbacks(...callbacks: readonly (AutonomousModelSelectionTraceEventCallback | undefined)[]): AutonomousModelSelectionTraceEventCallback | undefined {
+  const active = callbacks.filter((callback): callback is AutonomousModelSelectionTraceEventCallback => callback !== undefined);
+  if (!active.length) return undefined;
+  return async (event) => {
+    for (const callback of active) await callback(event);
+  };
+}
+
+function missionTraceStatus(status: string): ReturnType<typeof autonomousRunTraceStatus> {
+  if (status === "succeeded") return "completed";
+  if (status === "partial") return "partial";
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "paused";
+  return autonomousRunTraceStatus(status);
+}
+
+function validateMissionReplanOptions(options: AutonomousAgentMissionReplanOptions): AutonomousAgentMissionReplanOptions {
+  if (!isObject(options) || typeof options.evaluate !== "function") throw new ArgumentError("autonomous brain mission execution requires an evaluator callback");
+  return options;
+}
+
+function tracedMissionReplanResult(result: AutonomousMissionReplanResult, trace: AutonomousRunTraceSummary): AutonomousBrainTracedMissionReplanResult {
+  const projection = {
+    schema: AUTONOMOUS_BRAIN_TRACED_MISSION_REPLAN_SCHEMA,
+    trace,
+    retention: "mission_execution_values_caller_owned;trace_metadata_only_no_prompts_responses_arguments_or_credentials" as const,
+    secret_material: "never_returned" as const,
+  } as AutonomousBrainTracedMissionReplanResult;
+  Object.defineProperty(projection, "result", {
+    value: result,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return projection;
+}
+
 function automaticBatchTraceTaskDigest(inputs: readonly AutonomousBrainRequest[]): string {
   return digestJsonSync({
     schema: AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA,
@@ -1461,6 +1542,132 @@ export class AutonomousBrainFacade {
     const request = validateRequest(input);
     const route = await this.agent.route(request.task, { domain: request.domain, hints: request.hints, allowCrossDomain: request.allow_cross_domain ?? true });
     return this.buildPlanForRoute(request, route, null);
+  }
+
+  /**
+   * Validate the exact domains declared by a caller-owned mission against a deployment launch
+   * admission. Mission execution is still separately gated by its policy, provider approval,
+   * effect approval, and (when enabled) provider-planning review.
+   */
+  authorizeMissionLaunchAdmission(
+    mission: AgentMissionArgs,
+    admission: AutonomousLaunchAdmissionReport,
+  ): AutonomousLaunchAdmissionReport {
+    return authorizeAutonomousLaunchDomains(admission, missionDomains(mission));
+  }
+
+  /**
+   * Run the durable mission planner/executor through the application-facing brain boundary.
+   * The mission graph remains caller-owned: this method adds the autonomous per-step model,
+   * prompt, tool, policy, checkpoint, evaluator, replanning, and learning composition without
+   * granting any provider, credential, or external-effect authority implicitly.
+   */
+  async runMissionReplanCycle(
+    mission: AgentMissionArgs,
+    options: AutonomousAgentMissionReplanOptions,
+  ): Promise<AutonomousMissionReplanResult> {
+    const validated = validateMissionForBrain(mission);
+    validateMissionReplanOptions(options);
+    if (typeof this.agent.runMissionReplanCycle !== "function") throw new ArgumentError("autonomous brain agent does not expose mission replanning");
+    return this.agent.runMissionReplanCycle(validated, options);
+  }
+
+  /** Run a mission only after a provider-free launch admission covers every declared domain. */
+  async runMissionReplanCycleWithLaunchAdmission(
+    mission: AgentMissionArgs,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousAgentMissionReplanOptions,
+  ): Promise<AutonomousMissionReplanResult> {
+    const validated = validateMissionForBrain(mission);
+    validateMissionReplanOptions(options);
+    if (options.execute?.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted mission execution requires provider-free routing; admit semantic mission routing separately");
+    this.authorizeMissionLaunchAdmission(validated, admission);
+    return this.runMissionReplanCycle(validated, options);
+  }
+
+  /** Run a mission while attaching a hash-chained trace that never serializes mission values. */
+  async runMissionReplanCycleWithTrace(
+    mission: AgentMissionArgs,
+    options: AutonomousBrainMissionReplanTraceOptions,
+  ): Promise<AutonomousBrainTracedMissionReplanResult> {
+    const validated = validateMissionForBrain(mission);
+    validateMissionReplanOptions(options);
+    const domains = missionDomains(validated);
+    const trace = new AutonomousRunTraceSession(options.traceStore, {
+      run_id: options.runId,
+      task_digest: digestJsonSync({ task: validated.goal }),
+      domains,
+    });
+    await trace.started();
+    try {
+      const missionDigest = digestJsonSync(validated);
+      await trace.record({ phase: "plan_compiled", status: "running", domains, plan_digest: missionDigest });
+      const {
+        traceStore: _traceStore,
+        runId: _runId,
+        stepRun: sourceStepRun,
+        ...missionOptions
+      } = options;
+      const traceObserver = trace.providerObserver();
+      const tracedStepRun = {
+        ...(sourceStepRun ?? {}),
+        observer: composeBrainObservers(sourceStepRun?.observer, traceObserver),
+        selectionEventCallback: composeSelectionCallbacks(sourceStepRun?.selectionEventCallback, trace.selectionEventCallback()),
+      };
+      const result = await this.runMissionReplanCycle(validated, { ...missionOptions, stepRun: tracedStepRun });
+      await trace.record({
+        phase: "evaluation_settled",
+        status: "running",
+        route_digest: result.route_digest,
+        plan_digest: result.protected_contract_digest,
+        detail_digest: digestJsonSync({
+          replan_count: result.replan_count,
+          attempt_count: result.attempts.length,
+          evaluation_count: result.evaluations.length,
+          planning_status: result.planning_status,
+          planner_learning_status: result.planner_learning_status,
+          attempt_statuses: result.attempts.map((attempt) => ({ attempt: attempt.attempt, status: attempt.status, evaluation_digest: attempt.evaluation_digest })),
+        }),
+      });
+      if (result.learning_settlements.length > 0 || result.prompt_learning !== undefined) {
+        await trace.record({
+          phase: "learning_prepared",
+          status: "running",
+          route_digest: result.route_digest,
+          plan_digest: result.protected_contract_digest,
+          detail_digest: digestJsonSync({
+            settlement_count: result.learning_settlements.length,
+            prompt_selection_count: result.prompt_learning?.selection_count ?? 0,
+            planner_learning_status: result.planner_learning_status,
+          }),
+        });
+      }
+      await trace.complete({
+        status: missionTraceStatus(result.status),
+        domains,
+        route_digest: result.route_digest,
+        plan_digest: result.protected_contract_digest,
+        detail_digest: digestJsonSync({ status: result.status, final_status: result.final_execution.status, replan_count: result.replan_count }),
+      });
+      return tracedMissionReplanResult(result, await trace.summary());
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Launch-admitted variant of the digest-only mission trace boundary. */
+  async runMissionReplanCycleWithLaunchAdmissionAndTrace(
+    mission: AgentMissionArgs,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainMissionReplanTraceOptions,
+  ): Promise<AutonomousBrainTracedMissionReplanResult> {
+    const validated = validateMissionForBrain(mission);
+    validateMissionReplanOptions(options);
+    if (options.execute?.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted traced mission execution requires provider-free routing; admit semantic mission routing separately");
+    this.authorizeMissionLaunchAdmission(validated, admission);
+    return this.runMissionReplanCycleWithTrace(validated, options);
   }
 
   /** Convert a caller-owned execution failure projection into a deterministic recovery plan. */

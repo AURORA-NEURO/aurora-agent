@@ -18,6 +18,17 @@ omissions, and aggregate completion while persisting only digests and bounded fa
 Resumable checkpoint recovery remains a separate explicit boundary so restoring observability can
 never authorize provider, tool, source, learner, or effect work.
 
+The TypeScript application-facing brain now exposes the durable mission replanning kernel through
+`AutonomousBrainFacade.runMissionReplanCycle()`, with provider-free launch-admission checks and
+metadata-only traced variants. The facade validates all mission step domains and exact tool
+identities, composes model selection, prompt learning, provider invocation, evaluator feedback,
+checkpoint/replan state, and caller-owned result storage, and covers the same twelve-domain
+surface. Its traced result keeps raw mission values available only through a direct caller-owned
+property; JSON logging and persistence receive trace digests, lifecycle status, route/plan
+identity, learning counts, and bounded failure metadata. Remaining deployment work is still
+external authorization, credential provisioning, durable multi-host storage, evaluator/source
+truth, and effect reconciliation.
+
 The same trace seam now spans restart-safe automatic batches: TypeScript exposes
 `executeAutoBatchResumableWithTrace()` and Python exposes
 `run_resumable_auto_batch_with_trace()`, with launch-admitted variants that re-check the full route

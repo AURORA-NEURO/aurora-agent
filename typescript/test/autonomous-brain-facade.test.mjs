@@ -19,6 +19,8 @@ import {
   InMemoryAutonomousLearningFeedbackOutboxStore,
   InMemoryAutonomousConnectorReceiptJournal,
   InMemoryAutonomousRunTraceStore,
+  ToolCatalogue,
+  builtinAutonomousDomainProfiles,
   LLMRuntime,
   createBuiltinAutonomousConnectorRuntime,
   AutonomousProtectedRehydrationAdapter,
@@ -1347,5 +1349,92 @@ test("brain facade fails closed on route, connector, and plan identity boundarie
   await assert.rejects(
     brain.executePlanned(valid, { task: "a different task", domain: "coding" }, { approveProviderCall: true }),
     /does not match the transient request/,
+  );
+});
+
+test("brain facade mission boundary invokes exact tools and traces every built-in domain without retaining values", async () => {
+  let providerCalls = 0;
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("mission provider must stay local"); } });
+  runtime.registerInMemoryProvider("offline", (request) => {
+    providerCalls += 1;
+    if (request.messages.some((message) => message.role === "tool")) return { output_text: "mission completion" };
+    const tool = request.tools?.[0];
+    return tool === undefined
+      ? { output_text: "mission completion" }
+      : { tool_calls: [{ call_id: `mission-call-${providerCalls}`, name: tool.name, arguments: {} }] };
+  });
+  const profiles = await builtinAutonomousDomainProfiles();
+  const domainTools = Object.fromEntries(profiles.map((profile) => [profile.domain, profile.tool_profile.bindings[0].name]));
+  const toolNames = [...new Set(Object.values(domainTools))];
+  const toolCatalogue = await ToolCatalogue.fromDefinitions(toolNames.map((name) => ({
+    name,
+    description: `bounded ${name} mission probe`,
+    inputSchema: { type: "object", additionalProperties: true },
+  })));
+  const agent = new AutonomousAgent(runtime, {
+    toolCatalogue,
+    toolExecutor: async () => ({ ok: true, transient_value: "caller-owned" }),
+  });
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const mission = {
+      mission_id: `facade-mission-${domain}`,
+      goal: `verify the bounded ${domain} mission contract`,
+      steps: [{ id: `step-${domain}`, domain, capability: "verification", objective: `verify ${domain}`, tool: domainTools[domain], arguments: {} }],
+      policy: { execute: true, stop_on_error: true, allow_side_effects: false, max_steps: 8, max_step_output_bytes: 100_000, max_total_output_bytes: 1_000_000, execution_mode: "serial", max_parallelism: 1, allowed_tools: [domainTools[domain]] },
+    };
+    const result = await brain.runMissionReplanCycle(mission, {
+      evaluate: () => ({ evaluator_id: "facade-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+      stepRun: { candidates: agent.models() },
+      approveEffects: true,
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.final_execution.results[0].status, "succeeded", domain);
+    assert.equal(result.final_execution.results[0].decision.provider, "offline", domain);
+  }
+
+  const tracedMission = {
+    mission_id: "facade-traced-mission",
+    goal: "retain no raw traced mission goal or tool output",
+    steps: [{ id: "trace-step", domain: "coding", capability: "verification", objective: "execute a transient probe", tool: domainTools.coding, arguments: {} }],
+    policy: { execute: true, stop_on_error: true, allow_side_effects: false, max_steps: 8, max_step_output_bytes: 100_000, max_total_output_bytes: 1_000_000, execution_mode: "serial", max_parallelism: 1, allowed_tools: [domainTools.coding] },
+  };
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+  const traced = await brain.runMissionReplanCycleWithTrace(tracedMission, {
+    traceStore,
+    runId: "facade-traced-mission-run",
+    evaluate: () => ({ evaluator_id: "facade-reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false }),
+    stepRun: { candidates: agent.models() },
+    approveEffects: true,
+  });
+  assert.equal(traced.result.status, "completed");
+  assert.equal(traced.trace.status, "completed");
+  assert.equal(traced.trace.provider_invocations, 2);
+  assert.equal(traced.result.final_execution.results[0].value.transient_value, "caller-owned");
+  assert.doesNotMatch(JSON.stringify(traced), /retain no raw traced mission goal|caller-owned|mission completion/);
+  assert.doesNotMatch(JSON.stringify(await traceStore.snapshot()), /retain no raw traced mission goal|caller-owned|mission completion/);
+  assert.equal(providerCalls, AUTONOMOUS_DOMAIN_NAMES.length * 2 + 2);
+});
+
+test("brain facade mission boundary rejects malformed graphs and unadmitted semantic launch paths", async () => {
+  const brain = new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime()) });
+  const validMission = {
+    mission_id: "facade-validation-mission",
+    goal: "validate the mission boundary",
+    steps: [{ id: "step", domain: "coding", capability: "verification", objective: "validate one step", tool: "mission_probe", arguments: {} }],
+  };
+  const evaluate = () => ({ evaluator_id: "reviewer", evaluator_version: "1", reward: 1, passed: true, replan_requested: false });
+
+  await assert.rejects(() => brain.runMissionReplanCycle(validMission, undefined), /evaluator callback/);
+  assert.throws(() => brain.authorizeMissionLaunchAdmission(validMission, {}), /launch admission/);
+  await assert.rejects(
+    () => brain.runMissionReplanCycleWithLaunchAdmission(validMission, {}, { evaluate, execute: { semanticRouting: { enabled: true } } }),
+    /provider-free routing/,
+  );
+  assert.throws(
+    () => brain.authorizeMissionLaunchAdmission({ ...validMission, steps: [{ ...validMission.steps[0], id: "step" }, { ...validMission.steps[0], id: "step" }] }, {}),
+    /duplicate step id/,
   );
 });

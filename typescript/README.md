@@ -2241,6 +2241,36 @@ is the orchestration cursor, while the executor store and caller result cache ow
 and private values. `AutonomousMissionReplanPersistenceCoordinator` flushes/restores bounded,
 hash-bound multi-root snapshots through a caller-owned `read()`/`write()` adapter.
 
+Applications using `AutonomousBrainFacade` can enter this same mission boundary through
+`runMissionReplanCycle()`, without constructing an executor or adapter themselves. The facade
+validates every declared step domain and exact tool identity, and its launch-admitted variants
+require a caller-approved admission for every mission domain before any provider-backed step is
+started. `runMissionReplanCycleWithTrace()` composes the trace provider observer and model-
+selection callbacks into each step while returning the raw mission result only through the
+caller-owned direct property; ordinary JSON serialization of the traced envelope contains the
+trace and digest-only metadata, not task text, arguments, prompts, provider responses, or tool
+outputs:
+
+```typescript
+const traced = await brain.runMissionReplanCycleWithTrace(reviewedMission, {
+  runId: "mission-run-2026-08-27",
+  traceStore: durableTraceStore,
+  evaluate: heldOutMissionEvaluator,
+  stepRun: {
+    candidates: agent.models(),
+    credentialFor: provider => credentialSession.handle(provider),
+  },
+  approveEffects: false,
+});
+const privateExecution = traced.result;
+const auditMetadata = traced.trace;
+```
+
+`authorizeMissionLaunchAdmission()` is available as a provider-free pre-dispatch check. The
+launch-admitted methods intentionally reject semantic mission routing unless that classifier
+boundary is admitted separately. Provider planning, evaluator settlement, learning, result
+rehydration, and external effect reconciliation remain independent caller-owned gates.
+
 To connect provider-backed steps to delayed-credit learning, give the adapter the same
 `AutonomousLearningController` used by direct runs. Successful steps receive stable episode IDs;
 approval, refusal, failed, and uncertain-effect steps do not create episodes. The mission

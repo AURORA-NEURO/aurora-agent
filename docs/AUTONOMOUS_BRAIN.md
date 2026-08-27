@@ -5550,6 +5550,26 @@ unregistered domain binding, absent credential, provider refusal, approval pause
 effect remains an explicit non-success state. The façade never invents a provider key: hosts
 register providers and supply short-lived opaque credential handles through `stepRun`.
 
+The application-facing `AutonomousBrainFacade` now exposes the same composition directly through
+`runMissionReplanCycle()`. This closes the gap between the ordinary brain entry point and the
+durable mission kernel: a host can provide a reviewed dependency graph and evaluator while the
+facade supplies exact-tool provider invocation, prompt-arm selection, checkpoint/replan
+continuation, and optional learning. `authorizeMissionLaunchAdmission()` and the
+`runMissionReplanCycleWithLaunchAdmission()` variants check every declared mission domain against
+one provider-free launch decision before a step can dispatch. Provider-assisted semantic mission
+routing is deliberately rejected by that launch-admitted path until its classifier call is
+admitted separately; provider planning remains a distinct review gate.
+
+The facade also exposes `runMissionReplanCycleWithTrace()` and its launch-admitted variant. These
+compose the trace observer and model-selection lifecycle callback into every mission step, then
+return a hash-chained `AutonomousRunTraceSummary` with mission-plan, route, evaluator, learning,
+and failure digests. The traced envelope keeps the raw `AutonomousMissionReplanResult` available
+to the caller through a non-enumerable direct property so ordinary logging and JSON persistence
+cannot accidentally retain mission goals, step arguments, rendered prompts, provider responses,
+or tool outputs. This is an observability boundary, not a replay authorization: checkpoint,
+result-store, credential, catalogue, evaluator, budget, and effect checks still run on every
+continuation.
+
 When an `AutonomousPromptLearningPersistenceCoordinator` is attached to the agent, each model-backed
 step contributes only its validated adaptive selection receipt. `cycle.prompt_learning` and
 `agent.promptLearningSelections(cycle)` expose prompt-arm IDs, registry/plan/selection digests,
