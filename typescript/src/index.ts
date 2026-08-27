@@ -3493,6 +3493,15 @@ export {
   validateFederatedMechanismReceipt,
 } from "./research-contracts.js";
 export type { FederatedMechanismReceipt } from "./research-contracts.js";
+export {
+  FEDERATED_ANALYSIS_ASSURANCE_FEATURE_ID,
+  FEDERATED_ANALYSIS_ASSURANCE_CONTRACT_VERSION,
+  FEDERATED_ANALYSIS_ASSURANCE_INPUT_SCHEMA,
+  FEDERATED_ANALYSIS_ASSURANCE_OUTPUT_SCHEMA,
+  federatedAnalysisReceiptDigest,
+  validateFederatedAnalysisReceipt,
+} from "./research-contracts.js";
+export type { FederatedAnalysisReceipt } from "./research-contracts.js";
 
 export {
   CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,

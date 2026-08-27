@@ -7050,3 +7050,13 @@ __all__ += [
     "FederatedMechanismReceipt",
     "operate_federated_mechanisms",
 ]
+
+from .federated_analysis_assurance import (
+    FederatedAnalysisReceipt,
+    assure_federated_analysis,
+)
+
+__all__ += [
+    "FederatedAnalysisReceipt",
+    "assure_federated_analysis",
+]

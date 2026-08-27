@@ -5019,3 +5019,21 @@ export function validateFederatedMechanismReceipt(receipt: FederatedMechanismRec
   if (receipt.effect_receipts.some(effect => !effect.startsWith("operate:mechanism:") && !effect.startsWith("approval-required:mechanism") && effect !== "block:unsafe-release")) throw new Error("mechanism effect is outside governed gate");
 }
 export function federatedMechanismReceiptDigest(receipt: FederatedMechanismReceipt): string { validateFederatedMechanismReceipt(receipt); return digestJsonSync(receipt); }
+export const FEDERATED_ANALYSIS_ASSURANCE_FEATURE_ID = "AFA-ops-P13-F28" as const;
+export const FEDERATED_ANALYSIS_ASSURANCE_CONTRACT_VERSION = "ops-federated-continual-analysis-assurance/1.0" as const;
+export const FEDERATED_ANALYSIS_ASSURANCE_INPUT_SCHEMA = "AnalysisQuestion4@1" as const;
+export const FEDERATED_ANALYSIS_ASSURANCE_OUTPUT_SCHEMA = "QualifiedAnalysisResult7@1" as const;
+export interface FederatedAnalysisReceipt {
+  schema_version: string; contract_version: string; feature_id: string; request_id: string; federation_id: string; purpose: string; semantic_profile: string; admission: "qualified" | "unresolved" | "blocked";
+  origin_order: string[]; analysis_order: string[]; rank_order: string[]; qualified_order: string[]; unresolved_order: string[]; blocked_order: string[]; decisions: readonly { analysis_id: string; origin: string; score_milli: number; disposition: string; failed_gates: string[]; conditional_gates: string[]; negative_result: boolean }[]; checkpoint_seq: number; checkpoint_digest: string; control_digest: string; replay_identity: string; semantic_loss: readonly Record<string, unknown>[]; omissions: string[]; uncertainty: string[]; negative_evidence: string[]; effect_receipts: string[]; artifact: Record<string, unknown>; raw_data_local: true; boundary: string;
+}
+export function validateFederatedAnalysisReceipt(receipt: FederatedAnalysisReceipt): void {
+  if (receipt.schema_version !== RESEARCH_CONTRACT_SCHEMA_VERSION || receipt.contract_version !== FEDERATED_ANALYSIS_ASSURANCE_CONTRACT_VERSION || receipt.feature_id !== FEDERATED_ANALYSIS_ASSURANCE_FEATURE_ID || receipt.boundary !== PRECLINICAL_BOUNDARY || receipt.raw_data_local !== true || !receipt.request_id.trim() || !receipt.federation_id.trim() || !receipt.purpose.trim() || !receipt.semantic_profile.trim() || !receipt.analysis_order.length || receipt.decisions.length !== receipt.analysis_order.length || !receipt.effect_receipts.length) throw new Error("analysis federation identity, locality, candidates, decisions, or effects are incomplete");
+  for (const values of [receipt.origin_order, receipt.analysis_order, receipt.qualified_order, receipt.unresolved_order, receipt.blocked_order, receipt.omissions, receipt.uncertainty, receipt.negative_evidence, receipt.effect_receipts]) if (JSON.stringify([...new Set(values)].sort()) !== JSON.stringify(values)) throw new Error("analysis ordering is not canonical");
+  if (receipt.rank_order.length !== receipt.analysis_order.length || JSON.stringify([...new Set(receipt.rank_order)].sort()) !== JSON.stringify([...receipt.analysis_order].sort()) || receipt.decisions.some((decision, index) => decision.analysis_id !== receipt.analysis_order[index])) throw new Error("analysis ranking or decisions do not match candidates");
+  if (JSON.stringify([...new Set([...receipt.qualified_order, ...receipt.unresolved_order, ...receipt.blocked_order])].sort()) !== JSON.stringify([...receipt.analysis_order].sort())) throw new Error("analysis dispositions do not partition candidates");
+  for (const digest of [receipt.checkpoint_digest, receipt.control_digest, receipt.replay_identity, receipt.artifact.content_hash]) if (typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest)) throw new Error("analysis federation digest is invalid");
+  if (receipt.artifact.content_type !== "application/vnd.aurora.qualified-analysis-result+json") throw new Error("analysis artifact type is invalid");
+  if (receipt.effect_receipts.some(effect => !effect.startsWith("qualify:analysis:") && effect !== "block:unsafe-release")) throw new Error("analysis effect is outside the release gate");
+}
+export function federatedAnalysisReceiptDigest(receipt: FederatedAnalysisReceipt): string { validateFederatedAnalysisReceipt(receipt); return digestJsonSync(receipt); }

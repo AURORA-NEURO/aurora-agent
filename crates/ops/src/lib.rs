@@ -295,6 +295,7 @@ pub mod error;
 pub mod flags;
 pub mod hardening;
 pub mod knowledge_representation_assurance;
+pub mod federated_analysis_assurance;
 pub mod retrieval_assurance;
 pub mod telemetry;
 
@@ -322,6 +323,13 @@ pub use knowledge_representation_assurance::{
     KnowledgeRepresentationAssuranceReceipt, KnowledgeRepresentationAssuranceRequest,
     CONTRACT_VERSION as KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+};
+pub use federated_analysis_assurance::{
+    assure as assure_federated_analysis, capability_manifest as federated_analysis_manifest,
+    AnalysisCandidate, AnalysisDecision, AnalysisAdmission, FederatedAnalysisError,
+    FederatedAnalysisReceipt, FederatedAnalysisRequest,
+    FEATURE_ID as FEDERATED_ANALYSIS_FEATURE_ID,
+    CONTRACT_VERSION as FEDERATED_ANALYSIS_CONTRACT_VERSION,
 };
 pub use retrieval_assurance::{
     assure_retrieval, retrieval_assurance_manifest, EvidenceSynthesisReceipt,
