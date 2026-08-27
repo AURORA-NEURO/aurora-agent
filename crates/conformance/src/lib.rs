@@ -80,6 +80,7 @@
 //!   declared and preserved the decision; it cannot check that it was competently built.
 
 pub mod case;
+pub mod context_compilation_federated_control_plane;
 pub mod error;
 pub mod fiber_suite;
 pub mod fixture;

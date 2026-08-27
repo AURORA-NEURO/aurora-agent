@@ -225,6 +225,11 @@ pub use research_contracts::{
     RETRIEVAL_SYNTHESIS_TOOL, SEMANTIC_PARITY_TOOL, WEAVELANG_RELEASE_ASSURANCE_TOOL,
     WORKFLOW_BATCH_TOOL, WORKFLOW_EXECUTION_TOOL,
 };
+pub use research_contracts::{
+    run_context_compilation_federated_control_json,
+    validate_context_compilation_federated_control_json,
+    CONTEXT_COMPILATION_FEDERATED_CONTROL_TOOL,
+};
 pub use resource_discovery_contract::{
     compile_resource_discovery_contract_v2, ResourceDiscoveryContractError,
     ResourceDiscoveryContractRequest, ResourceDiscoveryContractResponse,

@@ -3476,6 +3476,16 @@ export {
 } from "./autonomous-memory.js";
 
 export {
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_CONTRACT_VERSION,
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_INPUT_SCHEMA,
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_OUTPUT_SCHEMA,
+  conformanceContextCompilationFederatedControlReceiptDigest,
+  validateConformanceContextCompilationFederatedControlReceipt,
+} from "./research-contracts.js";
+export type { ConformanceContextCompilationFederatedControlReceipt } from "./research-contracts.js";
+
+export {
   ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
   adapterLocalEvidenceSurveillanceInferenceEngineReceiptDigest,

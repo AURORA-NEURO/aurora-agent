@@ -2085,6 +2085,9 @@ impl Server {
             "weavelang_compile" => self.weavelang_compile(&arguments),
             "choreography_check" => self.choreography_check(&arguments),
             "conformance_run" => self.conformance_run(&arguments),
+            "conformance_context_compilation_federated_control" => {
+                self.conformance_context_compilation_federated_control(&arguments)
+            }
             "provider_capability_gate" => self.provider_capability_gate(&arguments),
             "sdk_registry_check" => self.sdk_registry_check(&arguments),
             "governance_schema_check" => self.governance_schema_check(&arguments),
@@ -30049,6 +30052,32 @@ impl Server {
         }))
     }
 
+    fn conformance_context_compilation_federated_control(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a ContextCompilationFederatedControlRequest")?;
+        let receipt =
+            crate::research_contracts::run_context_compilation_federated_control_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_conformance::context_compilation_federated_control_plane::FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "A2 prospective high-throughput context-compilation admission is pinned to a suite/protocol contract and gated by peer quorum, fixture identity, capacity, policy, protected closure, signed approval, locality, and replay",
+                "unknown/speculative evidence remains conditional, contradicted evidence and failed gates block, and negative results plus omissions remain explicit",
+                "the control artifact exchanges only digest-bound federation metadata; private context and raw preclinical data remain local"
+            ],
+            "limitations": [
+                "the contract admits and records validation work but does not compile private context or execute conformance suites",
+                "the capability is not a clinical decision system and excludes human-subject and clinical-source data"
+            ]
+        }))
+    }
+
     fn conformance_run(&self, arguments: &Value) -> Result<Value, String> {
         let include_details = arguments
             .get("include_details")
@@ -37920,6 +37949,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "conformance_context_compilation_federation",
+            "domains": ["prospective high-throughput context compilation", "federated conformance", "peer quorum", "fixture identity", "checkpoint and capacity admission", "aggregate-only locality"],
+            "crates": ["bioprism-conformance", "bioprism-foundation", "bioprism-mcp"],
+            "mcp_tools": ["conformance_context_compilation_federated_control"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "oncoworlds_identity_and_transport",
             "domains": ["participant identity", "specimen and lesion joins", "disease epochs", "cross-scope transport"],
             "crates": ["bioprism-oncoworlds", "bioprism-scope", "bioprism-standards"],
@@ -42064,6 +42101,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 },
                 "required": []
             }
+        }),
+        json!({
+            "name": "conformance_context_compilation_federated_control",
+            "description": "Operate an A2 prospective high-throughput context-compilation federation control plane with pinned suite/protocol and fixture compatibility, peer quorum, capacity/checkpoint continuity, policy, protected-closure, signed approval, locality, replay, omission, uncertainty, and negative-result gates.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ContextCompilationFederatedControlRequest with suite/protocol identity, typed candidates and peers, capacity/checkpoint controls, policy/approval/closure/locality permissions, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "provider_capability_gate",

@@ -427,6 +427,12 @@ use bioprism_foundation::{
     MechanismExplorationAssuranceRequest, PolicyReceipt,
     FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
 };
+use bioprism_conformance::context_compilation_federated_control_plane::{
+    operate_context_compilation_federated_control,
+    ContextCompilationFederatedControlReceipt,
+    ContextCompilationFederatedControlRequest,
+    FEATURE_ID as CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,
+};
 use bioprism_oraclex::publication_release_contract_model::{compile_publication_release, PublicationReleaseReceipt, PublicationReleaseRequest, feature_id as PUBLICATION_RELEASE_FEATURE_ID};
 use bioprism_interweave::interweave_contract_frontier_federated_control_plane::{feature_id as INTERWEAVE_FRONTIER_FEATURE_ID, operate_interweave_frontier, InterweaveControlPlaneRequest, InterweaveControlReceipt};
 use bioprism_influence::{
@@ -2628,6 +2634,29 @@ pub fn validate_bounded_evolution_assurance_json(
         .map_err(|error: EvolutionAssuranceError| error.to_string())?;
     if receipt.feature_id != EVOLUTION_ASSURANCE_FEATURE_ID {
         return Err("bounded evolution assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const CONTEXT_COMPILATION_FEDERATED_CONTROL_TOOL: &str = "conformance_context_compilation_federated_control";
+
+pub fn run_context_compilation_federated_control_json(value: &Value) -> Result<Value, String> {
+    let request: ContextCompilationFederatedControlRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid conformance context control request: {error}"))?;
+    let receipt = operate_context_compilation_federated_control(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize conformance context control receipt: {error}"))
+}
+
+pub fn validate_context_compilation_federated_control_json(
+    value: &Value,
+) -> Result<ContextCompilationFederatedControlReceipt, String> {
+    let receipt: ContextCompilationFederatedControlReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid conformance context control receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID {
+        return Err("conformance context control feature id mismatch".into());
     }
     Ok(receipt)
 }

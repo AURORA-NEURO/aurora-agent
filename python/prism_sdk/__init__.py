@@ -7002,3 +7002,13 @@ __all__ += [
     "FederatedContinualEvidenceSurveillanceWorkflowReceipt",
     "schedule_federated_continual_evidence_surveillance_workflow",
 ]
+
+from .conformance_context_compilation_federated_control import (
+    ContextCompilationFederatedControlReceipt,
+    operate_context_compilation_federated_control,
+)
+
+__all__ += [
+    "ContextCompilationFederatedControlReceipt",
+    "operate_context_compilation_federated_control",
+]
