@@ -12275,3 +12275,11 @@ against the task-bound route and the checkpoint result digest before it is accep
 does not replay planning, specialist calls, synthesis, or the provider. The legacy
 `providerRunOverride` remains available for direct mode, and every override still requires an
 explicit caller approval decision and keeps raw result values outside the durable projection.
+
+For deployments that need admission before any source work, use
+`runWithReviewedEvidenceWithLaunchAdmission()` or
+`runWithDomainEvidenceCatalogueWithLaunchAdmission()`. These wrappers authorize the declared
+evidence scope before adapter/catalogue preparation can reach source dispatch. The source approval
+inside `execute` and the provider approval inside `run` remain independent, so an admitted source
+scope can still stop at provider review without invoking a model. This is the same launch boundary
+used by ordinary and automatic agent runs, applied one phase earlier to evidence acquisition.

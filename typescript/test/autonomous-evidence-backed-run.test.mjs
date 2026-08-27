@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
+  AutonomousBrainFacade,
   AutonomousEvidenceAdapterRegistry,
   AutonomousEvidenceReadinessPolicy,
   CredentialStore,
@@ -20,6 +21,22 @@ function jsonResponse(payload, status = 200) {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+async function launchAdmissionFor(agent) {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const brain = new AutonomousBrainFacade({ agent });
+  const availableToolNames = profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => binding.name));
+  const availableEvidence = profiles.flatMap((profile) => profile.workflow.stages.flatMap((stage) => stage.evidence_outputs.map((label) => `${profile.domain}:${stage.id}:${label}`)));
+  const deploymentCapabilities = {
+    persistence: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+    queue: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+    approval_authority: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+    external_auth: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+    telemetry: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+  };
+  const preflight = await brain.launchPreflight({ availableToolNames, availableEvidence, deploymentCapabilities });
+  return brain.admitLaunchPreflight(preflight, { decision: "approve", authorizationDigest: "e".repeat(64) });
 }
 
 function model() {
@@ -240,6 +257,65 @@ test("evidence-backed cross-domain execution fans out only to the reviewed scope
     }),
     /cannot combine an exact evidence scope with provider-assisted semantic routing/,
   );
+});
+
+test("launch admission gates evidence acquisition before source dispatch across every domain", async () => {
+  const { agent, registry, calls } = await setup();
+  const admission = await launchAdmissionFor(agent);
+  let expectedEvidenceCalls = 0;
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const plan = await agent.evidencePlan([domain]);
+    expectedEvidenceCalls += plan.requirements.length;
+    const result = await agent.runWithReviewedEvidenceWithLaunchAdmission(
+      `Launch-admitted ${domain} evidence review.`,
+      admission,
+      { registry, ...evidenceOptions(plan, { approveProviderCall: false }) },
+    );
+    assert.equal(result.status, "approval_required", domain);
+  }
+  assert.equal(calls.evidence, expectedEvidenceCalls);
+  assert.equal(calls.provider, 0);
+
+  const codingBrain = new AutonomousBrainFacade({ agent });
+  const profiles = await builtinAutonomousDomainProfiles();
+  const preflight = await codingBrain.launchPreflight({
+    availableToolNames: profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => binding.name)),
+    availableEvidence: profiles.flatMap((profile) => profile.workflow.stages.flatMap((stage) => stage.evidence_outputs.map((label) => `${profile.domain}:${stage.id}:${label}`))),
+    deploymentCapabilities: {
+      persistence: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      queue: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      approval_authority: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      external_auth: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      telemetry: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+    },
+  });
+  const subset = codingBrain.admitLaunchPreflight(preflight, { decision: "approve", approvedDomains: ["coding"], authorizationDigest: "d".repeat(64) });
+  const sourceCalls = calls.evidence;
+  await assert.rejects(
+    agent.runWithReviewedEvidenceWithLaunchAdmission("Reject an unapproved biomedical source scope.", subset, {
+      registry,
+      ...evidenceOptions(await agent.evidencePlan(["biomedical"]), { approveProviderCall: false }),
+    }),
+    /does not approve requested domains/,
+  );
+  assert.equal(calls.evidence, sourceCalls);
+
+  const catalogueFixture = await catalogueSetup();
+  const catalogueAdmission = await launchAdmissionFor(catalogueFixture.agent);
+  const codingProfile = builtinAutonomousDomainEvidenceSourceProfiles().find((profile) => profile.domain === "coding");
+  const catalogueResult = await catalogueFixture.agent.runWithDomainEvidenceCatalogueWithLaunchAdmission(
+    "Launch-admitted catalogue coding review.",
+    catalogueAdmission,
+    {
+      catalogue: catalogueFixture.catalogue,
+      domains: ["coding"],
+      prepare: { profileId: codingProfile.profile_id, quorum: 1 },
+      execute: { approveSourceDispatch: true },
+      run: { domain: "coding", approveProviderCall: false },
+    },
+  );
+  assert.equal(catalogueResult.status, "approval_required");
+  assert.equal(catalogueFixture.calls.provider, 0);
 });
 
 async function catalogueSetup() {

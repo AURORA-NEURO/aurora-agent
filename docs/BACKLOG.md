@@ -2033,3 +2033,10 @@ checkpoint, and accepts them only through caller-owned `rehydrateAutomaticRun` o
 Completed automatic planning, specialists, and synthesis therefore do not replay after restart;
 direct-mode provider rehydration remains backward compatible. The remaining deployment-owned
 boundary is protected storage and retrieval of those raw result envelopes.
+
+Launch admission now reaches the evidence boundary in TypeScript as well: registry-backed and
+catalogue-backed `...WithLaunchAdmission()` facades authorize every declared source domain before
+preparation or acquisition, while retaining independent source-dispatch and provider-call
+approvals. The all-domain test matrix confirms that denied scopes make zero source calls and that
+provider approval can still pause after approved evidence. Deployment identity, external approval,
+and source credentials remain caller-owned.

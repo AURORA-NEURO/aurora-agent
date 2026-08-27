@@ -7208,6 +7208,35 @@ export class AutonomousAgent {
     return runAutonomousDomainEvidenceBacked(this, task, options);
   }
 
+  /**
+   * Admit the complete declared evidence scope before source adapters, credentials, or providers
+   * can be reached. Evidence acquisition is a separate authority from provider execution, so
+   * the launch record covers every requested domain while the nested evidence options retain
+   * their own source and provider approvals.
+   */
+  async runWithReviewedEvidenceWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousEvidenceBackedRunOptions,
+  ): Promise<AutonomousEvidenceBackedRunResult> {
+    const domains = options?.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWithReviewedEvidence(task, options);
+  }
+
+  /** Catalogue equivalent of the evidence-first launch-admission handoff. */
+  async runWithDomainEvidenceCatalogueWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousDomainEvidenceBrainRunOptions,
+  ): Promise<AutonomousDomainEvidenceBrainRunResult> {
+    const domains = options?.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWithDomainEvidenceCatalogue(task, options);
+  }
+
   async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; minConfidence?: number; minMargin?: number; maxDomains?: number; allowCrossDomain?: boolean; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number } = {}): Promise<AutonomousAutoBlueprint> {
     const taskText = boundedText("autonomous task", task, 32_000);
     const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, minConfidence: options.minConfidence, minMargin: options.minMargin, maxDomains: options.maxDomains, allowCrossDomain: options.allowCrossDomain });
