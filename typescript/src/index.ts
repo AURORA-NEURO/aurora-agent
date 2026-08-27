@@ -3966,3 +3966,12 @@ export {
   validateFiberFederatedExecutionInteroperabilityEnvelope,
 } from "./research-contracts.js";
 export type { FiberFederatedExecutionInteroperabilityEnvelope } from "./research-contracts.js";
+export {
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_FEATURE_ID,
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
+  interweaveFederatedDependencyCompositionReceiptDigest,
+  validateInterweaveFederatedDependencyCompositionReceipt,
+} from "./research-contracts.js";
+export type { InterweaveFederatedDependencyCompositionReceipt } from "./research-contracts.js";

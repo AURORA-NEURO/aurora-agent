@@ -5217,3 +5217,22 @@ export function validateFiberFederatedExecutionInteroperabilityEnvelope(receipt:
   if(receipt.effect_receipts.some(effect=>!effect.startsWith("exchange:execution-envelope:")&&effect!=="block:unsafe-release")) throw new Error("federated execution effect is outside digest-only gate");
 }
 export function fiberFederatedExecutionInteroperabilityEnvelopeDigest(receipt:FiberFederatedExecutionInteroperabilityEnvelope):string { validateFiberFederatedExecutionInteroperabilityEnvelope(receipt); return digestJsonSync(receipt); }
+
+export const INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_FEATURE_ID = "AFA-interweave-P27-F08" as const;
+export const INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_CONTRACT_VERSION = "interweave-federated-continual-dependency-composition-contract-model/1.0" as const;
+export const INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_INPUT_SCHEMA = "InterweaveDependencyContract5@1" as const;
+export const INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA = "CapabilityComposition6@1" as const;
+export interface InterweaveFederatedDependencyCompositionReceipt {
+  schema_version:string; contract_version:string; feature_id:string; request_id:string; federation_id:string; purpose:string; semantic_profile:string; protocol_version:string; disposition:"qualified"|"unresolved"|"blocked";
+  requested_capability_order:string[]; selected_capability_order:string[]; missing_capability_order:string[]; incompatible_capability_order:string[]; cycle_order:string[]; unresolved_capability_order:string[]; omissions:string[]; uncertainty:string[]; negative_evidence:string[]; composition_digest:string; replay_identity:string; artifact:Record<string,unknown>; effect_receipts:string[]; raw_data_local:true; aggregate_only:true; boundary:string;
+}
+export function validateInterweaveFederatedDependencyCompositionReceipt(receipt:InterweaveFederatedDependencyCompositionReceipt):void {
+  const ordered=(values:string[])=>JSON.stringify([...new Set(values)].sort())===JSON.stringify(values);
+  if(receipt.schema_version!==RESEARCH_CONTRACT_SCHEMA_VERSION||receipt.contract_version!==INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_CONTRACT_VERSION||receipt.feature_id!==INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_FEATURE_ID||receipt.boundary!==PRECLINICAL_BOUNDARY||receipt.raw_data_local!==true||receipt.aggregate_only!==true||!receipt.request_id.trim()||!receipt.federation_id.trim()||!receipt.purpose.trim()||!receipt.semantic_profile.trim()||!receipt.protocol_version.trim()||!receipt.requested_capability_order.length||!receipt.effect_receipts.length) throw new Error("dependency composition identity, schema, locality, capabilities, or effects are incomplete");
+  for(const values of[receipt.requested_capability_order,receipt.selected_capability_order,receipt.missing_capability_order,receipt.incompatible_capability_order,receipt.cycle_order,receipt.unresolved_capability_order,receipt.omissions,receipt.uncertainty,receipt.negative_evidence,receipt.effect_receipts]) if(!ordered(values)) throw new Error("dependency composition ordering is not canonical");
+  const requested=new Set(receipt.requested_capability_order); const outcomes=[...receipt.selected_capability_order,...receipt.missing_capability_order,...receipt.incompatible_capability_order,...receipt.unresolved_capability_order]; if(requested.size!==receipt.requested_capability_order.length||new Set(outcomes).size!==outcomes.length||![...requested].every(item=>outcomes.includes(item))) throw new Error("dependency composition outcomes do not cover requests");
+  for(const digest of[receipt.composition_digest,receipt.replay_identity,receipt.artifact.content_hash]) if(typeof digest!=="string"||!/^[0-9a-f]{64}$/.test(digest)) throw new Error("dependency composition digest is invalid");
+  if(receipt.artifact.content_type!=="application/vnd.aurora.capability-composition+json") throw new Error("dependency composition artifact type is invalid");
+  if(receipt.effect_receipts.some(effect=>!effect.startsWith("compose:capability-contract:")&&effect!=="block:unsafe-release")) throw new Error("dependency composition effect is outside no-execution gate");
+}
+export function interweaveFederatedDependencyCompositionReceiptDigest(receipt:InterweaveFederatedDependencyCompositionReceipt):string { validateInterweaveFederatedDependencyCompositionReceipt(receipt); return digestJsonSync(receipt); }

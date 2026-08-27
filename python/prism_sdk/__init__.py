@@ -7190,3 +7190,13 @@ __all__ += [
     "FederatedExecutionInteroperabilityEnvelope",
     "assure_federated_execution",
 ]
+
+from .federated_dependency_contract_model import (
+    FederatedDependencyCompositionReceipt,
+    assure_federated_dependency_composition,
+)
+
+__all__ += [
+    "FederatedDependencyCompositionReceipt",
+    "assure_federated_dependency_composition",
+]

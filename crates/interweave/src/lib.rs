@@ -159,6 +159,7 @@ pub mod conformance;
 pub mod credit;
 pub mod human;
 pub mod interweave_contract_frontier_federated_control_plane;
+pub mod federated_dependency_contract_model;
 pub mod laboratory_integration_workflow_fabric;
 pub mod microbench;
 pub mod packs;
@@ -180,6 +181,16 @@ pub use semantic_parity_copilot::{
     InterweaveParityFixture, InterweaveParityWitness, SemanticParityError,
     CONTRACT_VERSION as SEMANTIC_PARITY_CONTRACT_VERSION, FEATURE_ID as SEMANTIC_PARITY_FEATURE_ID,
     INPUT_SCHEMA as SEMANTIC_PARITY_INPUT_SCHEMA, OUTPUT_SCHEMA as SEMANTIC_PARITY_OUTPUT_SCHEMA,
+};
+pub use federated_dependency_contract_model::{
+    assure as assure_federated_dependency_composition,
+    capability_manifest as federated_dependency_composition_manifest,
+    CapabilityCompositionReceipt, CapabilityDeclaration, DependencyCompositionError,
+    DependencyCompositionRequest,
+    CONTRACT_VERSION as FEDERATED_DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_DEPENDENCY_COMPOSITION_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
 };
 
 /// The blueprint section this crate completes.
