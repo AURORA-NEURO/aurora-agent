@@ -65,6 +65,7 @@ pub mod combine;
 pub mod disagreement;
 pub mod error;
 pub mod evidence;
+pub mod experiment_design_copilot;
 pub mod ingestion_control;
 pub mod judgement;
 pub mod ladder;
@@ -91,6 +92,15 @@ pub use disagreement::{
 };
 pub use error::OracleError;
 pub use evidence::Evidence;
+pub use experiment_design_copilot::{
+    compile_experiment_design_copilot, experiment_design_copilot_manifest,
+    CopilotDisposition, DesignCandidate, ExperimentDesignCopilotError,
+    ExperimentDesignCopilotReceipt, ExperimentObjective as ExperimentDesignObjective,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_COPILOT_FEATURE_ID,
+    INPUT_SCHEMA as EXPERIMENT_DESIGN_COPILOT_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EXPERIMENT_DESIGN_COPILOT_OUTPUT_SCHEMA,
+};
 pub use ingestion_control::{
     control_federated_ingestion, federated_ingestion_control_manifest,
     FederatedIngestionControlReceipt, FederatedIngestionControlRequest,

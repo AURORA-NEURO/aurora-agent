@@ -4053,3 +4053,13 @@ export {
   validateCliExperimentDesignAssurance,
 } from "./research-contracts.js";
 export type { CliExperimentDesignAssurance } from "./research-contracts.js";
+
+export {
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_FEATURE_ID,
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_CONTRACT_VERSION,
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_INPUT_SCHEMA,
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_OUTPUT_SCHEMA,
+  oracleExperimentDesignCopilotDigest,
+  validateOracleExperimentDesignCopilot,
+} from "./research-contracts.js";
+export type { OracleExperimentDesignCopilotReceipt } from "./research-contracts.js";

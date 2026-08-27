@@ -7292,3 +7292,15 @@ __all__ += [
     "assure_experiment_design",
     "cli_experiment_design_assurance_digest",
 ]
+
+from .oracle_experiment_design_copilot import (
+    OracleExperimentDesignCopilotReceipt,
+    compile_experiment_design_copilot,
+    oracle_experiment_design_copilot_digest,
+)
+
+__all__ += [
+    "OracleExperimentDesignCopilotReceipt",
+    "compile_experiment_design_copilot",
+    "oracle_experiment_design_copilot_digest",
+]
