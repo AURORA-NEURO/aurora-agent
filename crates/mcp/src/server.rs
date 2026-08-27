@@ -44,6 +44,7 @@ use bioprism_ids::{
 };
 use bioprism_ids::{IDS_QUALITY_CONTROL_CONTRACT_VERSION, IDS_QUALITY_CONTROL_FEATURE_ID};
 use bioprism_ids::{IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION, IDS_MECHANISM_EXPLORATION_FEATURE_ID};
+use bioprism_ids::{IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION, IDS_EXPERIMENT_DESIGN_FEATURE_ID};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -1846,6 +1847,7 @@ impl Server {
             }
             "ids_quality_control_assurance" => self.ids_quality_control_assurance(&arguments),
             "ids_mechanism_exploration_assurance" => self.ids_mechanism_exploration_assurance(&arguments),
+            "ids_experiment_design_workbench" => self.ids_experiment_design_workbench(&arguments),
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -24928,6 +24930,26 @@ impl Server {
         }))
     }
 
+    fn ids_experiment_design_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_ids_experiment_design_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_EXPERIMENT_DESIGN_FEATURE_ID,
+            "contract_version": IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "design candidates are deterministically ranked by power, effect, and stable identity",
+                "required controls, power shortfalls, replay, authorization, locality, uncertainty, and negative evidence remain explicit",
+                "the route only emits a preclinical design frontier and cannot enroll subjects, control instruments, or make clinical decisions"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied design summaries and does not calculate power from raw measurements or execute laboratory work",
+                "a qualified design frontier is not biological validity, statistical significance, or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -41068,6 +41090,18 @@ pub fn tool_definitions() -> Vec<Value> {
                     "peers": { "type": "array", "description": "Signed aggregate-only PeerMechanismSummary4 attestations." }
                 },
                 "required": ["request", "candidates", "peers"]
+            }
+        }),
+        json!({
+            "name": "ids_experiment_design_workbench",
+            "description": "Rank typed local single-study experiment designs into a deterministic power-aware preclinical frontier. The workbench enforces required-control closure, minimum power, replay identity, authorization, raw-data locality, and explicit uncertainty without executing laboratory actions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ExperimentDesignRequest4 with study identity, estimand purpose, control requirements, power threshold, budget, policy, approval, locality, and replay declarations." },
+                    "candidates": { "type": "array", "description": "Typed DesignCandidate4 summaries with controls, power/effect scores, provenance, evidence state, and authorization declarations." }
+                },
+                "required": ["request", "candidates"]
             }
         }),
         json!({

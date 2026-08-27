@@ -4383,3 +4383,13 @@ export {
   validateIdsMechanismPortfolio7,
 } from "./research-contracts.js";
 export type { IdsMechanismPortfolio7 } from "./research-contracts.js";
+
+export {
+  IDS_EXPERIMENT_DESIGN_FEATURE_ID,
+  IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
+  IDS_EXPERIMENT_DESIGN_INPUT_SCHEMA,
+  IDS_EXPERIMENT_DESIGN_OUTPUT_SCHEMA,
+  idsExperimentDesignDigest,
+  validateIdsDesignFrontier8,
+} from "./research-contracts.js";
+export type { IdsDesignFrontier8 } from "./research-contracts.js";

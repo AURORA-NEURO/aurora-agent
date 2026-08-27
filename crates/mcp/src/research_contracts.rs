@@ -535,8 +535,12 @@ use bioprism_ids::{
     QualityObservation4, IDS_QUALITY_CONTROL_FEATURE_ID,
 };
 use bioprism_ids::{
-    assure_mechanism_exploration, MechanismCandidate4, MechanismPortfolio7,
+    assure_mechanism_exploration as assure_ids_mechanism_exploration, MechanismCandidate4, MechanismPortfolio7,
     MechanismQuestion2, PeerMechanismSummary4, IDS_MECHANISM_EXPLORATION_FEATURE_ID,
+};
+use bioprism_ids::{
+    design_experiment, DesignCandidate4, DesignFrontier8, ExperimentDesignRequest4,
+    IDS_EXPERIMENT_DESIGN_FEATURE_ID,
 };
 use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
@@ -3097,7 +3101,7 @@ pub fn operate_ids_mechanism_exploration_json(value: &Value) -> Result<Value, St
         .map_err(|error| format!("invalid ids mechanism candidates: {error}"))?;
     let peers: Vec<PeerMechanismSummary4> = serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
         .map_err(|error| format!("invalid ids mechanism peers: {error}"))?;
-    let receipt = assure_mechanism_exploration(&request, &candidates, &peers)
+    let receipt = assure_ids_mechanism_exploration(&request, &candidates, &peers)
         .map_err(|error| format!("ids mechanism exploration failed: {error}"))?;
     serde_json::to_value(receipt).map_err(|error| format!("cannot serialize ids mechanism receipt: {error}"))
 }
@@ -3107,6 +3111,33 @@ pub fn validate_ids_mechanism_exploration_json(value: &Value) -> Result<Mechanis
         .map_err(|error| format!("invalid ids mechanism receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_MECHANISM_EXPLORATION_FEATURE_ID { return Err("ids mechanism feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub const IDS_EXPERIMENT_DESIGN_TOOL: &str = "ids_experiment_design_workbench";
+
+pub fn operate_ids_experiment_design_json(value: &Value) -> Result<Value, String> {
+    let request: ExperimentDesignRequest4 = serde_json::from_value(
+        value.get("request").cloned().ok_or("request is required")?,
+    )
+    .map_err(|error| format!("invalid ids experiment-design request: {error}"))?;
+    let candidates: Vec<DesignCandidate4> = serde_json::from_value(
+        value.get("candidates").cloned().ok_or("candidates are required")?,
+    )
+    .map_err(|error| format!("invalid ids experiment-design candidates: {error}"))?;
+    let receipt = design_experiment(&request, &candidates)
+        .map_err(|error| format!("ids experiment design failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids experiment-design receipt: {error}"))
+}
+
+pub fn validate_ids_experiment_design_json(value: &Value) -> Result<DesignFrontier8, String> {
+    let receipt: DesignFrontier8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids experiment-design receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_EXPERIMENT_DESIGN_FEATURE_ID {
+        return Err("ids experiment-design feature id mismatch".into());
+    }
     Ok(receipt)
 }
 

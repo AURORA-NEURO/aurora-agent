@@ -18,6 +18,7 @@ pub mod knowledge_representation_federated_control_plane;
 pub mod multimodal_ingestion_research_copilot;
 pub mod quality_control_assurance;
 pub mod mechanism_exploration_assurance;
+pub mod experiment_design_workbench;
 pub mod throughput_evidence_surveillance_contract_model;
 
 pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
@@ -80,6 +81,12 @@ pub use mechanism_exploration_assurance::{
     MechanismPortfolio7Artifact, MechanismQuestion2, PeerMechanismSummary4,
     CONTRACT_VERSION as IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION,
     FEATURE_ID as IDS_MECHANISM_EXPLORATION_FEATURE_ID,
+};
+pub use experiment_design_workbench::{
+    design_experiment, experiment_design_manifest, DesignCandidate4, DesignEvidenceState,
+    DesignFrontier8, DesignFrontier8Artifact, ExperimentDesignError, ExperimentDesignRequest4,
+    CONTRACT_VERSION as IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
+    FEATURE_ID as IDS_EXPERIMENT_DESIGN_FEATURE_ID,
 };
 pub use throughput_evidence_surveillance_contract_model::{
     model_throughput_evidence_surveillance_contract,

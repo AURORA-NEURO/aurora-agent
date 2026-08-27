@@ -7725,3 +7725,17 @@ __all__ += [
     "assure_ids_mechanism_exploration",
     "idsMechanismExplorationDigest",
 ]
+
+from .ids_experiment_design_workbench import (
+    DesignFrontier8 as IdsDesignFrontier8,
+    experiment_design_manifest as ids_experiment_design_manifest,
+    design_experiment as design_ids_experiment,
+    idsExperimentDesignDigest,
+)
+
+__all__ += [
+    "IdsDesignFrontier8",
+    "ids_experiment_design_manifest",
+    "design_ids_experiment",
+    "idsExperimentDesignDigest",
+]
