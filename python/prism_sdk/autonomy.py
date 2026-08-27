@@ -25234,6 +25234,90 @@ class AutonomousAgent:
             private_result=final,
         )
 
+    def run_auto_cycle_with_launch_admission(
+        self,
+        *,
+        task: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AutonomousAutoDecisionCycleResult:
+        """Run one automatic decision cycle only after a provider-free launch review.
+
+        The wrapper compiles the exact route that the cycle will use, checks every selected
+        domain against the caller-owned launch admission, and then passes that route back as a
+        digest-verified override.  This preserves the cycle's single-route invariant while
+        ensuring that launch admission is checked before credential normalization, provider
+        invocation, evaluator settlement, tool execution, or effects.  Provider-assisted
+        semantic routing remains a separate boundary and is rejected here until its classifier
+        call has its own explicit admission.
+
+        ``kwargs`` accepts the ordinary :meth:`run_auto_cycle` controls, including an explicit
+        ``domain`` and route/learning/persistence settings.  The wrapper owns ``route_override``
+        and rejects it so a caller cannot review one route and execute another.
+        """
+
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("launch-admitted automatic decision-cycle task must be non-empty text")
+        if "route_override" in kwargs:
+            raise BrainRunError(
+                "run_auto_cycle_with_launch_admission owns the route override; pass routing controls instead"
+            )
+        semantic_routing = kwargs.pop("semantic_routing", False)
+        if not isinstance(semantic_routing, bool):
+            raise BrainRunError("semantic_routing must be a boolean")
+        if semantic_routing:
+            raise BrainRunError(
+                "launch-admitted automatic decision-cycle execution requires provider-free routing; "
+                "admit semantic routing separately before enabling it"
+            )
+
+        domain = kwargs.pop("domain", None)
+        route_options = self._automatic_route_options(kwargs)
+        if domain is not None:
+            if not isinstance(domain, str) or domain not in AUTONOMOUS_DOMAINS:
+                raise BrainRunError(
+                    "domain must be one of: " + ", ".join(AUTONOMOUS_DOMAINS)
+                )
+            # Match run_auto_cycle's explicit-domain route construction exactly.  The route is
+            # intentionally made from the domain alone so unrelated lexical hints cannot cause
+            # the admission preview and execution route to diverge.
+            route_options.update(
+                {
+                    "hints": (domain,),
+                    "min_confidence": 0.0,
+                    "min_margin": 0.0,
+                    "max_domains": 1,
+                    "allow_cross_domain": False,
+                }
+            )
+
+        blueprint = self.prepare_auto(task=task, **route_options)
+        route = blueprint.route
+        cycle_options = dict(kwargs)
+        cycle_options["route_override"] = route
+        cycle_options["semantic_routing"] = False
+        if route.abstained:
+            # No domain was selected, so there is no launch scope to authorize.  Returning the
+            # normal review result keeps route abstention value-free and provider-free.
+            return self.run_auto_cycle(
+                task=task,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                **cycle_options,
+            )
+
+        from .autonomous_launch_admission import authorize_autonomous_launch_domains
+
+        authorize_autonomous_launch_domains(launch_admission, route.selected_domains)
+        return self.run_auto_cycle(
+            task=task,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            **cycle_options,
+        )
+
     def run_auto_replan_cycle(
         self,
         *,

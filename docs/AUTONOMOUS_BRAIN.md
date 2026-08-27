@@ -583,6 +583,27 @@ cycle = agent.run_auto_replan_cycle_with_launch_admission(
 )
 ```
 
+The ordinary evaluator-backed automatic cycle has the same launch boundary:
+`agent.run_auto_cycle_with_launch_admission(...)` in Python and
+`agent.runAutoCycleWithLaunchAdmission(...)` in TypeScript. Both APIs freeze the provider-free
+route, require admission for every selected domain, and then enter the normal route → plan →
+model-selection → prompt → provider → evaluator → learning path with that exact route override.
+They reject caller-supplied route overrides and provider-assisted semantic routing until those
+separate boundaries have been reviewed. TypeScript automatic cycles also accept explicit
+`minConfidence`, `minMargin`, and `maxDomains` controls, so an admission preview can enforce the
+same route separation and fan-out bound as execution.
+
+```python
+cycle = agent.run_auto_cycle_with_launch_admission(
+    task="review a bounded biomedical evidence workflow",
+    launch_admission=approved_launch_record,
+    credentials=user_credential_session,
+    domain="biomedical",
+    evaluator=evaluator,
+    approve_provider_call=True,
+)
+```
+
 #### Binding a reviewed launch admission at the CLI
 
 Deployments that require an operator or queue decision before credential intake can persist the

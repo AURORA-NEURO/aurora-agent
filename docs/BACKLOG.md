@@ -1634,6 +1634,17 @@ settlement identities without provider payloads, and exposes protected in-proces
 caller-owned restart storage. Focused offline tests exercise all twelve domains, cross-domain
 online learning, semantic approval refusal, route tamper rejection, and no-duplicate-call resume.
 
+The automatic decision-cycle launch handoff is now complete in both SDKs. Python
+`run_auto_cycle_with_launch_admission()` and TypeScript
+`runAutoCycleWithLaunchAdmission()` compile the exact provider-free route, require every selected
+domain to be covered by the caller's reviewed admission, and then pass that route as a verified
+override into the normal evaluator/learning cycle. Matching replan wrappers are exposed in both
+runtimes. They refuse provider-assisted semantic routing until that classifier boundary is
+separately admitted, reject caller-supplied route overrides, preserve route abstention as a
+provider-free review result, and perform the admission check before credentials or provider work.
+The admission remains a metadata-only caller review and never authorizes a provider, source, tool,
+learner, credential, or effect.
+
 That automatic-cycle parity gap is now closed for evaluator-guided replanning as well. The
 TypeScript `runAutoReplanCycle()` / `runAutonomousAutoReplanCycle()` facade resolves the route
 once, dispatches to the matching replan kernel, preserves evaluator-driven bounded attempts,

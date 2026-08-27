@@ -1,6 +1,7 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous-domains.js";
 import type { AutonomousDomainName } from "./autonomous-domains.js";
+import type { AutonomousLaunchAdmissionReport } from "./autonomous-launch-admission.js";
 import type { ApiClient } from "./client.js";
 import { createAutonomousApiToolExecutor } from "./autonomous-api-adapter.js";
 import {
@@ -7201,12 +7202,60 @@ export class AutonomousAgent {
   }
 
   /**
+   * Run one automatic decision cycle only after a provider-free launch admission covers its
+   * frozen route. Semantic routing is intentionally refused because its classifier call is a
+   * separate provider boundary that must be reviewed independently.
+   */
+  async runAutoCycleWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousAutoDecisionCycleOptions = {},
+  ): Promise<AutonomousAutoDecisionCycleResult> {
+    if (options.routeOverride !== undefined) throw new ArgumentError("runAutoCycleWithLaunchAdmission owns routeOverride; pass routing controls instead");
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted automatic decision-cycle execution requires provider-free routing; admit semantic routing separately before enabling it");
+    const route = await this.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    if (!route.abstained) authorizeAutonomousLaunchDomains(admission, route.selected_domains);
+    const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...cycleOptions } = options;
+    return this.runAutoCycle(task, { ...cycleOptions, routeOverride: route, semanticRouting: undefined });
+  }
+
+  /**
    * Route once and execute the bounded evaluator-guided single- or cross-domain replan cycle.
    * Replan attempts retain the reviewed route, share the aggregate cost boundary, and preserve
    * the lower-level persistence and evaluator-settlement contracts.
    */
   async runAutoReplanCycle(task: string, options: AutonomousAutoReplanCycleOptions): Promise<AutonomousAutoReplanCycleResult> {
     return runAutonomousAutoReplanCycle(this, task, options);
+  }
+
+  /** Run the automatic evaluator/replan cycle only after its provider-free route is admitted. */
+  async runAutoReplanCycleWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousAutoReplanCycleOptions,
+  ): Promise<AutonomousAutoReplanCycleResult> {
+    if (options.routeOverride !== undefined) throw new ArgumentError("runAutoReplanCycleWithLaunchAdmission owns routeOverride; pass routing controls instead");
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted automatic replan execution requires provider-free routing; admit semantic routing separately before enabling it");
+    const route = await this.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    if (!route.abstained) authorizeAutonomousLaunchDomains(admission, route.selected_domains);
+    const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...cycleOptions } = options;
+    return this.runAutoReplanCycle(task, { ...cycleOptions, routeOverride: route, semanticRouting: undefined });
   }
 
   /**

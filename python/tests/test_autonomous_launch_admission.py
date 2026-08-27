@@ -258,6 +258,82 @@ def test_launch_admission_covers_route_frozen_auto_replan_before_dispatch(monkey
         )
 
 
+def test_launch_admission_covers_automatic_decision_cycle_for_every_domain_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = _agent()
+    preflight = _complete_preflight(agent)
+    approved = agent.launch_admission(
+        preflight,
+        decision="approve",
+        authorization_digest="f" * 64,
+    )
+    tasks = {
+        "coding": "debug this Rust repository implementation",
+        "browser": "compare browser research sources",
+        "data": "validate this dataset schema",
+        "science": "design a scientific experiment hypothesis",
+        "biomedical": "review biomedical clinical evidence",
+        "neuroscience": "analyze neuroscience neural signals",
+        "operations": "plan an operations incident rollback",
+        "enterprise": "review enterprise governance compliance",
+        "multi_agent": "delegate a multi agent specialist subtask",
+        "multimodal": "align multimodal image audio evidence",
+        "cross_domain": "synthesize cross domain evidence",
+        "evaluation": "run an evaluation benchmark holdout",
+    }
+    dispatched: list[dict[str, object]] = []
+
+    def fake_cycle(**kwargs: object) -> str:
+        dispatched.append(kwargs)
+        return "dispatched"
+
+    monkeypatch.setattr(agent, "run_auto_cycle", fake_cycle)
+    for domain, task in tasks.items():
+        assert agent.run_auto_cycle_with_launch_admission(
+            task=task,
+            launch_admission=approved,
+            credentials={"opaque": object()},
+            domain=domain,
+        ) == "dispatched"
+
+    assert len(dispatched) == len(tasks)
+    for task, call in zip(tasks.values(), dispatched):
+        route = call["route_override"]
+        assert route.task_digest == agent.route(task=task).task_digest
+        assert route.selected_domains == (next(domain for domain, value in tasks.items() if value == task),)
+        assert call["semantic_routing"] is False
+        assert "domain" not in call
+
+    held = agent.launch_admission(preflight, decision="hold")
+    with pytest.raises(ArgumentError, match="not approved"):
+        # The held admission must fail before this malformed credential mapping is normalized.
+        agent.run_auto_cycle_with_launch_admission(
+            task=tasks["coding"],
+            launch_admission=held,
+            credentials={"api_key": "must-not-be-read"},
+            domain="coding",
+        )
+    assert len(dispatched) == len(tasks)
+
+    with pytest.raises(BrainRunError, match="requires provider-free routing"):
+        agent.run_auto_cycle_with_launch_admission(
+            task=tasks["coding"],
+            launch_admission=approved,
+            credentials={},
+            domain="coding",
+            semantic_routing=True,
+        )
+
+    with pytest.raises(BrainRunError, match="owns the route override"):
+        agent.run_auto_cycle_with_launch_admission(
+            task=tasks["coding"],
+            launch_admission=approved,
+            credentials={},
+            route_override=agent.route(task=tasks["coding"]),
+        )
+
+
 def test_launch_admission_covers_explicit_cross_domain_and_resumable_batches_before_credentials() -> None:
     agent = _agent()
     preflight = _complete_preflight(agent)

@@ -198,6 +198,12 @@ export const AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA = "bioprism-typescript-autono
 
 export type AutonomousAutoDecisionCycleOptions = Omit<AutonomousCrossDomainDecisionCycleOptions, "learning" | "semanticRouting"> & {
   domain?: AutonomousDomainName;
+  /** Provider-free route confidence floor used before the cycle kernel is selected. */
+  minConfidence?: number;
+  /** Provider-free route separation floor used before the cycle kernel is selected. */
+  minMargin?: number;
+  /** Maximum number of routed domains admitted into the bounded fan-out. */
+  maxDomains?: number;
   semanticRouting?: AutonomousDecisionCycleSemanticOptions;
   learning?: AutonomousDecisionCycleLearningOptions | AutonomousCrossDomainDecisionCycleLearningOptions;
   subtasks?: readonly AutonomousCrossDomainSubtask[];
@@ -228,6 +234,12 @@ export const AUTONOMOUS_AUTO_REPLAN_CYCLE_SCHEMA = "bioprism-typescript-autonomo
 
 export type AutonomousAutoReplanCycleOptions = Omit<AutonomousCrossDomainReplanCycleOptions, "evaluate" | "learning" | "semanticRouting"> & {
   domain?: AutonomousDomainName;
+  /** Provider-free route confidence floor used before the replan kernel is selected. */
+  minConfidence?: number;
+  /** Provider-free route separation floor used before the replan kernel is selected. */
+  minMargin?: number;
+  /** Maximum number of routed domains admitted into the bounded fan-out. */
+  maxDomains?: number;
   semanticRouting?: AutonomousDecisionCycleSemanticOptions;
   evaluate: AutonomousReplanEvaluator | AutonomousCrossDomainReplanEvaluator;
   learning?: AutonomousReplanLearningOptions | AutonomousCrossDomainReplanLearningOptions;
@@ -1826,7 +1838,14 @@ export async function runAutonomousAutoDecisionCycle(
       };
     }
   } else {
-    route = await agent.route(task, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    route = await agent.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
   }
 
   const crossDomain = route.cross_domain && route.selected_domains.length > 1;
@@ -1926,7 +1945,14 @@ export async function runAutonomousAutoReplanCycle(
       };
     }
   } else {
-    route = await agent.route(task, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain });
+    route = await agent.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
   }
 
   const crossDomain = route.cross_domain && route.selected_domains.length > 1;

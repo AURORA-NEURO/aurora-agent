@@ -34,7 +34,7 @@ async function readyBrain() {
   const tools = profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => binding.name));
   const evidence = profiles.flatMap((profile) => profile.workflow.stages.flatMap((stage) => stage.evidence_outputs.map((label) => `${profile.domain}:${stage.id}:${label}`)));
   const preflight = await brain.launchPreflight({ availableToolNames: tools, availableEvidence: evidence, deploymentCapabilities: capabilities });
-  return { brain, preflight, session };
+  return { agent, brain, preflight, session };
 }
 
 test("launch admission holds a blocked preflight across all domains", async () => {
@@ -119,6 +119,62 @@ test("launch admission gates facade execution before dispatch and checks route c
     await assert.rejects(
       () => fixture.brain.executeWithLaunchAdmission({ task: "write a small function", domain: "coding" }, coding, { semanticRouting: { enabled: true, approveProviderCall: true }, approveProviderCall: false }),
       /requires provider-free routing/,
+    );
+  } finally {
+    fixture.session.close();
+  }
+});
+
+test("launch admission gates automatic decision cycles across every domain before provider dispatch", async () => {
+  const fixture = await readyBrain();
+  try {
+    const admission = fixture.brain.admitLaunchPreflight(fixture.preflight, { decision: "approve", authorizationDigest: "f".repeat(64) });
+    const tasks = {
+      coding: "debug this Rust repository implementation",
+      browser: "compare browser research sources",
+      data: "validate this dataset schema",
+      science: "design a scientific experiment hypothesis",
+      biomedical: "review biomedical clinical evidence",
+      neuroscience: "analyze neuroscience neural signals",
+      operations: "plan an operations incident rollback",
+      enterprise: "review enterprise governance compliance",
+      multi_agent: "delegate a multi agent specialist subtask",
+      multimodal: "align multimodal image audio evidence",
+      evaluation: "run an evaluation benchmark holdout",
+    };
+    for (const [domain, task] of Object.entries(tasks)) {
+      const result = await fixture.agent.runAutoCycleWithLaunchAdmission(task, admission, { domain, approveProviderCall: false });
+      assert.equal(result.route.selected_domains.length, 1, domain);
+      assert.equal(result.route.selected_domains[0], domain, domain);
+      assert.equal(result.status, "approval_required", domain);
+    }
+
+    const codingOnly = fixture.brain.admitLaunchPreflight(fixture.preflight, { decision: "approve", approvedDomains: ["coding"], authorizationDigest: "1".repeat(64) });
+    await assert.rejects(
+      () => fixture.agent.runAutoCycleWithLaunchAdmission("review the biomedical evidence", codingOnly, { domain: "biomedical", approveProviderCall: false }),
+      /does not approve requested domains/,
+    );
+    const held = fixture.brain.admitLaunchPreflight(fixture.preflight, { decision: "hold" });
+    await assert.rejects(
+      () => fixture.agent.runAutoCycleWithLaunchAdmission("debug this repository", held, { domain: "coding", approveProviderCall: false }),
+      /not approved/,
+    );
+    await assert.rejects(
+      () => fixture.agent.runAutoCycleWithLaunchAdmission("debug this repository", admission, { domain: "coding", semanticRouting: { enabled: true, approveProviderCall: true } }),
+      /requires provider-free routing/,
+    );
+    const replan = await fixture.agent.runAutoReplanCycleWithLaunchAdmission("debug this repository", admission, {
+      domain: "coding",
+      approveProviderCall: false,
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: "unused-launch-reviewer", evaluator_version: "1", reward: 0, passed: false, replan_requested: false }),
+    });
+    assert.equal(replan.route.primary_domain, "coding");
+    assert.equal(replan.status, "approval_required");
+    const route = await fixture.agent.route("debug this repository", { domain: "coding" });
+    await assert.rejects(
+      () => fixture.agent.runAutoCycleWithLaunchAdmission("debug this repository", admission, { routeOverride: route, approveProviderCall: false }),
+      /owns routeOverride/,
     );
   } finally {
     fixture.session.close();
