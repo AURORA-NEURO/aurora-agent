@@ -4213,3 +4213,13 @@ export {
   validateWeavelangClosureReceipt,
 } from "./research-contracts.js";
 export type { WeavelangClosureReceipt } from "./research-contracts.js";
+
+export {
+  BUNDLE_RETRIEVAL_ASSURANCE_FEATURE_ID,
+  BUNDLE_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
+  BUNDLE_RETRIEVAL_ASSURANCE_INPUT_SCHEMA,
+  BUNDLE_RETRIEVAL_ASSURANCE_OUTPUT_SCHEMA,
+  bundleRetrievalAssuranceDigest,
+  validateBundleEvidenceSynthesis,
+} from "./research-contracts.js";
+export type { BundleEvidenceSynthesis } from "./research-contracts.js";

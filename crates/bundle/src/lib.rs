@@ -114,6 +114,7 @@ pub mod provenance;
 pub mod reproduce;
 pub mod signature;
 pub mod trust;
+pub mod retrieval_bundle_assurance;
 
 pub use attestation::{
     Attestation, AttestationCheck, AttestationPurpose, ClaimedProducer, KeyHolderAuthenticated,
@@ -149,4 +150,11 @@ pub use trust::{
     KeyDelegation, KeyRegistry, KeyRevocation, KeyRole, KeyRotation, RegisteredKey, TrustError,
     TrustPolicy, TrustReport, TrustVerdict, MAX_DELEGATION_DEPTH, MAX_TRUST_EVENTS, MAX_TRUST_KEYS,
     TRUST_REGISTRY_SCHEMA_VERSION,
+};
+pub use retrieval_bundle_assurance::{
+    assure_retrieval_bundle, retrieval_bundle_assurance_manifest, BundleAssuranceError,
+    BundleEvidenceCandidate, BundleEvidenceSynthesis, BundlePeerSummary, BundleRetrievalQuery,
+    BundleSynthesisDisposition,
+    CONTRACT_VERSION as RETRIEVAL_BUNDLE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_BUNDLE_ASSURANCE_FEATURE_ID,
 };
