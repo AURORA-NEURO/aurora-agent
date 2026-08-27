@@ -136,6 +136,7 @@ export const AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA = "bioprism-typescript-auton
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
 export const AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomous-brain-execution-policy/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-brain-auto-execution/0.1" as const;
+export const AUTONOMOUS_BRAIN_AUTO_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-batch/0.1" as const;
 export const MAX_AUTONOMOUS_BRAIN_BATCH = 64;
 export const MAX_AUTONOMOUS_BRAIN_PARALLELISM = 8;
 export const MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES = 128_000;
@@ -380,6 +381,38 @@ export interface AutonomousBrainAutoTraceOptions extends AutonomousBrainAutoExec
 export interface AutonomousBrainTracedAutoExecution {
   execution: AutonomousBrainAutoExecution;
   trace: AutonomousRunTraceSummary;
+}
+
+export type AutonomousBrainAutoBatchOptionFactory<T> = T | ((input: AutonomousBrainRequest, index: number) => T);
+
+export interface AutonomousBrainAutoBatchOptions {
+  maxParallelism?: number;
+  stopOnError?: boolean;
+  /** One automatic policy for every item, or a caller-owned per-item policy factory. */
+  execution?: AutonomousBrainAutoBatchOptionFactory<AutonomousBrainAutoExecuteOptions>;
+}
+
+export interface AutonomousBrainAutoBatchItem {
+  index: number;
+  status: "succeeded" | "refused" | "failed" | "omitted";
+  task_digest: string | null;
+  execution?: AutonomousBrainAutoExecution;
+  error_class?: string;
+  failure_code?: string;
+}
+
+export interface AutonomousBrainAutoBatchResult {
+  schema: typeof AUTONOMOUS_BRAIN_AUTO_BATCH_SCHEMA;
+  status: "completed" | "partial" | "failed";
+  items: AutonomousBrainAutoBatchItem[];
+  completed_count: number;
+  failed_count: number;
+  omitted_count: number;
+  max_parallelism: number;
+  stop_on_error: boolean;
+  batch_digest: string;
+  retention: "metadata_only_tasks_and_automatic_connector_values_transient";
+  secret_material: "never_returned";
 }
 
 /** Options for executing one caller-approved, digest-bound model-selection preview. */
@@ -1776,6 +1809,69 @@ export class AutonomousBrainFacade {
     return this.agent.revokeActivation(reason);
   }
 
+  /** Execute automatic route-to-invocation work with bounded concurrency and deterministic order. */
+  async executeAutoBatch(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainAutoBatchOptions = {}): Promise<AutonomousBrainAutoBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const { maxParallelism, stopOnError } = boundedBatchControls(options);
+    const items: Array<AutonomousBrainAutoBatchItem | undefined> = new Array(inputs.length);
+    let nextIndex = 0;
+    let halted = false;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= inputs.length) return;
+        if (halted) {
+          items[index] = { index, status: "omitted", task_digest: null };
+          continue;
+        }
+        try {
+          const policy = batchOption(options.execution, inputs[index]!, index) ?? {};
+          const execution = await this.executeAuto(inputs[index]!, policy);
+          const succeeded = execution.status === "completed";
+          const refused = batchRefused(execution.status);
+          items[index] = { index, status: succeeded ? "succeeded" : refused ? "refused" : "failed", task_digest: execution.plan.task_digest, execution };
+          if (stopOnError && !succeeded) halted = true;
+        } catch (error) {
+          const projection = errorProjection(error);
+          items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
+          if (stopOnError) halted = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(maxParallelism, inputs.length) }, () => worker()));
+    const normalized = items.map((item, index) => item ?? { index, status: "failed" as const, task_digest: null, error_class: "AutonomousBrainError", failure_code: "missing_batch_result" });
+    const completed = normalized.filter((item) => item.status === "succeeded").length;
+    const failed = normalized.filter((item) => item.status === "failed" || item.status === "refused").length;
+    const omitted = normalized.filter((item) => item.status === "omitted").length;
+    return {
+      schema: AUTONOMOUS_BRAIN_AUTO_BATCH_SCHEMA,
+      status: batchStatus(completed, failed, omitted),
+      items: normalized,
+      completed_count: completed,
+      failed_count: failed,
+      omitted_count: omitted,
+      max_parallelism: maxParallelism,
+      stop_on_error: stopOnError,
+      batch_digest: batchDigest(normalized),
+      retention: "metadata_only_tasks_and_automatic_connector_values_transient",
+      secret_material: "never_returned",
+    };
+  }
+
+  /** Execute automatic batches only after every frozen route is covered by launch admission. */
+  async executeAutoBatchWithLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoBatchOptions = {},
+  ): Promise<AutonomousBrainAutoBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const policies = inputs.map((input, index) => batchOption(options.execution, input, index) ?? {});
+    for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic batch requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeAutoBatchLaunchAdmission(inputs, policies, admission);
+    return this.executeAutoBatch(inputs, { ...options, execution: (_input, index) => policies[index]! });
+  }
+
   /** Execute independent brain requests with bounded concurrency and deterministic result order. */
   async executeBatch(inputs: readonly AutonomousBrainRequest[], options: { maxParallelism?: number; stopOnError?: boolean; execution?: AutonomousBrainExecuteOptions } = {}): Promise<AutonomousBrainBatchResult> {
     if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
@@ -2111,6 +2207,22 @@ export class AutonomousBrainFacade {
     authorizeAutonomousLaunchDomains(admission, [...selected]);
   }
 
+  private async authorizeAutoBatchLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    policies: readonly AutonomousBrainAutoExecuteOptions[],
+    admission: AutonomousLaunchAdmissionReport,
+  ): Promise<void> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (policies.length !== inputs.length) throw new ArgumentError("autonomous brain automatic batch policies do not match the requests");
+    const selected = new Set<AutonomousDomainName>();
+    for (const [index, input] of inputs.entries()) {
+      const policy = policies[index]!;
+      const prepared = await this.prepare(validateRequest(input), undefined, policy, policy.approveProviderCall);
+      for (const domainName of prepared.route.selected_domains) selected.add(domainName);
+    }
+    if (selected.size > 0) authorizeAutonomousLaunchDomains(admission, [...selected]);
+  }
+
   private async prepare(
     input: AutonomousBrainRequest,
     semanticRouting?: AutonomousBrainSemanticRoutingInput,
@@ -2128,7 +2240,14 @@ export class AutonomousBrainFacade {
       : semanticRouteOverride;
     const route = routeOverride === undefined
       ? semanticRoute === null
-        ? await this.agent.route(request.task, { domain: request.domain, hints: request.hints, allowCrossDomain: request.allow_cross_domain ?? true })
+        ? await this.agent.route(request.task, {
+          domain: request.domain ?? source.domain,
+          hints: request.hints ?? source.hints,
+          minConfidence: source.minConfidence,
+          minMargin: source.minMargin,
+          maxDomains: source.maxDomains,
+          allowCrossDomain: request.allow_cross_domain ?? source.allowCrossDomain ?? true,
+        })
         : await validateAutonomousRouteOverride(request.task, semanticRoute.route)
       : await validateAutonomousRouteOverride(request.task, routeOverride);
     const plan = semanticRouteOverride === undefined

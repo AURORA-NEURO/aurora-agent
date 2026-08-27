@@ -166,6 +166,33 @@ test("brain facade automatic execution preserves the separate provider-planning 
   assert.equal(completed.automatic?.result?.status, "completed");
 });
 
+test("brain facade automatic batches preserve per-item policy and deterministic all-domain accounting", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const inputs = AUTONOMOUS_DOMAIN_NAMES.map((domain) => ({ task: tasks[domain], domain }));
+  const preflight = await brain.launchPreflight();
+  const heldAdmission = brain.admitLaunchPreflight(preflight, { decision: "hold" });
+  await assert.rejects(
+    () => brain.executeAutoBatchWithLaunchAdmission(inputs, heldAdmission, { execution: { approveProviderCall: true } }),
+    /not approved/,
+  );
+
+  const batch = await brain.executeAutoBatch(inputs, {
+    maxParallelism: 4,
+    execution: (_input, index) => ({ approveProviderCall: true, executionAttempt: index + 1 }),
+  });
+  assert.equal(batch.schema, "bioprism-typescript-autonomous-brain-auto-batch/0.1");
+  assert.equal(batch.status, "completed");
+  assert.equal(batch.completed_count, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(batch.failed_count, 0);
+  assert.equal(batch.omitted_count, 0);
+  assert.deepEqual(batch.items.map((item) => item.index), [...Array(AUTONOMOUS_DOMAIN_NAMES.length).keys()]);
+  assert.ok(batch.items.every((item) => item.status === "succeeded" && item.execution?.automatic?.status === "completed"));
+  assert.match(batch.batch_digest, /^[0-9a-f]{64}$/);
+});
+
 test("brain facade automatic execution composes connector observation, launch admission, and metadata tracing", async () => {
   const seen = [];
   const runtime = localRuntime((request) => seen.push(request));

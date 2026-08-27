@@ -648,6 +648,12 @@ boundary used by direct and adaptive execution. For deployments with a completed
 before connector/provider dispatch; semantic routing is intentionally a separate approval
 boundary for that method.
 
+For independent work items, `executeAutoBatch()` applies the same automatic boundary with a
+maximum of 64 requests, bounded parallelism, deterministic output order, per-item policy
+factories, and explicit `succeeded`/`refused`/`failed`/`omitted` accounting. Its
+`executeAutoBatchWithLaunchAdmission()` variant first unions the provider-free route domains for
+all items and refuses the batch unless one reviewed admission covers that complete set.
+
 The automatic facade is deliberately additive: `execute()` remains the lower-level direct
 provider/cross-domain path, while `executeAuto()` is the explicit route -> blueprint -> automatic
 planning path. This makes the chosen autonomy level visible in application code instead of
