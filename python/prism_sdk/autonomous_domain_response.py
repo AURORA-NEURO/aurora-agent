@@ -20,6 +20,11 @@ import re
 from typing import Any, Mapping, Sequence
 
 from .authoring import content_digest
+from .autonomous_domain_quality import (
+    autonomous_domain_quality_policy,
+    autonomous_domain_quality_prompt,
+    evaluate_autonomous_domain_response_quality,
+)
 from .errors import ArgumentError
 
 
@@ -32,7 +37,7 @@ MAX_AUTONOMOUS_DOMAIN_RESPONSE_ITEMS = 64
 MAX_AUTONOMOUS_DOMAIN_RESPONSE_ITEM_BYTES = 8_192
 MAX_AUTONOMOUS_DOMAIN_RESPONSE_ANSWER_BYTES = 64_000
 MAX_AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_BYTES = 1_000_000
-AUTONOMOUS_DOMAIN_RESPONSE_EVALUATOR_VERSION = "1"
+AUTONOMOUS_DOMAIN_RESPONSE_EVALUATOR_VERSION = "2"
 AUTONOMOUS_DOMAIN_RESPONSE_PASS_THRESHOLD = 0.8
 
 AUTONOMOUS_DOMAIN_RESPONSE_FIELDS: dict[str, tuple[str, ...]] = {
@@ -324,6 +329,7 @@ def _response_schema(domain: str, workflow_id: str, stage_ids: Sequence[str], fi
 
 
 def _prompt_contract(domain: str, workflow_id: str, stage_ids: Sequence[str], fields: Sequence[str]) -> str:
+    quality = autonomous_domain_quality_policy(domain)
     return " ".join(
         (
             f"Return only one JSON object matching the {AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA} contract for domain {domain}.",
@@ -331,6 +337,7 @@ def _prompt_contract(domain: str, workflow_id: str, stage_ids: Sequence[str], fi
             f"Each stage must report status, evidence, findings, uncertainty, and open_questions. Populate every domain_details field: {', '.join(fields)}.",
             "Separate observations from inferences, mark missing evidence and uncertainty explicitly, and put proposed work in next_actions.",
             "Never claim that a provider response, tool dispatch, simulation, or plan proves an external-world effect.",
+            autonomous_domain_quality_prompt(quality),
         )
     )
 
@@ -490,6 +497,7 @@ def evaluate_autonomous_domain_response(value: Any, contract: AutonomousDomainRe
     """Return a deterministic structural reward for a validated response."""
 
     response = validate_autonomous_domain_response(value, contract)
+    quality = evaluate_autonomous_domain_response_quality(response, contract)
     response_dict = response.to_dict()
     response_digest = content_digest(response_dict)
     stage_reporting = [int(bool(stage.evidence or stage.findings or stage.uncertainty or stage.open_questions)) for stage in response.stages]
@@ -504,6 +512,7 @@ def evaluate_autonomous_domain_response(value: Any, contract: AutonomousDomainRe
         "uncertainty_disclosed": float(bool(response.uncertainty)),
         "evidence_gaps_disclosed": float(bool(response.evidence_gaps)),
         "next_actions_present": float(bool(response.next_actions)),
+        **quality.signals,
     }
     weights = {
         "answer_present": 1.0,
@@ -515,11 +524,12 @@ def evaluate_autonomous_domain_response(value: Any, contract: AutonomousDomainRe
         "uncertainty_disclosed": 1.5,
         "evidence_gaps_disclosed": 1.0,
         "next_actions_present": 1.0,
+        **quality.weights,
     }
     total_weight = sum(weights.values())
     reward = round(sum(signals[name] * weight for name, weight in weights.items()) / total_weight, 12)
     missing = tuple(name for name, score in signals.items() if score < 1.0)
-    passed = reward >= AUTONOMOUS_DOMAIN_RESPONSE_PASS_THRESHOLD
+    passed = reward >= AUTONOMOUS_DOMAIN_RESPONSE_PASS_THRESHOLD and quality.passed
     evaluator_id = f"autonomous-{contract.domain}-response-integrity"
     feedback_digest = content_digest({"contract_digest": contract.contract_digest, "response_digest": response_digest, "signals": signals})
     failure_class = None if passed else "response_integrity_gate"

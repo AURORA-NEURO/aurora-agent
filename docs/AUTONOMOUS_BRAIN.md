@@ -139,6 +139,34 @@ evidence, approval, provider, evaluator, and learning gates. A complete kit ther
 domain architecture is internally wired; it does not mean a deployment has configured a model or
 approved a live action.
 
+### Domain quality gates
+
+Structured responses now carry a second, domain-specific readiness layer. The quality registry
+contains a reviewed policy for every built-in domain with critical decision fields, safety-control
+fields, stage-specific reporting requirements, and provider prompt guidance. For example, coding
+must report executable verification and rollback risk; operations must report blast radius,
+stop conditions, recovery, approval, and the execution boundary; biomedical work must report
+scope, applicability, uncertainty, and human escalation; evaluation work must report coverage,
+regressions, replay outcomes, and reproduction steps.
+
+```typescript
+const policy = autonomousDomainQualityPolicy("operations");
+const report = evaluateAutonomousDomainResponseQuality(response, contract, policy);
+// report.passed is a structural readiness gate, not proof that an operation occurred.
+// report.missing_signals and report.recommendations are safe replan feedback.
+```
+
+The existing `evaluateAutonomousDomainResponse(...)` merges these signals into the value-only
+reward used by prompt learning, model selection, and explicit bandit settlement. A high aggregate
+score cannot hide a missing domain safety or stage-control signal: the quality gate requires all
+domain controls to be satisfied. The outer `response_integrity_gate` failure class remains stable
+for existing callers, while the `quality_*` signals and recommendations identify the repair.
+Policies and reports are digest-bound, provider-free, and secret-free. Python exposes matching
+`autonomous_domain_quality_policy(...)`, `evaluate_autonomous_domain_response_quality(...)`, and
+`validate_autonomous_domain_quality_policy(...)` functions. These checks improve composition and
+decision readiness; they are not medical, scientific, operational, enterprise, or external-world
+truth evaluators, and they never authorize an effect.
+
 Semantic provider routing is covered by the same boundary. `route_with_provider`,
 `prepare_auto_with_provider`, and Python `run_auto(..., semantic_routing=True)` perform a
 provider-free cross-domain admission before model selection or classifier invocation. A strict
