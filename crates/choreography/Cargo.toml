@@ -11,6 +11,7 @@ description = "Multiparty choreography: session types with projection, bounded p
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-weave = { workspace = true }
+bioprism-foundation = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

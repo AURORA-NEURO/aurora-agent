@@ -7140,3 +7140,13 @@ __all__ += [
     "SemanticParityWitness",
     "compare_semantic_parity",
 ]
+
+from .retrieval_synthesis_workbench import (
+    EvidenceSynthesis,
+    render_retrieval_workbench,
+)
+
+__all__ += [
+    "EvidenceSynthesis",
+    "render_retrieval_workbench",
+]

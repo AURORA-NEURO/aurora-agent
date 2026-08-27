@@ -41,6 +41,7 @@
 pub mod adjudicate;
 pub mod check;
 pub mod quorum;
+pub mod retrieval_synthesis_workbench;
 pub mod saga;
 pub mod session;
 
@@ -56,6 +57,13 @@ pub use check::{
 pub use quorum::{
     CheckedIndependence, Cluster, Correlation, CorrelationReason, EvidenceBasis, Finding, Juror,
     JurorDissent, Jury, Question, QuestionKind, QuorumOutcome, QuorumRule, Vote,
+};
+pub use retrieval_synthesis_workbench::{
+    capability_manifest as retrieval_workbench_capability_manifest,
+    render as render_retrieval_workbench, EvidenceSynthesis, RetrievalCandidate,
+    ScopedRetrievalQuery, WorkbenchError, CONTRACT_VERSION as RETRIEVAL_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_WORKBENCH_FEATURE_ID, INPUT_SCHEMA as RETRIEVAL_WORKBENCH_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as RETRIEVAL_WORKBENCH_OUTPUT_SCHEMA,
 };
 pub use saga::{
     ActionClass, Compensation, CompensationReport, Failure, FailurePolicy, Recovery,
