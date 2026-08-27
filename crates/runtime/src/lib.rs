@@ -73,6 +73,7 @@ pub mod sandbox;
 pub mod seam;
 pub mod secret;
 pub mod tape;
+pub mod context_compilation_contract;
 
 pub use budget::{
     Accounting, BudgetController, BudgetPlan, BudgetWarning, ChargeStatus, Limit, RuntimeResource,
@@ -95,6 +96,15 @@ pub use orchestrator::{
 pub use provider::{
     Artifact, Capabilities, ContainerProvider, ExecutionPlan, ExecutorProvider, InProcessProvider,
     StateHandle, SubprocessProvider,
+};
+pub use context_compilation_contract::{
+    capability_manifest as context_compilation_capability_manifest,
+    compile as compile_context_contract,
+    compile_json as compile_context_contract_json,
+    CertifiedDecisionSection, ContextContractError, ContextContractReceipt, DecisionQuery,
+    FactBinding, CONTRACT_VERSION as CONTEXT_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_CONTRACT_FEATURE_ID, INPUT_SCHEMA as CONTEXT_CONTRACT_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as CONTEXT_CONTRACT_OUTPUT_SCHEMA,
 };
 pub use research_run::{
     ResearchExecutionSession, ResearchReplayBundle, ResearchRuntimeError,

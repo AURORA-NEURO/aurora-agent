@@ -7100,3 +7100,13 @@ __all__ += [
     "FederatedAnalysisReceipt",
     "assure_federated_analysis",
 ]
+
+from .context_compilation_contract import (
+    ContextContractReceipt,
+    compile_context_contract,
+)
+
+__all__ += [
+    "ContextContractReceipt",
+    "compile_context_contract",
+]
