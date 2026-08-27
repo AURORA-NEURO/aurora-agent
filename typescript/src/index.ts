@@ -3476,6 +3476,16 @@ export {
 } from "./autonomous-memory.js";
 
 export {
+  CLI_FEDERATED_RETRIEVAL_FEATURE_ID,
+  CLI_FEDERATED_RETRIEVAL_CONTRACT_VERSION,
+  CLI_FEDERATED_RETRIEVAL_INPUT_SCHEMA,
+  CLI_FEDERATED_RETRIEVAL_OUTPUT_SCHEMA,
+  validateCliFederatedRetrievalAssuranceReceipt,
+  cliFederatedRetrievalAssuranceReceiptDigest,
+} from "./research-contracts.js";
+export type { CliFederatedRetrievalAssuranceReceipt } from "./research-contracts.js";
+
+export {
   CLI_PROTOCOL_SIMULATION_ASSURANCE_FEATURE_ID,
   CLI_PROTOCOL_SIMULATION_ASSURANCE_CONTRACT_VERSION,
   CLI_PROTOCOL_SIMULATION_ASSURANCE_INPUT_SCHEMA,

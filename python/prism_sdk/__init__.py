@@ -7160,3 +7160,13 @@ __all__ += [
     "ExecutionRun",
     "admit_computational_execution",
 ]
+
+from .federated_retrieval_assurance import (
+    FederatedRetrievalAssuranceReceipt,
+    assure_federated_retrieval,
+)
+
+__all__ += [
+    "FederatedRetrievalAssuranceReceipt",
+    "assure_federated_retrieval",
+]

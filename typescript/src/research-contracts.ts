@@ -5153,3 +5153,26 @@ export function validateGraphComputationalExecutionReceipt(receipt:GraphComputat
   if(receipt.effect_receipts.some(effect=>!effect.startsWith("exchange:permitted-artifacts:")&&effect!=="block:unsafe-release")) throw new Error("computational execution effect is outside permitted-artifact gate");
 }
 export function graphComputationalExecutionReceiptDigest(receipt:GraphComputationalExecutionReceipt):string { validateGraphComputationalExecutionReceipt(receipt); return digestJsonSync(receipt); }
+
+export const CLI_FEDERATED_RETRIEVAL_FEATURE_ID = "AFA-cli-P02-F28" as const;
+export const CLI_FEDERATED_RETRIEVAL_CONTRACT_VERSION = "cli-federated-continual-retrieval-synthesis-assurance/1.0" as const;
+export const CLI_FEDERATED_RETRIEVAL_INPUT_SCHEMA = "ScopedRetrievalQuery4@1" as const;
+export const CLI_FEDERATED_RETRIEVAL_OUTPUT_SCHEMA = "EvidenceSynthesis7@1" as const;
+export interface CliFederatedRetrievalAssuranceReceipt {
+  schema_version:string; contract_version:string; feature_id:string; request_id:string; corpus_id:string; scope:string; query:string; disposition:"qualified"|"unresolved"|"blocked";
+  candidate_order:string[]; rank_order:string[]; selected_order:string[]; unresolved_order:string[]; blocked_order:string[]; required_source_order:string[]; observed_source_order:string[]; missing_source_order:string[]; stale_order:string[]; contradiction_order:string[];
+  peer_order:string[]; qualified_peer_order:string[]; missing_peer_order:string[]; blocked_peer_order:string[]; checks:string[]; omissions:string[]; uncertainty:string[]; negative_evidence:string[]; replay_identity:string; local_evidence_digest:string; federation_envelope_digest:string;
+  artifact:Record<string,unknown>; effect_receipts:string[]; raw_data_local:true; boundary:string;
+}
+export function validateCliFederatedRetrievalAssuranceReceipt(receipt:CliFederatedRetrievalAssuranceReceipt):void {
+  const ordered=(values:string[])=>JSON.stringify([...new Set(values)].sort())===JSON.stringify(values);
+  if(receipt.schema_version!==RESEARCH_CONTRACT_SCHEMA_VERSION||receipt.contract_version!==CLI_FEDERATED_RETRIEVAL_CONTRACT_VERSION||receipt.feature_id!==CLI_FEDERATED_RETRIEVAL_FEATURE_ID||receipt.boundary!==PRECLINICAL_BOUNDARY||receipt.raw_data_local!==true||!receipt.request_id.trim()||!receipt.corpus_id.trim()||!receipt.scope.trim()||!receipt.query.trim()||!receipt.candidate_order.length||receipt.rank_order.length!==receipt.candidate_order.length||!receipt.peer_order.length||!receipt.checks.length||!receipt.effect_receipts.length) throw new Error("federated retrieval identity, locality, candidates, peers, checks, or effects are incomplete");
+  for(const values of[receipt.candidate_order,receipt.selected_order,receipt.unresolved_order,receipt.blocked_order,receipt.required_source_order,receipt.observed_source_order,receipt.missing_source_order,receipt.stale_order,receipt.contradiction_order,receipt.peer_order,receipt.qualified_peer_order,receipt.missing_peer_order,receipt.blocked_peer_order,receipt.checks,receipt.omissions,receipt.uncertainty,receipt.negative_evidence,receipt.effect_receipts]) if(!ordered(values)) throw new Error("federated retrieval ordering is not canonical");
+  if(JSON.stringify([...new Set(receipt.rank_order)].sort())!==JSON.stringify([...new Set(receipt.candidate_order)].sort())) throw new Error("federated retrieval rank order is not a candidate permutation");
+  const candidatePartition=[...receipt.selected_order,...receipt.unresolved_order,...receipt.blocked_order]; if(new Set(candidatePartition).size!==candidatePartition.length||JSON.stringify([...new Set(candidatePartition)].sort())!==JSON.stringify([...new Set(receipt.candidate_order)].sort())) throw new Error("federated retrieval candidate states do not partition candidates");
+  const peerPartition=[...receipt.qualified_peer_order,...receipt.missing_peer_order,...receipt.blocked_peer_order]; if(new Set(peerPartition).size!==peerPartition.length||JSON.stringify([...new Set(peerPartition)].sort())!==JSON.stringify([...new Set(receipt.peer_order)].sort())) throw new Error("federated retrieval peer states do not partition peers");
+  for(const digest of[receipt.replay_identity,receipt.local_evidence_digest,receipt.federation_envelope_digest,receipt.artifact.content_hash]) if(typeof digest!=="string"||!/^[0-9a-f]{64}$/.test(digest)) throw new Error("federated retrieval digest is invalid");
+  if(receipt.artifact.content_type!=="application/vnd.aurora.federated-evidence-synthesis+json") throw new Error("federated retrieval artifact type is invalid");
+  if(receipt.effect_receipts.some(effect=>!effect.startsWith("exchange:aggregate-evidence:")&&effect!=="block:unsafe-release")) throw new Error("federated retrieval effect is outside aggregate-only exchange gate");
+}
+export function cliFederatedRetrievalAssuranceReceiptDigest(receipt:CliFederatedRetrievalAssuranceReceipt):string { validateCliFederatedRetrievalAssuranceReceipt(receipt); return digestJsonSync(receipt); }
