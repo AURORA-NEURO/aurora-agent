@@ -12,6 +12,7 @@ pub mod evolution;
 pub mod hash;
 pub mod id;
 pub mod interpretation_plane;
+pub mod throughput_evidence_surveillance_contract_model;
 
 pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
 pub use error::{CanonicalError, IdError};
@@ -29,4 +30,17 @@ pub use interpretation_plane::{
     InterpretationPlaneRequest, CONTRACT_VERSION as INTERPRETATION_PLANE_CONTRACT_VERSION,
     FEATURE_ID as INTERPRETATION_PLANE_FEATURE_ID,
     PRECLINICAL_BOUNDARY as INTERPRETATION_PLANE_BOUNDARY,
+};
+pub use throughput_evidence_surveillance_contract_model::{
+    model_throughput_evidence_surveillance_contract,
+    throughput_evidence_surveillance_contract_model_manifest,
+    ContractClaim as IdsThroughputContractClaim,
+    ContractDisposition as IdsThroughputContractDisposition,
+    ContractModelError as IdsThroughputContractModelError,
+    EvidenceFeedRequest as IdsEvidenceFeedRequest,
+    EvidenceState as IdsEvidenceState,
+    EvidenceSurveillanceContractReceipt as IdsEvidenceSurveillanceContractReceipt,
+    TypedArtifact as IdsTypedArtifact,
+    CONTRACT_VERSION as IDS_THROUGHPUT_CONTRACT_VERSION,
+    FEATURE_ID as IDS_THROUGHPUT_FEATURE_ID,
 };

@@ -5390,3 +5390,25 @@ export function validateBiolangCapabilityManifest(receipt:BiolangCapabilityManif
   if(receipt.disposition!=="qualified"&&JSON.stringify(receipt.effect_receipts)!==JSON.stringify(["block:unsafe-release"])) throw new Error("non-qualified BioLang manifest must block release");
 }
 export function biolangContractFrontierDigest(receipt:BiolangCapabilityManifest):string { validateBiolangCapabilityManifest(receipt); return digestJsonSync(receipt); }
+
+export const IDS_THROUGHPUT_EVIDENCE_FEATURE_ID = "AFA-ids-P01-F07" as const;
+export const IDS_THROUGHPUT_EVIDENCE_CONTRACT_VERSION = "ids-prospective-throughput-evidence-surveillance-contract-model/1.0" as const;
+export const IDS_THROUGHPUT_EVIDENCE_INPUT_SCHEMA = "EvidenceFeed3@1" as const;
+export const IDS_THROUGHPUT_EVIDENCE_OUTPUT_SCHEMA = "QualifiedEvidenceSet2@1" as const;
+export interface IdsEvidenceSurveillanceContractReceipt {
+  schema_version:string; contract_version:string; feature_id:string; request_id:string; input_schema:string; output_schema:string; batch_id:string; checkpoint_seq:number;
+  disposition:"compatible"|"partial"|"unknown"|"blocked"; candidate_order:string[]; retained_order:string[]; unknown_order:string[]; denied_order:string[]; overflow_order:string[];
+  omission_order:string[]; semantic_loss:string[]; queue_digest:string; checkpoint_digest:string; contract_digest:string; canonical_digest:string; provenance_digest:string; replay_identity:string;
+  effect_receipts:string[]; artifact:Record<string,unknown>; raw_data_local:true; boundary:string;
+}
+export function validateIdsEvidenceSurveillanceContractReceipt(receipt:IdsEvidenceSurveillanceContractReceipt):void {
+  const ordered=(values:string[])=>JSON.stringify([...new Set(values)].sort())===JSON.stringify(values);
+  if(receipt.schema_version!==RESEARCH_CONTRACT_SCHEMA_VERSION||receipt.contract_version!==IDS_THROUGHPUT_EVIDENCE_CONTRACT_VERSION||receipt.feature_id!==IDS_THROUGHPUT_EVIDENCE_FEATURE_ID||receipt.boundary!==PRECLINICAL_BOUNDARY||receipt.raw_data_local!==true||!receipt.request_id.trim()||receipt.input_schema!==IDS_THROUGHPUT_EVIDENCE_INPUT_SCHEMA||receipt.output_schema!==IDS_THROUGHPUT_EVIDENCE_OUTPUT_SCHEMA||!receipt.batch_id.trim()||receipt.checkpoint_seq===0||!receipt.candidate_order.length||!receipt.effect_receipts.length||!["compatible","partial","unknown","blocked"].includes(receipt.disposition)) throw new Error("ids evidence contract identity, schemas, checkpoint, locality, candidates, or effects are incomplete");
+  for(const values of[receipt.candidate_order,receipt.retained_order,receipt.unknown_order,receipt.denied_order,receipt.overflow_order,receipt.omission_order,receipt.semantic_loss,receipt.effect_receipts]) if(!ordered(values)) throw new Error("ids evidence contract ordering is not canonical");
+  const classified=[...receipt.retained_order,...receipt.unknown_order,...receipt.denied_order,...receipt.overflow_order]; if(JSON.stringify([...new Set(classified)].sort())!==JSON.stringify([...new Set(receipt.candidate_order)].sort())||new Set(classified).size!==classified.length||new Set(receipt.candidate_order).size!==receipt.candidate_order.length) throw new Error("ids evidence contract states do not partition candidates");
+  for(const digest of[receipt.queue_digest,receipt.checkpoint_digest,receipt.contract_digest,receipt.canonical_digest,receipt.provenance_digest,receipt.replay_identity,receipt.artifact.content_hash]) if(typeof digest!=="string"||!/^[0-9a-f]{64}$/.test(digest)) throw new Error("ids evidence contract digest is invalid");
+  if(receipt.artifact.content_type!=="application/vnd.aurora.qualified-throughput-evidence-set+json"||receipt.artifact.boundary!==PRECLINICAL_BOUNDARY) throw new Error("ids evidence artifact metadata is invalid");
+  if(receipt.effect_receipts.some(effect=>!effect.startsWith("read:local-evidence-contract:")&&effect!=="block:unsafe-release")) throw new Error("ids evidence contract effect is outside local-read gate");
+  if(receipt.disposition==="blocked"&&JSON.stringify(receipt.effect_receipts)!==JSON.stringify(["block:unsafe-release"])) throw new Error("blocked ids evidence contract must explicitly block release");
+}
+export function idsThroughputEvidenceSurveillanceDigest(receipt:IdsEvidenceSurveillanceContractReceipt):string { validateIdsEvidenceSurveillanceContractReceipt(receipt); return digestJsonSync(receipt); }

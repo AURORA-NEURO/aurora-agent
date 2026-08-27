@@ -4103,3 +4103,13 @@ export {
   validateBiolangCapabilityManifest,
 } from "./research-contracts.js";
 export type { BiolangCapabilityManifest } from "./research-contracts.js";
+
+export {
+  IDS_THROUGHPUT_EVIDENCE_FEATURE_ID,
+  IDS_THROUGHPUT_EVIDENCE_CONTRACT_VERSION,
+  IDS_THROUGHPUT_EVIDENCE_INPUT_SCHEMA,
+  IDS_THROUGHPUT_EVIDENCE_OUTPUT_SCHEMA,
+  idsThroughputEvidenceSurveillanceDigest,
+  validateIdsEvidenceSurveillanceContractReceipt,
+} from "./research-contracts.js";
+export type { IdsEvidenceSurveillanceContractReceipt } from "./research-contracts.js";
