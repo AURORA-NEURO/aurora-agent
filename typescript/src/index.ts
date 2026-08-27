@@ -4183,3 +4183,13 @@ export {
   validateOpsReplicationRecord,
 } from "./research-contracts.js";
 export type { OpsReplicationRecord } from "./research-contracts.js";
+
+export {
+  FIBER_SEMANTIC_PARITY_FEATURE_ID,
+  FIBER_SEMANTIC_PARITY_CONTRACT_VERSION,
+  FIBER_SEMANTIC_PARITY_INPUT_SCHEMA,
+  FIBER_SEMANTIC_PARITY_OUTPUT_SCHEMA,
+  fiberSemanticParityDigest,
+  validateFiberParityWitness,
+} from "./research-contracts.js";
+export type { FiberParityWitness } from "./research-contracts.js";

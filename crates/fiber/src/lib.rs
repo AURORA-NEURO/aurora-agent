@@ -48,6 +48,7 @@ pub mod error;
 pub mod influence;
 pub mod mechanism_assurance;
 pub mod mechanism_contract_model;
+pub mod semantic_parity_assurance;
 pub mod mechanism_gateway;
 pub mod oracle;
 pub mod plan;
@@ -88,6 +89,14 @@ pub use mechanism_contract_model::{
     FEATURE_ID as MECHANISM_CONTRACT_MODEL_FEATURE_ID,
     INPUT_SCHEMA as MECHANISM_CONTRACT_MODEL_INPUT_SCHEMA,
     OUTPUT_SCHEMA as MECHANISM_CONTRACT_MODEL_OUTPUT_SCHEMA,
+};
+pub use semantic_parity_assurance::{
+    assure_semantic_parity, semantic_parity_assurance_manifest, FiberParityCase,
+    FiberParityFixture, FiberParityWitness, ParityDisposition, SemanticParityError,
+    CONTRACT_VERSION as SEMANTIC_PARITY_CONTRACT_VERSION,
+    FEATURE_ID as SEMANTIC_PARITY_FEATURE_ID,
+    INPUT_SCHEMA as SEMANTIC_PARITY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as SEMANTIC_PARITY_OUTPUT_SCHEMA,
 };
 pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};

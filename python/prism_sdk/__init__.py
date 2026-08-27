@@ -7464,3 +7464,17 @@ __all__ += [
     "assure_replication",
     "opsReplicationDigest",
 ]
+
+from .fiber_semantic_parity_assurance import (
+    FiberParityWitness,
+    semantic_parity_assurance_manifest,
+    assure_semantic_parity,
+    fiberSemanticParityDigest,
+)
+
+__all__ += [
+    "FiberParityWitness",
+    "semantic_parity_assurance_manifest",
+    "assure_semantic_parity",
+    "fiberSemanticParityDigest",
+]
