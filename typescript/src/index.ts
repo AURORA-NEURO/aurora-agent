@@ -1399,6 +1399,35 @@ export type {
   PlanAutonomousClaimIntegrityAcquisitionOptions,
 } from "./autonomous-claim-integrity.js";
 export {
+  AUTONOMOUS_OUTCOME_INTEGRITY_SCHEMA,
+  AUTONOMOUS_OUTCOME_INTEGRITY_RUN_SCHEMA,
+  AUTONOMOUS_OUTCOME_INTEGRITY_BINDING_SCHEMA,
+  AUTONOMOUS_OUTCOME_INTEGRITY_STATUSES,
+  AUTONOMOUS_OUTCOME_INTEGRITY_MODES,
+  AUTONOMOUS_OUTCOME_INTEGRITY_ROLES,
+  MAX_AUTONOMOUS_OUTCOME_INTEGRITY_DOMAINS,
+  MAX_AUTONOMOUS_OUTCOME_INTEGRITY_CLAIM_BINDINGS,
+  MAX_AUTONOMOUS_OUTCOME_INTEGRITY_REASONS,
+  MAX_AUTONOMOUS_OUTCOME_INTEGRITY_ACTIONS,
+  MAX_AUTONOMOUS_OUTCOME_INTEGRITY_BYTES,
+  bindAutonomousOutcomeIntegrityClaims,
+  assessAutonomousOutcomeIntegrity,
+  projectAutonomousOutcomeIntegrityRun,
+  validateAutonomousOutcomeIntegrity,
+  validateAutonomousOutcomeIntegritySnapshot,
+} from "./autonomous-outcome-integrity.js";
+export type {
+  AutonomousOutcomeIntegrityStatus,
+  AutonomousOutcomeIntegrityMode,
+  AutonomousOutcomeIntegrityRole,
+  AutonomousOutcomeIntegrityRunInput,
+  AutonomousOutcomeIntegrityRun,
+  AutonomousOutcomeIntegrityClaimBindingInput,
+  AutonomousOutcomeIntegrityClaimBinding,
+  AutonomousOutcomeIntegrityAssessmentJSON,
+  AssessAutonomousOutcomeIntegrityOptions,
+} from "./autonomous-outcome-integrity.js";
+export {
   AUTONOMOUS_DOMAIN_RESPONSE_SCHEMA,
   AUTONOMOUS_DOMAIN_RESPONSE_CONTRACT_SCHEMA,
   AUTONOMOUS_DOMAIN_RESPONSE_EVALUATION_SCHEMA,

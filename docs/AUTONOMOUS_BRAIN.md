@@ -12032,6 +12032,54 @@ CAS-fenced checkpoint path. This is a composition boundary, not an authorization
 `approve_source_dispatch`, provider contracts, evaluator acceptance, and contradiction resolution
 remain independent caller-owned decisions.
 
+## Outcome-integrity reliance gate
+
+The final outcome seam is now explicit through
+`assess_outcome_integrity()` / `assessOutcomeIntegrity()`. Claim fusion by itself says whether
+evidence supports a claim, and cross-domain response gating says whether specialist outputs can
+be synthesized; neither alone proves that the claim was attached to the exact run a caller is
+about to rely on. The outcome gate binds both reviews to a metadata-only run identity containing
+the task, route, mode, domain set, provider outcome, final output, and (when present) response
+assessment digests.
+
+Callers provide each claim's domain, role, exact output digest, and structural response digest.
+The gate rejects output drift, response drift, duplicate or missing claim bindings, incomplete
+runs, mismatched cross-domain assessments, and required-but-unverified synthesis. It reports one
+of `ready`, `review_required`, `blocked`, or `ineligible`, plus deterministic repair actions such
+as `rebind_claims_to_exact_run_output`, `execute_reviewed_claim_integrity_actions`, and
+`complete_cross_domain_synthesis_review`. A `ready` result means only that the explicit local
+contracts passed; it is not a claim of scientific, biomedical, operational, or external-world
+truth.
+
+The serialized `AutonomousOutcomeIntegrityAssessment` retains the run digest, claim/evidence
+counts, claim-status histogram, action digests, binding digests, response-gate digest, and gate
+reasons. It never retains claim text, evidence values, answer text, prompts, provider payloads,
+credentials, locators, or effect arguments. `project_outcome_integrity_run()` /
+`projectOutcomeIntegrityRun()` derives the same output identity from direct, automatic, and
+cross-domain result envelopes; direct Python brain results may supply the task digest explicitly
+when the lower-level result does not carry route metadata.
+
+```python
+outcome = agent.assess_outcome_integrity(
+    result,
+    claims=claims,
+    evidence=evidence_rows,
+    claim_bindings=bindings_to_that_exact_result,
+    reference_time="2026-08-26T12:00:00Z",
+    response_assessment=cross_domain_assessment,
+    require_response_assessment=True,
+    require_synthesis=True,
+)
+if outcome.status == "ready":
+    rely_on_caller_reviewed_projection(outcome)
+else:
+    inspect(outcome.next_actions, outcome.gate_reasons)
+```
+
+This closes the reliance decision boundary across all twelve built-in domains while preserving
+the existing authority split: the SDK does not extract claims from prose, invent evidence,
+authorize source/provider/tool/effect work, or settle evaluator rewards.
+
 ## Cross-domain response integrity and alignment gating
 
 Cross-domain fan-out now has a provider-free gate between specialist completion and synthesis.

@@ -1974,3 +1974,13 @@ snapshot persistence and optional compare-and-swap coordinators restore the queu
 provider work. The control plane remains intentionally non-executing: deployment-owned request
 rehydration, provider/source/tool/effect authority, external reconciliation, reviewer identity,
 encryption, tenant isolation, retention, leases, and evaluator settlement are still required.
+
+Outcome-integrity reliance gating is now implemented in both SDKs. `assess_outcome_integrity()` /
+`assessOutcomeIntegrity()` joins exact run/output identity, explicit claim bindings, claim/evidence
+fusion, and optional cross-domain synthesis alignment into one provider-free contract. It rejects
+output/response drift, incomplete or unbound claims, missing required synthesis review, and
+cross-domain assessment drift, while retaining only digests, counts, statuses, and deterministic
+next actions. It does not extract claims from prose, establish external truth, authorize source,
+provider, tool, effect, or evaluator work, or retain raw values. Remaining production work is to
+connect this final reliance projection to caller-owned review/admission surfaces and domain-specific
+claim/evidence adapters without turning the SDK into a truth oracle.

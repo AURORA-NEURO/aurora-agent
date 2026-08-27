@@ -95,6 +95,14 @@ from .autonomous_cross_domain_response import (
     AutonomousCrossDomainResponseAssessment,
     assess_autonomous_cross_domain_response_set,
 )
+from .autonomous_outcome_integrity import (
+    AutonomousOutcomeIntegrityAssessment,
+    AutonomousOutcomeIntegrityClaimBinding,
+    AutonomousOutcomeIntegrityRun,
+    assess_autonomous_outcome_integrity,
+    bind_autonomous_outcome_integrity_claims,
+    project_autonomous_outcome_integrity_run,
+)
 from .autonomous_recovery import (
     AutonomousRecoveryHandoffLedger,
     AutonomousRecoveryObservation,
@@ -16683,6 +16691,71 @@ class AutonomousAgent:
             execute_options=execute_options,
             available_evidence=available_evidence,
             completed_stages=completed_stages,
+        )
+
+    def project_outcome_integrity_run(
+        self,
+        result: Any,
+        *,
+        task_digest: str | None = None,
+        domain: str | None = None,
+    ) -> AutonomousOutcomeIntegrityRun:
+        """Project a direct, automatic, or cross-domain result into a reliance identity."""
+
+        return project_autonomous_outcome_integrity_run(
+            result,
+            task_digest=task_digest,
+            domain=domain,
+        )
+
+    def bind_outcome_integrity_claims(
+        self,
+        result: Any,
+        bindings: Sequence[Mapping[str, Any] | AutonomousOutcomeIntegrityClaimBinding],
+        *,
+        task_digest: str | None = None,
+        domain: str | None = None,
+    ) -> tuple[AutonomousOutcomeIntegrityClaimBinding, ...]:
+        """Bind explicit claim declarations to the exact result output and response digest."""
+
+        run = self.project_outcome_integrity_run(result, task_digest=task_digest, domain=domain)
+        return bind_autonomous_outcome_integrity_claims(run, bindings)
+
+    def assess_outcome_integrity(
+        self,
+        result: Any,
+        *,
+        claims: Sequence[AutonomousClaimIntegrityClaim | Mapping[str, Any]],
+        evidence: Sequence[AutonomousClaimIntegrityEvidence | Mapping[str, Any]],
+        claim_bindings: Sequence[Mapping[str, Any] | AutonomousOutcomeIntegrityClaimBinding],
+        reference_time: str,
+        policy: AutonomousClaimIntegrityPolicy | Mapping[str, Any] | None = None,
+        response_assessment: AutonomousCrossDomainResponseAssessment | None = None,
+        require_completed_run: bool = True,
+        require_response_assessment: bool = False,
+        require_synthesis: bool = False,
+        task_digest: str | None = None,
+        domain: str | None = None,
+    ) -> AutonomousOutcomeIntegrityAssessment:
+        """Run the final provider-free claim/reliance gate for one exact autonomous outcome.
+
+        The result remains transient.  The returned assessment contains only digests, counts,
+        statuses, and next actions; it does not turn a provider response into external truth or
+        authorize a new provider, source, tool, effect, or evaluator settlement.
+        """
+
+        run = self.project_outcome_integrity_run(result, task_digest=task_digest, domain=domain)
+        return assess_autonomous_outcome_integrity(
+            run=run,
+            claims=claims,
+            evidence=evidence,
+            claim_bindings=claim_bindings,
+            reference_time=reference_time,
+            policy=policy,
+            response_assessment=response_assessment,
+            require_completed_run=require_completed_run,
+            require_response_assessment=require_response_assessment,
+            require_synthesis=require_synthesis,
         )
 
     def assess_cross_domain_responses(

@@ -178,6 +178,16 @@ import {
 } from "./autonomous-claim-integrity.js";
 import type { AutonomousClaimIntegrityAcquisitionBinding, AutonomousClaimIntegrityAcquisitionRequestInput, PlanAutonomousClaimIntegrityAcquisitionOptions } from "./autonomous-claim-integrity.js";
 import {
+  assessAutonomousOutcomeIntegrity,
+  bindAutonomousOutcomeIntegrityClaims,
+  projectAutonomousOutcomeIntegrityRun,
+  type AssessAutonomousOutcomeIntegrityOptions,
+  type AutonomousOutcomeIntegrityAssessment,
+  type AutonomousOutcomeIntegrityClaimBinding,
+  type AutonomousOutcomeIntegrityClaimBindingInput,
+  type AutonomousOutcomeIntegrityRun,
+} from "./autonomous-outcome-integrity.js";
+import {
   assessAutonomousCrossDomainResponseSet,
   type AutonomousCrossDomainResponseAssessment,
   type AutonomousCrossDomainResponseAlignmentInput,
@@ -6649,6 +6659,36 @@ export class AutonomousAgent {
     const acquisitionPlan = bridge.acquisitionPlan;
     if (acquisitionPlan === null) throw new ArgumentError("integrity acquisition bridge has no executable plan");
     return this.executeReviewedEvidenceResumable(registry, acquisitionPlan.selectedDomains, binding.requests, options);
+  }
+
+  /** Project a completed direct or cross-domain result into a metadata-only reliance identity. */
+  projectOutcomeIntegrityRun(result: AutonomousRunResult | AutonomousCrossDomainRunResult): AutonomousOutcomeIntegrityRun {
+    return projectAutonomousOutcomeIntegrityRun(result);
+  }
+
+  /** Bind explicit claims to the exact output and structural response of one autonomous result. */
+  bindOutcomeIntegrityClaims(
+    result: AutonomousRunResult | AutonomousCrossDomainRunResult,
+    bindings: readonly (AutonomousOutcomeIntegrityClaimBindingInput | Record<string, unknown>)[],
+  ): AutonomousOutcomeIntegrityClaimBinding[] {
+    return bindAutonomousOutcomeIntegrityClaims(projectAutonomousOutcomeIntegrityRun(result), bindings);
+  }
+
+  /**
+   * Decide whether caller-supplied claims may rely on one exact autonomous outcome.
+   *
+   * This is a provider-free final gate: claim/evidence values are evaluated transiently, while
+   * the returned contract retains only digests, counts, statuses, and next actions.  It never
+   * upgrades a model response into external truth or authorizes any downstream effect.
+   */
+  assessOutcomeIntegrity(
+    result: AutonomousRunResult | AutonomousCrossDomainRunResult,
+    options: Omit<AssessAutonomousOutcomeIntegrityOptions, "run">,
+  ): AutonomousOutcomeIntegrityAssessment {
+    return assessAutonomousOutcomeIntegrity({
+      run: projectAutonomousOutcomeIntegrityRun(result),
+      ...options,
+    });
   }
 
   /** Gate structured specialist outputs before cross-domain synthesis. */
