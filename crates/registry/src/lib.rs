@@ -55,6 +55,7 @@ pub mod index;
 pub mod pack;
 pub mod promote;
 pub mod resource_assurance;
+pub mod scale_frontier_assurance;
 pub mod tier;
 
 pub use context_assurance::{
@@ -79,6 +80,15 @@ pub use resource_assurance::{
     ResourceDiscoveryAssuranceReceipt, ResourceDiscoveryAssuranceRequest, ResourceState,
     CONTRACT_VERSION as RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID,
+};
+pub use scale_frontier_assurance::{
+    assure_registry_scale_frontier, assure_registry_scale_frontier_json,
+    registry_scale_frontier_manifest, validate_registry_scale_frontier_json,
+    CapacityDisposition, RegistryCapacityReport, RegistryScaleAssuranceError,
+    RegistryScaleWorkload, RegistryStudyWorkload, WorkloadState,
+    CONTRACT_VERSION as REGISTRY_SCALE_FRONTIER_CONTRACT_VERSION,
+    FEATURE_ID as REGISTRY_SCALE_FRONTIER_FEATURE_ID,
+    TOOL_NAME as REGISTRY_SCALE_FRONTIER_TOOL,
 };
 pub use tier::{
     assess, evaluate_tier, evaluate_tier_with, reassess, Requirement, RungAssessment,

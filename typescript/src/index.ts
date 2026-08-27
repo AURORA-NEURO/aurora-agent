@@ -4253,3 +4253,13 @@ export {
   validateMcpTypedKnowledgeWorldReceipt,
 } from "./research-contracts.js";
 export type { McpTypedKnowledgeWorldReceipt } from "./research-contracts.js";
+
+export {
+  REGISTRY_SCALE_FRONTIER_FEATURE_ID,
+  REGISTRY_SCALE_FRONTIER_CONTRACT_VERSION,
+  REGISTRY_SCALE_FRONTIER_INPUT_SCHEMA,
+  REGISTRY_SCALE_FRONTIER_OUTPUT_SCHEMA,
+  registryScaleFrontierDigest,
+  validateRegistryCapacityReport,
+} from "./research-contracts.js";
+export type { RegistryCapacityReport } from "./research-contracts.js";

@@ -2013,6 +2013,7 @@ impl Server {
             "mcp_multimodal_ingestion_assurance" => self.mcp_multimodal_ingestion_assurance(&arguments),
             "weavelang_computational_execution_assurance" => self.weavelang_computational_execution_assurance(&arguments),
             "mcp_knowledge_representation_contract" => self.mcp_knowledge_representation_contract(&arguments),
+            "registry_multimodal_scale_frontier_assurance" => self.registry_multimodal_scale_frontier_assurance(&arguments),
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
             "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
@@ -26452,6 +26453,32 @@ impl Server {
         }))
     }
 
+    fn registry_multimodal_scale_frontier_assurance(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized RegistryScaleWorkload")?;
+        let receipt = crate::research_contracts::assure_registry_scale_frontier_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_registry::REGISTRY_SCALE_FRONTIER_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "multimodal study order, capacity totals, omission sets, and effect receipts are deterministic",
+                "missing modality closure, unknown or unmeasured workload state, contradiction, policy denial, capacity overflow, and adversarial events fail closed",
+                "raw registry data remains institution-local and only typed capacity metadata is returned",
+                "qualified output measures declared registry capacity and is never a biological or clinical conclusion"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied workload manifests and does not inspect raw registry bytes or schedule work",
+                "capacity qualification is a release gate and requires independent benchmark, replication, and institutional governance evidence"
+            ]
+        }))
+    }
+
     fn analysis_qualify(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -38166,7 +38193,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_harmonization_coverage", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "registry_multimodal_scale_frontier_assurance", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_harmonization_coverage", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -40623,6 +40650,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized mcp KnowledgeRepresentationRequest." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "registry_multimodal_scale_frontier_assurance",
+            "description": "Evaluate a local multimodal multi-study registry workload against explicit capacity, modality-closure, provenance, replay, policy, locality, and adversarial gates. It returns a deterministic RegistryCapacityReport7 receipt without reading raw bytes or scheduling work.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-registry RegistryScaleWorkload with required modality order, study workload manifests, capacity limits, replay identity, policy and protected-closure gates, and preclinical boundary." }
                 },
                 "required": ["request"]
             }

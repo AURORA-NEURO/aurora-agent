@@ -801,6 +801,19 @@ pub fn validate_mcp_knowledge_representation_contract_json(
     crate::knowledge_representation_contract_model::validate_knowledge_representation_contract_json(value)
 }
 
+/// MCP transport wrapper for the registry multimodal scale-frontier assurance harness.
+/// The registry implementation remains the source of truth; this adapter only owns the
+/// serialized transport boundary and keeps validation behavior identical across callers.
+pub fn assure_registry_scale_frontier_json(value: &Value) -> Result<Value, String> {
+    bioprism_registry::assure_registry_scale_frontier_json(value)
+}
+
+pub fn validate_registry_scale_frontier_json(
+    value: &Value,
+) -> Result<bioprism_registry::RegistryCapacityReport, String> {
+    bioprism_registry::validate_registry_scale_frontier_json(value)
+}
+
 pub fn validate_harmonized_research_object_json(
     value: &Value,
 ) -> Result<HarmonizedResearchObject, String> {

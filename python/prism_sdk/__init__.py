@@ -7551,3 +7551,10 @@ from .mcp_knowledge_representation_contract_model import (
 )
 
 __all__ += ["McpTypedKnowledgeWorldReceipt", "model_knowledge_representation"]
+
+from .registry_scale_frontier_assurance import (
+    RegistryCapacityReport,
+    assure_registry_scale_frontier,
+)
+
+__all__ += ["RegistryCapacityReport", "assure_registry_scale_frontier"]
