@@ -12268,6 +12268,10 @@ persist(result.toJSON());
 
 The automatic evidence tests run every built-in domain, prove exact route preservation for
 cross-domain coding+data fan-out, verify catalogue parity, and reject semantic rerouting when an
-evidence scope is already bound. Provider-run overrides remain intentionally limited to the
-legacy direct mode: rehydrating an automatic plan or cross-domain result requires the corresponding
-caller-owned result boundary rather than pretending a single-domain response is a complete run.
+evidence scope is already bound. Restart-aware callers can supply `automaticRunOverride` or
+`crossDomainRunOverride`, while the resumable controller exposes matching
+`rehydrateAutomaticRun` and `rehydrateCrossDomainRun` callbacks. Each callback result is checked
+against the task-bound route and the checkpoint result digest before it is accepted, so a restart
+does not replay planning, specialist calls, synthesis, or the provider. The legacy
+`providerRunOverride` remains available for direct mode, and every override still requires an
+explicit caller approval decision and keeps raw result values outside the durable projection.

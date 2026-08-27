@@ -2025,3 +2025,11 @@ adapter-registry execution. Tests exercise every built-in domain, exact coding+d
 catalogue parity, and semantic-rerouting refusal. Remaining work is still deployment-owned:
 automatic-result checkpoint rehydration, distributed leases, encrypted raw-value retention, and
 caller-owned source/evaluator truth adapters.
+
+The evidence-backed restart controller now understands all three TypeScript handoff modes. It
+hash-binds automatic envelopes and cross-domain fan-out results in the existing provider-result
+checkpoint, and accepts them only through caller-owned `rehydrateAutomaticRun` or
+`rehydrateCrossDomainRun` callbacks whose results match the task route and checkpoint digest.
+Completed automatic planning, specialists, and synthesis therefore do not replay after restart;
+direct-mode provider rehydration remains backward compatible. The remaining deployment-owned
+boundary is protected storage and retrieval of those raw result envelopes.

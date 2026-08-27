@@ -105,6 +105,8 @@ async function optionsFor(agent, registry, domain, journal, overrides = {}) {
       ...overrides.execute,
     },
     run: { domain, candidates: [model()], approveProviderCall: true, ...overrides.run },
+    runMode: overrides.runMode,
+    crossDomain: overrides.crossDomain,
     promptBuilder: ({ values }) => [{
       id: "resumable-transient-value",
       content: JSON.stringify({ claim: Object.values(values)[0]?.claim }),
@@ -112,6 +114,10 @@ async function optionsFor(agent, registry, domain, journal, overrides = {}) {
       priority: 970,
     }],
     rehydrateProviderRun: overrides.rehydrateProviderRun,
+    rehydrateAutomaticRun: overrides.rehydrateAutomaticRun,
+    rehydrateCrossDomainRun: overrides.rehydrateCrossDomainRun,
+    automaticRunOverride: overrides.automaticRunOverride,
+    crossDomainRunOverride: overrides.crossDomainRunOverride,
     resumeProvider: overrides.resumeProvider,
     evidenceCheckpointStore: overrides.evidenceCheckpointStore,
     evidenceJobId: overrides.evidenceJobId,
@@ -150,6 +156,96 @@ test("resumable evidence-backed runs rehydrate completed evidence and provider r
     assert.doesNotMatch(JSON.stringify(second.run.toJSON()), /resumable-transient-claim/);
     assert.doesNotMatch(JSON.stringify(second.run.toJSON()), /provider response/);
   }
+});
+
+test("resumable automatic evidence runs rehydrate the complete envelope without replaying planning or provider work", async () => {
+  const { agent, registry, calls } = await setup();
+  const journal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  const checkpointStore = new InMemoryAutonomousEvidenceBackedCheckpointStore();
+  const firstController = new AutonomousEvidenceBackedController(agent, "automatic-rehydration-job", checkpointStore);
+  const firstOptions = await optionsFor(agent, registry, "coding", journal, { runMode: "auto" });
+  const first = await firstController.run("Rehydrate an automatic coding evidence run.", firstOptions);
+  assert.equal(first.run.status, "completed");
+  assert.equal(first.run.result.run_mode, "auto");
+  assert.ok(first.run.result.automatic);
+  const rawValues = first.run.result.evidence.runtime.values;
+  const rawAutomaticRun = first.run.result.automatic;
+  const sourceCalls = calls.evidence;
+  const providerCalls = calls.provider;
+
+  const secondController = new AutonomousEvidenceBackedController(agent, "automatic-rehydration-job", checkpointStore);
+  const second = await secondController.run("Rehydrate an automatic coding evidence run.", await optionsFor(agent, registry, "coding", journal, {
+    runMode: "auto",
+    execute: { rehydrateValue: (receipt) => rawValues[receipt.request_digest] ?? null },
+    rehydrateAutomaticRun: () => rawAutomaticRun,
+  }));
+  assert.equal(second.run.status, "completed");
+  assert.equal(second.run.provider_rehydrated, true);
+  assert.equal(second.run.result.automatic?.status, "completed");
+  assert.equal(calls.evidence, sourceCalls);
+  assert.equal(calls.provider, providerCalls);
+  assert.doesNotMatch(JSON.stringify(second.run.toJSON()), /resumable-transient-claim/);
+  assert.doesNotMatch(JSON.stringify(second.run.toJSON()), /provider response/);
+});
+
+test("resumable cross-domain evidence runs rehydrate fan-out metadata without replaying specialists or synthesis", async () => {
+  const { agent, registry, calls } = await setup();
+  const journal = new InMemoryAutonomousEvidenceRuntimeJournal();
+  const checkpointStore = new InMemoryAutonomousEvidenceBackedCheckpointStore();
+  const plan = await agent.evidencePlan(["coding", "data"]);
+  const requests = plan.requirements.map((requirement, index) => ({
+    requirement_id: requirement.requirement_id,
+    source_id: `cross-resumable-source-${index}`,
+    request_id: `cross-resumable-request-${index}`,
+    metadata: {},
+  }));
+  const common = {
+    registry,
+    domains: ["coding", "data"],
+    requests,
+    prepare: { readinessPolicy: new AutonomousEvidenceReadinessPolicy({ requireHealth: false }), allowDegradedDispatch: true },
+    execute: {
+      approveSourceDispatch: true,
+      journal,
+      projector: { project: (_value, context) => [{ label: context.requirement.requirement_id, kind: "fact", status: "observed" }] },
+      evaluator: {
+        evaluator_id: "cross-resumable-evaluator",
+        evaluator_version: "1",
+        evaluate: ({ requirement }) => ({ evaluator_id: "cross-resumable-evaluator", evaluator_version: "1", verdict: "accepted", score: 1, evidence_digest: requirement.workflow_digest }),
+      },
+    },
+    runMode: "cross_domain",
+    crossDomain: {
+      subtasks: [
+        { id: "cross-coding", domain: "coding", task: "Review coding evidence." },
+        { id: "cross-data", domain: "data", task: "Review data evidence." },
+      ],
+      maxParallelChildren: 2,
+    },
+    run: { domain: "coding", candidates: [model()], approveProviderCall: true },
+  };
+  const firstController = new AutonomousEvidenceBackedController(agent, "cross-rehydration-job", checkpointStore);
+  const first = await firstController.run("Rehydrate a cross-domain evidence run.", common);
+  assert.equal(first.run.status, "completed");
+  assert.equal(first.run.result.run_mode, "cross_domain");
+  assert.ok(first.run.result.cross_domain_run);
+  const rawValues = first.run.result.evidence.runtime.values;
+  const rawCrossRun = first.run.result.cross_domain_run;
+  const providerCalls = calls.provider;
+  const sourceCalls = calls.evidence;
+
+  const secondController = new AutonomousEvidenceBackedController(agent, "cross-rehydration-job", checkpointStore);
+  const second = await secondController.run("Rehydrate a cross-domain evidence run.", {
+    ...common,
+    execute: { ...common.execute, rehydrateValue: (receipt) => rawValues[receipt.request_digest] ?? null },
+    rehydrateCrossDomainRun: () => rawCrossRun,
+  });
+  assert.equal(second.run.status, "completed");
+  assert.equal(second.run.provider_rehydrated, true);
+  assert.equal(second.run.result.cross_domain_run?.status, "completed");
+  assert.equal(second.run.result.cross_domain_run?.child_runs.length, 2);
+  assert.equal(calls.evidence, sourceCalls);
+  assert.equal(calls.provider, providerCalls);
 });
 
 test("provider-pending checkpoints require explicit resume approval and never replay source work", async () => {

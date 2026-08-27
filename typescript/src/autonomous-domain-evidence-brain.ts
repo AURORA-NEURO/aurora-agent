@@ -14,6 +14,7 @@ import {
   type AutonomousPromptChunk,
   type AutonomousRunResult,
   routeAutonomousEvidenceScope,
+  validateAutonomousRouteOverride,
 } from "./autonomous.js";
 import type {
   AutonomousDomainEvidenceCatalogueExecuteOptions,
@@ -96,6 +97,8 @@ export interface AutonomousDomainEvidenceBrainRunOptions {
   promptBuilder?: AutonomousDomainEvidenceBrainPromptBuilder;
   beforeProviderRun?: AutonomousDomainEvidenceBrainPreflightHook;
   providerRunOverride?: AutonomousRunResult;
+  automaticRunOverride?: AutonomousAutoRunResult;
+  crossDomainRunOverride?: AutonomousCrossDomainRunResult;
   allowIncompleteEvidence?: boolean;
 }
 
@@ -258,6 +261,11 @@ export async function runAutonomousDomainEvidenceBacked(
   const taskText = boundedText("domain evidence brain task", task, 32_000);
   const domains = normalizeDomains(options.domains);
   const runMode = normalizeRunMode(options.runMode);
+  const overrideCount = [options.providerRunOverride, options.automaticRunOverride, options.crossDomainRunOverride].filter((value) => value !== undefined).length;
+  if (overrideCount > 1) throw new ArgumentError("domain evidence brain accepts only one result override");
+  if (options.providerRunOverride !== undefined && runMode !== "domain") throw new ArgumentError("domain evidence brain providerRunOverride is supported only for domain mode");
+  if (options.automaticRunOverride !== undefined && runMode !== "auto") throw new ArgumentError("domain evidence brain automaticRunOverride is supported only for auto mode");
+  if (options.crossDomainRunOverride !== undefined && runMode !== "cross_domain") throw new ArgumentError("domain evidence brain crossDomainRunOverride is supported only for cross_domain mode");
   if (runMode === "cross_domain" && options.domains === undefined) throw new ArgumentError("cross-domain catalogue execution requires an explicit 2..8 domain scope");
   if (runMode === "cross_domain" && (domains.length < 2 || domains.length > AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN || domains.includes("cross_domain"))) throw new ArgumentError("cross-domain catalogue execution requires 2..8 non-synthesis domains");
   const evidenceScopeRoute = options.domains === undefined ? null : await routeAutonomousEvidenceScope(taskText, domains);
@@ -355,10 +363,29 @@ export async function runAutonomousDomainEvidenceBacked(
   let crossDomainRun: AutonomousCrossDomainRunResult | null = null;
   let automatic: AutonomousAutoRunResult | null = null;
   if (options.providerRunOverride !== undefined) {
-    if (runMode !== "domain") throw new ArgumentError("domain evidence brain provider run override is supported only for domain mode");
     if (!isObject(options.providerRunOverride) || options.providerRunOverride.schema !== "bioprism-typescript-autonomous-run/0.1") throw new ArgumentError("domain evidence brain provider run override is malformed");
     if (runOptions.approveProviderCall !== true) throw new ArgumentError("domain evidence brain provider run override requires provider approval");
+    await validateAutonomousRouteOverride(taskText, options.providerRunOverride.route);
     run = options.providerRunOverride;
+  } else if (options.automaticRunOverride !== undefined) {
+    if (!isObject(options.automaticRunOverride) || options.automaticRunOverride.schema !== "bioprism-typescript-autonomous-auto-run/0.1") throw new ArgumentError("domain evidence brain automatic run override is malformed");
+    if (runOptions.approveProviderCall !== true) throw new ArgumentError("domain evidence brain automatic run override requires provider approval");
+    if (!options.automaticRunOverride.result) throw new ArgumentError("domain evidence brain automatic run override requires a completed result envelope");
+    const overrideRoute = await validateAutonomousRouteOverride(taskText, options.automaticRunOverride.route);
+    if (evidenceScopeRoute && overrideRoute.route_digest !== evidenceScopeRoute.route_digest) throw new ArgumentError("domain evidence brain automatic run override does not match the reviewed evidence route");
+    const nestedRoute = await validateAutonomousRouteOverride(taskText, options.automaticRunOverride.result.route);
+    if (nestedRoute.route_digest !== overrideRoute.route_digest) throw new ArgumentError("domain evidence brain automatic run override result route does not match its envelope");
+    automatic = options.automaticRunOverride;
+    const automaticResult = automatic.result;
+    if (automaticResult && automaticResult.schema === "bioprism-typescript-autonomous-run/0.1") run = automaticResult;
+    if (automaticResult && automaticResult.schema === "bioprism-typescript-autonomous-cross-domain-result/0.1") crossDomainRun = automaticResult;
+  } else if (options.crossDomainRunOverride !== undefined) {
+    if (!isObject(options.crossDomainRunOverride) || options.crossDomainRunOverride.schema !== "bioprism-typescript-autonomous-cross-domain-result/0.1") throw new ArgumentError("domain evidence brain cross-domain run override is malformed");
+    if (runOptions.approveProviderCall !== true) throw new ArgumentError("domain evidence brain cross-domain run override requires provider approval");
+    const overrideRoute = await validateAutonomousRouteOverride(taskText, options.crossDomainRunOverride.route);
+    if (!overrideRoute.cross_domain) throw new ArgumentError("domain evidence brain cross-domain run override must carry a cross-domain route");
+    if (evidenceScopeRoute && overrideRoute.route_digest !== evidenceScopeRoute.route_digest) throw new ArgumentError("domain evidence brain cross-domain run override does not match the reviewed evidence route");
+    crossDomainRun = options.crossDomainRunOverride;
   } else {
     await options.beforeProviderRun?.({ plan, prepared, prompt_context: promptContext });
     if (runMode === "domain") {

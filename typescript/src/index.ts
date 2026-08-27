@@ -1808,6 +1808,8 @@ export type {
   AutonomousEvidenceBackedTransactionalCheckpointTextStore,
   AutonomousEvidenceBackedProviderRehydrationContext,
   AutonomousEvidenceBackedProviderRehydrator,
+  AutonomousEvidenceBackedAutomaticRehydrator,
+  AutonomousEvidenceBackedCrossDomainRehydrator,
   AutonomousEvidenceBackedResumableExecutionOptions,
   AutonomousEvidenceBackedResumableStatus,
   AutonomousEvidenceBackedResumableRunProjection,

@@ -1,10 +1,13 @@
 import { ArgumentError, ProviderRuntimeError } from "./errors.js";
 import type {
   AutonomousAgent,
+  AutonomousAutoRunResult,
   AutonomousEvidenceBackedRunOptions,
   AutonomousEvidenceBackedRunPreflight,
   AutonomousEvidenceBackedRunResult,
   AutonomousEvidenceBackedRunStatus,
+  AutonomousCrossDomainRunResult,
+  AutonomousPlanAndRunStatus,
   AutonomousPromptChunk,
   AutonomousRunResult,
 } from "./autonomous.js";
@@ -39,7 +42,7 @@ export interface AutonomousEvidenceBackedCheckpointJSON extends JsonObject {
   evidence_result_digest: string | null;
   prompt_projection_digest: string | null;
   provider_result_digest: string | null;
-  provider_status: AutonomousRunResult["status"] | null;
+  provider_status: AutonomousPlanAndRunStatus | null;
   status: AutonomousEvidenceBackedCheckpointStatus;
   checkpoint_digest: string;
   retention: "metadata_only;task_requests_evidence_and_provider_payloads_caller_owned";
@@ -73,12 +76,24 @@ export type AutonomousEvidenceBackedProviderRehydrator = (
   context: AutonomousEvidenceBackedProviderRehydrationContext,
 ) => AutonomousRunResult | null | Promise<AutonomousRunResult | null>;
 
-export interface AutonomousEvidenceBackedResumableExecutionOptions extends Omit<AutonomousEvidenceBackedRunOptions, "beforeProviderRun" | "providerRunOverride"> {
+export type AutonomousEvidenceBackedAutomaticRehydrator = (
+  context: AutonomousEvidenceBackedProviderRehydrationContext,
+) => AutonomousAutoRunResult | null | Promise<AutonomousAutoRunResult | null>;
+
+export type AutonomousEvidenceBackedCrossDomainRehydrator = (
+  context: AutonomousEvidenceBackedProviderRehydrationContext,
+) => AutonomousCrossDomainRunResult | null | Promise<AutonomousCrossDomainRunResult | null>;
+
+export interface AutonomousEvidenceBackedResumableExecutionOptions extends Omit<AutonomousEvidenceBackedRunOptions, "beforeProviderRun" | "providerRunOverride" | "automaticRunOverride" | "crossDomainRunOverride"> {
   jobId: string;
   checkpoint?: AutonomousEvidenceBackedCheckpointJSON;
   checkpointSink: (checkpoint: AutonomousEvidenceBackedCheckpointJSON) => Promise<void> | void;
   /** Rehydrate a prior provider result by its caller-owned digest; returning null requires reconciliation. */
   rehydrateProviderRun?: AutonomousEvidenceBackedProviderRehydrator;
+  /** Rehydrate a completed automatic envelope by its caller-owned checkpoint digest. */
+  rehydrateAutomaticRun?: AutonomousEvidenceBackedAutomaticRehydrator;
+  /** Rehydrate a completed cross-domain fan-out by its caller-owned checkpoint digest. */
+  rehydrateCrossDomainRun?: AutonomousEvidenceBackedCrossDomainRehydrator;
   /** Provider dispatch after a provider_pending checkpoint is always an explicit resume decision. */
   resumeProvider?: boolean;
 }
@@ -170,6 +185,9 @@ async function runPolicyDigest(options: AutonomousEvidenceBackedResumableExecuti
   const run = options.run ?? {};
   return digestJson({
     schema: AUTONOMOUS_EVIDENCE_BACKED_CHECKPOINT_SCHEMA,
+    run_mode: options.runMode ?? "domain",
+    planning_mode: run.planningMode ?? null,
+    cross_domain_options_digest: options.crossDomain === undefined ? null : await digestJson(options.crossDomain),
     domain: run.domain ?? null,
     capability: run.capability ?? null,
     candidates_digest: run.candidates === undefined ? null : await digestJson(run.candidates),
@@ -196,7 +214,7 @@ async function runPolicyDigest(options: AutonomousEvidenceBackedResumableExecuti
   });
 }
 
-function providerResultWasObserved(status: AutonomousRunResult["status"]): boolean {
+function providerResultWasObserved(status: string): boolean {
   return !["approval_required", "route_review_required", "abstained"].includes(status);
 }
 
@@ -204,8 +222,9 @@ function checkpointStatusForResult(result: AutonomousEvidenceBackedRunResult): A
   if (result.status === "evidence_review_required") return "evidence_review_required";
   if (result.status === "evidence_blocked") return "evidence_blocked";
   if (result.evidence && result.evidence.status !== "completed") return "evidence_incomplete";
-  if (result.run?.status === "completed") return "completed";
-  if (result.run && providerResultWasObserved(result.run.status)) return "provider_reconciliation_required";
+  const providerStatus = result.automatic?.status ?? result.cross_domain_run?.status ?? result.run?.status ?? null;
+  if (providerStatus === "completed") return "completed";
+  if (providerStatus !== null && providerResultWasObserved(providerStatus)) return "provider_reconciliation_required";
   return "provider_pending";
 }
 
@@ -217,7 +236,9 @@ async function checkpointForResult(input: {
   status?: AutonomousEvidenceBackedCheckpointStatus;
 }): Promise<AutonomousEvidenceBackedCheckpointJSON> {
   const status = input.status ?? checkpointStatusForResult(input.result);
-  const providerResultDigest = input.result.run && providerResultWasObserved(input.result.run.status) ? await digestJson(input.result.run) : null;
+  const providerStatus = input.result.automatic?.status ?? input.result.cross_domain_run?.status ?? input.result.run?.status ?? null;
+  const providerResult = input.result.automatic ?? input.result.cross_domain_run ?? input.result.run ?? null;
+  const providerResultDigest = providerResult && providerStatus !== null && providerResultWasObserved(providerStatus) ? await digestJson(providerResult) : null;
   const payload = {
     schema: AUTONOMOUS_EVIDENCE_BACKED_CHECKPOINT_SCHEMA,
     job_id: input.jobId,
@@ -229,7 +250,7 @@ async function checkpointForResult(input: {
     evidence_result_digest: input.result.evidence?.result_digest ?? null,
     prompt_projection_digest: input.result.prompt_context.length ? await digestJson(input.result.prompt_context) : null,
     provider_result_digest: providerResultDigest,
-    provider_status: input.result.run?.status ?? null,
+    provider_status: providerStatus,
     status,
   };
   const encoded = JSON.stringify(payload);
@@ -276,8 +297,8 @@ export async function validateAutonomousEvidenceBackedCheckpoint(value: unknown)
   const evidenceResultDigest = optionalDigest("evidence-backed checkpoint evidence_result_digest", value.evidence_result_digest);
   const promptProjectionDigest = optionalDigest("evidence-backed checkpoint prompt_projection_digest", value.prompt_projection_digest);
   const providerResultDigest = optionalDigest("evidence-backed checkpoint provider_result_digest", value.provider_result_digest);
-  const providerStatus = value.provider_status === null ? null : value.provider_status as AutonomousRunResult["status"];
-  if (providerStatus !== null && !["completed", "route_review_required", "approval_required", "reconciliation_required", "turn_limit_reached", "abstained", "cross_domain_partial", "child_failed"].includes(providerStatus)) throw new ArgumentError("evidence-backed checkpoint provider_status is invalid");
+  const providerStatus = value.provider_status === null ? null : value.provider_status as AutonomousPlanAndRunStatus;
+  if (providerStatus !== null && !["completed", "children_completed", "children_partial", "approval_required", "policy_review_required", "policy_blocked", "reconciliation_required", "turn_limit_reached", "child_failed", "route_review_required", "response_review_required", "cross_domain_partial", "plan_review_required", "provider_invalid", "provider_disagreement", "abstained"].includes(providerStatus)) throw new ArgumentError("evidence-backed checkpoint provider_status is invalid");
   const status = value.status as AutonomousEvidenceBackedCheckpointStatus;
   if (!["evidence_review_required", "evidence_blocked", "evidence_incomplete", "provider_pending", "provider_reconciliation_required", "completed"].includes(status)) throw new ArgumentError("evidence-backed checkpoint status is invalid");
   if (status === "completed" && (providerResultDigest === null || providerStatus !== "completed")) throw new ArgumentError("completed evidence-backed checkpoint requires a completed provider digest");
@@ -360,7 +381,7 @@ export async function runAutonomousEvidenceBackedResumable(
     if (!options.execute?.journal) throw new ArgumentError("evidence-backed resume requires the caller-owned evidence journal");
   }
 
-  const { jobId: _jobId, checkpoint: _checkpoint, checkpointSink: _checkpointSink, rehydrateProviderRun, resumeProvider, ...baseOptions } = options;
+  const { jobId: _jobId, checkpoint: _checkpoint, checkpointSink: _checkpointSink, rehydrateProviderRun, rehydrateAutomaticRun, rehydrateCrossDomainRun, resumeProvider, ...baseOptions } = options;
   const providerRun = baseOptions.run?.approveProviderCall === true;
   const probe = async (): Promise<AutonomousEvidenceBackedRunResult> => agent.runWithReviewedEvidence(task, {
     ...baseOptions,
@@ -375,6 +396,38 @@ export async function runAutonomousEvidenceBackedResumable(
       const next = await checkpointForResult({ jobId, requestDigest: requestDigestValue, runPolicyDigest: runPolicyDigestValue, result: probeResult });
       await persist(options.checkpointSink, next);
       return makeResumableResult({ jobId, status: next.status === "evidence_incomplete" ? "evidence_incomplete" : probeResult.status, result: probeResult, checkpoint: next, providerRehydrated: false });
+    }
+    if (baseOptions.runMode === "auto" && rehydrateAutomaticRun) {
+      const recovered = await rehydrateAutomaticRun({ checkpoint, executionPlan: probeResult.execution_plan, evidence: probeResult.evidence, promptContext: probeResult.prompt_context });
+      if (recovered !== null) {
+        if (!isObject(recovered) || recovered.schema !== "bioprism-typescript-autonomous-auto-run/0.1") throw new ArgumentError("rehydrated automatic run is malformed");
+        if (checkpoint.provider_result_digest === null || await digestJson(recovered) !== checkpoint.provider_result_digest) throw new ProviderRuntimeError("rehydrated automatic run does not match its checkpoint digest");
+        const finalResult = await agent.runWithReviewedEvidence(task, {
+          ...baseOptions,
+          run: { ...(baseOptions.run ?? {}), approveProviderCall: true },
+          automaticRunOverride: recovered,
+        });
+        const nextStatus = finalResult.status === "completed" ? "completed" : "provider_reconciliation_required";
+        const next = await checkpointForResult({ jobId, requestDigest: requestDigestValue, runPolicyDigest: runPolicyDigestValue, result: finalResult, status: nextStatus });
+        await persist(options.checkpointSink, next);
+        return makeResumableResult({ jobId, status: nextStatus, result: finalResult, checkpoint: next, providerRehydrated: true });
+      }
+    }
+    if (baseOptions.runMode === "cross_domain" && rehydrateCrossDomainRun) {
+      const recovered = await rehydrateCrossDomainRun({ checkpoint, executionPlan: probeResult.execution_plan, evidence: probeResult.evidence, promptContext: probeResult.prompt_context });
+      if (recovered !== null) {
+        if (!isObject(recovered) || recovered.schema !== "bioprism-typescript-autonomous-cross-domain-result/0.1") throw new ArgumentError("rehydrated cross-domain run is malformed");
+        if (checkpoint.provider_result_digest === null || await digestJson(recovered) !== checkpoint.provider_result_digest) throw new ProviderRuntimeError("rehydrated cross-domain run does not match its checkpoint digest");
+        const finalResult = await agent.runWithReviewedEvidence(task, {
+          ...baseOptions,
+          run: { ...(baseOptions.run ?? {}), approveProviderCall: true },
+          crossDomainRunOverride: recovered,
+        });
+        const nextStatus = finalResult.status === "completed" ? "completed" : "provider_reconciliation_required";
+        const next = await checkpointForResult({ jobId, requestDigest: requestDigestValue, runPolicyDigest: runPolicyDigestValue, result: finalResult, status: nextStatus });
+        await persist(options.checkpointSink, next);
+        return makeResumableResult({ jobId, status: nextStatus, result: finalResult, checkpoint: next, providerRehydrated: true });
+      }
     }
     if (rehydrateProviderRun) {
       const recovered = await rehydrateProviderRun({ checkpoint, executionPlan: probeResult.execution_plan, evidence: probeResult.evidence, promptContext: probeResult.prompt_context });
