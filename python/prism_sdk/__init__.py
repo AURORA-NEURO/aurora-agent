@@ -7373,6 +7373,20 @@ __all__ += [
     "ids_throughput_evidence_surveillance_digest",
 ]
 
+from .ids_federated_resource_discovery_interoperability import (
+    QualifiedResourceSet6 as IdsQualifiedResourceSet6,
+    ids_federated_resource_discovery_interoperability_digest,
+    interoperate_resources as interoperate_ids_resources,
+    interoperability_manifest as ids_resource_interoperability_manifest,
+)
+
+__all__ += [
+    "IdsQualifiedResourceSet6",
+    "ids_federated_resource_discovery_interoperability_digest",
+    "interoperate_ids_resources",
+    "ids_resource_interoperability_manifest",
+]
+
 from .bioir_performance_reliability_control_plane import (
     BioirReliableCapabilityResult,
     performance_reliability_control_plane_manifest,

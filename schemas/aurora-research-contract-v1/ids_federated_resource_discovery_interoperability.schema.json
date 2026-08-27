@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/ids-federated-resource-discovery-interoperability.schema.json",
+  "title": "AFA-ids-P05-F24 qualified resource interoperability set",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "request_id", "federation_id", "requester", "purpose", "semantic_profile", "negotiated_protocol_version", "disposition", "endpoint_order", "qualified_order", "unresolved_order", "blocked_order", "missing_capability_order", "peer_order", "qualified_peer_order", "missing_peer_order", "resources", "omissions", "uncertainty", "negative_evidence", "migration_notes", "replay_identity", "selection_digest", "artifact", "effect_receipts", "raw_data_local", "aggregate_only", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"},
+    "contract_version": {"const": "ids-federated-continual-resource-discovery-interoperability/1.0"},
+    "feature_id": {"const": "AFA-ids-P05-F24"},
+    "request_id": {"type": "string", "minLength": 1}, "federation_id": {"type": "string", "minLength": 1}, "requester": {"type": "string", "minLength": 1}, "purpose": {"type": "string", "minLength": 1}, "semantic_profile": {"type": "string", "minLength": 1}, "negotiated_protocol_version": {"type": "string", "minLength": 1},
+    "disposition": {"enum": ["qualified", "unresolved", "blocked"]},
+    "endpoint_order": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "qualified_order": {"type": "array", "items": {"type": "string"}}, "unresolved_order": {"type": "array", "items": {"type": "string"}}, "blocked_order": {"type": "array", "items": {"type": "string"}}, "missing_capability_order": {"type": "array", "items": {"type": "string"}},
+    "peer_order": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "qualified_peer_order": {"type": "array", "items": {"type": "string"}}, "missing_peer_order": {"type": "array", "items": {"type": "string"}},
+    "resources": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["resource_id", "endpoint_id", "origin", "protocol_version", "fitness_milli", "compatibility", "migration_notes"], "properties": {"resource_id": {"type": "string", "minLength": 1}, "endpoint_id": {"type": "string", "minLength": 1}, "origin": {"type": "string", "minLength": 1}, "protocol_version": {"type": "string", "minLength": 1}, "fitness_milli": {"type": "integer"}, "compatibility": {"type": "string", "minLength": 1}, "migration_notes": {"type": "array", "items": {"type": "string"}}}}},
+    "omissions": {"type": "array", "items": {"type": "string"}}, "uncertainty": {"type": "array", "items": {"type": "string"}}, "negative_evidence": {"type": "array", "items": {"type": "string"}}, "migration_notes": {"type": "array", "items": {"type": "string"}},
+    "replay_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "selection_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["artifact_id", "content_type", "content_hash", "semantic_loss", "provenance_digests", "boundary"], "properties": {"artifact_id": {"type": "string", "minLength": 1}, "content_type": {"const": "application/vnd.aurora.qualified-resource-set-6+json"}, "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "semantic_loss": {"type": "array", "items": {"type": "string"}}, "provenance_digests": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}}},
+    "effect_receipts": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "raw_data_local": {"const": true}, "aggregate_only": {"const": true}, "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  }
+}

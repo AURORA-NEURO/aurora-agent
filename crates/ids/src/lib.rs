@@ -9,6 +9,7 @@
 pub mod canonical;
 pub mod error;
 pub mod evolution;
+pub mod federated_resource_discovery_interoperability;
 pub mod hash;
 pub mod id;
 pub mod interpretation_plane;
@@ -21,6 +22,15 @@ pub use evolution::{
     CONTRACT_VERSION as EVOLUTION_IDENTITY_CONTRACT_VERSION,
     FEATURE_ID as EVOLUTION_IDENTITY_FEATURE_ID,
     PRECLINICAL_BOUNDARY as EVOLUTION_IDENTITY_BOUNDARY,
+};
+pub use federated_resource_discovery_interoperability::{
+    interoperability_manifest, interoperate_resources, EndpointStatus as ResourceEndpointStatus,
+    EvidenceState as ResourceEvidenceState,
+    InteroperabilityManifest as ResourceInteroperabilityManifest, PeerResourceSummary4,
+    QualifiedResource6, QualifiedResourceSet6, ResourceArtifact6, ResourceDisposition,
+    ResourceEndpoint4, ResourceInteroperabilityError, ResourceNeed4,
+    CONTRACT_VERSION as IDS_RESOURCE_INTEROPERABILITY_CONTRACT_VERSION,
+    FEATURE_ID as IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
 };
 pub use hash::{sha256_hex_of_value, ContentHash};
 pub use id::{EventId, FactId, FactorId, QueryId, RunId, VariableName, WorldId};

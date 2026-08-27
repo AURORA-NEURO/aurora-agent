@@ -4142,6 +4142,18 @@ export {
   validateBaselineInterpretationAssuranceReceipt,
 } from "./research-contracts.js";
 export type { BaselineInterpretationAssuranceReceipt } from "./research-contracts.js";
+
+export {
+  IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
+  IDS_RESOURCE_INTEROPERABILITY_CONTRACT_VERSION,
+  IDS_RESOURCE_INTEROPERABILITY_INPUT_SCHEMA,
+  IDS_RESOURCE_INTEROPERABILITY_OUTPUT_SCHEMA,
+  IDS_RESOURCE_INTEROPERABILITY_CONTENT_TYPE,
+  idsResourceInteroperabilityDigest,
+  validateIdsQualifiedResourceSet6,
+} from "./research-contracts.js";
+export type { IdsQualifiedResourceSet6 } from "./research-contracts.js";
+
 export {
   GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
   GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_CONTRACT_VERSION,

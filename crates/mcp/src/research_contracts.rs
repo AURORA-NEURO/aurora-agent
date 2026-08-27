@@ -514,6 +514,10 @@ use bioprism_weavelang::{
     assure_weavelang_release, WeaveLangReleaseAssuranceReceipt, WeaveLangReleaseAssuranceRequest,
     WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID,
 };
+use bioprism_ids::{
+    interoperate_resources, PeerResourceSummary4, QualifiedResourceSet6, ResourceEndpoint4,
+    ResourceNeed4, IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
+};
 use serde_json::Value;
 
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
@@ -2840,6 +2844,39 @@ pub fn validate_mutation_knowledge_federated_control_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID {
         return Err("mutation knowledge federation feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_RESOURCE_INTEROPERABILITY_TOOL: &str = "ids_federated_resource_discovery_interoperability";
+
+pub fn interoperate_ids_resources_json(value: &Value) -> Result<Value, String> {
+    let request: ResourceNeed4 = serde_json::from_value(
+        value.get("request").cloned().unwrap_or_else(|| value.clone()),
+    )
+    .map_err(|error| format!("invalid ids resource interoperability request: {error}"))?;
+    let endpoints: Vec<ResourceEndpoint4> = serde_json::from_value(
+        value.get("endpoints").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
+    )
+    .map_err(|error| format!("invalid ids resource endpoints: {error}"))?;
+    let peers: Vec<PeerResourceSummary4> = serde_json::from_value(
+        value.get("peers").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
+    )
+    .map_err(|error| format!("invalid ids resource peers: {error}"))?;
+    let receipt = interoperate_resources(&request, &endpoints, &peers)
+        .map_err(|error| format!("ids resource interoperability failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids resource interoperability receipt: {error}"))
+}
+
+pub fn validate_ids_resource_interoperability_json(
+    value: &Value,
+) -> Result<QualifiedResourceSet6, String> {
+    let receipt: QualifiedResourceSet6 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids resource interoperability receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID {
+        return Err("ids resource interoperability feature id mismatch".into());
     }
     Ok(receipt)
 }

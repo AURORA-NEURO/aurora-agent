@@ -1808,6 +1808,9 @@ impl Server {
             "federated_evaluation_consensus" => self.federated_evaluation_consensus(&arguments),
             "resource_workbench_discover" => self.resource_workbench_discover(&arguments),
             "resource_discovery_contract_v2" => self.resource_discovery_contract_v2(&arguments),
+            "ids_federated_resource_discovery_interoperability" => {
+                self.ids_federated_resource_discovery_interoperability(&arguments)
+            }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -24689,6 +24692,29 @@ impl Server {
         }))
     }
 
+    fn ids_federated_resource_discovery_interoperability(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt = crate::research_contracts::interoperate_ids_resources_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_ids::IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
+            "contract_version": bioprism_ids::IDS_RESOURCE_INTEROPERABILITY_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "resource endpoint and peer qualification is deterministic and replay-bound",
+                "raw data stays institution-local and only aggregate permitted artifacts may cross federation boundaries",
+                "unknown, stale, contradicted, policy-denied, and missing-capability resources remain explicit"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied manifests and does not fetch endpoints or move raw data",
+                "qualification is an interoperability and policy decision, not biological validity or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -40715,6 +40741,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "request": { "type": "object", "description": "Serialized ResourceDiscoveryContractRequest with schema_version, feature_id, request_id, requested_by, compatibility_profile, need, candidates, and boundary." }
                 },
                 "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "ids_federated_resource_discovery_interoperability",
+            "description": "Interoperate typed resource registries across approved preclinical research peers. Deterministically qualifies local aggregate-only endpoints against semantic profile, protocol, capability, provenance, replay, policy, quorum, and locality gates while retaining unknown, stale, contradicted, and omitted resources.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ResourceNeed4 under request, ResourceEndpoint4 records under endpoints, and PeerResourceSummary4 records under peers." },
+                    "endpoints": { "type": "array", "description": "Institution-local typed endpoint manifests." },
+                    "peers": { "type": "array", "description": "Aggregate-only signed peer capability summaries." }
+                },
+                "required": ["request", "endpoints", "peers"]
             }
         }),
         json!({

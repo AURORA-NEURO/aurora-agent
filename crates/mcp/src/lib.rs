@@ -280,6 +280,10 @@ pub use research_contracts::{
     validate_mutation_knowledge_federated_control_json,
     MUTATION_KNOWLEDGE_FEDERATED_CONTROL_TOOL,
 };
+pub use research_contracts::{
+    interoperate_ids_resources_json, validate_ids_resource_interoperability_json,
+    IDS_RESOURCE_INTEROPERABILITY_TOOL,
+};
 pub use resource_discovery_contract::{
     compile_resource_discovery_contract_v2, ResourceDiscoveryContractError,
     ResourceDiscoveryContractRequest, ResourceDiscoveryContractResponse,
