@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import hashlib, json, re
 from typing import Any, Mapping, Sequence
 from .research_contracts import PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION, ResearchContractError
-FEATURE_ID="AFA-governance-P14-F28"; CONTRACT_VERSION="governance-federated-continual-interpretation-assurance/1.0"; INPUT_SCHEMA="EvidenceBackedResult2@1"; OUTPUT_SCHEMA="InteractiveInterpretation7@1"; CONTENT_TYPE="application/vnd.aurora.interactive-interpretation-7+json"
+FEATURE_ID="AFA-governance-P14-F28"; CONTRACT_VERSION="governance-federated-continual-interpretation-assurance/1.0"; INPUT_SCHEMA="EvidenceBackedResult4@1"; OUTPUT_SCHEMA="InteractiveInterpretation7@1"; CONTENT_TYPE="application/vnd.aurora.interactive-interpretation-7+json"
 def _digest(v:Any)->bool:return isinstance(v,str) and re.fullmatch(r"[0-9a-f]{64}",v) is not None
 def _canonical(v:Sequence[str])->bool:return tuple(v)==tuple(sorted(set(v)))
 def _hash(v:Any)->str:return hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()

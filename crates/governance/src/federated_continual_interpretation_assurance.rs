@@ -21,6 +21,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-governance-P14-F28";
 pub const CONTRACT_VERSION: &str = "governance-federated-continual-interpretation-assurance/1.0";
+pub const INPUT_SCHEMA: &str = "EvidenceBackedResult4@1";
+pub const OUTPUT_SCHEMA: &str = "InteractiveInterpretation7@1";
 pub const MAX_CANDIDATES: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -222,12 +224,12 @@ pub fn federated_continual_interpretation_assurance_manifest() -> CapabilityMani
         value: "provides a high-throughput, researcher-facing interpretation release gate with reproducible negative and unknown evidence".into(),
         inputs: vec![TypedPort {
             name: "interpretation_assurance_request".into(),
-            schema: "FederatedContinualInterpretationAssuranceRequest@1".into(),
+            schema: INPUT_SCHEMA.into(),
             required: true,
         }],
         outputs: vec![TypedPort {
             name: "interpretation_assurance_report".into(),
-            schema: "FederatedContinualInterpretationAssuranceReport@1".into(),
+            schema: OUTPUT_SCHEMA.into(),
             required: true,
         }],
         effects: [Effect::ReadLocalData, Effect::WriteLocalArtifact, Effect::ExecuteLocalComputation].into(),
