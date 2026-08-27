@@ -2088,6 +2088,9 @@ impl Server {
             "conformance_context_compilation_federated_control" => {
                 self.conformance_context_compilation_federated_control(&arguments)
             }
+            "federated_publication_release_inference" => {
+                self.federated_publication_release_inference(&arguments)
+            }
             "provider_capability_gate" => self.provider_capability_gate(&arguments),
             "sdk_registry_check" => self.sdk_registry_check(&arguments),
             "governance_schema_check" => self.governance_schema_check(&arguments),
@@ -26282,6 +26285,31 @@ impl Server {
         }))
     }
 
+    fn federated_publication_release_inference(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a FederatedPublicationReleaseInferenceRequest")?;
+        let receipt = crate::research_contracts::run_federated_publication_release_inference_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_services::FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "release attestations are ranked deterministically across federated continual origins",
+                "unknown, speculative, contradicted, omitted, negative, policy, locality, and replay states remain explicit and fail closed",
+                "the route emits digest-only recommendations; signing and publication remain separate authorized service effects"
+            ],
+            "limitations": [
+                "the inference engine does not sign, publish, dereference, or move raw experimental data",
+                "a qualified recommendation is not a scientific conclusion or a clinical decision"
+            ]
+        }))
+    }
+
     fn instrument_preflight(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -37957,6 +37985,14 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "federated_publication_release_inference",
+            "domains": ["federated continual publication", "research-object release inference", "deterministic ranking", "origin quorum", "negative evidence", "aggregate-only locality"],
+            "crates": ["bioprism-services", "bioprism-foundation", "bioprism-mcp"],
+            "mcp_tools": ["federated_publication_release_inference"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "oncoworlds_identity_and_transport",
             "domains": ["participant identity", "specimen and lesion joins", "disease epochs", "cross-scope transport"],
             "crates": ["bioprism-oncoworlds", "bioprism-scope", "bioprism-standards"],
@@ -42106,6 +42142,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "conformance_context_compilation_federated_control",
             "description": "Operate an A2 prospective high-throughput context-compilation federation control plane with pinned suite/protocol and fixture compatibility, peer quorum, capacity/checkpoint continuity, policy, protected-closure, signed approval, locality, replay, omission, uncertainty, and negative-result gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ContextCompilationFederatedControlRequest with suite/protocol identity, typed candidates and peers, capacity/checkpoint controls, policy/approval/closure/locality permissions, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "federated_publication_release_inference",
+            "description": "Rank digest-only federated continual research-object release attestations and emit a qualified, degraded, unknown, or blocked recommendation while preserving provenance, omissions, negative evidence, locality, and fail-closed gates. Signing and publication remain separate authorized effects.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedPublicationReleaseInferenceRequest with origin attestations, semantic profile, quorum, capacity/checkpoint, policy, locality, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "provider_capability_gate",

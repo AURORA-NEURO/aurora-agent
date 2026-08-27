@@ -3486,6 +3486,16 @@ export {
 export type { ConformanceContextCompilationFederatedControlReceipt } from "./research-contracts.js";
 
 export {
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_CONTRACT_VERSION,
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_INPUT_SCHEMA,
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_OUTPUT_SCHEMA,
+  servicesFederatedPublicationReleaseInferenceReceiptDigest,
+  validateServicesFederatedPublicationReleaseInferenceReceipt,
+} from "./research-contracts.js";
+export type { ServicesFederatedPublicationReleaseInferenceReceipt } from "./research-contracts.js";
+
+export {
   ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
   ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
   adapterLocalEvidenceSurveillanceInferenceEngineReceiptDigest,

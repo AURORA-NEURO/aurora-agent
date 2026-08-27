@@ -122,6 +122,7 @@ pub mod mechanism_workbench;
 pub mod research;
 pub mod research_release;
 pub mod research_release_batch;
+pub mod research_release_federated_inference_engine;
 pub mod topology;
 pub mod workspace;
 
@@ -156,6 +157,15 @@ pub use research_release_batch::{
     ResearchReleaseBatchEntry, ResearchReleaseBatchError, ResearchReleaseBatchReceipt,
     ResearchReleaseBatchRequest, FEATURE_ID as RESEARCH_RELEASE_BATCH_FEATURE_ID,
     FEATURE_VERSION as RESEARCH_RELEASE_BATCH_FEATURE_VERSION,
+};
+pub use research_release_federated_inference_engine::{
+    federated_publication_release_inference_manifest, infer_federated_publication_release,
+    FederatedPublicationReleaseInferenceError,
+    FederatedPublicationReleaseInferenceReceipt,
+    FederatedPublicationReleaseInferenceRequest,
+    PublicationReleaseInferenceCandidate, PublicationReleaseInferenceDecision,
+    FEATURE_ID as FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
+    FEATURE_VERSION as FEDERATED_PUBLICATION_RELEASE_INFERENCE_VERSION,
 };
 pub use topology::{Deployment, Placement, Topology, TopologyError};
 

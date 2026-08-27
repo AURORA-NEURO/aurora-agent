@@ -7012,3 +7012,13 @@ __all__ += [
     "ContextCompilationFederatedControlReceipt",
     "operate_context_compilation_federated_control",
 ]
+
+from .services_federated_publication_release_inference import (
+    FederatedPublicationReleaseInferenceReceipt,
+    operate_federated_publication_release_inference,
+)
+
+__all__ += [
+    "FederatedPublicationReleaseInferenceReceipt",
+    "operate_federated_publication_release_inference",
+]

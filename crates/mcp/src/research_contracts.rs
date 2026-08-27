@@ -481,8 +481,10 @@ use bioprism_runtime::{
     WORKFLOW_EXECUTION_FEATURE_ID,
 };
 use bioprism_services::{
-    ResearchReleaseBatchReceipt, ResearchReleaseReceipt, RESEARCH_RELEASE_BATCH_FEATURE_ID,
-    RESEARCH_RELEASE_FEATURE_ID,
+    infer_federated_publication_release, FederatedPublicationReleaseInferenceReceipt,
+    FederatedPublicationReleaseInferenceRequest, ResearchReleaseBatchReceipt,
+    ResearchReleaseReceipt, FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
+    RESEARCH_RELEASE_BATCH_FEATURE_ID, RESEARCH_RELEASE_FEATURE_ID,
 };
 use bioprism_store::{
     admit_federated_knowledge, FederatedKnowledgeGatewayReceipt, FederatedKnowledgeGatewayRequest,
@@ -505,6 +507,7 @@ pub const EVALUATION_OBSERVABILITY_TOOL: &str = "evaluation_observability_card";
 pub const FEDERATED_EVALUATION_TOOL: &str = "federated_evaluation_consensus";
 pub const RESEARCH_RELEASE_VALIDATE_TOOL: &str = "research_release_validate";
 pub const RESEARCH_RELEASE_BATCH_VALIDATE_TOOL: &str = "research_release_batch_validate";
+pub const FEDERATED_PUBLICATION_RELEASE_INFERENCE_TOOL: &str = "federated_publication_release_inference";
 pub const INSTRUMENT_PREFLIGHT_TOOL: &str = "instrument_preflight";
 pub const MULTIMODAL_HARMONIZATION_TOOL: &str = "multimodal_harmonize";
 pub const ANALYSIS_QUALIFICATION_TOOL: &str = "analysis_qualify";
@@ -706,6 +709,28 @@ pub fn validate_research_release_batch_receipt_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != RESEARCH_RELEASE_BATCH_FEATURE_ID {
         return Err("research-release batch feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_publication_release_inference_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedPublicationReleaseInferenceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated publication-release inference request: {error}"))?;
+    let receipt = infer_federated_publication_release(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated publication-release inference receipt: {error}")
+    })
+}
+
+pub fn validate_federated_publication_release_inference_json(
+    value: &Value,
+) -> Result<FederatedPublicationReleaseInferenceReceipt, String> {
+    let receipt: FederatedPublicationReleaseInferenceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated publication-release inference receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID {
+        return Err("federated publication-release inference feature id mismatch".into());
     }
     Ok(receipt)
 }
