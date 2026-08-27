@@ -16,10 +16,12 @@ import type { AutonomousDecisionCyclePersistenceCoordinator } from "./autonomous
  */
 export const AUTONOMOUS_AGENT_LIFECYCLE_SCHEMA = "bioprism-typescript-autonomous-agent-persistence-lifecycle/0.1" as const;
 export const AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS = ["model_inventory", "runtime_health", "health", "activation", "selection_promotion", "evaluator_calibration", "memory", "learning", "prompt_learning", "capability_journal", "decision_cycle", "execution"] as const;
+/** Optional components are appended to lifecycle reports only when configured on the agent. */
+export const AUTONOMOUS_AGENT_LIFECYCLE_OPTIONAL_COMPONENTS = ["tool_selection"] as const;
 export const AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER = AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS;
 export const AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER = [...AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS].reverse() as unknown as typeof AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS;
 
-export type AutonomousAgentPersistenceLifecycleComponent = typeof AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS[number];
+export type AutonomousAgentPersistenceLifecycleComponent = typeof AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS[number] | typeof AUTONOMOUS_AGENT_LIFECYCLE_OPTIONAL_COMPONENTS[number];
 export type AutonomousAgentPersistenceLifecycleOperation = "restore" | "flush";
 export type AutonomousAgentPersistenceLifecycleStatus = "completed" | "partial" | "failed" | "empty" | "unconfigured";
 export type AutonomousAgentPersistenceLifecycleComponentStatus = "restored" | "flushed" | "empty" | "unconfigured" | "not_attempted" | "failed";
@@ -173,6 +175,7 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
   getLastReport(): AutonomousAgentPersistenceLifecycleReport | null { return this.lastReport === null ? null : structuredClone(this.lastReport); }
 
   private configured(componentId: AutonomousAgentPersistenceLifecycleComponent): boolean {
+    if (componentId === "tool_selection") return Boolean((this.agent as unknown as { toolSelectionPersistence?: unknown }).toolSelectionPersistence);
     if (componentId === "model_inventory") return this.modelInventoryPersistence !== undefined;
     if (componentId === "activation") return this.activationStore !== undefined;
     if (componentId === "selection_promotion") return this.selectionPromotionStore !== undefined && Boolean((this.agent as unknown as { selectionPromotion?: unknown }).selectionPromotion);
@@ -186,9 +189,18 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
       memory: "memoryPersistence",
       learning: "learnerPersistence",
       prompt_learning: "promptLearningCoordinator",
+      tool_selection: "toolSelectionPersistence",
     } as const;
     const propertyName = names[componentId as keyof typeof names];
     return propertyName !== undefined && Boolean((this.agent as unknown as Record<string, unknown>)[propertyName]);
+  }
+
+  private orderedComponents(operation: AutonomousAgentPersistenceLifecycleOperation): AutonomousAgentPersistenceLifecycleComponent[] {
+    const base = [...(operation === "restore" ? AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER : AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER)] as AutonomousAgentPersistenceLifecycleComponent[];
+    if (!this.configured("tool_selection")) return base;
+    const insertionIndex = operation === "restore" ? 9 : 4;
+    base.splice(insertionIndex, 0, "tool_selection");
+    return base;
   }
 
   private async invoke(componentId: AutonomousAgentPersistenceLifecycleComponent, operation: AutonomousAgentPersistenceLifecycleOperation): Promise<unknown> {
@@ -208,6 +220,7 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
       memory: ["restoreMemory", "flushMemory"],
       learning: ["restoreOnlineLearning", "flushOnlineLearning"],
       prompt_learning: ["restorePromptLearning", "flushPromptLearning"],
+      tool_selection: ["restoreToolSelection", "flushToolSelection"],
       capability_journal: ["restoreCapabilityJournalPersistence", "flushCapabilityJournalPersistence"],
       decision_cycle: ["restoreDecisionCyclePersistence", "flushDecisionCyclePersistence"],
       execution: ["restoreExecutionPersistence", "flushExecutionPersistence"],
@@ -247,7 +260,7 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
     if (options.continueOnError !== undefined && typeof options.continueOnError !== "boolean") throw new ArgumentError("agent lifecycle continueOnError must be boolean");
     const strict = options.strict ?? true;
     const continueOnError = options.continueOnError ?? this.continueOnError;
-    const ordered = operation === "restore" ? AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER : AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER;
+    const ordered = this.orderedComponents(operation);
     const results: AutonomousAgentPersistenceComponentResult[] = [];
     let failedComponentId: AutonomousAgentPersistenceLifecycleComponent | null = null;
     for (const componentId of ordered) {

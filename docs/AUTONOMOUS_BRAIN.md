@@ -12445,3 +12445,26 @@ evidence scope before adapter/catalogue preparation can reach source dispatch. T
 inside `execute` and the provider approval inside `run` remain independent, so an admitted source
 scope can still stop at provider review without invoking a model. This is the same launch boundary
 used by ordinary and automatic agent runs, applied one phase earlier to evidence acquisition.
+
+### Persistent adaptive tool selection
+
+The autonomous façade now owns the reviewed tool-selection bandit when an application supplies
+`toolSelectionPersistence` (TypeScript) or `tool_selection_persistence` (Python). Tool-arm state
+is keyed by domain, capability, and reviewed tool identity, and it learns only from explicit
+evaluator settlement. Transport success, tool output, arguments, prompts, task text, credentials,
+and evaluator prose never become durable learning input.
+
+The persistence boundary is a canonical, bounded, digest-chained snapshot with optional
+compare-and-swap fencing. `restoreToolSelection()` / `restore_tool_selection()` must be called
+before work is admitted after restart; `flushToolSelection()` / `flush_tool_selection()` seals
+the current value-only arm statistics and evaluator outcome identities. `recordToolSelectionReward()`
+and the receipt/capability evaluator paths update the agent-owned state when callers do not pass
+an explicit state, while explicit state remains caller-owned for compatibility. The lifecycle
+coordinator includes the optional `tool_selection` component only when configured, preserving
+older integrations that do not persist tool learning.
+
+The same state is fed into single-domain, cross-domain, capability-portfolio, and tool-receipt
+paths, so coding, browser, data, science, biomedical, neuroscience, operations, enterprise,
+multi-agent, multimodal, cross-domain, and evaluation workflows share one governed adaptation
+contract without sharing task payloads. A stale writer or tampered snapshot fails closed before
+the restored state can influence planning.

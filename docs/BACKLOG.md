@@ -2085,3 +2085,10 @@ preparation or acquisition, while retaining independent source-dispatch and prov
 approvals. The all-domain test matrix confirms that denied scopes make zero source calls and that
 provider approval can still pause after approved evidence. Deployment identity, external approval,
 and source credentials remain caller-owned.
+
+The high-level TypeScript and Python agents now also own an optional persistent adaptive
+tool-selection state. Evaluator-approved domain/capability/tool rewards can be restored and flushed
+through canonical digest-chained JSON with optional CAS fencing, and the lifecycle includes this
+component when configured. The projection is deliberately metadata-only; raw tool arguments,
+outputs, prompts, tasks, credentials, and evaluator prose remain caller-owned. Future deployment
+work is to bind this adapter to encrypted tenant-scoped storage and operational retention policies.

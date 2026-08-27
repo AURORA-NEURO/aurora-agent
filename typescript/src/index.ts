@@ -426,6 +426,23 @@ export type {
   AutonomousOnlineLearnerTransactionalSnapshotTextStore,
 } from "./autonomous-online-learner-persistence.js";
 export {
+  AUTONOMOUS_TOOL_SELECTION_SNAPSHOT_SCHEMA,
+  MAX_AUTONOMOUS_TOOL_SELECTION_SNAPSHOT_BYTES,
+  validateAutonomousToolSelectionSnapshot,
+  snapshotAutonomousToolSelection,
+  AutonomousToolSelectionPersistenceCoordinator,
+  JsonAutonomousToolSelectionPersistence,
+  TransactionalJsonAutonomousToolSelectionPersistence,
+  WebStorageAutonomousToolSelectionSnapshotTextStore,
+} from "./autonomous-tool-selection-persistence.js";
+export type {
+  AutonomousToolSelectionSnapshot,
+  AutonomousToolSelectionPersistence,
+  AutonomousToolSelectionSnapshotTextStore,
+  AutonomousToolSelectionTransactionalSnapshotTextStore,
+  AutonomousToolSelectionStateBinding,
+} from "./autonomous-tool-selection-persistence.js";
+export {
   MAX_ALLOWED_TOOLS,
   MISSION_ASSEMBLY_SCHEMA,
   MISSION_TRACE_SCHEMA_VERSION,
@@ -706,6 +723,7 @@ export type {
 export {
   AUTONOMOUS_AGENT_LIFECYCLE_SCHEMA,
   AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS,
+  AUTONOMOUS_AGENT_LIFECYCLE_OPTIONAL_COMPONENTS,
   AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER,
   AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER,
   AutonomousAgentPersistenceLifecycleCoordinator,

@@ -121,6 +121,11 @@ import type {
   AutonomousOnlineLearnerPersistenceCoordinator,
   AutonomousOnlineLearnerSnapshot,
 } from "./autonomous-online-learner-persistence.js";
+import {
+  AutonomousToolSelectionPersistenceCoordinator,
+  type AutonomousToolSelectionPersistence,
+  type AutonomousToolSelectionSnapshot,
+} from "./autonomous-tool-selection-persistence.js";
 import { buildAutonomousEvidencePlan, type AutonomousEvidencePlan, type AutonomousEvidencePlanJSON } from "./autonomous-evidence.js";
 import {
   AutonomousEvidenceRuntime,
@@ -1447,6 +1452,10 @@ export interface AutonomousAgentOptions {
   memoryConsolidator?: AutonomousMemoryConsolidator;
   /** Optional registry-bound, CAS-fenced prompt learner used by every high-level run. */
   promptLearningCoordinator?: AutonomousPromptLearningPersistenceCoordinator;
+  /** Optional caller-owned CAS-fenced persistence for evaluator-approved tool selection state. */
+  toolSelectionPersistence?: AutonomousToolSelectionPersistence;
+  /** Optional initial value-only tool selection state restored by the application before execution. */
+  toolSelectionState?: AutonomousToolSelectionState | null;
   /** Optional caller-owned activation state machine; keys and raw prompts never enter its state. */
   activation?: AutonomousCapabilityActivation;
   /** Optional caller-owned external connector catalogue; registration never authorizes dispatch. */
@@ -5102,6 +5111,11 @@ export class AutonomousAgent {
   /** Optional evaluator-gated lesson index; it never receives prompts, provider payloads, or keys. */
   readonly memoryConsolidator?: AutonomousMemoryConsolidator;
   readonly promptLearningCoordinator?: AutonomousPromptLearningPersistenceCoordinator;
+  /** Caller-owned persistence for value-only adaptive tool-arm state. */
+  readonly toolSelectionPersistence?: AutonomousToolSelectionPersistence;
+  private toolSelectionStateValue: AutonomousToolSelectionState;
+  private readonly toolSelectionConfigured: boolean;
+  private readonly toolSelectionPersistenceCoordinator?: AutonomousToolSelectionPersistenceCoordinator;
   private domainToolRegistry?: AutonomousDomainToolRegistry;
   private domainToolRuntime?: AutonomousDomainToolRuntime;
   private capabilityRuntime?: AutonomousCapabilityRuntime;
@@ -5147,6 +5161,7 @@ export class AutonomousAgent {
       || options.evaluatorCalibrationPersistence.registry !== options.evaluatorCalibrationRegistry
     )) throw new ArgumentError("AutonomousAgent evaluatorCalibrationPersistence must be bound to the supplied registry");
     if (options.promptLearningCoordinator !== undefined && !(options.promptLearningCoordinator instanceof AutonomousPromptLearningPersistenceCoordinator)) throw new ArgumentError("AutonomousAgent promptLearningCoordinator must be an AutonomousPromptLearningPersistenceCoordinator");
+    if (options.toolSelectionPersistence !== undefined && (typeof options.toolSelectionPersistence.read !== "function" || typeof options.toolSelectionPersistence.write !== "function")) throw new ArgumentError("AutonomousAgent toolSelectionPersistence is malformed");
     if (options.connectorRegistry !== undefined && !(options.connectorRegistry instanceof AutonomousConnectorRegistry)) throw new ArgumentError("AutonomousAgent connectorRegistry must be an AutonomousConnectorRegistry");
     if (options.connectorRuntime !== undefined && !(options.connectorRuntime instanceof AutonomousConnectorRuntime)) throw new ArgumentError("AutonomousAgent connectorRuntime must be an AutonomousConnectorRuntime");
     if (options.connectorRegistry !== undefined && options.connectorRuntime !== undefined && options.connectorRuntime.registry !== options.connectorRegistry) throw new ArgumentError("AutonomousAgent connectorRegistry and connectorRuntime must reference the same catalogue");
@@ -5181,6 +5196,15 @@ export class AutonomousAgent {
     )) throw new ArgumentError("AutonomousAgent memoryConsolidator is malformed");
     this.memoryConsolidator = options.memoryConsolidator;
     this.promptLearningCoordinator = options.promptLearningCoordinator;
+    this.toolSelectionPersistence = options.toolSelectionPersistence;
+    this.toolSelectionStateValue = normalizeAutonomousToolSelectionState(options.toolSelectionState);
+    this.toolSelectionConfigured = options.toolSelectionState !== undefined || options.toolSelectionPersistence !== undefined;
+    if (this.toolSelectionPersistence !== undefined) {
+      this.toolSelectionPersistenceCoordinator = new AutonomousToolSelectionPersistenceCoordinator({
+        get: () => structuredClone(this.toolSelectionStateValue),
+        set: (state) => { this.toolSelectionStateValue = normalizeAutonomousToolSelectionState(state); },
+      }, this.toolSelectionPersistence);
+    }
     this.activation = options.activation ?? new AutonomousCapabilityActivation();
     this.modelHealthController = options.modelHealthStore === undefined ? undefined : new AutonomousModelHealthController(options.modelHealthStore);
     this.runtimeHealthPersistence = options.runtimeHealthPersistence;
@@ -5281,6 +5305,30 @@ export class AutonomousAgent {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
     if (!this.learnerPersistence) throw new ArgumentError("AutonomousAgent online learner persistence is not configured");
     return this.learnerPersistence.flush();
+  }
+
+  /** Return the agent-owned value-only adaptive tool state without exposing mutable internals. */
+  toolSelectionState(): AutonomousToolSelectionState {
+    return structuredClone(this.toolSelectionStateValue);
+  }
+
+  /** Restore evaluator-approved tool-arm statistics before admitting new adaptive decisions. */
+  async restoreToolSelection(): Promise<AutonomousToolSelectionSnapshot | null> {
+    if (!this.toolSelectionPersistenceCoordinator) throw new ArgumentError("AutonomousAgent tool selection persistence is not configured");
+    return this.toolSelectionPersistenceCoordinator.restore();
+  }
+
+  /** Flush evaluator-approved tool-arm statistics through the caller-owned CAS boundary. */
+  async flushToolSelection(): Promise<AutonomousToolSelectionSnapshot> {
+    if (!this.toolSelectionPersistenceCoordinator) throw new ArgumentError("AutonomousAgent tool selection persistence is not configured");
+    return this.toolSelectionPersistenceCoordinator.flush();
+  }
+
+  /** Apply one independent evaluator reward to the agent-owned tool selector. */
+  recordToolSelectionReward(outcome: AutonomousToolSelectionOutcome): AutonomousToolSelectionState {
+    if (!this.toolSelectionConfigured) throw new ArgumentError("AutonomousAgent tool selection state is not configured");
+    this.toolSelectionStateValue = settleAutonomousToolSelectionOutcome(this.toolSelectionStateValue, outcome);
+    return this.toolSelectionState();
   }
 
   /**
@@ -5738,6 +5786,8 @@ export class AutonomousAgent {
   ): Promise<AutonomousAgentCapabilityLearningResult> {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
     const { toolSelectionState, ...learningOptions } = options;
+    const callerProvidedToolSelectionState = toolSelectionState !== undefined;
+    const effectiveToolSelectionState = callerProvidedToolSelectionState ? toolSelectionState : this.effectiveToolSelectionState();
     const settlement = await settleAutonomousCapabilityLearning(result, {
       ...learningOptions,
       settlementStore: learningOptions.settlementStore ?? this.capabilityLearningSettlementStore,
@@ -5751,7 +5801,7 @@ export class AutonomousAgent {
     });
     this.learner.restore(settlement.next_state);
     const record = ("record" in result ? (result as AutonomousCapabilityExecutionResult).record : result) as AutonomousCapabilityExecutionRecord;
-    const nextToolSelectionState = settleAutonomousToolSelectionOutcome(toolSelectionState, {
+    const nextToolSelectionState = settleAutonomousToolSelectionOutcome(effectiveToolSelectionState, {
       domain: record.domain as AutonomousDomainName,
       capability: record.capability ?? "capability_execution",
       tool: record.tool,
@@ -5760,6 +5810,7 @@ export class AutonomousAgent {
       latencyMs: record.duration_ms,
       outcomeDigest: settlement.outcome_digest,
     });
+    if (!callerProvidedToolSelectionState && this.toolSelectionConfigured) this.toolSelectionStateValue = nextToolSelectionState;
     return { ...settlement, tool_selection_state: nextToolSelectionState, tool_selection_state_digest: await digestJson(nextToolSelectionState) };
   }
 
@@ -5770,6 +5821,8 @@ export class AutonomousAgent {
   ): Promise<AutonomousAgentCapabilityLearningBatchResult> {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
     const { toolSelectionState, ...learningOptions } = options;
+    const callerProvidedToolSelectionState = toolSelectionState !== undefined;
+    const effectiveToolSelectionState = callerProvidedToolSelectionState ? toolSelectionState : this.effectiveToolSelectionState();
     const settlement = await settleAutonomousCapabilityLearningBatch(results, {
       ...learningOptions,
       settlementStore: learningOptions.settlementStore ?? this.capabilityLearningSettlementStore,
@@ -5782,7 +5835,7 @@ export class AutonomousAgent {
       }),
     });
     for (const item of settlement.settlements) this.learner.restore(item.next_state);
-    let nextToolSelectionState = normalizeAutonomousToolSelectionState(toolSelectionState);
+    let nextToolSelectionState = normalizeAutonomousToolSelectionState(effectiveToolSelectionState);
     for (const [index, item] of settlement.settlements.entries()) {
       const record = ("record" in results[index]! ? (results[index] as AutonomousCapabilityExecutionResult).record : results[index]) as AutonomousCapabilityExecutionRecord;
       nextToolSelectionState = settleAutonomousToolSelectionOutcome(nextToolSelectionState, {
@@ -5795,6 +5848,7 @@ export class AutonomousAgent {
         outcomeDigest: item.outcome_digest,
       });
     }
+    if (!callerProvidedToolSelectionState && this.toolSelectionConfigured) this.toolSelectionStateValue = nextToolSelectionState;
     return { ...settlement, tool_selection_state: nextToolSelectionState, tool_selection_state_digest: await digestJson(nextToolSelectionState) };
   }
 
@@ -5819,11 +5873,15 @@ export class AutonomousAgent {
     if (!this.domainToolRuntime) throw new ArgumentError("evaluateToolReceipts requires a configured domain tool runtime");
     if (!(options?.evaluator instanceof AutonomousToolOutcomeEvaluator)) throw new ArgumentError("evaluateToolReceipts requires an AutonomousToolOutcomeEvaluator");
     const receipts = options.receipts === undefined ? this.domainToolRuntime.receiptsSnapshot() : [...options.receipts];
-    return options.evaluator.evaluateReceipts(receipts, {
+    const callerProvidedToolSelectionState = options.toolSelectionState !== undefined;
+    const effectiveToolSelectionState = callerProvidedToolSelectionState ? options.toolSelectionState : this.effectiveToolSelectionState();
+    const report = await options.evaluator.evaluateReceipts(receipts, {
       evidence: options.evidence,
-      toolSelectionState: options.toolSelectionState,
+      toolSelectionState: effectiveToolSelectionState,
       toolSelectionUpdater: settleAutonomousToolSelectionOutcome,
     });
+    if (!callerProvidedToolSelectionState && this.toolSelectionConfigured && report.next_tool_selection_state !== null) this.toolSelectionStateValue = normalizeAutonomousToolSelectionState(report.next_tool_selection_state);
+    return report;
   }
 
   /**
@@ -7248,7 +7306,7 @@ export class AutonomousAgent {
     const profile = await profileFor(route.primary_domain);
     const capabilityRoute = routeAutonomousCapability(taskText, profile.domain, options.capability === undefined ? {} : { explicitCapability: options.capability });
     const effectiveCapability = options.capability ?? capabilityRoute.selected_capability ?? undefined;
-    const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], effectiveCapability, options.toolSelectionState, options.toolSelectionExploration);
+    const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], effectiveCapability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration);
     const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: effectiveCapability, capabilityRoute, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames, structuredDomainResponse: options.structuredDomainResponse });
     return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, capability_route: capabilityRoute, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
   }
@@ -8061,7 +8119,7 @@ export class AutonomousAgent {
         { id: "cross-domain-parent", content: `Parent route digest: ${parentDigest}; child id: ${id}`, required: true, priority: 100 },
         ...(subtask.context ?? []),
       ];
-      const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(childTask, [subtask.domain], effectiveCapability, options.toolSelectionState, options.toolSelectionExploration);
+      const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(childTask, [subtask.domain], effectiveCapability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration);
       const child = await buildTaskBlueprint(profile, childTask, {
         capability: effectiveCapability,
         capabilityRoute,
@@ -8086,7 +8144,7 @@ export class AutonomousAgent {
       },
     ];
     const synthesisTask = `Synthesize the domain analyses for: ${taskText}`;
-    const synthesisTools = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(synthesisTask, [...selectedDomains, "cross_domain"], options.capability ?? synthesisProfile.default_capability, options.toolSelectionState, options.toolSelectionExploration);
+    const synthesisTools = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(synthesisTask, [...selectedDomains, "cross_domain"], options.capability ?? synthesisProfile.default_capability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration);
     const synthesis = await buildTaskBlueprint(synthesisProfile, synthesisTask, {
       capability: options.capability ?? synthesisProfile.default_capability,
       routeDigest: route.route_digest,
@@ -9439,6 +9497,11 @@ export class AutonomousAgent {
   private async liveToolNames(domains: readonly AutonomousDomainName[]): Promise<string[]> {
     const registry = await this.ensureToolRegistry();
     return registry ? this.filterActivatedToolNames((await registry.plan(domains)).available_curated_tools) : [];
+  }
+
+  private effectiveToolSelectionState(state?: AutonomousToolSelectionState | null): AutonomousToolSelectionState | null | undefined {
+    if (state !== undefined) return state;
+    return this.toolSelectionConfigured ? this.toolSelectionStateValue : undefined;
   }
 
   private async liveToolNamesForTask(task: string, domains: readonly AutonomousDomainName[], capability?: string, toolSelectionState?: AutonomousToolSelectionState | null, exploration?: number): Promise<string[]> {

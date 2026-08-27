@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import threading
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from .authoring import content_digest
 from .errors import ArgumentError
@@ -38,6 +38,7 @@ AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS = (
     "decision_cycle",
     "execution",
 )
+AUTONOMOUS_AGENT_LIFECYCLE_OPTIONAL_COMPONENTS = ("tool_selection",)
 AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER = AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS
 AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER = tuple(reversed(AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS))
 AUTONOMOUS_AGENT_LIFECYCLE_OPERATIONS = ("restore", "flush")
@@ -274,6 +275,8 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
         return self._last_report
 
     def _coordinator_for(self, component_id: str) -> Any | None:
+        if component_id == "tool_selection":
+            return getattr(self.agent, "tool_selection_persistence", None)
         if component_id == "model_inventory":
             return self.model_inventory_store
         if component_id == "activation":
@@ -287,6 +290,14 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
         if component_id == "execution":
             return self.execution_persistence
         return getattr(self.agent, f"{component_id}_persistence", None)
+
+    def _order(self, operation: str) -> tuple[str, ...]:
+        base = AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER if operation == "restore" else AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER
+        if self._coordinator_for("tool_selection") is None:
+            return base
+        values = list(base)
+        values.insert(9 if operation == "restore" else 4, "tool_selection")
+        return tuple(values)
 
     def _invoke(self, component_id: str, operation: str) -> Any:
         if component_id == "model_inventory":
@@ -313,13 +324,15 @@ class AutonomousAgentPersistenceLifecycleCoordinator:
             if operation == "restore":
                 return self.agent.restore_execution_persistence()
             return self.agent.flush_execution_persistence()
+        if component_id == "tool_selection":
+            method = getattr(self.agent, f"{operation}_tool_selection", None)
+            if not callable(method):
+                raise ArgumentError(f"agent does not expose {operation}_tool_selection")
+            return method()
         method = getattr(self.agent, f"{operation}_{component_id}", None)
         if not callable(method):
             raise ArgumentError(f"agent does not expose {operation}_{component_id}")
         return method()
-
-    def _order(self, operation: str) -> tuple[str, ...]:
-        return AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER if operation == "restore" else AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER
 
     def _report(
         self,
@@ -422,6 +435,7 @@ __all__ = [
     "AUTONOMOUS_AGENT_LIFECYCLE_COMPONENTS",
     "AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER",
     "AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER",
+    "AUTONOMOUS_AGENT_LIFECYCLE_OPTIONAL_COMPONENTS",
     "AUTONOMOUS_AGENT_LIFECYCLE_OPERATIONS",
     "AUTONOMOUS_AGENT_LIFECYCLE_STATUSES",
     "AUTONOMOUS_AGENT_LIFECYCLE_COMPONENT_STATUSES",

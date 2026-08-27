@@ -154,6 +154,12 @@ from .autonomous_prompt_learning import (
     extract_autonomous_prompt_learning_selections,
     select_adaptive_autonomous_prompts,
 )
+from .autonomous_tool_selection_persistence import (
+    AutonomousToolSelectionPersistenceCoordinator,
+    AutonomousToolSelectionSnapshot,
+    AutonomousToolSelectionSnapshotPersistence,
+    validate_autonomous_tool_selection_snapshot,
+)
 from .autonomous_evaluator_calibration import (
     AutonomousEvaluatorCalibrationRegistry,
     AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
@@ -15672,6 +15678,8 @@ class AutonomousAgent:
         evaluator_calibration_registry: AutonomousEvaluatorCalibrationRegistry | None = None,
         evaluator_calibration_persistence: AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator | None = None,
         prompt_learning_coordinator: AutonomousPromptLearningPersistenceCoordinator | None = None,
+        tool_selection_state: Mapping[str, Any] | None = None,
+        tool_selection_persistence: AutonomousToolSelectionSnapshotPersistence | None = None,
     ) -> None:
         if not isinstance(runtime, LLMRuntime):
             raise BrainRunError("runtime must be an LLMRuntime")
@@ -15805,6 +15813,11 @@ class AutonomousAgent:
             raise BrainRunError(
                 "prompt_learning_coordinator must be an AutonomousPromptLearningPersistenceCoordinator or None"
             )
+        if tool_selection_persistence is not None and not all(
+            callable(getattr(tool_selection_persistence, method, None))
+            for method in ("read", "write")
+        ):
+            raise BrainRunError("tool_selection_persistence must implement read and write")
         if (
             connector_registry is not None
             and connector_runtime is not None
@@ -15855,6 +15868,21 @@ class AutonomousAgent:
         self.evaluator_calibration_registry = evaluator_calibration_registry
         self.evaluator_calibration_persistence = evaluator_calibration_persistence
         self.prompt_learning_coordinator = prompt_learning_coordinator
+        try:
+            self.tool_selection_state = normalize_autonomous_tool_selection_state(tool_selection_state)
+        except (ArgumentError, BrainRunError) as error:
+            raise BrainRunError("tool_selection_state is invalid") from error
+        self.tool_selection_persistence = tool_selection_persistence
+        self._tool_selection_configured = tool_selection_state is not None or tool_selection_persistence is not None
+        self._tool_selection_persistence_coordinator = (
+            AutonomousToolSelectionPersistenceCoordinator(
+                lambda: dict(self.tool_selection_state),
+                self._set_tool_selection_state,
+                tool_selection_persistence,
+            )
+            if tool_selection_persistence is not None
+            else None
+        )
         self.execution_journal = execution_journal
         self.decision_cycle_persistence = decision_cycle_persistence
         self.execution_persistence = execution_persistence
@@ -19492,17 +19520,25 @@ class AutonomousAgent:
 
         if not isinstance(evaluator, AutonomousToolOutcomeEvaluator):
             raise BrainRunError("evaluator must be an AutonomousToolOutcomeEvaluator")
+        caller_provided_tool_selection_state = tool_selection_state is not None
+        effective_tool_selection_state = tool_selection_state if caller_provided_tool_selection_state else (
+            self.tool_selection_state if self._tool_selection_configured else None
+        )
         try:
-            return evaluator.evaluate_capability_result(
+            report = evaluator.evaluate_capability_result(
                 result,
                 evidence=evidence,
                 allow_reconciliation=allow_reconciliation,
                 bandit_state=bandit_state,
                 bandit_updater=bandit_updater,
                 ledger=self.ledger if ledger is None else ledger,
-                tool_selection_state=tool_selection_state,
+                tool_selection_state=effective_tool_selection_state,
                 tool_selection_updater=_update_autonomous_tool_selection_state,
             )
+            next_state = report.get("next_tool_selection_state") if isinstance(report, Mapping) else None
+            if not caller_provided_tool_selection_state and self._tool_selection_configured and isinstance(next_state, Mapping):
+                self._set_tool_selection_state(next_state)
+            return report
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("capability execution evaluation failed") from error
 
@@ -19522,17 +19558,25 @@ class AutonomousAgent:
 
         if not isinstance(evaluator, AutonomousToolOutcomeEvaluator):
             raise BrainRunError("evaluator must be an AutonomousToolOutcomeEvaluator")
+        caller_provided_tool_selection_state = tool_selection_state is not None
+        effective_tool_selection_state = tool_selection_state if caller_provided_tool_selection_state else (
+            self.tool_selection_state if self._tool_selection_configured else None
+        )
         try:
-            return evaluator.evaluate_capability_results(
+            report = evaluator.evaluate_capability_results(
                 results,
                 evidence=evidence,
                 allow_reconciliation=allow_reconciliation,
                 bandit_state=bandit_state,
                 bandit_updater=bandit_updater,
                 ledger=self.ledger if ledger is None else ledger,
-                tool_selection_state=tool_selection_state,
+                tool_selection_state=effective_tool_selection_state,
                 tool_selection_updater=_update_autonomous_tool_selection_state,
             )
+            next_state = report.get("next_tool_selection_state") if isinstance(report, Mapping) else None
+            if not caller_provided_tool_selection_state and self._tool_selection_configured and isinstance(next_state, Mapping):
+                self._set_tool_selection_state(next_state)
+            return report
         except (ArgumentError, TypeError, ValueError) as error:
             raise BrainRunError("capability execution batch evaluation failed") from error
 
@@ -19562,16 +19606,24 @@ class AutonomousAgent:
         selected = self.tool_runtime.receipts if receipts is None else tuple(receipts)
         if any(not isinstance(receipt, AutonomousDomainToolReceipt) for receipt in selected):
             raise BrainRunError("receipts must contain AutonomousDomainToolReceipt values")
+        caller_provided_tool_selection_state = tool_selection_state is not None
+        effective_tool_selection_state = tool_selection_state if caller_provided_tool_selection_state else (
+            self.tool_selection_state if self._tool_selection_configured else None
+        )
         try:
-            return evaluator.evaluate_receipts(
+            report = evaluator.evaluate_receipts(
                 selected,
                 evidence=evidence,
                 bandit_state=bandit_state,
                 bandit_updater=bandit_updater,
                 ledger=self.ledger if ledger is None else ledger,
-                tool_selection_state=tool_selection_state,
+                tool_selection_state=effective_tool_selection_state,
                 tool_selection_updater=_update_autonomous_tool_selection_state,
             )
+            next_state = report.get("next_tool_selection_state") if isinstance(report, Mapping) else None
+            if not caller_provided_tool_selection_state and self._tool_selection_configured and isinstance(next_state, Mapping):
+                self._set_tool_selection_state(next_state)
+            return report
         except (ArgumentError, ValueError) as error:
             raise BrainRunError("domain tool receipt evaluation failed") from error
 
@@ -21870,6 +21922,8 @@ class AutonomousAgent:
         capability_focus = resolved_options.pop("_aurora_capability_focus", None)
         capability_contract = resolved_options.pop("_aurora_capability_contract", None)
         tool_learning_state = resolved_options.pop("tool_learning_state", resolved_options.pop("toolSelectionState", None))
+        if tool_learning_state is None and self._tool_selection_configured:
+            tool_learning_state = self.tool_selection_state
         tool_selection_exploration = resolved_options.pop("tool_selection_exploration", resolved_options.pop("toolSelectionExploration", 0.15))
         if capability_focus is not None:
             capability_focus = _identifier("capability focus", capability_focus)
@@ -22465,6 +22519,39 @@ class AutonomousAgent:
         """Compatibility alias for flushing the agent's value-only online-learning ledger."""
 
         return self.flush_learning()
+
+    def _set_tool_selection_state(self, state: Mapping[str, Any]) -> None:
+        self.tool_selection_state = normalize_autonomous_tool_selection_state(state)
+
+    def tool_selection_state_snapshot(self) -> dict[str, Any]:
+        """Return a fresh normalized copy of the agent-owned tool selector state."""
+
+        return normalize_autonomous_tool_selection_state(self.tool_selection_state)
+
+    def restore_tool_selection(self) -> AutonomousToolSelectionSnapshot | None:
+        """Restore evaluator-approved tool-arm statistics before planning resumes."""
+
+        if self._tool_selection_persistence_coordinator is None:
+            raise BrainRunError("AutonomousAgent tool selection persistence is not configured")
+        return self._tool_selection_persistence_coordinator.restore()
+
+    def flush_tool_selection(self) -> AutonomousToolSelectionSnapshot:
+        """Flush evaluator-approved tool-arm statistics through the caller-owned CAS boundary."""
+
+        if self._tool_selection_persistence_coordinator is None:
+            raise BrainRunError("AutonomousAgent tool selection persistence is not configured")
+        return self._tool_selection_persistence_coordinator.flush()
+
+    def record_tool_selection_reward(self, outcome: Mapping[str, Any]) -> dict[str, Any]:
+        """Apply one independent evaluator reward to the agent-owned adaptive selector."""
+
+        if not self._tool_selection_configured:
+            raise BrainRunError("AutonomousAgent tool selection state is not configured")
+        try:
+            self._set_tool_selection_state(_update_autonomous_tool_selection_state(self.tool_selection_state, outcome))
+        except (ArgumentError, BrainRunError, TypeError, ValueError) as error:
+            raise BrainRunError("tool selection reward could not be recorded") from error
+        return self.tool_selection_state_snapshot()
 
     def restore_memory(self) -> Any:
         """Restore episodic memory from its caller-owned persistence boundary."""
@@ -26945,6 +27032,10 @@ __all__ = [
     "normalize_autonomous_tool_selection_state",
     "autonomous_tool_selection_arm_id",
     "settle_autonomous_tool_selection_outcome",
+    "AutonomousToolSelectionSnapshot",
+    "AutonomousToolSelectionSnapshotPersistence",
+    "AutonomousToolSelectionPersistenceCoordinator",
+    "validate_autonomous_tool_selection_snapshot",
     "AutonomousCapabilityActivation",
     "AutonomousCapabilityActivationStore",
     "AutonomousCrossDomainBlueprint",
