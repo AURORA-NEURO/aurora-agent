@@ -7,6 +7,7 @@
 //! primitive that 43.26 (Context Certificate) requires to be replayable across languages.
 
 pub mod canonical;
+pub mod context_compilation_federated_control_plane;
 pub mod error;
 pub mod evolution;
 pub mod federated_resource_discovery_interoperability;
@@ -16,6 +17,13 @@ pub mod interpretation_plane;
 pub mod throughput_evidence_surveillance_contract_model;
 
 pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
+pub use context_compilation_federated_control_plane::{
+    context_compilation_manifest, operate_context_compilation, CertifiedDecisionSection1,
+    CertifiedDecisionSection1Artifact, ContextCompilationError, ContextEvidenceState,
+    ContextFact4, ContextPeer4, DecisionQuery4,
+    CONTRACT_VERSION as IDS_CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as IDS_CONTEXT_COMPILATION_FEATURE_ID,
+};
 pub use error::{CanonicalError, IdError};
 pub use evolution::{
     EvolutionIdentity, EvolutionIdentityError,

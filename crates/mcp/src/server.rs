@@ -33,6 +33,9 @@ use bioprism_epistemic::{
     RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_CONTRACT_VERSION,
     RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
 };
+use bioprism_ids::{
+    IDS_CONTEXT_COMPILATION_CONTRACT_VERSION, IDS_CONTEXT_COMPILATION_FEATURE_ID,
+};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -1823,6 +1826,9 @@ impl Server {
             }
             "epistemic_retrieval_synthesis_federated_control_plane" => {
                 self.epistemic_retrieval_synthesis_federated_control_plane(&arguments)
+            }
+            "ids_context_compilation_federated_control_plane" => {
+                self.ids_context_compilation_federated_control_plane(&arguments)
             }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
@@ -24797,6 +24803,29 @@ impl Server {
         }))
     }
 
+    fn ids_context_compilation_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_ids_context_compilation_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_CONTEXT_COMPILATION_FEATURE_ID,
+            "contract_version": IDS_CONTEXT_COMPILATION_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "typed facts are deterministically ranked with stable tie breaks and replay identity",
+                "unknown, unmeasured, contradicted, omitted, and negative claims remain visible",
+                "only aggregate-only permitted context summaries can cross an approved federation boundary"
+            ],
+            "limitations": [
+                "the route consumes caller-supplied fact summaries and does not retrieve documents or raw measurements",
+                "a qualified context section is not biological validity or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -40874,6 +40903,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "peers": { "type": "array", "description": "Signed aggregate-only PeerSynthesisSummary4 records." }
                 },
                 "required": ["request", "candidates", "peers"]
+            }
+        }),
+        json!({
+            "name": "ids_context_compilation_federated_control_plane",
+            "description": "Compile bounded typed decision facts and signed aggregate-only peer context summaries for preclinical research. The control plane preserves semantic, replay, provenance, policy, quorum, omission, contradiction, negative-evidence, locality, and protected-closure state without retrieving raw documents or making clinical decisions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized DecisionQuery4 with required claims, semantic profile, checkpoint, budget, policy, approval, federation, locality, aggregate-only, and replay declarations." },
+                    "facts": { "type": "array", "description": "Typed ContextFact4 summaries; raw source content is not accepted." },
+                    "peers": { "type": "array", "description": "Signed aggregate-only ContextPeer4 attestations." }
+                },
+                "required": ["request", "facts", "peers"]
             }
         }),
         json!({

@@ -518,6 +518,10 @@ use bioprism_ids::{
     interoperate_resources, PeerResourceSummary4, QualifiedResourceSet6, ResourceEndpoint4,
     ResourceNeed4, IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
 };
+use bioprism_ids::{
+    operate_context_compilation, CertifiedDecisionSection1, ContextFact4, ContextPeer4,
+    DecisionQuery4, IDS_CONTEXT_COMPILATION_FEATURE_ID,
+};
 use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
     PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
@@ -2981,6 +2985,28 @@ pub fn validate_epistemic_retrieval_synthesis_json(value: &Value) -> Result<Evid
     if receipt.feature_id != RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID {
         return Err("epistemic retrieval synthesis feature id mismatch".into());
     }
+    Ok(receipt)
+}
+
+pub const IDS_CONTEXT_COMPILATION_TOOL: &str = "ids_context_compilation_federated_control_plane";
+
+pub fn operate_ids_context_compilation_json(value: &Value) -> Result<Value, String> {
+    let request: DecisionQuery4 = serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+        .map_err(|error| format!("invalid ids context compilation request: {error}"))?;
+    let facts: Vec<ContextFact4> = serde_json::from_value(value.get("facts").cloned().ok_or("facts are required")?)
+        .map_err(|error| format!("invalid ids context facts: {error}"))?;
+    let peers: Vec<ContextPeer4> = serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+        .map_err(|error| format!("invalid ids context peers: {error}"))?;
+    let receipt = operate_context_compilation(&request, &facts, &peers)
+        .map_err(|error| format!("ids context compilation failed: {error}"))?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize ids context receipt: {error}"))
+}
+
+pub fn validate_ids_context_compilation_json(value: &Value) -> Result<CertifiedDecisionSection1, String> {
+    let receipt: CertifiedDecisionSection1 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids context receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_CONTEXT_COMPILATION_FEATURE_ID { return Err("ids context compilation feature id mismatch".into()); }
     Ok(receipt)
 }
 

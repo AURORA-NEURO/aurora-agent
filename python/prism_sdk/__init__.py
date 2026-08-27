@@ -7655,3 +7655,17 @@ __all__ += [
     "operate_retrieval_synthesis",
     "epistemicRetrievalSynthesisDigest",
 ]
+
+from .ids_context_compilation_federated_control_plane import (
+    CertifiedDecisionSection1 as IdsCertifiedDecisionSection1,
+    context_compilation_manifest as ids_context_compilation_manifest,
+    operate_context_compilation as operate_ids_context_compilation,
+    idsContextCompilationDigest,
+)
+
+__all__ += [
+    "IdsCertifiedDecisionSection1",
+    "ids_context_compilation_manifest",
+    "operate_ids_context_compilation",
+    "idsContextCompilationDigest",
+]

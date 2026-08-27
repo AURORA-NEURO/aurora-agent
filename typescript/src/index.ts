@@ -4333,3 +4333,13 @@ export {
   validateEpistemicEvidenceSynthesis8,
 } from "./research-contracts.js";
 export type { EpistemicEvidenceSynthesis8 } from "./research-contracts.js";
+
+export {
+  IDS_CONTEXT_COMPILATION_FEATURE_ID,
+  IDS_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  IDS_CONTEXT_COMPILATION_INPUT_SCHEMA,
+  IDS_CONTEXT_COMPILATION_OUTPUT_SCHEMA,
+  idsContextCompilationDigest,
+  validateIdsCertifiedDecisionSection1,
+} from "./research-contracts.js";
+export type { IdsCertifiedDecisionSection1 } from "./research-contracts.js";

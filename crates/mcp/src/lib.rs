@@ -297,6 +297,10 @@ pub use research_contracts::{
     validate_epistemic_retrieval_synthesis_json,
     EPISTEMIC_RETRIEVAL_SYNTHESIS_TOOL,
 };
+pub use research_contracts::{
+    operate_ids_context_compilation_json, validate_ids_context_compilation_json,
+    IDS_CONTEXT_COMPILATION_TOOL,
+};
 pub use resource_discovery_contract::{
     compile_resource_discovery_contract_v2, ResourceDiscoveryContractError,
     ResourceDiscoveryContractRequest, ResourceDiscoveryContractResponse,
