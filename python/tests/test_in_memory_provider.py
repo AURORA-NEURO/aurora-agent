@@ -583,6 +583,80 @@ def test_agent_run_auto_batch_with_trace_preserves_one_redacted_all_domain_lifec
     assert "perform a bounded coding review" not in serialized
 
 
+def test_agent_run_resumable_auto_batch_with_trace_rehydrates_without_provider_replay() -> None:
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "offline",
+        lambda _request: {"output_text": "offline resumable traced answer"},
+    )
+    required = {
+        capability
+        for profile in AutonomousDomainRegistry.with_builtin_profiles().catalogue()
+        for capability in profile["required_model_capabilities"]
+    }
+    required.update({"tool_calling", "structured_output"})
+    agent = AutonomousAgent(
+        _OfflineWorkspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(
+            [
+                {
+                    "provider": "offline",
+                    "model": "offline-model",
+                    "capabilities": sorted(required),
+                    "context_window_tokens": 32_000,
+                    "max_output_tokens": 2_048,
+                    "quality": 0.9,
+                    "latency_ms": 1,
+                    "cost_per_million_tokens": 0,
+                    "reliability": 0.99,
+                }
+            ]
+        ),
+    )
+    requests = (
+        {"task": "perform a bounded coding review"},
+        {"task": "profile a bounded data dataset"},
+    )
+    first_checkpoints: list[AutonomousBatchCheckpoint] = []
+    first_trace = agent.run_resumable_auto_batch_with_trace(
+        requests,
+        job_id="resumable-traced-auto-batch",
+        credentials={},
+        trace_store=InMemoryAutonomousRunTraceStore(),
+        run_id="resumable-traced-first",
+        max_parallelism=1,
+        options_factory=lambda _request, _index: {"approve_provider_call": True},
+        checkpoint_sink=first_checkpoints.append,
+    )
+    assert first_trace.result.status == "completed"
+    assert first_checkpoints[-1].status == "completed"
+
+    rehydrated = 0
+
+    def rehydrate(context: AutonomousBatchRehydrationContext) -> Any:
+        nonlocal rehydrated
+        rehydrated += 1
+        return first_trace.result.items[context.index].result
+
+    second_trace = agent.run_resumable_auto_batch_with_trace(
+        requests,
+        job_id="resumable-traced-auto-batch",
+        credentials={},
+        trace_store=InMemoryAutonomousRunTraceStore(),
+        run_id="resumable-traced-second",
+        max_parallelism=1,
+        options_factory=lambda _request, _index: {"approve_provider_call": True},
+        checkpoint=first_checkpoints[-1].to_dict(),
+        rehydrate_result=rehydrate,
+    )
+    assert second_trace.result.status == "completed"
+    assert second_trace.trace.status == "completed"
+    assert rehydrated == len(requests)
+    assert runtime.provider_status("offline")["attempts"] == len(requests)
+    assert "offline resumable traced answer" not in json.dumps(second_trace.to_dict(), sort_keys=True)
+
+
 def test_agent_run_cross_domain_batch_preserves_child_order_and_shared_approval_boundary() -> None:
     runtime = LLMRuntime()
 

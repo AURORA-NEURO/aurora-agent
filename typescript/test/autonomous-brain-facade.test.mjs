@@ -221,6 +221,51 @@ test("brain facade traced automatic batches expose one redacted all-domain lifec
   assert.doesNotMatch(persisted, /debug and verify|offline:offline-model/);
 });
 
+test("brain facade traced automatic resumable batches trace rehydration without replay", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const inputs = [
+    { task: tasks.coding, domain: "coding" },
+    { task: tasks.data, domain: "data" },
+  ];
+  const checkpoints = [];
+  const firstTraceStore = new InMemoryAutonomousRunTraceStore();
+  const first = await brain.executeAutoBatchResumableWithTrace(inputs, {
+    jobId: "traced-resumable-batch",
+    runId: "traced-resumable-first",
+    traceStore: firstTraceStore,
+    maxParallelism: 1,
+    execution: { approveProviderCall: true },
+    checkpointSink: (checkpoint) => checkpoints.push(checkpoint),
+  });
+  assert.equal(first.batch.status, "completed");
+  assert.equal(first.trace.status, "completed");
+  assert.equal(checkpoints.at(-1).status, "completed");
+
+  const secondTraceStore = new InMemoryAutonomousRunTraceStore();
+  let rehydrated = 0;
+  const resumed = await brain.executeAutoBatchResumableWithTrace(inputs, {
+    jobId: "traced-resumable-batch",
+    runId: "traced-resumable-second",
+    traceStore: secondTraceStore,
+    maxParallelism: 1,
+    execution: { approveProviderCall: true },
+    checkpoint: checkpoints.at(-1),
+    rehydrateExecution: (context) => {
+      rehydrated += 1;
+      return first.batch.items[context.index].execution;
+    },
+  });
+  assert.equal(resumed.batch.status, "completed");
+  assert.equal(rehydrated, inputs.length);
+  assert.equal(resumed.trace.status, "completed");
+  assert.ok(secondTraceStore.events({ run_id: "traced-resumable-second" }).some((event) => event.detail_digest));
+  assert.equal(runtime.providerStatus("offline").attempts, inputs.length, "rehydrated items must not invoke the provider again");
+  assert.doesNotMatch(JSON.stringify(resumed), /debug and verify|offline:offline-model/);
+});
+
 test("brain facade automatic resumable batches rehydrate completed envelopes without direct-run fallback", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

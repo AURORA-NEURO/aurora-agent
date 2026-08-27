@@ -2531,6 +2531,14 @@ credentials, provider responses, tool arguments, evidence bodies, or evaluator p
 trace is observability state rather than a resume token: checkpoint recovery and provider/effect
 approval remain separate explicit boundaries.
 
+Restart-safe automatic work can use `run_resumable_auto_batch_with_trace()` in Python or
+`executeAutoBatchResumableWithTrace()` in TypeScript. These variants add rehydrated-item and
+resumed-execution metadata to the same trace while leaving checkpoint verification, protected
+receipt resolution, and provider approval in their existing gates. Their launch-admitted forms
+(`run_auto_batch_with_launch_admission_and_trace()` and
+`executeAutoBatchResumableWithLaunchAdmissionAndTrace()`) re-review the current route union before
+trace creation can lead to any rehydration or dispatch.
+
 ```python
 traced = agent.run_auto_batch_with_trace(
     requests,

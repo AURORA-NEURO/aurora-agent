@@ -804,6 +804,12 @@ export interface AutonomousBrainAutoBatchResumableOptions {
   rehydrateExecution?: (context: AutonomousBrainBatchRehydrationContext) => Promise<AutonomousBrainAutoExecution> | AutonomousBrainAutoExecution;
 }
 
+/** Restart-safe automatic batch controls plus one caller-owned lifecycle trace. */
+export interface AutonomousBrainAutoBatchResumableTraceOptions extends AutonomousBrainAutoBatchResumableOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
 /** Caller-owned storage for one verified metadata-only brain batch checkpoint. */
 export interface AutonomousBrainBatchCheckpointStore {
   read(): Promise<AutonomousBrainBatchCheckpointJSON | null> | AutonomousBrainBatchCheckpointJSON | null;
@@ -2353,6 +2359,58 @@ export class AutonomousBrainFacade {
    * resumed items never fall back to direct execution or silently re-plan under new controls.
    */
   async executeAutoBatchResumable(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainAutoBatchResumableOptions): Promise<AutonomousBrainAutoBatchResult> {
+    return this.executeAutoBatchResumableCore(inputs, options);
+  }
+
+  /**
+   * Resume an automatic batch while recording rehydration, checkpoint progress, and resumed
+   * provider work in one metadata-only trace. Restoring the trace is never sufficient to resume
+   * the batch: the normal digest-bound checkpoint and transient result rehydrator remain required.
+   */
+  async executeAutoBatchResumableWithTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoBatchResumableTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoBatchResult> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain automatic traced resumable batch options must be an object");
+    const normalizedInputs = inputs.map((input) => validateRequest(input));
+    const trace = new AutonomousRunTraceSession(options.traceStore, {
+      run_id: options.runId,
+      task_digest: automaticBatchTraceTaskDigest(normalizedInputs),
+      domains: [...AUTONOMOUS_DOMAIN_NAMES],
+    });
+    await trace.started();
+    try {
+      const { traceStore: _traceStore, runId: _runId, ...batchOptions } = options;
+      const batch = await this.executeAutoBatchResumableCore(normalizedInputs, batchOptions, trace);
+      await trace.complete({
+        status: autonomousRunTraceStatus(batch.status),
+        domains: [...AUTONOMOUS_DOMAIN_NAMES],
+        detail_digest: digestJsonSync({
+          batch_digest: batch.batch_digest,
+          completed_count: batch.completed_count,
+          failed_count: batch.failed_count,
+          omitted_count: batch.omitted_count,
+        }),
+      });
+      return {
+        schema: AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA,
+        batch,
+        trace: await trace.summary(),
+        retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads",
+        secret_material: "never_returned",
+      };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async executeAutoBatchResumableCore(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoBatchResumableOptions,
+    trace?: AutonomousRunTraceSession,
+  ): Promise<AutonomousBrainAutoBatchResult> {
     if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic resumable batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
     if (!options || options.jobId === undefined) throw new ArgumentError("autonomous brain automatic resumable batch requires jobId");
     const normalizedInputs = inputs.map((input) => validateRequest(input));
@@ -2387,6 +2445,7 @@ export class AutonomousBrainFacade {
         const item: AutonomousBrainAutoBatchItem = { index, status: "succeeded", task_digest: taskDigests[index]!, execution };
         if (batchItemDigest(item) !== restored.completed_result_digests[position]) throw new ArgumentError(`rehydrated autonomous brain automatic batch item ${index} does not match its checkpoint digest`);
         items[index] = item;
+        if (trace !== undefined) await trace.record({ phase: "completed", status: "completed", detail_digest: digestJsonSync({ index, state: "rehydrated" }) });
       }
     }
     let persistChain: Promise<void> = Promise.resolve();
@@ -2407,10 +2466,37 @@ export class AutonomousBrainFacade {
         if (items[index] !== undefined) continue;
         if (halted) {
           items[index] = { index, status: "omitted", task_digest: null };
+          if (trace !== undefined) await trace.record({ phase: "paused", status: "paused", detail_digest: digestJsonSync({ index, state: "omitted" }) });
           continue;
         }
         try {
-          const execution = await this.executeAuto(normalizedInputs[index]!, options.execution ?? {});
+          let execution: AutonomousBrainAutoExecution;
+          let prepared: PreparedBrainRequest | undefined;
+          if (trace === undefined) {
+            execution = await this.executeAuto(normalizedInputs[index]!, options.execution ?? {});
+          } else {
+            const policy = options.execution ?? {};
+            prepared = await this.prepare(normalizedInputs[index]!, selectBrainSemanticRouting(policy.semanticRouting, undefined), policy, policy.approveProviderCall);
+            await trace.record({
+              phase: "plan_compiled",
+              status: "running",
+              domains: this.traceDomains(prepared),
+              route_digest: prepared.route.route_digest,
+              plan_digest: prepared.plan.plan_digest,
+              detail_digest: digestJsonSync({ index, state: "prepared_for_resume" }),
+            });
+            execution = await this.executeAutoPrepared(prepared, policy, trace);
+            const traceStatus = autonomousRunTraceStatus(execution.status);
+            const phase = traceStatus === "completed" || traceStatus === "partial" ? "completed" : traceStatus === "paused" ? "paused" : traceStatus === "refused" ? "refused" : "failed";
+            await trace.record({
+              phase,
+              status: traceStatus,
+              domains: this.traceDomains(prepared),
+              route_digest: prepared.route.route_digest,
+              plan_digest: prepared.plan.plan_digest,
+              detail_digest: digestJsonSync({ index, state: execution.status }),
+            });
+          }
           const succeeded = execution.status === "completed";
           const refused = automaticBatchRefused(execution.status);
           const item: AutonomousBrainAutoBatchItem = { index, status: succeeded ? "succeeded" : refused ? "refused" : "failed", task_digest: execution.plan.task_digest, execution };
@@ -2419,6 +2505,7 @@ export class AutonomousBrainFacade {
           if (stopOnError && !succeeded) halted = true;
         } catch (error) {
           const projection = errorProjection(error);
+          if (trace !== undefined) await trace.record({ phase: "failed", status: "failed", detail_digest: digestJsonSync({ index, ...projection }) }).catch(() => undefined);
           items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
           if (stopOnError) halted = true;
         }
@@ -2458,6 +2545,19 @@ export class AutonomousBrainFacade {
     const policy = options?.execution ?? {};
     await this.authorizeAutoBatchLaunchAdmission(inputs, inputs.map(() => policy), admission);
     return this.executeAutoBatchResumable(inputs, options);
+  }
+
+  /** Resume a traced automatic batch only after re-admitting its complete current route set. */
+  async executeAutoBatchResumableWithLaunchAdmissionAndTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoBatchResumableTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoBatchResult> {
+    if (options?.execution?.semanticRouting !== undefined && options.execution.semanticRouting !== false) throw new ArgumentError("launch-admitted automatic traced resumable batch requires provider-free routing; admit semantic routing separately before enabling it");
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic traced resumable batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const policy = options?.execution ?? {};
+    await this.authorizeAutoBatchLaunchAdmission(inputs, inputs.map(() => policy), admission);
+    return this.executeAutoBatchResumableWithTrace(inputs, options);
   }
 
   /** Resume a batch only after re-reviewing the complete current route set. */

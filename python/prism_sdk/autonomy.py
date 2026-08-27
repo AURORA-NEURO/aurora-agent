@@ -23858,6 +23858,204 @@ class AutonomousAgent:
         persist("completed" if result.status == "completed" else "partial")
         return result
 
+    def run_resumable_auto_batch_with_trace(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+        checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any] | None = None,
+        checkpoint_sink: Callable[[AutonomousBatchCheckpoint], Any] | None = None,
+        rehydrate_result: Callable[[AutonomousBatchRehydrationContext], Any] | None = None,
+    ) -> AutonomousTracedRunResult:
+        """Resume an automatic batch with one trace spanning recovery and fresh execution.
+
+        The generic resumable runner remains the authority for checkpoint digest validation and
+        rehydration. This adapter only composes value-only trace callbacks around it, records
+        settled item metadata after the runner classifies each item, and never serializes the
+        restored result. Trace persistence therefore cannot bypass a checkpoint, provider
+        approval, credential scope, or effect reconciliation boundary.
+        """
+
+        self._trace_store(trace_store)
+        resolved_job_id = _identifier("autonomous traced batch job_id", job_id)
+        if not isinstance(requests, Sequence) or isinstance(requests, (str, bytes)):
+            raise BrainRunError("autonomous traced automatic batch requests must be a sequence")
+        task_digests = [
+            content_digest({"task": request.get("task") if isinstance(request, Mapping) else None})
+            for request in requests
+        ]
+        resolved_run_id = run_id or f"trace-{uuid.uuid4().hex}"
+        session = AutonomousRunTraceSession(
+            trace_store,
+            run_id=resolved_run_id,
+            task_digest=content_digest({
+                "schema": AUTONOMOUS_TRACED_AUTO_BATCH_SCHEMA,
+                "mode": "auto",
+                "task_digests": task_digests,
+            }),
+            domains=AUTONOMOUS_DOMAINS,
+        )
+        session.started(detail_digest=content_digest({
+            "mode": "auto",
+            "job_id": resolved_job_id,
+            "item_count": len(task_digests),
+            "task_digests": task_digests,
+        }))
+        rehydrated_indices: set[int] = set()
+
+        def traced_factory(request: Mapping[str, Any], index: int) -> Mapping[str, Any]:
+            raw_options = request.get("options", {}) if isinstance(request, Mapping) else {}
+            if isinstance(raw_options, Mapping) and any(
+                key in raw_options for key in ("invocation_observer", "trace_event_callback")
+            ):
+                raise BrainRunError(
+                    "automatic traced batch options cannot override invocation_observer or trace_event_callback"
+                )
+            options = {} if options_factory is None else options_factory(request, index)
+            if not isinstance(options, Mapping):
+                raise BrainRunError("autonomous traced automatic batch options_factory must return a mapping")
+            if any(key in options for key in ("invocation_observer", "trace_event_callback")):
+                raise BrainRunError(
+                    "automatic traced batch options cannot override invocation_observer or trace_event_callback"
+                )
+            return {
+                **dict(options),
+                "invocation_observer": session.provider_observer(),
+                "trace_event_callback": session.record,
+            }
+
+        def traced_rehydrate(context: AutonomousBatchRehydrationContext) -> Any:
+            if rehydrate_result is None:
+                raise BrainRunError("resuming a traced automatic batch requires rehydrate_result")
+            result = rehydrate_result(context)
+            # The generic runner verifies the returned value and its result digest after this
+            # callback returns. Record the rehydration only after that verification succeeds.
+            rehydrated_indices.add(context.index)
+            return result
+
+        try:
+            result = self.run_resumable_batch(
+                requests,
+                job_id=resolved_job_id,
+                mode="auto",
+                credentials=credentials,
+                model_candidates=model_candidates,
+                options_factory=traced_factory,
+                max_parallelism=max_parallelism,
+                stop_on_error=stop_on_error,
+                checkpoint=checkpoint,
+                checkpoint_sink=checkpoint_sink,
+                rehydrate_result=traced_rehydrate if rehydrate_result is not None else None,
+            )
+            for item in result.items:
+                metadata = self._trace_execution_metadata(item.result) if item.result is not None else {
+                    "route_digest": None,
+                    "plan_digest": None,
+                    "selection_digest": None,
+                }
+                if item.result is not None:
+                    trace_status = autonomous_run_trace_status(getattr(item.result, "status", "unknown"))
+                    terminal_phase = (
+                        "completed"
+                        if trace_status in {"completed", "partial"}
+                        else trace_status
+                        if trace_status in {"paused", "refused", "failed"}
+                        else "failed"
+                    )
+                else:
+                    trace_status = "failed"
+                    terminal_phase = "failed"
+                session.record(
+                    phase="plan_compiled",
+                    status="running",
+                    route_digest=metadata["route_digest"],
+                    plan_digest=metadata["plan_digest"],
+                    selection_digest=metadata["selection_digest"],
+                    detail_digest=content_digest({
+                        "index": item.index,
+                        "task_digest": task_digests[item.index],
+                        "state": "rehydrated" if item.index in rehydrated_indices else "settled",
+                    }),
+                )
+                session.record(
+                    phase=terminal_phase,
+                    status=trace_status,
+                    route_digest=metadata["route_digest"],
+                    plan_digest=metadata["plan_digest"],
+                    selection_digest=metadata["selection_digest"],
+                    failure_class=item.error_class,
+                    failure_code=item.failure_code,
+                    detail_digest=content_digest({
+                        "index": item.index,
+                        "status": item.status,
+                        "result_status": item.result_status,
+                    }),
+                )
+            session.complete(
+                status=autonomous_run_trace_status(result.status),
+                detail_digest=content_digest({
+                    "batch_digest": result.batch_digest,
+                    "completed_count": result.completed_count,
+                    "failed_count": result.failed_count,
+                    "omitted_count": result.omitted_count,
+                }),
+            )
+        except Exception as error:
+            session.fail(
+                failure_class=type(error).__name__,
+                failure_code="execution_error",
+                detail_digest=content_digest({"error_class": type(error).__name__}),
+            )
+            raise
+        return AutonomousTracedRunResult(result=result, trace=session.summary())
+
+    def run_resumable_auto_batch_with_launch_admission_and_trace(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        job_id: str,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str | None = None,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        options_factory: Callable[[Mapping[str, Any], int], Mapping[str, Any]] | None = None,
+        max_parallelism: int = 4,
+        stop_on_error: bool = False,
+        checkpoint: AutonomousBatchCheckpoint | Mapping[str, Any] | None = None,
+        checkpoint_sink: Callable[[AutonomousBatchCheckpoint], Any] | None = None,
+        rehydrate_result: Callable[[AutonomousBatchRehydrationContext], Any] | None = None,
+    ) -> AutonomousTracedRunResult:
+        """Re-admit every current automatic route before traced checkpoint recovery or dispatch."""
+
+        replay_factory = self._authorize_batch_launch_admission(
+            requests,
+            mode="auto",
+            launch_admission=launch_admission,
+            options_factory=options_factory,
+        )
+        return self.run_resumable_auto_batch_with_trace(
+            requests,
+            job_id=job_id,
+            credentials=credentials,
+            trace_store=trace_store,
+            run_id=run_id,
+            model_candidates=model_candidates,
+            options_factory=replay_factory,
+            max_parallelism=max_parallelism,
+            stop_on_error=stop_on_error,
+            checkpoint=checkpoint,
+            checkpoint_sink=checkpoint_sink,
+            rehydrate_result=rehydrate_result,
+        )
+
     def _prepare_auto_batch_invocations(
         self,
         requests: Sequence[Mapping[str, Any]],

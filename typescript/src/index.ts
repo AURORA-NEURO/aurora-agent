@@ -2064,6 +2064,7 @@ export type {
   AutonomousBrainBatchMode,
   AutonomousBrainResumableBatchOptions,
   AutonomousBrainAutoBatchResumableOptions,
+  AutonomousBrainAutoBatchResumableTraceOptions,
   AutonomousBrainBatchCheckpointStore,
   AutonomousBrainBatchControllerStatus,
   AutonomousBrainBatchControllerProjection,

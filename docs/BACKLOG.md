@@ -18,6 +18,13 @@ omissions, and aggregate completion while persisting only digests and bounded fa
 Resumable checkpoint recovery remains a separate explicit boundary so restoring observability can
 never authorize provider, tool, source, learner, or effect work.
 
+The same trace seam now spans restart-safe automatic batches: TypeScript exposes
+`executeAutoBatchResumableWithTrace()` and Python exposes
+`run_resumable_auto_batch_with_trace()`, with launch-admitted variants that re-check the full route
+union before rehydration. Rehydrated successes, fresh resumed work, checkpoint-driven omissions,
+and terminal aggregate status remain distinguishable metadata events; raw restored results and
+checkpoint values remain caller-owned.
+
 Both high-level SDK agents now also expose a coordinated persistence lifecycle. Restore and flush
 compose model inventory, runtime health, provider/model health when a coordinator exists, redacted
 activation, selection-promotion authority, evaluator calibration, memory, online learning, prompt
