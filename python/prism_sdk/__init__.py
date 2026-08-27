@@ -7450,3 +7450,17 @@ __all__ += [
     "assure_contract_frontier",
     "bioethicsContractFrontierDigest",
 ]
+
+from .ops_replication_negative_results_assurance import (
+    OpsReplicationRecord,
+    replication_negative_results_manifest,
+    assure_replication,
+    opsReplicationDigest,
+)
+
+__all__ += [
+    "OpsReplicationRecord",
+    "replication_negative_results_manifest",
+    "assure_replication",
+    "opsReplicationDigest",
+]

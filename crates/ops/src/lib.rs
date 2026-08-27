@@ -297,6 +297,7 @@ pub mod hardening;
 pub mod knowledge_representation_assurance;
 pub mod federated_analysis_assurance;
 pub mod retrieval_assurance;
+pub mod replication_negative_results_assurance;
 pub mod telemetry;
 
 pub use alpha::{AlphaSummary, Basis, Criterion, Finding, Verdict};
@@ -336,6 +337,14 @@ pub use retrieval_assurance::{
     RetrievalAssuranceError, RetrievalCandidate, RetrievalDisposition, ScopedRetrievalQuery,
     CONTRACT_VERSION as RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_ASSURANCE_FEATURE_ID,
+};
+pub use replication_negative_results_assurance::{
+    assure_replication, replication_negative_results_manifest, ClaimAndProtocol, ReplicationClaim,
+    ReplicationAssuranceError, ReplicationDisposition, ReplicationOutcome, ReplicationRecord,
+    CONTRACT_VERSION as REPLICATION_NEGATIVE_RESULTS_CONTRACT_VERSION,
+    FEATURE_ID as REPLICATION_NEGATIVE_RESULTS_FEATURE_ID,
+    INPUT_SCHEMA as REPLICATION_NEGATIVE_RESULTS_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as REPLICATION_NEGATIVE_RESULTS_OUTPUT_SCHEMA,
 };
 pub use telemetry::{
     audit_statement, Derivation, DomainEvent, ExportBatch, Field, LabelBudget, MetricDefinition,

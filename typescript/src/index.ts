@@ -4173,3 +4173,13 @@ export {
   validateBioethicsCapabilityManifestResult,
 } from "./research-contracts.js";
 export type { BioethicsCapabilityManifestResult } from "./research-contracts.js";
+
+export {
+  OPS_REPLICATION_NEGATIVE_RESULTS_FEATURE_ID,
+  OPS_REPLICATION_NEGATIVE_RESULTS_CONTRACT_VERSION,
+  OPS_REPLICATION_NEGATIVE_RESULTS_INPUT_SCHEMA,
+  OPS_REPLICATION_NEGATIVE_RESULTS_OUTPUT_SCHEMA,
+  opsReplicationDigest,
+  validateOpsReplicationRecord,
+} from "./research-contracts.js";
+export type { OpsReplicationRecord } from "./research-contracts.js";
