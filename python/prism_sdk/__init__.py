@@ -428,6 +428,8 @@ from .autonomous_cycle_evaluator_bridge import (
     AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_POLICY,
     AutonomousCycleEvaluatorEvidenceContext,
     AutonomousCycleEvaluatorEvidenceFactory,
+    AutonomousCycleEvaluatorSourceReceiptFactory,
+    AutonomousCycleEvaluatorCalibrationFactory,
     AutonomousCycleEvaluatorBridge,
     create_autonomous_cycle_evaluator_bridge,
 )
@@ -6782,6 +6784,8 @@ __all__ = [
     "AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_POLICY",
     "AutonomousCycleEvaluatorEvidenceContext",
     "AutonomousCycleEvaluatorEvidenceFactory",
+    "AutonomousCycleEvaluatorSourceReceiptFactory",
+    "AutonomousCycleEvaluatorCalibrationFactory",
     "AutonomousCycleEvaluatorBridge",
     "create_autonomous_cycle_evaluator_bridge",
     "AUTONOMOUS_EVALUATOR_CALIBRATION_SCHEMA",

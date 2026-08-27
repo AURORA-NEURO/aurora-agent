@@ -1075,6 +1075,25 @@ the callback receives only route/status/episode metadata and the required signal
 registry must cover all twelve built-in domains, and missing or malformed caller evidence fails
 closed before settlement.
 
+For deployments that already have source and evaluator governance, the same bridge can enforce
+those decisions at the exact learning boundary:
+
+```typescript
+const gated = createAutonomousCycleEvaluatorBridge({
+  evidenceFor: callerOwnedValueEvidence,
+  sourceReceiptFor: (context) => sourceLedgerReceiptFor(context),
+  evaluatorCalibrationFor: (context) => calibrationReportFor(context.domain),
+});
+```
+
+`sourceReceiptFor` must return a validated source receipt with an accepted observation, a source
+digest, and non-`caller_declared` authority. `evaluatorCalibrationFor` must return a validated
+holdout report whose routed evaluator identity is ready. Both gates run before the evidence
+callback and before reward settlement; missing, stale, refused, tampered, or mismatched metadata
+fails closed. The context exposes only receipt/report digests and bounded source labels. The SDK
+still does not decide external truth, provision credentials, or treat provider completion as
+reward.
+
 Use `AutonomousCycleReplanPersistenceCoordinator` with a caller `read()`/`write()` adapter to
 flush and restore bounded, hash-bound snapshots. The in-memory store is intended for tests and
 small workers; production deployments should place it beside the existing execution, learning,

@@ -24,6 +24,11 @@ import re
 from typing import Any, Callable, Mapping, Sequence
 
 from .authoring import content_digest
+from .autonomous_evaluator_calibration import (
+    admit_autonomous_evaluator_calibration,
+    validate_autonomous_evaluator_calibration_report,
+)
+from .autonomous_evidence_source import AutonomousEvidenceSourceReceipt
 from .brain import (
     BrainEvaluatorDecision,
     BrainLearningLedger,
@@ -112,6 +117,14 @@ class AutonomousCycleEvaluatorEvidenceContext:
     evaluator_version: str
     required_signals: tuple[str, ...]
     pass_threshold: float
+    source_receipt_digest: str | None = None
+    source_id: str | None = None
+    source_kind: str | None = None
+    source_authority: str | None = None
+    source_freshness: str | None = None
+    source_decision: str = "not_configured"
+    evaluator_calibration_digest: str | None = None
+    evaluator_calibration_decision: str = "not_configured"
     retention: str = AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_RETENTION
     secret_material: str = "never_returned"
 
@@ -137,6 +150,14 @@ class AutonomousCycleEvaluatorEvidenceContext:
             "evaluator_version": self.evaluator_version,
             "required_signals": list(self.required_signals),
             "pass_threshold": self.pass_threshold,
+            "source_receipt_digest": self.source_receipt_digest,
+            "source_id": self.source_id,
+            "source_kind": self.source_kind,
+            "source_authority": self.source_authority,
+            "source_freshness": self.source_freshness,
+            "source_decision": self.source_decision,
+            "evaluator_calibration_digest": self.evaluator_calibration_digest,
+            "evaluator_calibration_decision": self.evaluator_calibration_decision,
             "retention": self.retention,
             "secret_material": self.secret_material,
         }
@@ -144,6 +165,12 @@ class AutonomousCycleEvaluatorEvidenceContext:
 
 AutonomousCycleEvaluatorEvidenceFactory = Callable[
     [Mapping[str, Any]], Mapping[str, Any]
+]
+AutonomousCycleEvaluatorSourceReceiptFactory = Callable[
+    [Mapping[str, Any]], Mapping[str, Any] | None
+]
+AutonomousCycleEvaluatorCalibrationFactory = Callable[
+    [Mapping[str, Any]], Mapping[str, Any] | None
 ]
 
 
@@ -218,6 +245,8 @@ class _EvidenceBoundDomainEvaluator(BrainOutcomeEvaluator):
         mode: str,
         role: str,
         selected_domains: tuple[str, ...],
+        source_receipt_for: AutonomousCycleEvaluatorSourceReceiptFactory | None,
+        evaluator_calibration_for: AutonomousCycleEvaluatorCalibrationFactory | None,
     ) -> None:
         if not isinstance(inner, DomainEvaluatorAdapter):
             raise BrainRunError("cycle evaluator bridge inner evaluator is malformed")
@@ -227,6 +256,8 @@ class _EvidenceBoundDomainEvaluator(BrainOutcomeEvaluator):
         self._mode = mode
         self._role = role
         self._selected_domains = selected_domains
+        self._source_receipt_for = source_receipt_for
+        self._evaluator_calibration_for = evaluator_calibration_for
         super().__init__(
             self._unused_callback,
             evaluator_id=inner.evaluator_id,
@@ -256,6 +287,7 @@ class _EvidenceBoundDomainEvaluator(BrainOutcomeEvaluator):
             selected_domains=self._selected_domains,
             evaluator=self.inner,
         )
+        context = self._admitted_context(context)
         try:
             evidence = self._evidence_for(context.to_dict())
         except BrainRunError:
@@ -270,6 +302,77 @@ class _EvidenceBoundDomainEvaluator(BrainOutcomeEvaluator):
         generated["evidence"] = evidence_copy
         generated["evidence_digest"] = content_digest(evidence_copy)
         return self.inner.assess_value_only_input(generated), evidence_copy
+
+    def _admitted_context(
+        self,
+        context: AutonomousCycleEvaluatorEvidenceContext,
+    ) -> AutonomousCycleEvaluatorEvidenceContext:
+        admitted = context
+        if self._source_receipt_for is not None:
+            try:
+                raw_receipt = self._source_receipt_for(admitted.to_dict())
+                if raw_receipt is None:
+                    raise BrainRunError(
+                        "cycle evaluator bridge source receipt is required when source_receipt_for is configured"
+                    )
+                receipt = AutonomousEvidenceSourceReceipt.from_dict(raw_receipt)
+            except BrainRunError:
+                raise
+            except Exception as error:
+                raise BrainRunError(
+                    "cycle evaluator bridge source receipt is malformed"
+                ) from error
+            if receipt.domain != context.domain:
+                raise BrainRunError(
+                    "cycle evaluator bridge source receipt domain does not match the routed evaluator"
+                )
+            if (
+                receipt.decision != "accepted"
+                or receipt.status != "observed"
+                or receipt.source_digest is None
+                or receipt.authority == "caller_declared"
+            ):
+                raise BrainRunError(
+                    "cycle evaluator bridge source receipt is not an accepted authoritative observation"
+                )
+            admitted = replace(
+                admitted,
+                source_receipt_digest=receipt.receipt_digest,
+                source_id=receipt.source_id,
+                source_kind=receipt.source_kind,
+                source_authority=receipt.authority,
+                source_freshness=receipt.freshness,
+                source_decision="accepted",
+            )
+        if self._evaluator_calibration_for is not None:
+            try:
+                raw_report = self._evaluator_calibration_for(admitted.to_dict())
+                if raw_report is None:
+                    raise BrainRunError(
+                        "cycle evaluator bridge evaluator calibration report is required when evaluator_calibration_for is configured"
+                    )
+                report = validate_autonomous_evaluator_calibration_report(raw_report)
+                admission = admit_autonomous_evaluator_calibration(report, context.domain)
+            except BrainRunError:
+                raise
+            except Exception as error:
+                raise BrainRunError(
+                    "cycle evaluator bridge evaluator calibration report is malformed"
+                ) from error
+            if (
+                admission["decision"] != "admit_learning"
+                or admission["evaluator_id"] != context.evaluator_id
+                or admission["evaluator_version"] != context.evaluator_version
+            ):
+                raise BrainRunError(
+                    f"cycle evaluator bridge evaluator calibration holds {context.domain} learning"
+                )
+            admitted = replace(
+                admitted,
+                evaluator_calibration_digest=report["report_digest"],
+                evaluator_calibration_decision="admit_learning",
+            )
+        return admitted
 
     def _assess_input(self, evaluation_input: Mapping[str, Any]) -> BrainEvaluatorDecision:
         return self._assess_with_evidence_boundary(evaluation_input)[0]
@@ -447,6 +550,8 @@ class AutonomousCycleEvaluatorBridge:
         evidence_for: AutonomousCycleEvaluatorEvidenceFactory,
         *,
         evaluator_registry: DomainEvaluatorRegistry | None = None,
+        source_receipt_for: AutonomousCycleEvaluatorSourceReceiptFactory | None = None,
+        evaluator_calibration_for: AutonomousCycleEvaluatorCalibrationFactory | None = None,
     ) -> None:
         if not callable(evidence_for):
             raise BrainRunError("cycle evaluator bridge evidence_for must be callable")
@@ -457,6 +562,12 @@ class AutonomousCycleEvaluatorBridge:
             registry.resolve_for_autonomous_domain(domain)
         self.registry = registry
         self._evidence_for = evidence_for
+        if source_receipt_for is not None and not callable(source_receipt_for):
+            raise BrainRunError("cycle evaluator bridge source_receipt_for must be callable or None")
+        if evaluator_calibration_for is not None and not callable(evaluator_calibration_for):
+            raise BrainRunError("cycle evaluator bridge evaluator_calibration_for must be callable or None")
+        self._source_receipt_for = source_receipt_for
+        self._evaluator_calibration_for = evaluator_calibration_for
         self._single: dict[tuple[str, str, str, tuple[str, ...]], BrainOutcomeEvaluator] = {}
         self._cross: dict[tuple[str, ...], BrainOutcomeEvaluator] = {}
         self.evaluator_catalogue_digest = content_digest(
@@ -475,6 +586,8 @@ class AutonomousCycleEvaluatorBridge:
                 "roles": ["single", "specialist", "synthesis"],
                 "provider_success_is_not_reward": True,
                 "reward_source": AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_POLICY,
+                "source_receipt_admission": "optional;accepted_observed_non_caller_declared_source_digest_required",
+                "evaluator_calibration_admission": "optional;ready_exact_evaluator_identity_required",
                 "retention": AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_RETENTION,
             }
         )
@@ -493,6 +606,8 @@ class AutonomousCycleEvaluatorBridge:
                 mode="single_domain",
                 role="single",
                 selected_domains=(domain,),
+                source_receipt_for=self._source_receipt_for,
+                evaluator_calibration_for=self._evaluator_calibration_for,
             )
         return self._single[key]
 
@@ -523,6 +638,8 @@ class AutonomousCycleEvaluatorBridge:
                     mode="cross_domain",
                     role="specialist",
                     selected_domains=domains,
+                    source_receipt_for=self._source_receipt_for,
+                    evaluator_calibration_for=self._evaluator_calibration_for,
                 )
             synthesis = self.registry.resolve_for_autonomous_domain("cross_domain")
             evaluators["cross_domain"] = _EvidenceBoundDomainEvaluator(
@@ -531,6 +648,8 @@ class AutonomousCycleEvaluatorBridge:
                 mode="cross_domain",
                 role="synthesis",
                 selected_domains=domains,
+                source_receipt_for=self._source_receipt_for,
+                evaluator_calibration_for=self._evaluator_calibration_for,
             )
             self._cross[domains] = _EvidenceCompositeDomainEvaluator(
                 evaluators,
@@ -551,6 +670,8 @@ class AutonomousCycleEvaluatorBridge:
             "retention": AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_RETENTION,
             "reward_source": AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_POLICY,
             "provider_success_is_not_reward": True,
+            "source_receipt_gate": self._source_receipt_for is not None,
+            "evaluator_calibration_gate": self._evaluator_calibration_for is not None,
             "secret_material": "never_returned",
         }
 
@@ -559,12 +680,16 @@ def create_autonomous_cycle_evaluator_bridge(
     evidence_for: AutonomousCycleEvaluatorEvidenceFactory,
     *,
     evaluator_registry: DomainEvaluatorRegistry | None = None,
+    source_receipt_for: AutonomousCycleEvaluatorSourceReceiptFactory | None = None,
+    evaluator_calibration_for: AutonomousCycleEvaluatorCalibrationFactory | None = None,
 ) -> AutonomousCycleEvaluatorBridge:
     """Create a reviewed all-domain bridge for caller-owned evidence factories."""
 
     return AutonomousCycleEvaluatorBridge(
         evidence_for,
         evaluator_registry=evaluator_registry,
+        source_receipt_for=source_receipt_for,
+        evaluator_calibration_for=evaluator_calibration_for,
     )
 
 
@@ -574,6 +699,8 @@ __all__ = [
     "AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_POLICY",
     "AutonomousCycleEvaluatorEvidenceContext",
     "AutonomousCycleEvaluatorEvidenceFactory",
+    "AutonomousCycleEvaluatorSourceReceiptFactory",
+    "AutonomousCycleEvaluatorCalibrationFactory",
     "AutonomousCycleEvaluatorBridge",
     "create_autonomous_cycle_evaluator_bridge",
 ]

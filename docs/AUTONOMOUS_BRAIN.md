@@ -64,6 +64,22 @@ The Python API exposes the same contract through `autonomous_domain_policy(...)`
 Policy metadata is value-only and digest-addressed; prompts, credentials, evidence values, and
 provider responses remain transient caller-owned data.
 
+### Source and evaluator authority at the learning boundary
+
+The cycle evaluator bridge can optionally compose the existing source-provenance ledger and
+evaluator-calibration report into a fail-closed admission gate. A configured source callback must
+return an integrity-checked receipt for the exact routed domain with an accepted observation,
+non-null source digest, and non-`caller_declared` authority. A configured evaluator callback must
+return a validated calibration/holdout report whose exact evaluator identity is ready. The checks
+run before the evidence factory and before reward settlement, including for every cross-domain
+specialist and the synthesis episode.
+
+Only receipt/report digests and bounded source labels are exposed to the evidence factory. Raw
+source values, prompts, provider responses, credentials, and evidence bodies remain caller-owned
+and transient. These receipts are admission evidence, not an SDK claim that a source is truthful;
+deployment policy, source authentication, human review, and external truth authority remain
+explicit integration responsibilities.
+
 ### Audit versus strict execution
 
 The default `domainPolicyMode: "audit"` (or Python `domain_policy_mode="audit"`) preserves

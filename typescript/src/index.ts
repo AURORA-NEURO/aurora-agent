@@ -1199,6 +1199,7 @@ export {
   createAutonomousEvidenceSourceAcquirer,
   createAutonomousEvidenceSourceGuard,
   classifyAutonomousEvidenceSourceError,
+  validateAutonomousEvidenceSourceReceipt,
 } from "./autonomous-evidence-source.js";
 export type {
   AutonomousEvidenceSourceAuthority,
@@ -2961,6 +2962,8 @@ export type {
   AutonomousCycleEvaluatorEvidenceFactory,
   AutonomousCycleEvaluatorMode,
   AutonomousCycleEvaluatorRole,
+  AutonomousCycleEvaluatorSourceReceiptFactory,
+  AutonomousCycleEvaluatorCalibrationFactory,
 } from "./autonomous-cycle-evaluator-bridge.js";
 export {
   AUTONOMOUS_AUTO_DECISION_CYCLE_SCHEMA,

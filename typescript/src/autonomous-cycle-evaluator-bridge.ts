@@ -1,4 +1,4 @@
-import { ArgumentError } from "./errors.js";
+import { ArgumentError, isObject } from "./errors.js";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   type AutonomousCrossDomainRunResult,
@@ -18,6 +18,17 @@ import {
   type AutonomousValueEvaluation,
   type AutonomousValueEvaluationInput,
 } from "./autonomous-domain-evaluators.js";
+import {
+  autonomousEvaluatorCalibrationAdmission,
+  validateAutonomousEvaluatorCalibrationReport,
+  type AutonomousEvaluatorCalibrationReport,
+} from "./autonomous-evaluator-calibration.js";
+import {
+  validateAutonomousEvidenceSourceReceipt,
+  type AutonomousEvidenceSourceAuthority,
+  type AutonomousEvidenceSourceReceiptJSON,
+} from "./autonomous-evidence-source.js";
+import type { AutonomousEvidenceProviderFreshnessMode } from "./autonomous-evidence-provider-contract.js";
 import type { AutonomousEvaluatorRewardInput } from "./autonomous-learning.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
@@ -48,6 +59,16 @@ export interface AutonomousCycleEvaluatorEvidenceContext extends JsonObject {
   evaluator_version: string;
   required_signals: string[];
   pass_threshold: number;
+  /** Accepted source metadata, or null when no source gate was configured. */
+  source_receipt_digest: string | null;
+  source_id: string | null;
+  source_kind: string | null;
+  source_authority: AutonomousEvidenceSourceAuthority | null;
+  source_freshness: AutonomousEvidenceProviderFreshnessMode | null;
+  source_decision: "not_configured" | "accepted";
+  /** Calibration metadata, or null when no evaluator calibration gate was configured. */
+  evaluator_calibration_digest: string | null;
+  evaluator_calibration_decision: "not_configured" | "admit_learning";
   retention: "metadata_only;caller_evidence_factory_owns_values";
   secret_material: "never_returned";
 }
@@ -55,6 +76,19 @@ export interface AutonomousCycleEvaluatorEvidenceContext extends JsonObject {
 export type AutonomousCycleEvaluatorEvidenceFactory = (
   context: AutonomousCycleEvaluatorEvidenceContext,
 ) => AutonomousValueEvaluationInput | Promise<AutonomousValueEvaluationInput>;
+
+/**
+ * Optional source-provenance gate. The callback returns an existing, metadata-only source
+ * receipt; it never receives or returns the source value itself.
+ */
+export type AutonomousCycleEvaluatorSourceReceiptFactory = (
+  context: AutonomousCycleEvaluatorEvidenceContext,
+) => AutonomousEvidenceSourceReceiptJSON | null | Promise<AutonomousEvidenceSourceReceiptJSON | null>;
+
+/** Optional evaluator calibration/holdout gate for the exact routed domain and evaluator. */
+export type AutonomousCycleEvaluatorCalibrationFactory = (
+  context: AutonomousCycleEvaluatorEvidenceContext,
+) => AutonomousEvaluatorCalibrationReport | null | Promise<AutonomousEvaluatorCalibrationReport | null>;
 
 export interface AutonomousCycleEvaluatorBridgeOptions {
   /** Registry of reviewed value-only domain evaluators; defaults to every built-in profile. */
@@ -64,6 +98,10 @@ export interface AutonomousCycleEvaluatorBridgeOptions {
    * metadata context. The bridge never copies that evidence into a cycle result or checkpoint.
    */
   evidenceFor: AutonomousCycleEvaluatorEvidenceFactory;
+  /** When configured, only accepted observed non-caller-declared source receipts admit evaluation. */
+  sourceReceiptFor?: AutonomousCycleEvaluatorSourceReceiptFactory;
+  /** When configured, only a ready calibration report admits reward settlement for the routed evaluator. */
+  evaluatorCalibrationFor?: AutonomousCycleEvaluatorCalibrationFactory;
 }
 
 export interface AutonomousCycleEvaluatorBridge {
@@ -105,6 +143,8 @@ function policyDigest(registry: AutonomousValueEvaluatorRegistry): string {
     roles: ["single", "specialist", "synthesis"],
     reward_source: "caller_declared_value_only_evidence",
     provider_success_is_not_reward: true,
+    source_receipt_admission: "optional;accepted_observed_non_caller_declared_source_digest_required",
+    evaluator_calibration_admission: "optional;ready_exact_evaluator_identity_required",
     retention: BRIDGE_RETENTION,
   });
 }
@@ -142,6 +182,14 @@ function singleContext(
     evaluator_version: evaluator.evaluatorVersion,
     required_signals: [...evaluator.profile.required_signals],
     pass_threshold: evaluator.profile.pass_threshold,
+    source_receipt_digest: null,
+    source_id: null,
+    source_kind: null,
+    source_authority: null,
+    source_freshness: null,
+    source_decision: "not_configured",
+    evaluator_calibration_digest: null,
+    evaluator_calibration_decision: "not_configured",
     retention: BRIDGE_RETENTION,
     secret_material: "never_returned",
   };
@@ -172,9 +220,70 @@ function crossContext(
     evaluator_version: input.evaluator.evaluatorVersion,
     required_signals: [...input.evaluator.profile.required_signals],
     pass_threshold: input.evaluator.profile.pass_threshold,
+    source_receipt_digest: null,
+    source_id: null,
+    source_kind: null,
+    source_authority: null,
+    source_freshness: null,
+    source_decision: "not_configured",
+    evaluator_calibration_digest: null,
+    evaluator_calibration_decision: "not_configured",
     retention: BRIDGE_RETENTION,
     secret_material: "never_returned",
   };
+}
+
+async function admittedContext(
+  context: AutonomousCycleEvaluatorEvidenceContext,
+  options: AutonomousCycleEvaluatorBridgeOptions,
+): Promise<AutonomousCycleEvaluatorEvidenceContext> {
+  let admitted = context;
+  if (options.sourceReceiptFor !== undefined) {
+    let raw: AutonomousEvidenceSourceReceiptJSON | null;
+    try {
+      raw = await options.sourceReceiptFor(admitted);
+    } catch (error) {
+      if (error instanceof ArgumentError) throw error;
+      throw new ArgumentError("cycle evaluator bridge source receipt callback failed");
+    }
+    if (raw === null) throw new ArgumentError("cycle evaluator bridge source receipt is required when sourceReceiptFor is configured");
+    const receipt = validateAutonomousEvidenceSourceReceipt(raw);
+    if (receipt.domain !== context.domain) throw new ArgumentError("cycle evaluator bridge source receipt domain does not match the routed evaluator");
+    if (receipt.decision !== "accepted" || receipt.status !== "observed" || receipt.source_digest === null || receipt.authority === "caller_declared") {
+      throw new ArgumentError("cycle evaluator bridge source receipt is not an accepted authoritative observation");
+    }
+    admitted = {
+      ...admitted,
+      source_receipt_digest: receipt.receipt_digest,
+      source_id: receipt.source_id,
+      source_kind: receipt.source_kind,
+      source_authority: receipt.authority,
+      source_freshness: receipt.freshness,
+      source_decision: "accepted",
+    };
+  }
+  if (options.evaluatorCalibrationFor !== undefined) {
+    let raw: AutonomousEvaluatorCalibrationReport | null;
+    try {
+      raw = await options.evaluatorCalibrationFor(admitted);
+    } catch (error) {
+      if (error instanceof ArgumentError) throw error;
+      throw new ArgumentError("cycle evaluator bridge evaluator calibration callback failed");
+    }
+    if (raw === null) throw new ArgumentError("cycle evaluator bridge evaluator calibration report is required when evaluatorCalibrationFor is configured");
+    if (!isObject(raw)) throw new ArgumentError("cycle evaluator bridge evaluator calibration report is malformed");
+    const report = validateAutonomousEvaluatorCalibrationReport(raw as AutonomousEvaluatorCalibrationReport);
+    const admission = autonomousEvaluatorCalibrationAdmission(report, context.domain);
+    if (admission.decision !== "admit_learning" || admission.evaluator_id !== context.evaluator_id || admission.evaluator_version !== context.evaluator_version) {
+      throw new ArgumentError(`cycle evaluator bridge evaluator calibration holds ${context.domain} learning`);
+    }
+    admitted = {
+      ...admitted,
+      evaluator_calibration_digest: report.report_digest,
+      evaluator_calibration_decision: "admit_learning",
+    };
+  }
+  return admitted;
 }
 
 function rewardInput(evaluation: AutonomousValueEvaluation): AutonomousEvaluatorRewardInput {
@@ -244,24 +353,27 @@ export function createAutonomousCycleEvaluatorBridge(
   const registry = options.registry ?? AutonomousValueEvaluatorRegistry.withBuiltinProfiles();
   if (!(registry instanceof AutonomousValueEvaluatorRegistry)) throw new ArgumentError("cycle evaluator bridge registry is malformed");
   assertCompleteRegistry(registry);
+  const evaluatorCatalogueDigest = catalogueDigest(registry);
 
   const evaluateSingle = async (run: AutonomousRunResult): Promise<AutonomousValueEvaluation> => {
     if (!run || !run.route) throw new ArgumentError("cycle evaluator bridge received a malformed single-domain run");
     const domain = singleDomain(run);
     const evaluator = registry.resolveForAutonomousDomain(domain);
-    const evidence = await options.evidenceFor(singleContext(run, domain, evaluator));
+    const context = await admittedContext(singleContext(run, domain, evaluator), options);
+    const evidence = await options.evidenceFor(context);
     return evaluator.assess(evidence);
   };
 
   const evaluateCross = async (run: AutonomousCrossDomainRunResult): Promise<{ aggregate: AutonomousValueEvaluation; rewards: Record<string, AutonomousEvaluatorRewardInput> }> => {
     if (!run || !run.route || !Array.isArray(run.learning_episode_ids)) throw new ArgumentError("cycle evaluator bridge received a malformed cross-domain run");
     const aggregateEvaluator = registry.resolveForAutonomousDomain("cross_domain");
-    const aggregateEvidence = await options.evidenceFor(crossContext(run, {
+    const aggregateContext = await admittedContext(crossContext(run, {
       domain: "cross_domain",
       role: "synthesis",
       learningEpisodeId: null,
       evaluator: aggregateEvaluator,
-    }));
+    }), options);
+    const aggregateEvidence = await options.evidenceFor(aggregateContext);
     const aggregate = aggregateEvaluator.assess(aggregateEvidence);
     const rewards: Record<string, AutonomousEvaluatorRewardInput> = {};
     const episodeIds = [...run.learning_episode_ids];
@@ -272,12 +384,13 @@ export function createAutonomousCycleEvaluatorBridge(
         const episodeId = episodeIds[index]!;
         const unit = units[index]!;
         const evaluator = registry.resolveForAutonomousDomain(unit.domain);
-        const evidence = await options.evidenceFor(crossContext(run, {
+        const context = await admittedContext(crossContext(run, {
           domain: unit.domain,
           role: unit.role,
           learningEpisodeId: episodeId,
           evaluator,
-        }));
+        }), options);
+        const evidence = await options.evidenceFor(context);
         rewards[episodeId] = rewardInput(evaluator.assess(evidence));
       }
     }
@@ -287,7 +400,7 @@ export function createAutonomousCycleEvaluatorBridge(
   return {
     schema: AUTONOMOUS_CYCLE_EVALUATOR_BRIDGE_SCHEMA,
     registry,
-    evaluator_catalogue_digest: catalogueDigest(registry),
+    evaluator_catalogue_digest: evaluatorCatalogueDigest,
     policy_digest: policyDigest(registry),
     evaluate: async (run) => rewardInput(await evaluateSingle(run)),
     evaluateReplan: async (run) => replanEvaluation(await evaluateSingle(run)),

@@ -446,6 +446,25 @@ validated by the existing domain adapters; provider completion is never treated 
 learning/replan settlement. Inline evidence is rejected by the bridge so callers cannot
 accidentally bypass the independent evidence boundary.
 
+Deployments with explicit source and evaluator governance can make those decisions mandatory at
+the same boundary:
+
+```python
+gated = create_autonomous_cycle_evaluator_bridge(
+    evidence_for=caller_owned_value_evidence,
+    source_receipt_for=lambda context: source_ledger_receipt_for(context),
+    evaluator_calibration_for=lambda context: calibration_report_for(context["domain"]),
+)
+```
+
+`source_receipt_for` must return a validated accepted observation with a source digest and
+non-`caller_declared` authority. `evaluator_calibration_for` must return a validated report whose
+exact routed evaluator is ready on calibration/holdout evidence. Both callbacks run before the
+evidence callback and reward settlement; missing, stale, refused, tampered, or mismatched
+metadata fails closed. Only receipt/report digests and bounded source labels enter the context;
+the SDK still does not decide external truth, provision credentials, or infer reward from provider
+completion.
+
 ### Digest-bound next-action handoff
 
 When a caller needs an approval screen or scheduler input without executing the task, use
