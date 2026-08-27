@@ -4353,3 +4353,13 @@ export {
   validateIdsTypedKnowledgeWorld7,
 } from "./research-contracts.js";
 export type { IdsTypedKnowledgeWorld7 } from "./research-contracts.js";
+
+export {
+  IDS_MULTIMODAL_INGESTION_FEATURE_ID,
+  IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION,
+  IDS_MULTIMODAL_INGESTION_INPUT_SCHEMA,
+  IDS_MULTIMODAL_INGESTION_OUTPUT_SCHEMA,
+  idsMultimodalIngestionDigest,
+  validateIdsHarmonizedResearchObject8,
+} from "./research-contracts.js";
+export type { IdsHarmonizedResearchObject8 } from "./research-contracts.js";

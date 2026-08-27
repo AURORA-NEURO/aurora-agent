@@ -39,6 +39,9 @@ use bioprism_ids::{
 use bioprism_ids::{
     IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION, IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
 };
+use bioprism_ids::{
+    IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
+};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -1835,6 +1838,9 @@ impl Server {
             }
             "ids_knowledge_representation_federated_control_plane" => {
                 self.ids_knowledge_representation_federated_control_plane(&arguments)
+            }
+            "ids_multimodal_ingestion_research_copilot" => {
+                self.ids_multimodal_ingestion_research_copilot(&arguments)
             }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
@@ -24855,6 +24861,29 @@ impl Server {
         }))
     }
 
+    fn ids_multimodal_ingestion_research_copilot(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_ids_multimodal_ingestion_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_MULTIMODAL_INGESTION_FEATURE_ID,
+            "contract_version": IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "modality manifests are deterministically ordered and quality-gated with replay and provenance identities",
+                "missing, unknown, unmeasured, contradicted, omitted, and negative modalities remain explicit",
+                "raw modality data remains institution-local and the copilot emits only governed local capability receipts"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied manifests and does not read files or control instruments",
+                "a qualified harmonized object is not biological validity or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -40958,6 +40987,18 @@ pub fn tool_definitions() -> Vec<Value> {
                     "peers": { "type": "array", "description": "Signed aggregate-only KnowledgePeer4 world attestations." }
                 },
                 "required": ["request", "claims", "peers"]
+            }
+        }),
+        json!({
+            "name": "ids_multimodal_ingestion_research_copilot",
+            "description": "Validate local multimodal imaging and omics manifests into a harmonized preclinical research-object receipt. The copilot enforces modality closure, quality, semantic/unit/coordinate profiles, replay, provenance, authorization, protected closure, policy, and raw-data locality while preserving unknown and negative evidence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized MultimodalIngestionRequest4 with study, required modalities, quality threshold, budget, policy, approval, locality, and replay declarations." },
+                    "observations": { "type": "array", "description": "Typed ModalityObservation4 summaries; raw imaging or omics payloads are not accepted." }
+                },
+                "required": ["request", "observations"]
             }
         }),
         json!({

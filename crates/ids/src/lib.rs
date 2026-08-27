@@ -15,6 +15,7 @@ pub mod hash;
 pub mod id;
 pub mod interpretation_plane;
 pub mod knowledge_representation_federated_control_plane;
+pub mod multimodal_ingestion_research_copilot;
 pub mod throughput_evidence_surveillance_contract_model;
 
 pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
@@ -56,6 +57,13 @@ pub use knowledge_representation_federated_control_plane::{
     ScopedKnowledgeClaims4, TypedKnowledgeWorld7, TypedKnowledgeWorld7Artifact,
     CONTRACT_VERSION as IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
     FEATURE_ID as IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+};
+pub use multimodal_ingestion_research_copilot::{
+    multimodal_ingestion_manifest, operate_multimodal_ingestion, HarmonizedResearchObject8,
+    HarmonizedResearchObject8Artifact, IngestionEvidenceState, ModalityObservation4,
+    MultimodalIngestionError, MultimodalIngestionRequest4,
+    CONTRACT_VERSION as IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION,
+    FEATURE_ID as IDS_MULTIMODAL_INGESTION_FEATURE_ID,
 };
 pub use throughput_evidence_surveillance_contract_model::{
     model_throughput_evidence_surveillance_contract,

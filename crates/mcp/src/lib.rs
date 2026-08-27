@@ -305,6 +305,10 @@ pub use research_contracts::{
     operate_ids_knowledge_representation_json, validate_ids_knowledge_representation_json,
     IDS_KNOWLEDGE_REPRESENTATION_TOOL,
 };
+pub use research_contracts::{
+    operate_ids_multimodal_ingestion_json, validate_ids_multimodal_ingestion_json,
+    IDS_MULTIMODAL_INGESTION_TOOL,
+};
 pub use resource_discovery_contract::{
     compile_resource_discovery_contract_v2, ResourceDiscoveryContractError,
     ResourceDiscoveryContractRequest, ResourceDiscoveryContractResponse,

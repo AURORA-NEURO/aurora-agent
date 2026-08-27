@@ -7683,3 +7683,17 @@ __all__ += [
     "operate_ids_knowledge_representation",
     "idsKnowledgeRepresentationDigest",
 ]
+
+from .ids_multimodal_ingestion_research_copilot import (
+    HarmonizedResearchObject8 as IdsHarmonizedResearchObject8,
+    multimodal_ingestion_manifest as ids_multimodal_ingestion_manifest,
+    operate_multimodal_ingestion as operate_ids_multimodal_ingestion,
+    idsMultimodalIngestionDigest,
+)
+
+__all__ += [
+    "IdsHarmonizedResearchObject8",
+    "ids_multimodal_ingestion_manifest",
+    "operate_ids_multimodal_ingestion",
+    "idsMultimodalIngestionDigest",
+]

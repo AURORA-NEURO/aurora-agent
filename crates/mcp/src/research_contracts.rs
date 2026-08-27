@@ -526,6 +526,10 @@ use bioprism_ids::{
     operate_knowledge_representation, KnowledgeClaim4, KnowledgePeer4, ScopedKnowledgeClaims4,
     TypedKnowledgeWorld7, IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
 };
+use bioprism_ids::{
+    operate_multimodal_ingestion, HarmonizedResearchObject8, ModalityObservation4,
+    MultimodalIngestionRequest4, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
+};
 use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
     PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
@@ -3033,6 +3037,26 @@ pub fn validate_ids_knowledge_representation_json(value: &Value) -> Result<Typed
         .map_err(|error| format!("invalid ids knowledge receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID { return Err("ids knowledge representation feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub const IDS_MULTIMODAL_INGESTION_TOOL: &str = "ids_multimodal_ingestion_research_copilot";
+
+pub fn operate_ids_multimodal_ingestion_json(value: &Value) -> Result<Value, String> {
+    let request: MultimodalIngestionRequest4 = serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+        .map_err(|error| format!("invalid ids multimodal ingestion request: {error}"))?;
+    let observations: Vec<ModalityObservation4> = serde_json::from_value(value.get("observations").cloned().ok_or("observations are required")?)
+        .map_err(|error| format!("invalid ids modality observations: {error}"))?;
+    let receipt = operate_multimodal_ingestion(&request, &observations)
+        .map_err(|error| format!("ids multimodal ingestion failed: {error}"))?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize ids ingestion receipt: {error}"))
+}
+
+pub fn validate_ids_multimodal_ingestion_json(value: &Value) -> Result<HarmonizedResearchObject8, String> {
+    let receipt: HarmonizedResearchObject8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids ingestion receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_MULTIMODAL_INGESTION_FEATURE_ID { return Err("ids multimodal ingestion feature id mismatch".into()); }
     Ok(receipt)
 }
 
