@@ -6639,6 +6639,16 @@ __all__ += [
     "assure_retrieval_synthesis",
 ]
 
+from .multimodal_interpretation_workflow_fabric import (
+    InterpretationWorkflowReceipt,
+    run_interpretation_workflow,
+)
+
+__all__ += [
+    "InterpretationWorkflowReceipt",
+    "run_interpretation_workflow",
+]
+
 from .adapter_throughput_evidence_surveillance_inference_engine import (
     ThroughputEvidenceObservation,
     ThroughputEvidenceSurveillanceReceipt,

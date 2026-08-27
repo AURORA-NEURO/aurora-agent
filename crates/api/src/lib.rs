@@ -21,6 +21,7 @@
 pub mod analysis_assurance;
 pub mod events;
 pub mod http;
+pub mod multimodal_interpretation_workflow_fabric;
 pub mod release_assurance;
 pub mod router;
 
@@ -29,6 +30,15 @@ pub use analysis_assurance::{
     AnalysisAssuranceRequest, AnalysisCandidate, AnalysisDisposition, AnalysisEvidenceState,
     QualifiedAnalysisResult, ANALYSIS_ASSURANCE_CONTRACT_VERSION, ANALYSIS_ASSURANCE_FEATURE_ID,
     ANALYSIS_ASSURANCE_PRECLINICAL_BOUNDARY, ANALYSIS_ASSURANCE_SCHEMA_VERSION,
+};
+pub use multimodal_interpretation_workflow_fabric::{
+    capability_manifest as interpretation_workflow_manifest, run as run_interpretation_workflow,
+    run_json as run_interpretation_workflow_json, InterpretationDisposition, InterpretationStudy,
+    InterpretationWorkflowError, InterpretationWorkflowReceipt, InterpretationWorkflowRequest,
+    CONTRACT_VERSION as INTERPRETATION_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_WORKFLOW_FEATURE_ID,
+    INPUT_SCHEMA as INTERPRETATION_WORKFLOW_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as INTERPRETATION_WORKFLOW_OUTPUT_SCHEMA,
 };
 pub use release_assurance::{
     assure_release, release_assurance_manifest, ReleaseAssuranceError, ReleaseAssuranceReceipt,

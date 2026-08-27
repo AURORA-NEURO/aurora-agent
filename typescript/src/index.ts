@@ -3633,6 +3633,15 @@ export {
 } from "./research-contracts.js";
 export type { CliRetrievalEvidenceCandidate, CliRetrievalSynthesisAssuranceReceipt } from "./research-contracts.js";
 export {
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_FEATURE_ID,
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_CONTRACT_VERSION,
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_INPUT_SCHEMA,
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_OUTPUT_SCHEMA,
+  apiMultimodalInterpretationWorkflowReceiptDigest,
+  validateApiMultimodalInterpretationWorkflowReceipt,
+} from "./research-contracts.js";
+export type { ApiInterpretationStudy, ApiMultimodalInterpretationWorkflowReceipt } from "./research-contracts.js";
+export {
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
   adapterFederatedContinualEvidenceSurveillanceWorkflowFabricReceiptDigest,
