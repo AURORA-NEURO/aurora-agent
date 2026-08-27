@@ -522,6 +522,10 @@ use bioprism_ids::{
     operate_context_compilation, CertifiedDecisionSection1, ContextFact4, ContextPeer4,
     DecisionQuery4, IDS_CONTEXT_COMPILATION_FEATURE_ID,
 };
+use bioprism_ids::{
+    operate_knowledge_representation, KnowledgeClaim4, KnowledgePeer4, ScopedKnowledgeClaims4,
+    TypedKnowledgeWorld7, IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+};
 use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
     PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
@@ -3007,6 +3011,28 @@ pub fn validate_ids_context_compilation_json(value: &Value) -> Result<CertifiedD
         .map_err(|error| format!("invalid ids context receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_CONTEXT_COMPILATION_FEATURE_ID { return Err("ids context compilation feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub const IDS_KNOWLEDGE_REPRESENTATION_TOOL: &str = "ids_knowledge_representation_federated_control_plane";
+
+pub fn operate_ids_knowledge_representation_json(value: &Value) -> Result<Value, String> {
+    let request: ScopedKnowledgeClaims4 = serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+        .map_err(|error| format!("invalid ids knowledge request: {error}"))?;
+    let claims: Vec<KnowledgeClaim4> = serde_json::from_value(value.get("claims").cloned().ok_or("claims are required")?)
+        .map_err(|error| format!("invalid ids knowledge claims: {error}"))?;
+    let peers: Vec<KnowledgePeer4> = serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+        .map_err(|error| format!("invalid ids knowledge peers: {error}"))?;
+    let receipt = operate_knowledge_representation(&request, &claims, &peers)
+        .map_err(|error| format!("ids knowledge representation failed: {error}"))?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize ids knowledge receipt: {error}"))
+}
+
+pub fn validate_ids_knowledge_representation_json(value: &Value) -> Result<TypedKnowledgeWorld7, String> {
+    let receipt: TypedKnowledgeWorld7 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids knowledge receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID { return Err("ids knowledge representation feature id mismatch".into()); }
     Ok(receipt)
 }
 

@@ -7669,3 +7669,17 @@ __all__ += [
     "operate_ids_context_compilation",
     "idsContextCompilationDigest",
 ]
+
+from .ids_knowledge_representation_federated_control_plane import (
+    TypedKnowledgeWorld7 as IdsTypedKnowledgeWorld7,
+    knowledge_representation_manifest as ids_knowledge_representation_manifest,
+    operate_knowledge_representation as operate_ids_knowledge_representation,
+    idsKnowledgeRepresentationDigest,
+)
+
+__all__ += [
+    "IdsTypedKnowledgeWorld7",
+    "ids_knowledge_representation_manifest",
+    "operate_ids_knowledge_representation",
+    "idsKnowledgeRepresentationDigest",
+]

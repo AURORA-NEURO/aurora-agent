@@ -4343,3 +4343,13 @@ export {
   validateIdsCertifiedDecisionSection1,
 } from "./research-contracts.js";
 export type { IdsCertifiedDecisionSection1 } from "./research-contracts.js";
+
+export {
+  IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+  IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+  IDS_KNOWLEDGE_REPRESENTATION_INPUT_SCHEMA,
+  IDS_KNOWLEDGE_REPRESENTATION_OUTPUT_SCHEMA,
+  idsKnowledgeRepresentationDigest,
+  validateIdsTypedKnowledgeWorld7,
+} from "./research-contracts.js";
+export type { IdsTypedKnowledgeWorld7 } from "./research-contracts.js";

@@ -36,6 +36,9 @@ use bioprism_epistemic::{
 use bioprism_ids::{
     IDS_CONTEXT_COMPILATION_CONTRACT_VERSION, IDS_CONTEXT_COMPILATION_FEATURE_ID,
 };
+use bioprism_ids::{
+    IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION, IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -1829,6 +1832,9 @@ impl Server {
             }
             "ids_context_compilation_federated_control_plane" => {
                 self.ids_context_compilation_federated_control_plane(&arguments)
+            }
+            "ids_knowledge_representation_federated_control_plane" => {
+                self.ids_knowledge_representation_federated_control_plane(&arguments)
             }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
@@ -24826,6 +24832,29 @@ impl Server {
         }))
     }
 
+    fn ids_knowledge_representation_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_ids_knowledge_representation_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+            "contract_version": IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "multimodal claims are deterministically ranked and bound to source, provenance, replay, and semantic identities",
+                "unknown, unmeasured, contradicted, omitted, and negative claims remain explicit",
+                "only aggregate-only permitted typed worlds can cross the approved federation boundary"
+            ],
+            "limitations": [
+                "the route consumes caller-supplied claim summaries and does not access raw imaging or omics data",
+                "a qualified typed world is not biological validity or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -40916,6 +40945,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "peers": { "type": "array", "description": "Signed aggregate-only ContextPeer4 attestations." }
                 },
                 "required": ["request", "facts", "peers"]
+            }
+        }),
+        json!({
+            "name": "ids_knowledge_representation_federated_control_plane",
+            "description": "Compile typed multimodal knowledge claims and signed aggregate-only peer world attestations into a content-addressed preclinical knowledge world. The route preserves semantic, provenance, replay, contradiction, omission, negative-evidence, quorum, policy, and locality gates without exporting raw imaging or omics data.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ScopedKnowledgeClaims4 with world, semantic, checkpoint, quorum, policy, approval, federation, locality, aggregate-only, budget, and replay declarations." },
+                    "claims": { "type": "array", "description": "Typed KnowledgeClaim4 records with modality and evidence summaries." },
+                    "peers": { "type": "array", "description": "Signed aggregate-only KnowledgePeer4 world attestations." }
+                },
+                "required": ["request", "claims", "peers"]
             }
         }),
         json!({

@@ -14,6 +14,7 @@ pub mod federated_resource_discovery_interoperability;
 pub mod hash;
 pub mod id;
 pub mod interpretation_plane;
+pub mod knowledge_representation_federated_control_plane;
 pub mod throughput_evidence_surveillance_contract_model;
 
 pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
@@ -48,6 +49,13 @@ pub use interpretation_plane::{
     InterpretationPlaneRequest, CONTRACT_VERSION as INTERPRETATION_PLANE_CONTRACT_VERSION,
     FEATURE_ID as INTERPRETATION_PLANE_FEATURE_ID,
     PRECLINICAL_BOUNDARY as INTERPRETATION_PLANE_BOUNDARY,
+};
+pub use knowledge_representation_federated_control_plane::{
+    knowledge_representation_manifest, operate_knowledge_representation,
+    KnowledgeClaim4, KnowledgeEvidenceState, KnowledgePeer4, KnowledgeRepresentationError,
+    ScopedKnowledgeClaims4, TypedKnowledgeWorld7, TypedKnowledgeWorld7Artifact,
+    CONTRACT_VERSION as IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+    FEATURE_ID as IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
 };
 pub use throughput_evidence_surveillance_contract_model::{
     model_throughput_evidence_surveillance_contract,
