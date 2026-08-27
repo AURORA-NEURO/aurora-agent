@@ -7304,3 +7304,15 @@ __all__ += [
     "compile_experiment_design_copilot",
     "oracle_experiment_design_copilot_digest",
 ]
+
+from .oracle_context_federation_control import (
+    OracleContextFederationEnvelope,
+    operate_context_federation,
+    oracle_context_federation_digest,
+)
+
+__all__ += [
+    "OracleContextFederationEnvelope",
+    "operate_context_federation",
+    "oracle_context_federation_digest",
+]

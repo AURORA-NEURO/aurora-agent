@@ -66,6 +66,7 @@ pub mod disagreement;
 pub mod error;
 pub mod evidence;
 pub mod experiment_design_copilot;
+pub mod context_federation_control;
 pub mod ingestion_control;
 pub mod judgement;
 pub mod ladder;
@@ -100,6 +101,13 @@ pub use experiment_design_copilot::{
     FEATURE_ID as EXPERIMENT_DESIGN_COPILOT_FEATURE_ID,
     INPUT_SCHEMA as EXPERIMENT_DESIGN_COPILOT_INPUT_SCHEMA,
     OUTPUT_SCHEMA as EXPERIMENT_DESIGN_COPILOT_OUTPUT_SCHEMA,
+};
+pub use context_federation_control::{
+    operate_context_federation, context_federation_control_manifest,
+    ContextClaim, ContextFederationEnvelope, ContextFederationError,
+    DecisionQuery as FederatedContextQuery,
+    CONTRACT_VERSION as CONTEXT_FEDERATION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_FEDERATION_FEATURE_ID,
 };
 pub use ingestion_control::{
     control_federated_ingestion, federated_ingestion_control_manifest,

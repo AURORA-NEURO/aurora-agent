@@ -4063,3 +4063,13 @@ export {
   validateOracleExperimentDesignCopilot,
 } from "./research-contracts.js";
 export type { OracleExperimentDesignCopilotReceipt } from "./research-contracts.js";
+
+export {
+  ORACLE_CONTEXT_FEDERATION_FEATURE_ID,
+  ORACLE_CONTEXT_FEDERATION_CONTRACT_VERSION,
+  ORACLE_CONTEXT_FEDERATION_INPUT_SCHEMA,
+  ORACLE_CONTEXT_FEDERATION_OUTPUT_SCHEMA,
+  oracleContextFederationDigest,
+  validateOracleContextFederationEnvelope,
+} from "./research-contracts.js";
+export type { OracleContextFederationEnvelope } from "./research-contracts.js";
