@@ -4113,3 +4113,13 @@ export {
   validateIdsEvidenceSurveillanceContractReceipt,
 } from "./research-contracts.js";
 export type { IdsEvidenceSurveillanceContractReceipt } from "./research-contracts.js";
+
+export {
+  BIOIR_PERFORMANCE_RELIABILITY_FEATURE_ID,
+  BIOIR_PERFORMANCE_RELIABILITY_CONTRACT_VERSION,
+  BIOIR_PERFORMANCE_RELIABILITY_INPUT_SCHEMA,
+  BIOIR_PERFORMANCE_RELIABILITY_OUTPUT_SCHEMA,
+  bioirPerformanceReliabilityDigest,
+  validateBioirReliableCapabilityResult,
+} from "./research-contracts.js";
+export type { BioirReliableCapabilityResult } from "./research-contracts.js";

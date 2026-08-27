@@ -7366,3 +7366,17 @@ __all__ += [
     "model_throughput_evidence_surveillance_contract",
     "ids_throughput_evidence_surveillance_digest",
 ]
+
+from .bioir_performance_reliability_control_plane import (
+    BioirReliableCapabilityResult,
+    performance_reliability_control_plane_manifest,
+    evaluate_performance_reliability,
+    bioir_performance_reliability_digest,
+)
+
+__all__ += [
+    "BioirReliableCapabilityResult",
+    "performance_reliability_control_plane_manifest",
+    "evaluate_performance_reliability",
+    "bioir_performance_reliability_digest",
+]

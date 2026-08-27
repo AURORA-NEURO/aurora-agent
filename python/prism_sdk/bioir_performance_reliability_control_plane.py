@@ -1,0 +1,57 @@
+"""Python parity surface for ``AFA-bioir-P21-F32``.
+
+The control plane evaluates declared capability metadata and planned
+invocations only.  It emits reliability receipts and never calls a tool or
+exports raw research observations.
+"""
+from __future__ import annotations
+from dataclasses import dataclass
+import hashlib, json, re
+from typing import Any, Mapping, Sequence
+from .research_contracts import PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION, ResearchContractError
+
+FEATURE_ID = "AFA-bioir-P21-F32"; CONTRACT_VERSION = "bioir-federated-continual-performance-reliability-control-plane/1.0"; INPUT_SCHEMA = "CapabilityWorkload4@1"; OUTPUT_SCHEMA = "ReliableCapabilityResult8@1"; CONTENT_TYPE = "application/vnd.aurora.reliable-capability-result-8+json"
+def _digest(value:Any)->bool:return isinstance(value,str) and re.fullmatch(r"[0-9a-f]{64}",value) is not None
+def _canonical(values:Sequence[str])->bool:return tuple(values)==tuple(sorted(set(values)))
+def _hash(value:Any)->str:return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+
+@dataclass(frozen=True)
+class BioirReliableCapabilityResult:
+    workload_id:str; federation_id:str; institution_id:str; capability_id:str; disposition:str; invocation_order:tuple[str,...]; completed_order:tuple[str,...]; unresolved_order:tuple[str,...]; blocked_order:tuple[str,...]; retry_order:tuple[str,...]; timeout_order:tuple[str,...]; tool_order:tuple[str,...]; budget_used_units:int; omissions:tuple[str,...]; uncertainty:tuple[str,...]; negative_evidence:tuple[str,...]; replay_identity:str; result_digest:str; effect_receipts:tuple[str,...]; artifact:dict[str,Any]; raw_data_local:bool=True; aggregate_only:bool=True; boundary:str=PRECLINICAL_BOUNDARY; schema_version:str=RESEARCH_CONTRACT_SCHEMA_VERSION; contract_version:str=CONTRACT_VERSION; feature_id:str=FEATURE_ID
+    def to_dict(self)->dict[str,Any]:
+        return {"schema_version":self.schema_version,"contract_version":self.contract_version,"feature_id":self.feature_id,"workload_id":self.workload_id,"federation_id":self.federation_id,"institution_id":self.institution_id,"capability_id":self.capability_id,"disposition":self.disposition,"invocation_order":list(self.invocation_order),"completed_order":list(self.completed_order),"unresolved_order":list(self.unresolved_order),"blocked_order":list(self.blocked_order),"retry_order":list(self.retry_order),"timeout_order":list(self.timeout_order),"tool_order":list(self.tool_order),"budget_used_units":self.budget_used_units,"omissions":list(self.omissions),"uncertainty":list(self.uncertainty),"negative_evidence":list(self.negative_evidence),"replay_identity":self.replay_identity,"result_digest":self.result_digest,"effect_receipts":list(self.effect_receipts),"artifact":self.artifact,"raw_data_local":self.raw_data_local,"aggregate_only":self.aggregate_only,"boundary":self.boundary}
+    def validate(self)->None:
+        if (self.schema_version,self.contract_version,self.feature_id)!=(RESEARCH_CONTRACT_SCHEMA_VERSION,CONTRACT_VERSION,FEATURE_ID) or self.boundary!=PRECLINICAL_BOUNDARY or self.artifact.get("boundary")!=PRECLINICAL_BOUNDARY or not self.raw_data_local or not self.aggregate_only or not all(v.strip() for v in (self.workload_id,self.federation_id,self.institution_id,self.capability_id)) or not self.invocation_order or not self.tool_order or not self.effect_receipts or self.disposition not in {"qualified","degraded","unresolved","blocked"}: raise ResearchContractError("reliability result identity, locality, invocation, tool, or effects are incomplete")
+        for values in (self.invocation_order,self.completed_order,self.unresolved_order,self.blocked_order,self.retry_order,self.timeout_order,self.tool_order,self.omissions,self.uncertainty,self.negative_evidence,self.effect_receipts):
+            if not _canonical(values):raise ResearchContractError("reliability result ordering is not canonical")
+        parts=[*self.completed_order,*self.unresolved_order,*self.blocked_order]
+        if set(parts)!=set(self.invocation_order) or len(parts)!=len(set(parts)):raise ResearchContractError("reliability result states do not partition invocations")
+        if not all(_digest(value) for value in (self.replay_identity,self.result_digest,self.artifact.get("content_hash"))):raise ResearchContractError("reliability result digest is invalid")
+        if self.artifact.get("content_type")!=CONTENT_TYPE:raise ResearchContractError("reliability result artifact type is invalid")
+        if self.disposition=="qualified" and self.effect_receipts!=(f"exchange:permitted-summaries:{self.workload_id}",f"manage:local-capability:{self.workload_id}"):raise ResearchContractError("qualified reliability effects are invalid")
+        if self.disposition!="qualified" and self.effect_receipts!=("block:unsafe-release",):raise ResearchContractError("non-qualified reliability result must block release")
+
+def performance_reliability_control_plane_manifest()->dict[str,Any]:return {"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"capability_id":FEATURE_ID,"version":CONTRACT_VERSION,"owner_crate":"bioir","consumers":["bioinformatician","institution operations steward","federation operator"],"behavior":"evaluates declared capability workloads for deterministic, replayable, policy-separated reliability without invoking tools","value":"makes performance degradation, failures, locality, and federated authorization visible before a research workflow depends on a capability","input_schema":INPUT_SCHEMA,"output_schema":OUTPUT_SCHEMA,"effects":["execute_local_computation","write_local_artifact","federation_export"],"autonomy_tier":"A2","boundary":PRECLINICAL_BOUNDARY}
+
+def evaluate_performance_reliability(*,workload_id:str,federation_id:str,institution_id:str,capability_id:str,manifests:Sequence[Mapping[str,Any]],invocations:Sequence[Mapping[str,Any]],budget_units:int,policy_allow:bool,protected_closure:bool,signed_approval:bool,federation_approved:bool,raw_data_local:bool,aggregate_only:bool,replay_identity:str,adversarial_events:Sequence[str]=(),boundary:str=PRECLINICAL_BOUNDARY)->BioirReliableCapabilityResult:
+    if not all(v.strip() for v in (workload_id,federation_id,institution_id,capability_id)) or not manifests or not invocations or budget_units<=0 or not _digest(replay_identity) or boundary!=PRECLINICAL_BOUNDARY or not raw_data_local or not aggregate_only or not _canonical(adversarial_events):raise ResearchContractError("workload identity, manifests, budget, replay, locality, aggregate-only, or boundary is invalid")
+    mrows=[dict(x) for x in manifests]; mids={str(x.get("capability_id","")) for x in mrows}
+    if len(mids)!=len(mrows) or any(not str(x.get("capability_id","")).strip() or not str(x.get("version","")).strip() or not str(x.get("effect","")).strip() or not x.get("approved") or x.get("revoked") or not _digest(x.get("capability_digest")) or not _digest(x.get("provenance_digest")) for x in mrows):raise ResearchContractError("capability manifest is unapproved, revoked, malformed, or duplicated")
+    rows=[dict(x) for x in invocations]; ids=[str(x.get("invocation_id","")) for x in rows]; total=sum(int(x.get("estimated_cost_units",0)) for x in rows)
+    if len(set(ids))!=len(ids) or any(not x.strip() or str(row.get("capability_id", "")) not in mids or int(row.get("estimated_cost_units",0))<=0 or int(row.get("timeout_ms",0))<=0 or int(row.get("max_attempts",0))<=0 or not _digest(row.get("input_digest")) for row,x in zip(rows,ids)) or total>budget_units:raise ResearchContractError("invocation is incomplete, undeclared, duplicated, over budget, or has an invalid digest")
+    rows.sort(key=lambda x:str(x["invocation_id"])); order=tuple(str(x["invocation_id"]) for x in rows); retries=tuple(sorted(str(x["invocation_id"]) for x in rows if int(x["max_attempts"])>1)); timeouts=tuple(sorted(str(x["invocation_id"]) for x in rows if int(x["timeout_ms"])>0)); tools=tuple(sorted({str(x["capability_id"]) for x in rows})); completed:set[str]=set(); unresolved:set[str]=set(); blocked:set[str]=set(); omissions:set[str]=set(); uncertainty:set[str]=set(); negative:set[str]=set(); manifest_by_id={str(x["capability_id"]):x for x in mrows}
+    for row in rows:
+        iid=str(row["invocation_id"]); manifest=manifest_by_id[str(row["capability_id"])]
+        if row.get("simulated_failure"):unresolved.add(iid);negative.add(f"{iid}:{row['simulated_failure']}")
+        elif not manifest.get("deterministic"):unresolved.add(iid);uncertainty.add(f"{row['capability_id']}:bounded-nondeterminism")
+        else:completed.add(iid)
+    if not policy_allow:negative.add("request:policy-denied")
+    if not protected_closure:uncertainty.add("request:protected-closure-incomplete")
+    if not signed_approval:uncertainty.add("request:signed-approval-missing")
+    if not federation_approved:uncertainty.add("request:federation-approval-missing")
+    negative.update(f"adversarial:{x}" for x in adversarial_events); global_block=not policy_allow or not protected_closure or not signed_approval or not federation_approved or not raw_data_local or not aggregate_only or bool(adversarial_events)
+    if global_block:blocked.update(order);completed.clear();unresolved.clear();omissions.add("request:reliability-gates-blocked")
+    elif unresolved:omissions.add("failed-or-nondeterministic-invocations-remain-unresolved")
+    disposition="blocked" if global_block else "qualified" if not unresolved else "unresolved" if not completed else "degraded"; co,uo,bo=tuple(sorted(completed)),tuple(sorted(unresolved)),tuple(sorted(blocked)); oo,un,ne=tuple(sorted(omissions)),tuple(sorted(uncertainty)),tuple(sorted(negative)); effects=(f"exchange:permitted-summaries:{workload_id}",f"manage:local-capability:{workload_id}") if disposition=="qualified" else ("block:unsafe-release",); payload={"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"workload_id":workload_id,"federation_id":federation_id,"institution_id":institution_id,"capability_id":capability_id,"disposition":disposition,"invocation_order":list(order),"completed_order":list(co),"unresolved_order":list(uo),"blocked_order":list(bo),"retry_order":list(retries),"timeout_order":list(timeouts),"tool_order":list(tools),"budget_used_units":total,"omissions":list(oo),"uncertainty":list(un),"negative_evidence":list(ne),"replay_identity":replay_identity,"effect_receipts":list(effects),"raw_data_local":raw_data_local,"aggregate_only":aggregate_only,"boundary":PRECLINICAL_BOUNDARY}; d=_hash(payload); artifact={"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"artifact_id":f"reliable-capability:{workload_id}","content_type":CONTENT_TYPE,"content_hash":d,"semantic_loss":[],"provenance":[],"boundary":PRECLINICAL_BOUNDARY}; result=BioirReliableCapabilityResult(workload_id,federation_id,institution_id,capability_id,disposition,order,co,uo,bo,retries,timeouts,tools,total,oo,un,ne,replay_identity,d, effects,artifact);result.validate();return result
+def bioir_performance_reliability_digest(result:BioirReliableCapabilityResult)->str:result.validate();return _hash(result.to_dict())
+__all__=["FEATURE_ID","CONTRACT_VERSION","INPUT_SCHEMA","OUTPUT_SCHEMA","BioirReliableCapabilityResult","performance_reliability_control_plane_manifest","evaluate_performance_reliability","bioir_performance_reliability_digest"]
