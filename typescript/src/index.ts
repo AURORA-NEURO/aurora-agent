@@ -4083,3 +4083,13 @@ export {
   validateObligationEvidenceGatewaySet,
 } from "./research-contracts.js";
 export type { ObligationQualifiedEvidenceSet } from "./research-contracts.js";
+
+export {
+  BIOIR_LABORATORY_CONTROL_FEATURE_ID,
+  BIOIR_LABORATORY_CONTROL_CONTRACT_VERSION,
+  BIOIR_LABORATORY_CONTROL_INPUT_SCHEMA,
+  BIOIR_LABORATORY_CONTROL_OUTPUT_SCHEMA,
+  bioirLaboratoryControlDigest,
+  validateBioirInstrumentActionReceipt,
+} from "./research-contracts.js";
+export type { BioirInstrumentActionReceipt } from "./research-contracts.js";

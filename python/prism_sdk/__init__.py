@@ -7328,3 +7328,15 @@ __all__ += [
     "integrate_evidence_feed",
     "obligation_evidence_gateway_digest",
 ]
+
+from .bioir_laboratory_control_plane import (
+    BioirInstrumentActionReceipt,
+    preflight_instrument_action,
+    bioir_laboratory_control_digest,
+)
+
+__all__ += [
+    "BioirInstrumentActionReceipt",
+    "preflight_instrument_action",
+    "bioir_laboratory_control_digest",
+]
