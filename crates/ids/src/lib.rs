@@ -17,6 +17,7 @@ pub mod interpretation_plane;
 pub mod knowledge_representation_federated_control_plane;
 pub mod multimodal_ingestion_research_copilot;
 pub mod quality_control_assurance;
+pub mod mechanism_exploration_assurance;
 pub mod throughput_evidence_surveillance_contract_model;
 
 pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
@@ -72,6 +73,13 @@ pub use quality_control_assurance::{
     QualityEvidenceState, QualityObservation4,
     CONTRACT_VERSION as IDS_QUALITY_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as IDS_QUALITY_CONTROL_FEATURE_ID,
+};
+pub use mechanism_exploration_assurance::{
+    assure_mechanism_exploration, mechanism_exploration_manifest, MechanismCandidate4,
+    MechanismEvidenceState, MechanismExplorationError, MechanismPortfolio7,
+    MechanismPortfolio7Artifact, MechanismQuestion2, PeerMechanismSummary4,
+    CONTRACT_VERSION as IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+    FEATURE_ID as IDS_MECHANISM_EXPLORATION_FEATURE_ID,
 };
 pub use throughput_evidence_surveillance_contract_model::{
     model_throughput_evidence_surveillance_contract,

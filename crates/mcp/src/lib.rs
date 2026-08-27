@@ -313,6 +313,10 @@ pub use research_contracts::{
     operate_ids_quality_control_json, validate_ids_quality_control_json,
     IDS_QUALITY_CONTROL_TOOL,
 };
+pub use research_contracts::{
+    operate_ids_mechanism_exploration_json, validate_ids_mechanism_exploration_json,
+    IDS_MECHANISM_EXPLORATION_TOOL,
+};
 pub use resource_discovery_contract::{
     compile_resource_discovery_contract_v2, ResourceDiscoveryContractError,
     ResourceDiscoveryContractRequest, ResourceDiscoveryContractResponse,

@@ -43,6 +43,7 @@ use bioprism_ids::{
     IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
 };
 use bioprism_ids::{IDS_QUALITY_CONTROL_CONTRACT_VERSION, IDS_QUALITY_CONTROL_FEATURE_ID};
+use bioprism_ids::{IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION, IDS_MECHANISM_EXPLORATION_FEATURE_ID};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -1844,6 +1845,7 @@ impl Server {
                 self.ids_multimodal_ingestion_research_copilot(&arguments)
             }
             "ids_quality_control_assurance" => self.ids_quality_control_assurance(&arguments),
+            "ids_mechanism_exploration_assurance" => self.ids_mechanism_exploration_assurance(&arguments),
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -24906,6 +24908,26 @@ impl Server {
         }))
     }
 
+    fn ids_mechanism_exploration_assurance(&self, arguments: &Value) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_ids_mechanism_exploration_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_MECHANISM_EXPLORATION_FEATURE_ID,
+            "contract_version": IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "mechanism candidates are deterministically ranked with stable support/novelty tie breaks",
+                "study and modality closure, peer quorum, replay, provenance, policy, approval, and locality gates are explicit",
+                "competing explanations, contradictions, counterevidence, omissions, and negative results remain visible"
+            ],
+            "limitations": [
+                "the route verifies caller-supplied summaries and does not fit models, execute experiments, or move raw data",
+                "a qualified portfolio is not biological validity or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -41033,6 +41055,19 @@ pub fn tool_definitions() -> Vec<Value> {
                     "observations": { "type": "array", "description": "Typed QualityObservation4 metric summaries with modality, baseline, threshold, artifact, provenance, and evidence state." }
                 },
                 "required": ["request", "observations"]
+            }
+        }),
+        json!({
+            "name": "ids_mechanism_exploration_assurance",
+            "description": "Verify bounded multimodal mechanism candidates and aggregate-only peer portfolios for preclinical research. The harness ranks support and novelty, enforces study/modality comparability and governed release gates, and preserves competing explanations, contradictions, omissions, counterevidence, and negative results.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized MechanismQuestion2 with required studies/modalities, support threshold, checkpoint, quorum, policy, approval, federation, locality, budget, and replay declarations." },
+                    "candidates": { "type": "array", "description": "Typed MechanismCandidate4 summaries with support, novelty, modality/study closure, provenance, and evidence state." },
+                    "peers": { "type": "array", "description": "Signed aggregate-only PeerMechanismSummary4 attestations." }
+                },
+                "required": ["request", "candidates", "peers"]
             }
         }),
         json!({

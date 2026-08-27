@@ -534,6 +534,10 @@ use bioprism_ids::{
     assure_quality_control, QualityControlBatch4, QualityControlReport8,
     QualityObservation4, IDS_QUALITY_CONTROL_FEATURE_ID,
 };
+use bioprism_ids::{
+    assure_mechanism_exploration, MechanismCandidate4, MechanismPortfolio7,
+    MechanismQuestion2, PeerMechanismSummary4, IDS_MECHANISM_EXPLORATION_FEATURE_ID,
+};
 use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
     PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
@@ -3081,6 +3085,28 @@ pub fn validate_ids_quality_control_json(value: &Value) -> Result<QualityControl
         .map_err(|error| format!("invalid ids quality receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_QUALITY_CONTROL_FEATURE_ID { return Err("ids quality-control feature id mismatch".into()); }
+    Ok(receipt)
+}
+
+pub const IDS_MECHANISM_EXPLORATION_TOOL: &str = "ids_mechanism_exploration_assurance";
+
+pub fn operate_ids_mechanism_exploration_json(value: &Value) -> Result<Value, String> {
+    let request: MechanismQuestion2 = serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+        .map_err(|error| format!("invalid ids mechanism request: {error}"))?;
+    let candidates: Vec<MechanismCandidate4> = serde_json::from_value(value.get("candidates").cloned().ok_or("candidates are required")?)
+        .map_err(|error| format!("invalid ids mechanism candidates: {error}"))?;
+    let peers: Vec<PeerMechanismSummary4> = serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+        .map_err(|error| format!("invalid ids mechanism peers: {error}"))?;
+    let receipt = assure_mechanism_exploration(&request, &candidates, &peers)
+        .map_err(|error| format!("ids mechanism exploration failed: {error}"))?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize ids mechanism receipt: {error}"))
+}
+
+pub fn validate_ids_mechanism_exploration_json(value: &Value) -> Result<MechanismPortfolio7, String> {
+    let receipt: MechanismPortfolio7 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids mechanism receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_MECHANISM_EXPLORATION_FEATURE_ID { return Err("ids mechanism feature id mismatch".into()); }
     Ok(receipt)
 }
 
