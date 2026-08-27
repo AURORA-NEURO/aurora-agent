@@ -15,6 +15,7 @@ from prism_sdk import (
     AutonomousBatchCheckpoint,
     AutonomousBatchRehydrationContext,
     AutonomousBatchProtectedRehydration,
+    AutonomousAutomaticBatchProtectedRehydration,
     AutonomousBrainBatchJobController,
     AutonomousProtectedRehydrationAdapter,
     AutonomousProtectedRehydrationBoundary,
@@ -733,9 +734,14 @@ def test_agent_run_resumable_auto_batch_binds_semantic_policy_and_rejects_drift(
     assert first.status == "partial"
     assert first.items[0].status == "succeeded"
     assert checkpoints[-1].semantic_routing_policy_digest is not None
+    assert checkpoints[-1].automatic_execution_policy_digest is not None
     public = json.dumps(checkpoints[-1].to_dict())
     assert "perform a bounded coding review" not in public
     assert "offline semantic batch answer" not in public
+    missing_policy = checkpoints[-1].to_dict()
+    del missing_policy["automatic_execution_policy_digest"]
+    with pytest.raises(BrainRunError, match="automatic.*policy"):
+        AutonomousBatchCheckpoint.from_dict(missing_policy)
 
     semantic_weight = 0.85
     with pytest.raises(BrainRunError, match="semantic-routing policy|execution policy|checkpoint"):
@@ -746,6 +752,25 @@ def test_agent_run_resumable_auto_batch_binds_semantic_policy_and_rejects_drift(
             credentials={},
             max_parallelism=1,
             options_factory=options_factory,
+            checkpoint=checkpoints[-1].to_dict(),
+            rehydrate_result=lambda context: first.items[context.index].result,
+        )
+
+    semantic_weight = 0.65
+    with pytest.raises(BrainRunError, match="automatic execution policy|execution policy|checkpoint"):
+        agent.run_resumable_batch(
+            requests,
+            job_id="semantic-policy-batch",
+            mode="auto",
+            credentials={},
+            max_parallelism=1,
+            options_factory=lambda _request, _index: {
+                "approve_provider_call": True,
+                "semantic_routing": True,
+                "semantic_weight": semantic_weight,
+                "max_domains": 1,
+                "max_steps": 32,
+            },
             checkpoint=checkpoints[-1].to_dict(),
             rehydrate_result=lambda context: first.items[context.index].result,
         )
@@ -1076,6 +1101,56 @@ def test_agent_run_resumable_batch_supports_route_first_and_cross_domain_modes()
     assert auto.items[0].result is not None
     assert auto.items[0].result.status == "completed"
     assert auto_checkpoints[-1].mode == "auto"
+    assert auto_checkpoints[-1].automatic_execution_policy_digest is not None
+
+    protected_values: dict[str, Mapping[str, Any]] = {}
+    protected_value = auto.items[0].result.to_dict()
+    protected_digest = protected_value_digest(protected_value)
+    protected_values[protected_digest] = protected_value
+    boundary = AutonomousProtectedRehydrationBoundary(
+        AutonomousProtectedRehydrationContext("tenant-auto", "worker-auto", "session-auto", "c" * 64),
+        lambda reference, _context: protected_values[reference.value_digest],
+        authorizer=lambda _reference, _context: True,
+        clock=lambda: 100,
+    )
+    automatic_protected = AutonomousAutomaticBatchProtectedRehydration(
+        AutonomousProtectedRehydrationAdapter(boundary),
+        lambda context: {
+            "job_id": context.job_id,
+            "index": context.index,
+            "mode": context.mode,
+            "request_digest": context.request_digest,
+            "task_digest": context.task_digest,
+            "expected_result_digest": context.expected_result_digest,
+            "domain": "coding",
+            "value_digest": protected_digest,
+        },
+        value_decoder=lambda value: SimpleNamespace(status=value["status"]),
+    )
+    with pytest.raises(BrainRunError, match="auto checkpoint context"):
+        automatic_protected.resolve(
+            AutonomousBatchRehydrationContext(
+                "route-first-batch", 0, "domain", auto_checkpoints[-1].request_digests[0],
+                auto.items[0].task_digest, auto_checkpoints[-1].completed_result_digests[0],
+            )
+        )
+    auto_store = InMemoryAutonomousBatchCheckpointStore(auto_checkpoints[-1].to_dict())
+    auto_controller = AutonomousBrainBatchJobController(
+        agent,
+        auto_store,
+        automatic_protected_rehydration=automatic_protected,
+    )
+    assert auto_controller.restore()["status"] == "restored"
+    recovered = auto_controller.run(
+        ({"task": "perform a bounded coding review"},),
+        job_id="route-first-batch",
+        mode="auto",
+        credentials={},
+        max_parallelism=1,
+        options_factory=options,
+    )
+    assert recovered["batch"].status == "completed"
+    assert recovered["batch"].items[0].status == "succeeded"
 
     cross_checkpoints: list[AutonomousBatchCheckpoint] = []
     cross = agent.run_resumable_batch(

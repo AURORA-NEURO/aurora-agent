@@ -1070,6 +1070,15 @@ admission to the complete selected-domain union before credential resolution, ch
 rehydration, or provider dispatch. Per-item option factories are evaluated once and replayed after
 admission; automatic batches reject semantic routing unless it is separately reviewed.
 
+`run_resumable_batch(..., mode="auto")` now binds an automatic-execution policy digest into its
+metadata-only checkpoint. The digest covers normalized model candidates, route controls, planning,
+prompt and learning controls, connector/tool/structured-output options, domain-policy gates,
+approval, workflow, and decision-cycle settings without persisting their values. Changed
+automatic controls fail closed before protected-result rehydration or a new provider call.
+`AutonomousAutomaticBatchProtectedRehydration` is the strict auto-mode receipt adapter, and
+`AutonomousBrainBatchJobController(..., automatic_protected_rehydration=...)` uses it for restart
+recovery while explicit `rehydrate_result` callbacks retain precedence.
+
 The CLI exposes the same handoff with `--launch-admission-file` on `run` and `batch-run`. The file
 must be a bounded, digest-verified `agent.launch_admission(...)` record. The CLI checks its status
 and route coverage with an offline agent before collecting a user credential or opening MCP, then

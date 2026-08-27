@@ -331,6 +331,7 @@ from .tooling import ToolCatalogue, ToolDefinition
 AUTONOMY_SCHEMA = "bioprism-python-autonomous-task/0.1"
 AUTONOMOUS_AGENT_BATCH_SCHEMA = "bioprism-python-autonomous-agent-batch/0.1"
 AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA = "bioprism-python-autonomous-batch-checkpoint/0.1"
+AUTONOMOUS_AUTOMATIC_BATCH_POLICY_SCHEMA = "bioprism-python-autonomous-automatic-batch-policy/0.1"
 AUTONOMOUS_BATCH_CONTROLLER_SCHEMA = "bioprism-python-autonomous-batch-controller/0.1"
 AUTONOMOUS_EXECUTION_MODES = ("provider", "tool_loop", "mission")
 AUTONOMOUS_LEARNING_MODES = ("off", "online", "trajectory")
@@ -4515,6 +4516,107 @@ def _batch_semantic_routing_policy_digest(
     })
 
 
+def _batch_policy_projection(
+    value: Any,
+    *,
+    _depth: int = 0,
+    _active: set[int] | None = None,
+) -> Any:
+    """Convert transient automatic controls into a digestable, value-free projection.
+
+    Automatic options contain callbacks, typed proposal objects, and sometimes large private
+    context values.  The projection is used only as input to ``content_digest``; it is never
+    placed in a checkpoint.  Callables are represented by bounded type/name metadata, typed
+    objects by their own public projection when available, and arbitrary mappings/sequences are
+    recursively normalized so a policy change cannot silently reuse a prior result.
+    """
+
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if _depth >= 32:
+        return {"kind": "depth_limit", "type": type(value).__name__}
+    active = _active if _active is not None else set()
+    if callable(value):
+        return {
+            "kind": "callable",
+            "type": type(value).__name__,
+            "name": getattr(value, "__qualname__", getattr(value, "__name__", "callable")),
+        }
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        identity = id(value)
+        if identity in active:
+            return {"kind": "cycle", "type": type(value).__name__}
+        active.add(identity)
+        try:
+            return {
+                "kind": "typed",
+                "type": type(value).__name__,
+                "value": _batch_policy_projection(to_dict(), _depth=_depth + 1, _active=active),
+            }
+        except Exception:
+            return {"kind": "typed", "type": type(value).__name__}
+        finally:
+            active.remove(identity)
+    if isinstance(value, Mapping):
+        identity = id(value)
+        if identity in active:
+            return {"kind": "cycle", "type": type(value).__name__}
+        active.add(identity)
+        try:
+            return {
+                str(key): _batch_policy_projection(item, _depth=_depth + 1, _active=active)
+                for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            }
+        finally:
+            active.remove(identity)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        identity = id(value)
+        if identity in active:
+            return {"kind": "cycle", "type": type(value).__name__}
+        active.add(identity)
+        try:
+            return [_batch_policy_projection(item, _depth=_depth + 1, _active=active) for item in value]
+        finally:
+            active.remove(identity)
+    if isinstance(value, (bytes, bytearray)):
+        return {"kind": "bytes", "digest": content_digest(value.hex())}
+    return {"kind": "opaque", "type": type(value).__name__}
+
+
+def _batch_automatic_execution_policy_digest(
+    prepared: Sequence[Mapping[str, Any]],
+    mode: str,
+) -> str | None:
+    """Bind every automatic batch control without persisting transient option values."""
+
+    if mode != "auto":
+        return None
+    rows: list[dict[str, Any]] = []
+    try:
+        for descriptor in prepared:
+            candidates = descriptor.get("model_candidates", ())
+            candidate_projection = [
+                candidate.to_dict()
+                if isinstance(candidate, ModelCandidate)
+                else ModelCandidate.from_mapping(candidate).to_dict()
+                for candidate in candidates
+            ]
+            rows.append({
+                "index": descriptor["index"],
+                "execution_id": _batch_policy_projection(descriptor.get("execution_id")),
+                "model_candidates_digest": content_digest(candidate_projection),
+                "options": _batch_policy_projection(descriptor.get("options", {})),
+            })
+        return content_digest({
+            "schema": AUTONOMOUS_AUTOMATIC_BATCH_POLICY_SCHEMA,
+            "mode": mode,
+            "items": rows,
+        })
+    except (RecursionError, TypeError, ValueError, ProviderError) as error:
+        raise BrainRunError("autonomous automatic batch execution policy is not digestable") from error
+
+
 def _batch_item_digest(item: "AutonomousBatchItem") -> str:
     """Digest the redacted item projection used for restart validation."""
 
@@ -4609,12 +4711,29 @@ class AutonomousBatchProtectedRehydration:
             raise BrainRunError(f"autonomous batch protected result resolution failed for item {context.index}") from error
 
 
+class AutonomousAutomaticBatchProtectedRehydration(AutonomousBatchProtectedRehydration):
+    """Strict protected-result adapter for automatic batches.
+
+    The base adapter remains backward-compatible for callers that deliberately share one
+    receipt resolver across batch modes.  This specialization is the safer controller default
+    for automatic recovery: a direct or cross-domain checkpoint context can never be widened
+    into automatic execution by the protected-result callback.
+    """
+
+    def resolve(self, context: AutonomousBatchRehydrationContext) -> Any:
+        if not isinstance(context, AutonomousBatchRehydrationContext) or context.mode != "auto":
+            raise BrainRunError(
+                "autonomous automatic batch protected rehydration requires an auto checkpoint context"
+            )
+        return super().resolve(context)
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousBatchCheckpoint:
     """Metadata-only, restart-safe progress for one bounded task batch.
 
     The checkpoint deliberately stores only request and result digests plus an optional
-    non-secret semantic-routing policy digest. A caller-owned
+    non-secret semantic-routing or automatic-execution policy digest. A caller-owned
     ``rehydrate_result`` callback must provide the transient result for every completed item;
     the callback never receives a task, prompt, credential, provider response, or tool payload.
     """
@@ -4629,6 +4748,7 @@ class AutonomousBatchCheckpoint:
     stop_on_error: bool = False
     status: str = "running"
     semantic_routing_policy_digest: str | None = None
+    automatic_execution_policy_digest: str | None = None
 
     def __post_init__(self) -> None:
         _identifier("batch checkpoint job_id", self.job_id)
@@ -4637,6 +4757,12 @@ class AutonomousBatchCheckpoint:
         _route_digest(self.batch_input_digest, "batch checkpoint batch_input_digest")
         if self.semantic_routing_policy_digest is not None:
             _route_digest(self.semantic_routing_policy_digest, "batch checkpoint semantic_routing_policy_digest")
+        if self.automatic_execution_policy_digest is not None:
+            _route_digest(self.automatic_execution_policy_digest, "batch checkpoint automatic_execution_policy_digest")
+        if self.mode == "auto" and self.automatic_execution_policy_digest is None:
+            raise BrainRunError("automatic batch checkpoint requires an automatic execution policy digest")
+        if self.mode != "auto" and self.automatic_execution_policy_digest is not None:
+            raise BrainRunError("non-automatic batch checkpoint cannot contain an automatic execution policy digest")
         requests = _sequence("batch checkpoint request_digests", self.request_digests, maximum=MAX_AUTONOMOUS_AGENT_BATCH)
         for digest in requests:
             _route_digest(digest, "batch checkpoint request digest")
@@ -4690,6 +4816,11 @@ class AutonomousBatchCheckpoint:
                 if self.semantic_routing_policy_digest is not None
                 else {}
             ),
+            **(
+                {"automatic_execution_policy_digest": self.automatic_execution_policy_digest}
+                if self.automatic_execution_policy_digest is not None
+                else {}
+            ),
             "request_digests": list(self.request_digests if requests is None else requests),
             "completed_indices": list(self.completed_indices if indices is None else indices),
             "completed_result_digests": list(self.completed_result_digests if result_digests is None else result_digests),
@@ -4725,6 +4856,7 @@ class AutonomousBatchCheckpoint:
             max_parallelism=value.get("max_parallelism", 4),
             stop_on_error=value.get("stop_on_error", False),
             status=value.get("status", "running"),
+            automatic_execution_policy_digest=value.get("automatic_execution_policy_digest"),
         )
         supplied_digest = value.get("checkpoint_digest")
         if supplied_digest is not None and supplied_digest != checkpoint.checkpoint_digest:
@@ -4778,7 +4910,7 @@ def _normalize_batch_checkpoint(value: Mapping[str, Any]) -> dict[str, Any]:
         "completed_result_digests", "max_parallelism", "stop_on_error", "status", "checkpoint_digest",
         "retention", "secret_material",
     }
-    optional = {"semantic_routing_policy_digest"}
+    optional = {"semantic_routing_policy_digest", "automatic_execution_policy_digest"}
     if not expected.issubset(value) or set(value) - expected - optional:
         raise BrainRunError("autonomous batch checkpoint contains unsupported or missing fields")
     if value.get("retention") != "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted" or value.get("secret_material") != "never_returned":
@@ -23609,6 +23741,7 @@ class AutonomousAgent:
 
         request_digests = tuple(_batch_request_digest(descriptor, mode) for descriptor in prepared)
         semantic_routing_policy_digest = _batch_semantic_routing_policy_digest(prepared, mode)
+        automatic_execution_policy_digest = _batch_automatic_execution_policy_digest(prepared, mode)
         batch_input_digest = content_digest({
             "schema": AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA,
             "mode": mode,
@@ -23616,6 +23749,11 @@ class AutonomousAgent:
             **(
                 {"semantic_routing_policy_digest": semantic_routing_policy_digest}
                 if semantic_routing_policy_digest is not None
+                else {}
+            ),
+            **(
+                {"automatic_execution_policy_digest": automatic_execution_policy_digest}
+                if automatic_execution_policy_digest is not None
                 else {}
             ),
         })
@@ -23639,6 +23777,8 @@ class AutonomousAgent:
                 raise BrainRunError("legacy autonomous batch checkpoint requires explicit semantic-routing policy rebinding")
             if current_checkpoint.semantic_routing_policy_digest != semantic_routing_policy_digest:
                 raise BrainRunError("autonomous batch checkpoint semantic-routing policy does not match")
+            if current_checkpoint.automatic_execution_policy_digest != automatic_execution_policy_digest:
+                raise BrainRunError("autonomous batch checkpoint automatic execution policy does not match")
             if current_checkpoint.batch_input_digest != batch_input_digest:
                 raise BrainRunError("autonomous batch checkpoint does not match the current execution policy")
             if current_checkpoint.max_parallelism != max_parallelism or current_checkpoint.stop_on_error != stop_on_error:
@@ -23692,6 +23832,7 @@ class AutonomousAgent:
                 batch_input_digest=batch_input_digest,
                 request_digests=request_digests,
                 semantic_routing_policy_digest=semantic_routing_policy_digest,
+                automatic_execution_policy_digest=automatic_execution_policy_digest,
                 completed_indices=tuple(index for index, _item in completed_items),
                 completed_result_digests=tuple(_batch_item_digest(item) for _index, item in completed_items),
                 max_parallelism=max_parallelism,
@@ -26190,7 +26331,7 @@ class AutonomousBrainBatchJobController:
     application-facing boundary: startup restoration is explicit, concurrent runs are rejected,
     every persisted value is parsed and re-serialized as a metadata-only checkpoint, and caller
     tasks, prompts, provider values, connector observations, and credentials remain transient.
-    It supports the domain, route-first, and cross-domain batch modes through one API.
+    It supports the domain, route-first, automatic, and cross-domain batch modes through one API.
     """
 
     def __init__(
@@ -26199,6 +26340,7 @@ class AutonomousBrainBatchJobController:
         persistence: Any,
         *,
         protected_rehydration: AutonomousBatchProtectedRehydration | None = None,
+        automatic_protected_rehydration: AutonomousAutomaticBatchProtectedRehydration | None = None,
     ) -> None:
         if not isinstance(agent, AutonomousAgent):
             raise BrainRunError("autonomous brain batch controller requires an AutonomousAgent")
@@ -26208,7 +26350,10 @@ class AutonomousBrainBatchJobController:
         self.persistence = persistence
         if protected_rehydration is not None and not isinstance(protected_rehydration, AutonomousBatchProtectedRehydration):
             raise BrainRunError("autonomous brain batch controller protected_rehydration is malformed")
+        if automatic_protected_rehydration is not None and not isinstance(automatic_protected_rehydration, AutonomousAutomaticBatchProtectedRehydration):
+            raise BrainRunError("autonomous brain batch controller automatic_protected_rehydration is malformed")
         self.protected_rehydration = protected_rehydration
+        self.automatic_protected_rehydration = automatic_protected_rehydration
         self._checkpoint: AutonomousBatchCheckpoint | None = None
         self._expected_checkpoint_digest: str | None = None
         self._restored = False
@@ -26305,6 +26450,8 @@ class AutonomousBrainBatchJobController:
             self._running = True
         try:
             effective_rehydrator = rehydrate_result
+            if effective_rehydrator is None and mode == "auto" and self.automatic_protected_rehydration is not None:
+                effective_rehydrator = self.automatic_protected_rehydration.resolve
             if effective_rehydrator is None and self.protected_rehydration is not None:
                 effective_rehydrator = self.protected_rehydration.resolve
             run_kwargs = {
@@ -26337,6 +26484,7 @@ __all__ = [
     "AUTONOMY_SCHEMA",
     "AUTONOMOUS_AGENT_BATCH_SCHEMA",
     "AUTONOMOUS_BATCH_CHECKPOINT_SCHEMA",
+    "AUTONOMOUS_AUTOMATIC_BATCH_POLICY_SCHEMA",
     "AUTONOMOUS_BATCH_CONTROLLER_SCHEMA",
     "MAX_AUTONOMOUS_AGENT_BATCH",
     "MAX_AUTONOMOUS_AGENT_PARALLELISM",
@@ -26464,6 +26612,7 @@ __all__ = [
     "AutonomousBatchResult",
     "AutonomousBatchRehydrationContext",
     "AutonomousBatchProtectedRehydration",
+    "AutonomousAutomaticBatchProtectedRehydration",
     "AutonomousBatchCheckpoint",
     "AutonomousBatchCheckpointTextStore",
     "InMemoryAutonomousBatchCheckpointStore",

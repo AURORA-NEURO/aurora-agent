@@ -2565,12 +2565,20 @@ resumed = agent.run_resumable_batch(
 `AutonomousBatchCheckpoint` stores the mode, ordered request digests, successful item indexes,
 redacted result digests, concurrency controls, and its own content digest. It never stores task
 text, options, prompts, provider/model values, credentials, tool arguments, responses, or error
-messages. The checkpoint binds the request shape and task/subtask digests; the caller must reuse
-the same options factory and credential session after restart, and may use its own policy digest
-outside the SDK when those transient controls need stronger identity binding. A changed request,
-job, mode, control, checkpoint digest, or rehydrated result fails closed before a provider call.
-The sink is caller-owned and should write atomically; the SDK does not pretend that a metadata
-checkpoint can reconstruct a provider conversation.
+messages. For `mode="auto"`, it also requires an automatic-execution policy digest binding the
+normalized model catalogue, route controls, planning, prompt/learning, connector-observation,
+tool, structured-output, domain-policy, approval, learning, workflow, and decision-cycle controls.
+A changed request, job, mode, control, automatic policy, checkpoint digest, or rehydrated result
+fails closed before a provider call. The sink is caller-owned and should write atomically; the SDK
+does not pretend that a metadata checkpoint can reconstruct a provider conversation.
+
+`AutonomousAutomaticBatchProtectedRehydration` is the strict automatic-mode protected receipt
+adapter. It requires the receipt to repeat the exact job/index/mode/request/task/result identity
+and delegates tenant scope, authorization, expiry, replay fencing, and value-digest verification
+to `AutonomousProtectedRehydrationBoundary`. `AutonomousBrainBatchJobController` accepts it via
+`automatic_protected_rehydration`, while an explicit `rehydrate_result` callback remains
+authoritative. The older shared `AutonomousBatchProtectedRehydration` remains available for
+callers intentionally sharing one resolver across modes.
 
 For remote batch workers, `JsonAutonomousBatchCheckpointPersistence` provides strict canonical
 JSON over any text store, and `TransactionalJsonAutonomousBatchCheckpointPersistence` adds a
