@@ -181,6 +181,62 @@ test("launch admission gates automatic decision cycles across every domain befor
   }
 });
 
+test("launch admission gates high-level direct and automatic runs across every domain", async () => {
+  const fixture = await readyBrain();
+  try {
+    const admission = fixture.brain.admitLaunchPreflight(fixture.preflight, { decision: "approve", authorizationDigest: "3".repeat(64) });
+    const tasks = {
+      coding: "write a small function",
+      browser: "compare browser research sources",
+      data: "validate this dataset schema",
+      science: "design a scientific experiment hypothesis",
+      biomedical: "review biomedical clinical evidence",
+      neuroscience: "analyze neuroscience neural signals",
+      operations: "plan an operations incident rollback",
+      enterprise: "review enterprise governance compliance",
+      multi_agent: "delegate a multi agent specialist subtask",
+      multimodal: "align multimodal image audio evidence",
+      evaluation: "run an evaluation benchmark holdout",
+    };
+    for (const [domain, task] of Object.entries(tasks)) {
+      const direct = await fixture.agent.runWithLaunchAdmission(task, admission, { domain, approveProviderCall: false });
+      assert.equal(direct.status, "approval_required", `direct ${domain}`);
+      const automatic = await fixture.agent.runAutoWithLaunchAdmission(task, admission, { domain, approveProviderCall: false });
+      assert.equal(automatic.status, "approval_required", `automatic ${domain}`);
+      assert.equal(automatic.route.selected_domains[0], domain, `route ${domain}`);
+    }
+
+    const preview = await fixture.agent.authorizeAutoLaunchAdmission("write a small function", admission, { domain: "coding" });
+    assert.equal(preview.admission_digest, admission.admission_digest);
+    const boundedCrossDomain = await fixture.agent.runAutoWithLaunchAdmission("coding data", admission, {
+      minConfidence: 0,
+      minMargin: 1,
+      maxDomains: 2,
+      allowCrossDomain: true,
+      approveProviderCall: false,
+    });
+    assert.equal(boundedCrossDomain.route.cross_domain, true);
+    assert.deepEqual(boundedCrossDomain.route.selected_domains, ["coding", "data"]);
+
+    const codingOnly = fixture.brain.admitLaunchPreflight(fixture.preflight, { decision: "approve", approvedDomains: ["coding"], authorizationDigest: "2".repeat(64) });
+    await assert.rejects(
+      () => fixture.agent.runAutoWithLaunchAdmission("review biomedical clinical evidence", codingOnly, { domain: "biomedical", credential: { malformed: true }, approveProviderCall: false }),
+      /does not approve requested domains/,
+    );
+    await assert.rejects(
+      () => fixture.agent.runWithLaunchAdmission("write a small function", admission, { domain: "coding", semanticRouting: true }),
+      /requires provider-free routing/,
+    );
+    const route = await fixture.agent.route("write a small function", { domain: "coding" });
+    await assert.rejects(
+      () => fixture.agent.runAutoWithLaunchAdmission("write a small function", admission, { routeOverride: route, approveProviderCall: false }),
+      /owns routeOverride/,
+    );
+  } finally {
+    fixture.session.close();
+  }
+});
+
 test("launch admission gates ordinary, resumable, and cycle batches before dispatch", async () => {
   const fixture = await readyBrain();
   try {

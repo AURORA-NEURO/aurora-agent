@@ -1673,6 +1673,12 @@ export interface AutonomousRunOptions {
   /** Stable caller-owned identity for the pending learning episode. */
   learningEpisodeId?: string;
   hints?: readonly string[];
+  /** Provider-free route confidence floor used when no explicit route override is supplied. */
+  minConfidence?: number;
+  /** Provider-free route separation floor used when no explicit route override is supplied. */
+  minMargin?: number;
+  /** Maximum number of domains selected by the provider-free route. */
+  maxDomains?: number;
   allowCrossDomain?: boolean;
   maxInputTokens?: number;
   maxOutputTokens?: number;
@@ -6488,7 +6494,14 @@ export class AutonomousAgent {
     const semanticRouting = normalizeRunSemanticRouting(options.semanticRouting);
     if (semanticRouting === null) {
       return {
-        route: await this.route(taskText, { domain: options.domain, hints: options.hints, allowCrossDomain: options.allowCrossDomain }),
+        route: await this.route(taskText, {
+          domain: options.domain,
+          hints: options.hints,
+          minConfidence: options.minConfidence,
+          minMargin: options.minMargin,
+          maxDomains: options.maxDomains,
+          allowCrossDomain: options.allowCrossDomain,
+        }),
         semanticRoute: null,
       };
     }
@@ -7040,9 +7053,9 @@ export class AutonomousAgent {
     return runAutonomousDomainEvidenceBacked(this, task, options);
   }
 
-  async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number } = {}): Promise<AutonomousAutoBlueprint> {
+  async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; minConfidence?: number; minMargin?: number; maxDomains?: number; allowCrossDomain?: boolean; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number } = {}): Promise<AutonomousAutoBlueprint> {
     const taskText = boundedText("autonomous task", task, 32_000);
-    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints });
+    const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, minConfidence: options.minConfidence, minMargin: options.minMargin, maxDomains: options.maxDomains, allowCrossDomain: options.allowCrossDomain });
     if (route.abstained || !route.primary_domain) return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: null, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
     if (route.cross_domain) {
       const crossDomain = await this.buildCrossDomainBlueprint(taskText, route, options);
@@ -7135,6 +7148,10 @@ export class AutonomousAgent {
       maxInputTokens: runOptions.maxInputTokens,
       tools: runOptions.tools?.map((tool) => tool.name),
       hints: runOptions.hints,
+      minConfidence: runOptions.minConfidence,
+      minMargin: runOptions.minMargin,
+      maxDomains: runOptions.maxDomains,
+      allowCrossDomain: runOptions.allowCrossDomain,
       subtasks: runOptions.subtasks,
       structuredDomainResponse: runOptions.structuredDomainResponse,
       toolSelectionState: runOptions.toolSelectionState,
@@ -7181,6 +7198,84 @@ export class AutonomousAgent {
       retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned",
       authorization: "route_review_and_provider_or_effect_approval_remain_explicit",
     };
+  }
+
+  /**
+   * Compile one deterministic route, require a caller-owned launch admission for every selected
+   * domain, and only then enter the normal provider/tool execution boundary.  The route is passed
+   * back as an exact override so a second classification cannot widen or change the admitted
+   * execution scope.  Provider-assisted semantic routing is rejected because its classifier is a
+   * separate provider boundary and must be reviewed independently.
+   */
+  async runWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousRunOptions = {},
+  ): Promise<AutonomousRunResult> {
+    if (options.routeOverride !== undefined) throw new ArgumentError("runWithLaunchAdmission owns routeOverride; pass routing controls instead");
+    if (options.semanticRouting !== undefined && options.semanticRouting !== false) throw new ArgumentError("launch-admitted execution requires provider-free routing; admit semantic routing separately");
+    const route = await this.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    if (!route.abstained) authorizeAutonomousLaunchDomains(admission, route.selected_domains);
+    const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...runOptions } = options;
+    return this.run(task, { ...runOptions, routeOverride: route, semanticRouting: false });
+  }
+
+  /**
+   * Route and admit an automatic run before any provider-assisted planning, credentials, or
+   * tools are touched.  This covers both single-domain and cross-domain automatic execution and
+   * preserves the frozen route through `runAuto`'s deterministic or reviewed planning mode.
+   */
+  async runAutoWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousAutoRunOptions = {},
+  ): Promise<AutonomousAutoRunResult> {
+    if (options.routeOverride !== undefined) throw new ArgumentError("runAutoWithLaunchAdmission owns routeOverride; pass routing controls instead");
+    if (options.semanticRouting !== undefined && options.semanticRouting !== false) throw new ArgumentError("launch-admitted automatic execution requires provider-free routing; admit semantic routing separately");
+    const route = await this.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
+    const { authorizeAutonomousLaunchDomains } = await import("./autonomous-launch-admission.js");
+    if (!route.abstained) authorizeAutonomousLaunchDomains(admission, route.selected_domains);
+    const { domain: _domain, routeOverride: _routeOverride, semanticRouting: _semanticRouting, ...runOptions } = options;
+    return this.runAuto(task, { ...runOptions, routeOverride: route, semanticRouting: false });
+  }
+
+  /**
+   * Perform only the provider-free route/admission half of `runAutoWithLaunchAdmission`.  This
+   * gives a deployment a safe point to display or persist the exact launch decision before it
+   * collects a short-lived credential or starts a provider session.
+   */
+  async authorizeAutoLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: Pick<AutonomousAutoRunOptions, "domain" | "hints" | "minConfidence" | "minMargin" | "maxDomains" | "allowCrossDomain" | "semanticRouting"> = {},
+  ): Promise<AutonomousLaunchAdmissionReport> {
+    if (options.semanticRouting !== undefined && options.semanticRouting !== false) throw new ArgumentError("launch-admitted automatic authorization requires provider-free routing; admit semantic routing separately");
+    const route = await this.route(task, {
+      domain: options.domain,
+      hints: options.hints,
+      minConfidence: options.minConfidence,
+      minMargin: options.minMargin,
+      maxDomains: options.maxDomains,
+      allowCrossDomain: options.allowCrossDomain,
+    });
+    const { authorizeAutonomousLaunchDomains, validateAutonomousLaunchAdmission } = await import("./autonomous-launch-admission.js");
+    if (route.abstained) return validateAutonomousLaunchAdmission(admission);
+    return authorizeAutonomousLaunchDomains(admission, route.selected_domains);
   }
 
   /**
@@ -8373,7 +8468,7 @@ export class AutonomousAgent {
       if (!options.learning) return withSemanticRoute;
       return { ...withSemanticRoute, ...(await this.prepareDirectLearning(withSemanticRoute, route, { ...options, memoryEpisodeId: memoryProjection?.recorded_episode_id ?? null })) };
     };
-    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: route, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints, structuredDomainResponse: options.structuredDomainResponse, toolSelectionState: options.toolSelectionState, toolSelectionExploration: options.toolSelectionExploration });
+    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: route, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints, minConfidence: options.minConfidence, minMargin: options.minMargin, maxDomains: options.maxDomains, allowCrossDomain: options.allowCrossDomain, structuredDomainResponse: options.structuredDomainResponse, toolSelectionState: options.toolSelectionState, toolSelectionExploration: options.toolSelectionExploration });
     let blueprint = blueprintEnvelope.blueprint;
     if (!blueprint) return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     if (memory.projection?.consolidated_retrieval_digest !== null && memory.projection?.consolidated_retrieval_digest !== undefined) {

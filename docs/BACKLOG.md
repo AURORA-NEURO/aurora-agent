@@ -2003,3 +2003,14 @@ next actions. It does not extract claims from prose, establish external truth, a
 provider, tool, effect, or evaluator work, or retain raw values. Remaining production work is to
 connect this final reliance projection to caller-owned review/admission surfaces and domain-specific
 claim/evidence adapters without turning the SDK into a truth oracle.
+
+The TypeScript high-level agent now has launch-admitted direct and automatic execution parity with
+Python. `runWithLaunchAdmission()` and `runAutoWithLaunchAdmission()` compile the deterministic
+route before credentials, provider planning, model selection, prompts, tools, or effects are
+reachable, require admission for every selected domain, and reuse that exact route at dispatch.
+`authorizeAutoLaunchAdmission()` exposes the same provider-free handoff for deployments that need
+to collect credentials only after operator approval. Confidence, margin, maximum-domain, hint,
+and cross-domain controls now propagate through TypeScript run, automatic, blueprint, and launch
+gate paths. Semantic routing and caller route overrides remain separately reviewable provider
+boundaries. This closes the SDK execution-admission gap; deployment identity, credential storage,
+and external approval authority remain caller-owned.

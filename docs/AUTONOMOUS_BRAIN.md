@@ -12192,3 +12192,36 @@ retain only route, plan, selection, outcome, evaluation, episode, and settlement
 rehydration callbacks own all private values. Focused tests cover every built-in domain, single
 and cross-domain selection, approval and abstention boundaries, tampered route rejection,
 metadata-only output, and no-provider-call restart replay.
+
+### High-level launch admission for TypeScript runs
+
+The TypeScript `AutonomousAgent` now exposes the same process-boundary admission seam for its
+ordinary and automatic high-level runs: `runWithLaunchAdmission()`,
+`runAutoWithLaunchAdmission()`, and `authorizeAutoLaunchAdmission()`. Each wrapper compiles the
+provider-free route first, requires one approved caller-owned launch record for every selected
+domain, and passes the exact route back as a digest-verified override. The automatic wrapper
+therefore covers both one-domain and cross-domain fan-out without allowing a second classifier to
+widen the admitted scope.
+
+The wrappers reject semantic routing and caller route overrides until those separate provider
+boundaries have been reviewed. Route confidence, margin, maximum-domain, hint, and
+cross-domain controls are carried from the public TypeScript run options into both preview and
+dispatch. Admission is checked before credential resolution, model selection, prompt assembly,
+provider planning, tool execution, or effects; it remains an additional gate and never replaces
+provider, evidence, evaluator, tool, or effect approval. `authorizeAutoLaunchAdmission()` can be
+used as a provider-free deployment handoff before collecting a short-lived credential.
+
+```ts
+const admission = await createReviewedLaunchAdmission();
+const result = await agent.runAutoWithLaunchAdmission(
+  "compare the data pipeline with the experimental evidence",
+  admission,
+  { approveProviderCall: true, minConfidence: 0.35, minMargin: 0.15, maxDomains: 3 },
+);
+```
+
+The launch-admission tests exercise direct and automatic execution across every built-in domain,
+subset denial before malformed credential use, held-admission refusal, semantic-routing refusal,
+route-override refusal, and the safe provider-free authorization helper. The SDK still retains
+only route and admission metadata; deployment identity, credential storage, and external approval
+authorities remain caller-owned.
