@@ -3651,6 +3651,15 @@ export {
 } from "./research-contracts.js";
 export type { PolicyFederationArtifactCandidate, PolicyFederatedCommonsEnvelope } from "./research-contracts.js";
 export {
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_INPUT_SCHEMA,
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_OUTPUT_SCHEMA,
+  cliComputationalExecutionAssuranceReceiptDigest,
+  validateCliComputationalExecutionAssuranceReceipt,
+} from "./research-contracts.js";
+export type { CliExecutionNode, CliComputationalExecutionAssuranceReceipt } from "./research-contracts.js";
+export {
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
   adapterFederatedContinualEvidenceSurveillanceWorkflowFabricReceiptDigest,

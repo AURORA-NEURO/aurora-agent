@@ -14,6 +14,7 @@ mod explain;
 mod io;
 mod knowledge_interop;
 mod retrieval_synthesis_assurance;
+mod computational_execution_assurance;
 mod protocol_simulation_assurance;
 
 use args::{Command, CompileOptions, Family, GenerateOptions, Invocation, Parsed, Profile};
@@ -223,6 +224,11 @@ fn run(invocation: &Invocation) -> CliResult<Outcome> {
             receipt_out,
             dry_run,
         } => retrieval_synthesis_assure(request, receipt_out.as_deref(), *dry_run),
+        Command::ComputationalExecutionAssure {
+            request,
+            receipt_out,
+            dry_run,
+        } => computational_execution_assure(request, receipt_out.as_deref(), *dry_run),
         Command::ReadinessAudit { request } => readiness_audit(request),
         Command::ReadinessQuery {
             store,
@@ -725,6 +731,48 @@ fn retrieval_synthesis_assure(
     document["policy_denied"] = json!(request.get("policy_allow").and_then(Value::as_bool) == Some(false));
     let human = format!(
         "retrieval and synthesis assurance: {disposition}\n  request: {}\n  evidence digest: {digest}\n  execution: verification only; no retrieval provider or external effect started\n\nNext: bioprism retrieval assure --request {}{}\n",
+        request_path.display(),
+        request_path.display(),
+        receipt_out
+            .map(|path| format!(" --receipt-out {}", path.display()))
+            .unwrap_or_default(),
+    );
+    Ok(Outcome::ok(document, human).failing_if(disposition != "qualified"))
+}
+
+fn computational_execution_assure(
+    request_path: &Path,
+    receipt_out: Option<&Path>,
+    dry_run: bool,
+) -> CliResult<Outcome> {
+    let request = io::read_json(request_path)?;
+    let receipt = computational_execution_assurance::verify_json(&request).map_err(|error| {
+        CliError::invalid(error.to_string()).about(request_path.display().to_string())
+    })?;
+    let artifact = receipt_out
+        .map(|path| io::write_artifact(path, &receipt, dry_run))
+        .transpose()?;
+    let disposition = receipt
+        .get("disposition")
+        .and_then(Value::as_str)
+        .unwrap_or("blocked");
+    let digest = receipt
+        .get("run_digest")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let mut document = json!({
+        "ok": disposition == "qualified",
+        "feature_id": computational_execution_assurance::FEATURE_ID,
+        "contract_version": computational_execution_assurance::CONTRACT_VERSION,
+        "receipt": receipt,
+        "run_digest": digest,
+        "dry_run": dry_run,
+        "artifact": artifact.as_ref().map(|value| json!({"path": value.path.display().to_string(), "bytes": value.bytes, "written": value.written})).unwrap_or(Value::Null),
+        "execution": "verification only; no job, process, network provider, instrument, or clinical effect started"
+    });
+    document["policy_denied"] = json!(request.get("policy_allow").and_then(Value::as_bool) == Some(false));
+    let human = format!(
+        "computational execution assurance: {disposition}\n  request: {}\n  run digest: {digest}\n  execution: verification only; no job or external effect started\n\nNext: bioprism execution assure --request {}{}\n",
         request_path.display(),
         request_path.display(),
         receipt_out

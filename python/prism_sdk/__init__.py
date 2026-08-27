@@ -6659,6 +6659,16 @@ __all__ += [
     "admit_policy_federation",
 ]
 
+from .computational_execution_assurance import (
+    ExecutionAssuranceReceipt,
+    assure_computational_execution,
+)
+
+__all__ += [
+    "ExecutionAssuranceReceipt",
+    "assure_computational_execution",
+]
+
 from .adapter_throughput_evidence_surveillance_inference_engine import (
     ThroughputEvidenceObservation,
     ThroughputEvidenceSurveillanceReceipt,
