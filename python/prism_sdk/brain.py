@@ -42,7 +42,10 @@ from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_fac
 from .tooling import ToolCatalogue, ToolSchemaError
 from .autonomy_persistence import AutonomousExecutionController
 from .autonomy_provider import AutonomousProviderInvocationSession
-from .autonomous_selection_lab import normalize_autonomous_selection_weights
+from .autonomous_selection_lab import (
+    normalize_autonomous_model_observations,
+    normalize_autonomous_selection_weights,
+)
 
 if TYPE_CHECKING:
     from .jobs import BrainJobStore
@@ -3146,6 +3149,7 @@ class AutonomousBrain:
         min_selection_confidence: float | None = None,
         selection_overrides: Mapping[str, Any] | None = None,
         selection_weights: Mapping[str, Any] | None = None,
+        selection_observations: Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Build a live model-selection request from registered transports and learned state.
 
@@ -3226,6 +3230,38 @@ class AutonomousBrain:
                     )
         except ArgumentError as error:
             raise BrainRunError(str(error)) from error
+        try:
+            normalized_selection_observations = (
+                None
+                if selection_observations is None
+                else normalize_autonomous_model_observations(selection_observations)
+            )
+            override_observations = (
+                None
+                if selection_overrides is None
+                else selection_overrides.get("observations")
+            )
+            normalized_override_observations = (
+                None
+                if override_observations is None
+                else normalize_autonomous_model_observations(override_observations)
+            )
+        except ArgumentError as error:
+            raise BrainRunError(str(error)) from error
+        if (
+            normalized_selection_observations is not None
+            and normalized_override_observations is not None
+            and normalized_selection_observations != normalized_override_observations
+        ):
+            raise BrainRunError(
+                "selection_observations conflicts with selection_overrides.observations"
+            )
+        effective_selection_observations = (
+            normalized_selection_observations
+            if normalized_selection_observations is not None
+            else normalized_override_observations
+            or []
+        )
         health_overrides: Mapping[str, Any] = {}
         if selection_overrides is not None and selection_overrides.get("provider_health") is not None:
             raw_health_overrides = selection_overrides.get("provider_health")
@@ -3463,6 +3499,18 @@ class AutonomousBrain:
             else None if ledger is None else ledger.latest_state()
         )
         observations = _bandit_observations(global_state)
+        explicit_by_arm = {
+            observation["arm_id"]: observation
+            for observation in effective_selection_observations
+        }
+        merged_global_observations = {
+            observation["arm_id"]: observation for observation in observations
+        }
+        merged_global_observations.update(explicit_by_arm)
+        observations = [
+            merged_global_observations[arm_id]
+            for arm_id in sorted(merged_global_observations)
+        ]
         scoped_observations: list[dict[str, Any]] = []
         if context is not None:
             context_digest = _context_identity_digest(context)
@@ -3475,6 +3523,7 @@ class AutonomousBrain:
                 observation["arm_id"]: observation
                 for observation in _bandit_observations(scoped_state, context_digest=context_digest)
             }
+            scoped_by_arm.update(explicit_by_arm)
             supplied = _bandit_observations({"arms": list(contextual_observations)})
             scoped_by_arm.update({observation["arm_id"]: observation for observation in supplied})
             scoped_observations = [

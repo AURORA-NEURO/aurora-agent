@@ -7,6 +7,7 @@ from prism_sdk import (
     ArgumentError,
     DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS,
     evaluate_autonomous_selection_policy,
+    normalize_autonomous_model_observations,
     normalize_autonomous_selection_weights,
     rank_autonomous_models,
     validate_autonomous_selection_lab_report,
@@ -180,3 +181,35 @@ def test_weighted_ranker_matches_policy_contract_and_respects_learning_disable()
     assert cheap["eligible"] is False
     assert "disabled by learning policy" in cheap["reasons"]
     assert cheap["observed_pulls"] == 12
+
+
+def test_model_observation_normalizer_is_bounded_and_deterministic() -> None:
+    observations = normalize_autonomous_model_observations(
+        [
+            {
+                "arm_id": "lab/evaluation-cheap",
+                "pulls": 2,
+                "reward_sum": 1.23456789012345,
+                "failures": 1,
+            }
+        ]
+    )
+    assert observations == [
+        {
+            "arm_id": "lab/evaluation-cheap",
+            "pulls": 2,
+            "reward_sum": 1.234567890123,
+            "failures": 1,
+        }
+    ]
+    with pytest.raises(ArgumentError, match="duplicate arm"):
+        normalize_autonomous_model_observations(
+            [
+                {"arm_id": "lab/a", "pulls": 0, "reward_sum": 0, "failures": 0},
+                {"arm_id": "lab/a", "pulls": 0, "reward_sum": 0, "failures": 0},
+            ]
+        )
+    with pytest.raises(ArgumentError, match="failures"):
+        normalize_autonomous_model_observations(
+            [{"arm_id": "lab/a", "pulls": 1, "reward_sum": 0, "failures": 2}]
+        )

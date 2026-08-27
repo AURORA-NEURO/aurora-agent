@@ -243,6 +243,14 @@ def _validate_observations(value: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def normalize_autonomous_model_observations(
+    value: Sequence[Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Validate caller-owned model-arm evidence before it enters a live selection request."""
+
+    return _validate_observations(value)
+
+
 def _validate_candidate(value: Any, index: int, seen: set[str]) -> str:
     if not isinstance(value, Mapping):
         _fail(f"candidate {index} must be an object")
@@ -823,6 +831,7 @@ __all__ = [
     "DEFAULT_AUTONOMOUS_SELECTION_WEIGHTS",
     "AutonomousSelectionWeights",
     "normalize_autonomous_selection_weights",
+    "normalize_autonomous_model_observations",
     "SelectionLabSelector",
     "rank_autonomous_models",
     "autonomous_selection_confidence",

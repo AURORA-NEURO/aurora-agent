@@ -1758,17 +1758,34 @@ def test_approved_model_selection_revalidates_and_invokes_one_credentialless_arm
         model_catalogue=ModelCatalogue([candidate]),
     )
     task = "execute one reviewed local model decision"
+    selection_observations = [
+        {
+            "arm_id": "offline/offline-model",
+            "pulls": 3,
+            "reward_sum": 2.4,
+            "failures": 0,
+        }
+    ]
     previews: dict[str, dict[str, object]] = {}
     for domain in AUTONOMOUS_DOMAINS:
-        preview = agent.model_selection_preview(task=task, domain=domain, credentials={})
+        preview = agent.model_selection_preview(
+            task=task,
+            domain=domain,
+            credentials={},
+            selection_observations=selection_observations,
+        )
         previews[domain] = preview
         assert preview["status"] == "selected"
         assert preview["selection_contract"]["candidate_ids"] == ["offline/offline-model"]
+        assert preview["selection_contract"]["selection_observations_digest"] == content_digest(
+            selection_observations
+        )
         result = agent.run_approved_model_selection(
             task=task,
             domain=domain,
             selection_preview=preview,
             credentials={},
+            selection_observations=selection_observations,
         )
         assert result.status.startswith("completed")
         assert result.response is not None
@@ -3223,6 +3240,45 @@ def test_selection_weights_are_normalized_and_conflicts_fail_closed():
             selection_overrides={"weights": {"cost": 3}},
         )
         assert override_request["weights"]["cost"] == 3.0
+        explicit_observations = [
+            {
+                "arm_id": "openai/test-model",
+                "pulls": 4,
+                "reward_sum": 3.25,
+                "failures": 0,
+            }
+        ]
+        observed_request = brain.build_adaptive_model_selection(
+            task="choose a model from explicit online evidence",
+            model_candidates=_model(),
+            credentials={"openai": handle},
+            selection_observations=explicit_observations,
+        )
+        assert observed_request["observations"] == [
+            {
+                "arm_id": "openai/test-model",
+                "pulls": 4,
+                "reward_sum": 3.25,
+                "failures": 0,
+            }
+        ]
+        with pytest.raises(BrainRunError, match="observations"):
+            brain.build_adaptive_model_selection(
+                task="reject conflicting online evidence",
+                model_candidates=_model(),
+                credentials={"openai": handle},
+                selection_observations=explicit_observations,
+                selection_overrides={
+                    "observations": [
+                        {
+                            "arm_id": "openai/test-model",
+                            "pulls": 1,
+                            "reward_sum": 0.1,
+                            "failures": 0,
+                        }
+                    ]
+                },
+            )
         with pytest.raises(BrainRunError, match="conflicts"):
             brain.build_adaptive_model_selection(
                 task="reject conflicting policies",
