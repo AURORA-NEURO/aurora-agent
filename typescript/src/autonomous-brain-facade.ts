@@ -956,6 +956,29 @@ function batchItemDigest(item: { index: number; status: string; task_digest: str
   return digestJsonSync(batchItemProjection(item));
 }
 
+/**
+ * Keep caller-owned automatic values usable for rehydration without making them part of the
+ * serializable traced envelope.  A traced batch is routinely passed to logs, telemetry, and
+ * persistence adapters; its ordinary JSON image must therefore remain metadata-only while the
+ * direct property remains available to the caller that owns the transient result.
+ */
+function tracedAutoBatchResult(batch: AutonomousBrainAutoBatchResult): AutonomousBrainAutoBatchResult {
+  return {
+    ...batch,
+    items: batch.items.map((item) => {
+      if (item.execution === undefined) return { ...item };
+      const projection = { ...item } as AutonomousBrainAutoBatchItem;
+      Object.defineProperty(projection, "execution", {
+        value: item.execution,
+        enumerable: false,
+        configurable: false,
+        writable: false,
+      });
+      return projection;
+    }),
+  };
+}
+
 function automaticBatchTraceTaskDigest(inputs: readonly AutonomousBrainRequest[]): string {
   return digestJsonSync({
     schema: AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA,
@@ -2063,7 +2086,7 @@ export class AutonomousBrainFacade {
       });
       return {
         schema: AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA,
-        batch,
+        batch: tracedAutoBatchResult(batch),
         trace: await trace.summary(),
         retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads",
         secret_material: "never_returned",
@@ -2394,7 +2417,7 @@ export class AutonomousBrainFacade {
       });
       return {
         schema: AUTONOMOUS_BRAIN_TRACED_AUTO_BATCH_SCHEMA,
-        batch,
+        batch: tracedAutoBatchResult(batch),
         trace: await trace.summary(),
         retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads",
         secret_material: "never_returned",
