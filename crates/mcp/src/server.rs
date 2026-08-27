@@ -1814,6 +1814,9 @@ impl Server {
             "worldfactory_protocol_simulation_federated_control_plane" => {
                 self.worldfactory_protocol_simulation_federated_control_plane(&arguments)
             }
+            "atlashub_replication_negative_results_federated_control_plane" => {
+                self.atlashub_replication_negative_results_federated_control_plane(&arguments)
+            }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -24741,6 +24744,29 @@ impl Server {
         }))
     }
 
+    fn atlashub_replication_negative_results_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_atlashub_replication_control_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_atlashub::REPLICATION_CONTROL_FEATURE_ID,
+            "contract_version": bioprism_atlashub::REPLICATION_CONTROL_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "independent replication observations are deterministically partitioned by outcome and evidence state",
+                "null, negative, inconclusive, contradictory, incomparable, and omitted results remain visible",
+                "only aggregate summaries can cross federation and all policy, provenance, replay, approval, and locality gates fail closed"
+            ],
+            "limitations": [
+                "the route consumes caller-supplied replication summaries and never reads raw measurements",
+                "a qualified replication posture is not biological validity or a clinical decision"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -40791,6 +40817,20 @@ pub fn tool_definitions() -> Vec<Value> {
                     "request": { "type": "object", "description": "Serialized ProtocolDraft4 with stages, fault scenarios, peer summaries, checkpoint, budgets, policy, approval, federation, locality, and replay identity." }
                 },
                 "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "atlashub_replication_negative_results_federated_control_plane",
+            "description": "Operate an institution-local replication and negative-results control plane over typed ClaimAndProtocol1 observations and aggregate-only peer summaries. Null, negative, inconclusive, contradictory, incomparable, and omitted evidence remains explicit; no raw measurements or laboratory action are performed.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request_id": { "type": "string", "minLength": 1 },
+                    "claim": { "type": "object", "description": "Serialized ClaimAndProtocol1 with protocol, semantic, provenance, replay, policy, approval, and locality declarations." },
+                    "observations": { "type": "array", "description": "Independent ReplicationObservation4 records." },
+                    "peers": { "type": "array", "description": "Signed aggregate-only PeerReplicationSummary4 records." }
+                },
+                "required": ["request_id", "claim", "observations", "peers"]
             }
         }),
         json!({

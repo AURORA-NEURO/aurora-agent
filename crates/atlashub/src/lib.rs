@@ -139,6 +139,7 @@ pub mod error;
 pub mod federated;
 pub mod federated_copilot;
 pub mod voe;
+pub mod replication_negative_results_federated_control_plane;
 
 pub use card::{
     Ancestry, AncestryStep, CardLinks, ClaimKind, Currency, HealthCheck, LatentState,
@@ -167,4 +168,12 @@ pub use voe::{
     pareto_front, rank_with, Budget, Calibration, DeclaredValue, ExchangeRate, ExclusionReason,
     Excluded, Experiment, ExperimentId, Hypothesis, HypothesisId, HypothesisState, ParetoFront,
     Privacy, Ranked, Ranking,
+};
+pub use replication_negative_results_federated_control_plane::{
+    operate_replication_control, replication_control_manifest, ClaimAndProtocol1,
+    EvidenceState as ReplicationEvidenceState, PeerReplicationSummary4,
+    ReplicationArtifact8, ReplicationControlError, ReplicationObservation4,
+    ReplicationOutcome, ReplicationRecord8,
+    CONTRACT_VERSION as REPLICATION_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as REPLICATION_CONTROL_FEATURE_ID,
 };

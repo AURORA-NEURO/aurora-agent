@@ -522,6 +522,10 @@ use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
     PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
 };
+use bioprism_atlashub::{
+    operate_replication_control, ClaimAndProtocol1, PeerReplicationSummary4,
+    ReplicationObservation4, ReplicationRecord8, REPLICATION_CONTROL_FEATURE_ID,
+};
 use serde_json::Value;
 
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
@@ -2906,6 +2910,43 @@ pub fn validate_worldfactory_protocol_simulation_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID {
         return Err("worldfactory protocol simulation feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const ATLASHUB_REPLICATION_CONTROL_TOOL: &str = "atlashub_replication_negative_results_federated_control_plane";
+
+pub fn operate_atlashub_replication_control_json(value: &Value) -> Result<Value, String> {
+    let request_id = value
+        .get("request_id")
+        .and_then(Value::as_str)
+        .ok_or("request_id is required")?;
+    let claim: ClaimAndProtocol1 = serde_json::from_value(
+        value.get("claim").cloned().ok_or("claim is required")?,
+    )
+    .map_err(|error| format!("invalid atlashub replication claim: {error}"))?;
+    let observations: Vec<ReplicationObservation4> = serde_json::from_value(
+        value.get("observations").cloned().ok_or("observations are required")?,
+    )
+    .map_err(|error| format!("invalid atlashub replication observations: {error}"))?;
+    let peers: Vec<PeerReplicationSummary4> = serde_json::from_value(
+        value.get("peers").cloned().ok_or("peers are required")?,
+    )
+    .map_err(|error| format!("invalid atlashub replication peers: {error}"))?;
+    let receipt = operate_replication_control(request_id, &claim, &observations, &peers)
+        .map_err(|error| format!("atlashub replication control failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize atlashub replication receipt: {error}"))
+}
+
+pub fn validate_atlashub_replication_control_json(
+    value: &Value,
+) -> Result<ReplicationRecord8, String> {
+    let receipt: ReplicationRecord8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid atlashub replication receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != REPLICATION_CONTROL_FEATURE_ID {
+        return Err("atlashub replication feature id mismatch".into());
     }
     Ok(receipt)
 }
