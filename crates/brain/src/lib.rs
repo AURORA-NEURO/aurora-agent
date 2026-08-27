@@ -35,6 +35,7 @@ pub const PLAN_SCHEMA: &str = "bioprism-brain-plan/0.1";
 pub const BANDIT_SCHEMA: &str = "bioprism-brain-bandit/0.1";
 pub const LEARNING_EVIDENCE_SCHEMA: &str = "bioprism-brain-learning-evidence/0.1";
 pub const PROVIDER_HEALTH_SCHEMA: &str = "bioprism-brain-provider-health/0.1";
+pub const SELECTION_WEIGHTS_SCHEMA: &str = "bioprism-autonomous-selection-weights/0.1";
 
 const MAX_MODELS: usize = 256;
 const MAX_PROMPT_CHUNKS: usize = 512;
@@ -44,6 +45,8 @@ const MAX_EVALUATOR_ID_BYTES: usize = 256;
 const MAX_CONTEXT_LABEL_BYTES: usize = 256;
 const MAX_CREDITED_OUTCOMES: usize = 4096;
 const MAX_CONTEXTUAL_STATES: usize = 64;
+const MAX_MODEL_OBSERVATIONS: usize = 512;
+const MAX_OBSERVATION_PULLS: u64 = 1_000_000_000;
 
 #[derive(Debug, Error)]
 pub enum BrainError {
@@ -95,6 +98,8 @@ pub enum BrainError {
     InvalidProviderHealth(String),
     #[error("invalid model health evidence for {0:?}")]
     InvalidModelHealth(String),
+    #[error("model selection weights must contain at least one positive value")]
+    InvalidSelectionWeights,
     #[error("{field} must be a lowercase SHA-256 digest")]
     InvalidDigest { field: &'static str },
     #[error("invalid JSON for digest: {0}")]
@@ -245,7 +250,65 @@ impl SelectionWeights {
         ] {
             finite_range(value, name, 0.0, 100.0)?;
         }
+        let normalized = self.normalized();
+        if normalized.quality == 0.0
+            && normalized.reliability == 0.0
+            && normalized.cost == 0.0
+            && normalized.latency == 0.0
+            && normalized.exploration == 0.0
+        {
+            return Err(BrainError::InvalidSelectionWeights);
+        }
         Ok(())
+    }
+
+    fn normalized(&self) -> Self {
+        fn round_12(value: f64) -> f64 {
+            (value * 1_000_000_000_000.0).round() / 1_000_000_000_000.0
+        }
+
+        Self {
+            quality: round_12(self.quality),
+            reliability: round_12(self.reliability),
+            cost: round_12(self.cost),
+            latency: round_12(self.latency),
+            exploration: round_12(self.exploration),
+        }
+    }
+}
+
+impl ModelObservation {
+    fn validate(&self) -> Result<(), BrainError> {
+        non_empty(&self.arm_id, "observation.arm_id")?;
+        if self.pulls > MAX_OBSERVATION_PULLS {
+            return Err(BrainError::OutOfRange {
+                field: "observation.pulls",
+                min: 0.0,
+                max: MAX_OBSERVATION_PULLS as f64,
+            });
+        }
+        if self.failures > self.pulls {
+            return Err(BrainError::OutOfRange {
+                field: "observation.failures",
+                min: 0.0,
+                max: self.pulls as f64,
+            });
+        }
+        finite_range(self.reward_sum, "observation.reward_sum", -1e12, 1e12)
+    }
+
+    fn normalized(&self) -> Self {
+        fn round_12(value: f64) -> f64 {
+            (value * 1_000_000_000_000.0).round() / 1_000_000_000_000.0
+        }
+
+        Self {
+            arm_id: self.arm_id.clone(),
+            pulls: self.pulls,
+            reward_sum: round_12(self.reward_sum),
+            failures: self.failures,
+            disabled: self.disabled,
+        }
     }
 }
 
@@ -484,6 +547,7 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
         health.validate(arm_id)?;
     }
     request.weights.validate()?;
+    let weights = request.weights.normalized();
     if let Some(min_quality) = request.min_quality {
         finite_range(min_quality, "min_quality", 0.0, 1.0)?;
     }
@@ -496,17 +560,18 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
         )?;
     }
 
+    if request.observations.len() > MAX_MODEL_OBSERVATIONS {
+        return Err(BrainError::TooMany {
+            field: "observations",
+            max: MAX_MODEL_OBSERVATIONS,
+        });
+    }
     let mut observations = BTreeMap::new();
     for observation in &request.observations {
-        non_empty(&observation.arm_id, "observation.arm_id")?;
-        finite_range(
-            observation.reward_sum,
-            "observation.reward_sum",
-            -1e12,
-            1e12,
-        )?;
+        observation.validate()?;
+        let normalized = observation.normalized();
         if observations
-            .insert(observation.arm_id.clone(), observation)
+            .insert(normalized.arm_id.clone(), normalized)
             .is_some()
         {
             return Err(BrainError::DuplicateArm(observation.arm_id.clone()));
@@ -548,7 +613,7 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
             .get(&model_id)
             .copied()
             .unwrap_or((model.reliability, model.latency_ms as f64));
-        let observation = observations.get(&model_id).copied();
+        let observation = observations.get(&model_id).cloned();
         let mut reasons = Vec::new();
         if !model.enabled {
             reasons.push("disabled_by_caller".into());
@@ -597,25 +662,26 @@ pub fn select_model(request: &ModelSelectionRequest) -> Result<ModelSelectionRep
                 reasons.push("provider_health_ineligible".into());
             }
         }
-        if observation.is_some_and(|item| item.disabled) {
+        if observation.as_ref().is_some_and(|item| item.disabled) {
             reasons.push("disabled_by_learning_policy".into());
         }
         let eligible = reasons.is_empty();
-        let pulls = observation.map(|item| item.pulls).unwrap_or(0);
+        let pulls = observation.as_ref().map(|item| item.pulls).unwrap_or(0);
         let mean_reward = observation
+            .as_ref()
             .filter(|item| item.pulls > 0)
             .map(|item| item.reward_sum / item.pulls as f64)
             .unwrap_or(0.0);
         let exploration_bonus = if pulls == 0 {
-            request.weights.exploration
+            weights.exploration
         } else {
-            request.weights.exploration * (log_total / pulls as f64).sqrt()
+            weights.exploration * (log_total / pulls as f64).sqrt()
         };
-        let base_score = request.weights.quality * model.quality
-            + request.weights.reliability * effective_reliability
-            + request.weights.exploration * mean_reward
-            - request.weights.cost * (model.cost_per_million_tokens as f64 / max_cost)
-            - request.weights.latency * (effective_latency / max_latency);
+        let base_score = weights.quality * model.quality
+            + weights.reliability * effective_reliability
+            + weights.exploration * mean_reward
+            - weights.cost * (model.cost_per_million_tokens as f64 / max_cost)
+            - weights.latency * (effective_latency / max_latency);
         ranking.push(ModelCandidateScore {
             model_id,
             eligible,
@@ -2285,6 +2351,82 @@ mod tests {
         assert!(report.selected_model_id.is_none());
         assert!(report.ranking.iter().all(|candidate| !candidate.eligible));
         assert_eq!(report.selection_status, "refused_no_eligible_model");
+    }
+
+    #[test]
+    fn model_selection_rejects_degenerate_weights_and_unbounded_observations() {
+        let base = ModelSelectionRequest {
+            task: "selection contract validation".into(),
+            required_capabilities: vec!["reasoning".into()],
+            input_tokens: 100,
+            requested_output_tokens: 100,
+            max_cost_per_million_tokens: None,
+            max_latency_ms: None,
+            min_quality: None,
+            min_selection_confidence: None,
+            models: vec![model("provider", "model", 0.8, 10)],
+            observations: Vec::new(),
+            weights: SelectionWeights::default(),
+            provider_health: BTreeMap::new(),
+            model_health: BTreeMap::new(),
+        };
+        let error = select_model(&ModelSelectionRequest {
+            weights: SelectionWeights {
+                quality: 0.0,
+                reliability: 0.0,
+                cost: 0.0,
+                latency: 0.0,
+                exploration: 0.0,
+            },
+            ..base.clone()
+        })
+        .unwrap_err();
+        assert!(matches!(error, BrainError::InvalidSelectionWeights));
+
+        let error = select_model(&ModelSelectionRequest {
+            observations: vec![ModelObservation {
+                arm_id: "provider/model".into(),
+                pulls: MAX_OBSERVATION_PULLS + 1,
+                reward_sum: 0.0,
+                failures: 0,
+                disabled: false,
+            }],
+            ..base
+        })
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            BrainError::OutOfRange {
+                field: "observation.pulls",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn model_selection_canonicalizes_policy_and_observation_precision() {
+        let weights = SelectionWeights {
+            quality: 0.5500000000009,
+            reliability: 0.2499999999999,
+            cost: 0.1000000000009,
+            latency: 0.0999999999999,
+            exploration: 0.1500000000009,
+        };
+        let normalized = weights.normalized();
+        assert_eq!(normalized.quality, 0.550000000001);
+        assert_eq!(normalized.reliability, 0.25);
+        assert_eq!(normalized.cost, 0.100000000001);
+        assert_eq!(normalized.latency, 0.1);
+        assert_eq!(normalized.exploration, 0.150000000001);
+
+        let observation = ModelObservation {
+            arm_id: "provider/model".into(),
+            pulls: 1,
+            reward_sum: 0.7000000000009,
+            failures: 0,
+            disabled: false,
+        };
+        assert_eq!(observation.normalized().reward_sum, 0.700000000001);
     }
 
     #[test]
