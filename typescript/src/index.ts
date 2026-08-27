@@ -3975,3 +3975,12 @@ export {
   validateInterweaveFederatedDependencyCompositionReceipt,
 } from "./research-contracts.js";
 export type { InterweaveFederatedDependencyCompositionReceipt } from "./research-contracts.js";
+export {
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_FEATURE_ID,
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_CONTRACT_VERSION,
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_INPUT_SCHEMA,
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_OUTPUT_SCHEMA,
+  examplesStatisticalAnalysisWorkflowRunDigest,
+  validateExamplesStatisticalAnalysisWorkflowRun,
+} from "./research-contracts.js";
+export type { ExamplesStatisticalAnalysisWorkflowRun } from "./research-contracts.js";

@@ -7200,3 +7200,13 @@ __all__ += [
     "FederatedDependencyCompositionReceipt",
     "assure_federated_dependency_composition",
 ]
+
+from .statistical_analysis_workflow_fabric import (
+    StatisticalAnalysisWorkflowRun,
+    assure_statistical_analysis_workflow,
+)
+
+__all__ += [
+    "StatisticalAnalysisWorkflowRun",
+    "assure_statistical_analysis_workflow",
+]

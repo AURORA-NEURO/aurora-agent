@@ -53,6 +53,7 @@
 //!   wall-clock assertion in a test suite is a flake generator rather than a measurement.
 
 pub mod adversarial_recovery_contract;
+pub mod statistical_analysis_workflow_fabric;
 pub mod bundle;
 pub mod catalog;
 pub mod error;
@@ -77,6 +78,15 @@ pub use error::ExampleError;
 pub use expectation::{
     BundleExpectation, BundleProbe, Compiled, DepthExpectation, Expectation, GraphWalkProbe,
     Refusal,
+};
+pub use statistical_analysis_workflow_fabric::{
+    assure as assure_statistical_analysis_workflow,
+    capability_manifest as statistical_analysis_workflow_manifest,
+    AnalysisCandidate, AnalysisWorkflowDraft, AnalysisWorkflowError, AnalysisWorkflowRun,
+    CONTRACT_VERSION as STATISTICAL_ANALYSIS_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as STATISTICAL_ANALYSIS_WORKFLOW_FEATURE_ID,
+    INPUT_SCHEMA as STATISTICAL_ANALYSIS_WORKFLOW_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as STATISTICAL_ANALYSIS_WORKFLOW_OUTPUT_SCHEMA,
 };
 pub use property::{Property, PropertyClaim};
 pub use registry::{CoverageReport, RegistryReport, SliceRegistry};
