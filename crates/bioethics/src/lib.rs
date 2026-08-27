@@ -285,6 +285,7 @@
 //! is an input to a clinical transition certificate.
 
 pub mod action;
+pub mod contract_frontier_assurance;
 pub mod dependency_composition_assurance;
 pub mod dualuse;
 pub mod error;

@@ -4163,3 +4163,13 @@ export {
   validateFiberMechanismPortfolioContract,
 } from "./research-contracts.js";
 export type { FiberMechanismPortfolioContract } from "./research-contracts.js";
+
+export {
+  BIOETHICS_CONTRACT_FRONTIER_FEATURE_ID,
+  BIOETHICS_CONTRACT_FRONTIER_CONTRACT_VERSION,
+  BIOETHICS_CONTRACT_FRONTIER_INPUT_SCHEMA,
+  BIOETHICS_CONTRACT_FRONTIER_OUTPUT_SCHEMA,
+  bioethicsContractFrontierDigest,
+  validateBioethicsCapabilityManifestResult,
+} from "./research-contracts.js";
+export type { BioethicsCapabilityManifestResult } from "./research-contracts.js";
