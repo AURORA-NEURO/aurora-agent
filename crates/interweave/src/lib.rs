@@ -159,11 +159,21 @@ pub mod conformance;
 pub mod credit;
 pub mod human;
 pub mod interweave_contract_frontier_federated_control_plane;
+pub mod laboratory_integration_workflow_fabric;
 pub mod microbench;
 pub mod packs;
 pub mod threat;
 pub mod workflow;
 pub mod workflow_execution;
+
+pub use laboratory_integration_workflow_fabric::{
+    capability_manifest as laboratory_integration_capability_manifest,
+    orchestrate as orchestrate_laboratory_workflow, InstrumentAction, InstrumentActionReceipt,
+    InstrumentActionRequest, LaboratoryWorkflowError, StudyBinding,
+    CONTRACT_VERSION as LABORATORY_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as LABORATORY_WORKFLOW_FEATURE_ID, INPUT_SCHEMA as LABORATORY_WORKFLOW_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as LABORATORY_WORKFLOW_OUTPUT_SCHEMA,
+};
 
 /// The blueprint section this crate completes.
 pub const BLUEPRINT_SECTION: &str = "23_AGENT_INTERWEAVE_FABRIC";

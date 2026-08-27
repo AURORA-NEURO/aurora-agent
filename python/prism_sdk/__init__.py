@@ -7110,3 +7110,13 @@ __all__ += [
     "ContextContractReceipt",
     "compile_context_contract",
 ]
+
+from .laboratory_integration_workflow_fabric import (
+    LaboratoryWorkflowReceipt,
+    orchestrate_laboratory_workflow,
+)
+
+__all__ += [
+    "LaboratoryWorkflowReceipt",
+    "orchestrate_laboratory_workflow",
+]
