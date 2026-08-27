@@ -7268,3 +7268,15 @@ __all__ += [
     "assure_evidence_surveillance",
     "safety_evidence_surveillance_digest",
 ]
+
+from .cli_mechanism_control_plane import (
+    CliMechanismPortfolio,
+    control_mechanism_portfolio,
+    cli_mechanism_control_digest,
+)
+
+__all__ += [
+    "CliMechanismPortfolio",
+    "control_mechanism_portfolio",
+    "cli_mechanism_control_digest",
+]

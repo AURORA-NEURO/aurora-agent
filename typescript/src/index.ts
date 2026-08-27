@@ -4033,3 +4033,13 @@ export {
   validateSafetyEvidenceSurveillanceSet,
 } from "./research-contracts.js";
 export type { SafetyQualifiedEvidenceSet } from "./research-contracts.js";
+
+export {
+  CLI_MECHANISM_CONTROL_FEATURE_ID,
+  CLI_MECHANISM_CONTROL_CONTRACT_VERSION,
+  CLI_MECHANISM_CONTROL_INPUT_SCHEMA,
+  CLI_MECHANISM_CONTROL_OUTPUT_SCHEMA,
+  cliMechanismPortfolioDigest,
+  validateCliMechanismPortfolio,
+} from "./research-contracts.js";
+export type { CliMechanismPortfolio } from "./research-contracts.js";
