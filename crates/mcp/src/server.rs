@@ -2015,6 +2015,7 @@ impl Server {
             "mcp_knowledge_representation_contract" => self.mcp_knowledge_representation_contract(&arguments),
             "registry_multimodal_scale_frontier_assurance" => self.registry_multimodal_scale_frontier_assurance(&arguments),
             "registry_knowledge_representation_assurance" => self.registry_knowledge_representation_assurance(&arguments),
+            "ops_context_compilation_federated_control_plane" => self.ops_context_compilation_federated_control_plane(&arguments),
             "oraclex_context_compilation_research_copilot" => self.oraclex_context_compilation_research_copilot(&arguments),
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
@@ -26533,6 +26534,32 @@ impl Server {
         }))
     }
 
+    fn ops_context_compilation_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized DecisionQuery")?;
+        let receipt = crate::research_contracts::operate_ops_context_compilation_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_ops::CONTEXT_COMPILATION_CONTROL_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "high-throughput context identities, peer summaries, capacity witnesses, and effects are deterministic and partitioned",
+                "policy, signed approval, protected closure, federation, locality, queue, active-run, and adversarial gates fail closed",
+                "unknown, speculative, contradictory, missing, omitted, uncertain, and negative evidence remains visible",
+                "the operator route emits only typed control metadata and never schedules processes or moves raw research data"
+            ],
+            "limitations": [
+                "the control plane evaluates caller-declared queue and context manifests; it does not execute or transport a workflow",
+                "qualified admission remains subject to institution-local scheduler, instrument, security, and independent validation gates"
+            ]
+        }))
+    }
+
     fn analysis_qualify(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -38247,7 +38274,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "registry_multimodal_scale_frontier_assurance", "registry_knowledge_representation_assurance", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_harmonization_coverage", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "registry_multimodal_scale_frontier_assurance", "registry_knowledge_representation_assurance", "ops_context_compilation_federated_control_plane", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_harmonization_coverage", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -40723,6 +40750,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "registry_knowledge_representation_assurance",
             "description": "Verify federated continual ScopedResearchClaims4 attestations and signed aggregate-only peer summaries into a deterministic TypedKnowledgeWorld7 receipt. The route enforces semantic-profile, provenance/replay, quorum, policy, approval, protected-closure, locality, and adversarial gates without moving raw studies or making biological or clinical decisions.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized bioprism-registry ScopedResearchClaims with required claims, peer summaries, minimum quorum, replay identity, policy and locality controls, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "ops_context_compilation_federated_control_plane",
+            "description": "Operate a prospective high-throughput context-compilation control plane over typed DecisionQuery3 context attestations and aggregate peer summaries. It verifies queue and active-run capacity, semantic closure, replay, policy, signed approval, federation, locality, and adversarial gates and emits deterministic CertifiedDecisionSection8 metadata without scheduling processes or moving raw data.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized bioprism-ops DecisionQuery with context attestations, peer operations summaries, capacity and queue bounds, replay identity, policy/approval/federation controls, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "oraclex_context_compilation_research_copilot",

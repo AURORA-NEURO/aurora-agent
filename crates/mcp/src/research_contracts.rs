@@ -835,6 +835,16 @@ pub fn validate_registry_knowledge_representation_json(
     bioprism_registry::validate_knowledge_representation_json(value)
 }
 
+pub fn operate_ops_context_compilation_json(value: &Value) -> Result<Value, String> {
+    bioprism_ops::operate_context_compilation_json(value)
+}
+
+pub fn validate_ops_context_compilation_json(
+    value: &Value,
+) -> Result<bioprism_ops::ContextCompilationDecisionSection, String> {
+    bioprism_ops::validate_context_compilation_json(value)
+}
+
 pub fn validate_harmonized_research_object_json(
     value: &Value,
 ) -> Result<HarmonizedResearchObject, String> {

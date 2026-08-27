@@ -291,6 +291,7 @@
 pub mod alpha;
 pub mod capacity;
 pub mod config;
+pub mod context_compilation_federated_control_plane;
 pub mod error;
 pub mod flags;
 pub mod hardening;
@@ -309,6 +310,16 @@ pub use config::{
     Binding, ConfigStack, DeploymentProfile, EffectiveConfig, Influence, Layer, Resolution, Schema,
     SecretLease, SecretRef, SecretSource, SettingKey, SettingKind, SettingSpec, SettingValue,
     Source, ValueType,
+};
+pub use context_compilation_federated_control_plane::{
+    context_compilation_control_manifest, operate_context_compilation,
+    operate_context_compilation_json, validate_context_compilation_json,
+    CertifiedDecisionSection as ContextCompilationDecisionSection,
+    ContextAttestation, ControlDisposition, ControlPlaneError, DecisionQuery as ContextDecisionQuery,
+    PeerOperationsSummary,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_CONTROL_FEATURE_ID,
+    TOOL_NAME as CONTEXT_COMPILATION_CONTROL_TOOL,
 };
 pub use error::OpsError;
 pub use flags::{

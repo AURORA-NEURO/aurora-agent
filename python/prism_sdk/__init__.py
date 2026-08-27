@@ -7572,3 +7572,10 @@ from .registry_knowledge_representation_assurance import (
 )
 
 __all__ += ["RegistryTypedKnowledgeWorld", "assure_registry_knowledge_representation"]
+
+from .ops_context_compilation_federated_control_plane import (
+    CertifiedDecisionSection as OpsCertifiedDecisionSection,
+    operate_context_compilation,
+)
+
+__all__ += ["OpsCertifiedDecisionSection", "operate_context_compilation"]

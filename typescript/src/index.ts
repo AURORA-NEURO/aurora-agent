@@ -4283,3 +4283,13 @@ export {
   validateRegistryTypedKnowledgeWorld,
 } from "./research-contracts.js";
 export type { RegistryTypedKnowledgeWorld } from "./research-contracts.js";
+
+export {
+  OPS_CONTEXT_COMPILATION_CONTROL_FEATURE_ID,
+  OPS_CONTEXT_COMPILATION_CONTROL_CONTRACT_VERSION,
+  OPS_CONTEXT_COMPILATION_CONTROL_INPUT_SCHEMA,
+  OPS_CONTEXT_COMPILATION_CONTROL_OUTPUT_SCHEMA,
+  opsContextCompilationControlDigest,
+  validateOpsCertifiedDecisionSection,
+} from "./research-contracts.js";
+export type { OpsCertifiedDecisionSection } from "./research-contracts.js";
