@@ -7,6 +7,7 @@ import {
   AutonomousBrainFacade,
   AutonomousBrainBatchJobController,
   AutonomousBrainBatchProtectedRehydrator,
+  AutonomousBrainAutoBatchProtectedRehydrator,
   InMemoryAutonomousBrainBatchCheckpointStore,
   AutonomousBrainPlan,
   AutonomousCapabilityActivation,
@@ -191,6 +192,159 @@ test("brain facade automatic batches preserve per-item policy and deterministic 
   assert.deepEqual(batch.items.map((item) => item.index), [...Array(AUTONOMOUS_DOMAIN_NAMES.length).keys()]);
   assert.ok(batch.items.every((item) => item.status === "succeeded" && item.execution?.automatic?.status === "completed"));
   assert.match(batch.batch_digest, /^[0-9a-f]{64}$/);
+});
+
+test("brain facade automatic resumable batches rehydrate completed envelopes without direct-run fallback", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const initialBrain = new AutonomousBrainFacade({ agent });
+  const requests = [
+    { task: tasks.coding, domain: "coding" },
+    {
+      task: "review science evidence through a caller-owned connector",
+      domain: "science",
+      connector: {
+        domain: "science",
+        capability: "literature",
+        operation_id: "science.reproducible_evidence_acquisition",
+        subject_digest: "a".repeat(64),
+        request: { hypothesis: "automatic-restart", evidence_digests: ["b".repeat(64)], analysis_digest: "c".repeat(64) },
+        approved: true,
+      },
+    },
+  ];
+  const checkpoints = [];
+  const first = await initialBrain.executeAutoBatchResumable(requests, {
+    jobId: "automatic-resumable-batch",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+    checkpointSink: (checkpoint) => checkpoints.push(checkpoint),
+  });
+  assert.equal(first.status, "partial");
+  assert.deepEqual(first.items.map((item) => item.status), ["succeeded", "failed"]);
+  assert.deepEqual(checkpoints.at(-1).completed_indices, [0]);
+  assert.equal(checkpoints.at(-1).mode, "automatic");
+  assert.match(checkpoints.at(-1).automatic_execution_policy_digest, /^[0-9a-f]{64}$/);
+  assert.doesNotMatch(JSON.stringify(checkpoints.at(-1)), /debug and verify|automatic-restart|offline:offline-model/);
+  await assert.rejects(
+    initialBrain.executeBatchResumable(requests, {
+      jobId: "automatic-resumable-batch",
+      maxParallelism: 1,
+      stopOnError: true,
+      execution: { approveProviderCall: true },
+      checkpoint: checkpoints.at(-1),
+      rehydrateExecution: (context) => first.items[context.index].execution,
+    }),
+    /mode/,
+  );
+
+  const connector = createBuiltinAutonomousConnectorRuntime({ domainScoped: true, approvalRequired: false });
+  const resumedBrain = new AutonomousBrainFacade({ agent, connectorOperations: connector.operationFacade });
+  const resumed = await resumedBrain.executeAutoBatchResumable(requests, {
+    jobId: "automatic-resumable-batch",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+    checkpoint: checkpoints.at(-1),
+    rehydrateExecution: (context) => first.items[context.index].execution,
+  });
+  assert.equal(resumed.status, "completed");
+  assert.deepEqual(resumed.items.map((item) => item.status), ["succeeded", "succeeded"]);
+  assert.equal(runtime.providerStatus("offline").attempts, 2, "the completed automatic item must not be invoked again");
+
+  await assert.rejects(
+    resumedBrain.executeAutoBatchResumable(requests, {
+      jobId: "automatic-resumable-batch",
+      maxParallelism: 1,
+      stopOnError: true,
+      execution: { approveProviderCall: true, includeConnectorObservation: false },
+      checkpoint: checkpoints.at(-1),
+      rehydrateExecution: (context) => resumed.items[context.index].execution,
+    }),
+    /policy/,
+  );
+
+  const tampered = structuredClone(checkpoints.at(-1));
+  tampered.request_digests[0] = "0".repeat(64);
+  await assert.rejects(
+    resumedBrain.executeAutoBatchResumable(requests, {
+      jobId: "automatic-resumable-batch",
+      maxParallelism: 1,
+      stopOnError: true,
+      execution: { approveProviderCall: true },
+      checkpoint: tampered,
+      rehydrateExecution: (context) => resumed.items[context.index].execution,
+    }),
+    /checkpoint/i,
+  );
+});
+
+test("automatic batch controller rehydrates protected results and preserves automatic mode identity", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const initialBrain = new AutonomousBrainFacade({ agent });
+  const requests = [
+    { task: tasks.coding, domain: "coding" },
+    {
+      task: "force an automatic restartable connector failure",
+      domain: "science",
+      connector: {
+        domain: "science",
+        capability: "literature",
+        operation_id: "science.reproducible_evidence_acquisition",
+        subject_digest: "a".repeat(64),
+        request: { hypothesis: "automatic-controller", evidence_digests: ["b".repeat(64)], analysis_digest: "c".repeat(64) },
+        approved: true,
+      },
+    },
+  ];
+  const store = new InMemoryAutonomousBrainBatchCheckpointStore();
+  const firstController = new AutonomousBrainBatchJobController(initialBrain, store);
+  assert.equal((await firstController.restore()).status, "empty");
+  const first = await firstController.runAutomatic(requests, {
+    jobId: "automatic-controller-batch",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+  });
+  assert.equal(first.batch.status, "partial");
+  assert.equal(store.read().mode, "automatic");
+
+  const protectedValues = new Map();
+  const boundary = new AutonomousProtectedRehydrationBoundary(
+    new AutonomousProtectedRehydrationContext({ tenantId: "automatic-tenant", actorId: "automatic-worker", sessionId: "automatic-session", authorizationDigest: "e".repeat(64) }),
+    (reference) => protectedValues.get(reference.value_digest),
+    { authorizer: () => true, clock: () => 300 },
+  );
+  const completedValue = first.batch.items[0].execution;
+  const valueDigest = protectedValueDigest(completedValue);
+  protectedValues.set(valueDigest, completedValue);
+  const protectedRehydrator = new AutonomousBrainAutoBatchProtectedRehydrator({
+    adapter: new AutonomousProtectedRehydrationAdapter(boundary),
+    receiptResolver: (context) => ({ ...context, domain: "coding", value_digest: valueDigest }),
+  });
+  await assert.rejects(
+    protectedRehydrator.resolve({ job_id: "automatic-controller-batch", index: 0, mode: "brain", request_digest: "a".repeat(64), task_digest: "b".repeat(64), expected_result_digest: "c".repeat(64) }),
+    /automatic checkpoint context/,
+  );
+
+  const connector = createBuiltinAutonomousConnectorRuntime({ domainScoped: true, approvalRequired: false });
+  const resumedBrain = new AutonomousBrainFacade({ agent, connectorOperations: connector.operationFacade });
+  const restarted = new AutonomousBrainBatchJobController(resumedBrain, store, { automaticProtectedRehydration: protectedRehydrator });
+  assert.equal((await restarted.restore()).status, "restored");
+  const completed = await restarted.runAutomatic(requests, {
+    jobId: "automatic-controller-batch",
+    maxParallelism: 1,
+    stopOnError: true,
+    execution: { approveProviderCall: true },
+  });
+  assert.equal(completed.batch.status, "completed");
+  assert.deepEqual(completed.batch.items.map((item) => item.status), ["succeeded", "succeeded"]);
+  assert.equal(completed.controller.status, "completed");
+  assert.equal(store.read().mode, "automatic");
 });
 
 test("brain facade automatic execution composes connector observation, launch admission, and metadata tracing", async () => {

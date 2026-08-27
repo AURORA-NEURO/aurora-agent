@@ -585,7 +585,7 @@ export interface AutonomousBrainBatchResult {
   secret_material: "never_returned";
 }
 
-export type AutonomousBrainBatchMode = "brain";
+export type AutonomousBrainBatchMode = "brain" | "automatic";
 
 export interface AutonomousBrainBatchRehydrationContext {
   job_id: string;
@@ -639,6 +639,7 @@ export class AutonomousBrainBatchProtectedRehydrator {
   }
 
   async resolve(context: AutonomousBrainBatchRehydrationContext): Promise<AutonomousBrainExecution> {
+    if (!context || context.mode !== "brain") throw new ArgumentError("autonomous brain batch protected rehydrator requires a direct brain checkpoint context");
     let receipt: unknown;
     try {
       receipt = await this.receiptResolver(context);
@@ -674,6 +675,78 @@ export class AutonomousBrainBatchProtectedRehydrator {
   }
 }
 
+/** Protected-receipt adapter for automatic batches; it never widens a direct checkpoint into automatic execution. */
+export class AutonomousBrainAutoBatchProtectedRehydrator {
+  readonly adapter: AutonomousProtectedRehydrationAdapter;
+  readonly receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
+  readonly valueDecoder?: (value: unknown) => AutonomousBrainAutoExecution | unknown;
+  readonly domain?: AutonomousDomainName;
+  readonly purpose: string;
+  readonly valueKind: string;
+  readonly oneTime: boolean;
+  readonly digestScheme: string;
+
+  constructor(options: {
+    adapter: AutonomousProtectedRehydrationAdapter;
+    receiptResolver: (context: AutonomousBrainBatchRehydrationContext) => unknown | Promise<unknown>;
+    valueDecoder?: (value: unknown) => AutonomousBrainAutoExecution | unknown;
+    domain?: AutonomousDomainName;
+    purpose?: string;
+    valueKind?: string;
+    oneTime?: boolean;
+    digestScheme?: string;
+  }) {
+    if (!(options?.adapter instanceof AutonomousProtectedRehydrationAdapter)) throw new ArgumentError("autonomous brain automatic batch protected rehydrator requires a protected rehydration adapter");
+    if (typeof options.receiptResolver !== "function") throw new ArgumentError("autonomous brain automatic batch protected rehydrator receiptResolver must be callable");
+    if (options.valueDecoder !== undefined && typeof options.valueDecoder !== "function") throw new ArgumentError("autonomous brain automatic batch protected rehydrator valueDecoder must be callable");
+    if (options.oneTime !== undefined && typeof options.oneTime !== "boolean") throw new ArgumentError("autonomous brain automatic batch protected rehydrator oneTime must be boolean");
+    this.adapter = options.adapter;
+    this.receiptResolver = options.receiptResolver;
+    this.valueDecoder = options.valueDecoder;
+    this.domain = options.domain;
+    this.purpose = options.purpose ?? "autonomous_automatic_batch_result";
+    this.valueKind = options.valueKind ?? "autonomous_automatic_batch_result";
+    this.oneTime = options.oneTime ?? false;
+    this.digestScheme = options.digestScheme ?? "canonical_json";
+  }
+
+  async resolve(context: AutonomousBrainBatchRehydrationContext): Promise<AutonomousBrainAutoExecution> {
+    if (!context || context.mode !== "automatic") throw new ArgumentError("autonomous brain automatic batch protected rehydrator requires an automatic checkpoint context");
+    let receipt: unknown;
+    try {
+      receipt = await this.receiptResolver(context);
+    } catch (error) {
+      throw new ArgumentError(`autonomous brain automatic batch protected receipt lookup failed for item ${context.index}`, { cause: error });
+    }
+    if (!isObject(receipt)) throw new ArgumentError("autonomous brain automatic batch protected receiptResolver must return an object");
+    for (const [key, expected] of [
+      ["job_id", context.job_id],
+      ["index", context.index],
+      ["mode", context.mode],
+      ["request_digest", context.request_digest],
+      ["task_digest", context.task_digest],
+      ["expected_result_digest", context.expected_result_digest],
+    ] as const) {
+      if (receipt[key] !== expected) throw new ArgumentError(`autonomous brain automatic batch protected receipt ${key} does not match item ${context.index}`);
+    }
+    try {
+      const value = this.adapter.resolveReceipt(receipt, {
+        domain: this.domain,
+        purpose: this.purpose,
+        valueKind: this.valueKind,
+        oneTime: this.oneTime,
+        digestScheme: this.digestScheme,
+      });
+      const decoded = this.valueDecoder === undefined ? value : await this.valueDecoder(value);
+      if (!isObject(decoded)) throw new ArgumentError(`autonomous brain automatic batch protected result for item ${context.index} is not an execution object`);
+      return decoded as unknown as AutonomousBrainAutoExecution;
+    } catch (error) {
+      if (error instanceof ArgumentError) throw error;
+      throw new ArgumentError(`autonomous brain automatic batch protected result resolution failed for item ${context.index}`, { cause: error });
+    }
+  }
+}
+
 export interface AutonomousBrainBatchCheckpointJSON {
   schema: typeof AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA;
   job_id: string;
@@ -681,6 +754,8 @@ export interface AutonomousBrainBatchCheckpointJSON {
   batch_input_digest: string;
   /** Digest of the non-secret semantic-routing policy; absent only on legacy deterministic checkpoints. */
   semantic_routing_policy_digest?: string;
+  /** Digest of the non-secret automatic execution policy; present for automatic checkpoints. */
+  automatic_execution_policy_digest?: string;
   request_digests: string[];
   completed_indices: number[];
   completed_result_digests: string[];
@@ -700,6 +775,17 @@ export interface AutonomousBrainResumableBatchOptions {
   checkpoint?: AutonomousBrainBatchCheckpointJSON;
   checkpointSink?: (checkpoint: AutonomousBrainBatchCheckpointJSON) => Promise<void> | void;
   rehydrateExecution?: (context: AutonomousBrainBatchRehydrationContext) => Promise<AutonomousBrainExecution> | AutonomousBrainExecution;
+}
+
+/** Restart-safe automatic route -> blueprint -> invocation batch controls. */
+export interface AutonomousBrainAutoBatchResumableOptions {
+  jobId: string;
+  maxParallelism?: number;
+  stopOnError?: boolean;
+  execution?: AutonomousBrainAutoExecuteOptions;
+  checkpoint?: AutonomousBrainBatchCheckpointJSON;
+  checkpointSink?: (checkpoint: AutonomousBrainBatchCheckpointJSON) => Promise<void> | void;
+  rehydrateExecution?: (context: AutonomousBrainBatchRehydrationContext) => Promise<AutonomousBrainAutoExecution> | AutonomousBrainAutoExecution;
 }
 
 /** Caller-owned storage for one verified metadata-only brain batch checkpoint. */
@@ -727,7 +813,13 @@ export interface AutonomousBrainBatchControllerRun {
   batch: AutonomousBrainBatchResult;
 }
 
+export interface AutonomousBrainAutoBatchControllerRun {
+  controller: AutonomousBrainBatchControllerProjection;
+  batch: AutonomousBrainAutoBatchResult;
+}
+
 export type AutonomousBrainBatchControllerRunOptions = Omit<AutonomousBrainResumableBatchOptions, "checkpoint" | "checkpointSink">;
+export type AutonomousBrainAutoBatchControllerRunOptions = Omit<AutonomousBrainAutoBatchResumableOptions, "checkpoint" | "checkpointSink">;
 
 interface PreparedBrainRequest {
   readonly request: AutonomousBrainRequest;
@@ -818,6 +910,14 @@ function batchRefused(status: string): boolean {
     || status === "provider_disagreement";
 }
 
+function automaticBatchRefused(status: string): boolean {
+  return batchRefused(status)
+    || status === "policy_review_required"
+    || status === "policy_blocked"
+    || status === "reconciliation_required"
+    || status === "response_review_required";
+}
+
 function batchStatus(completed: number, failed: number, omitted: number): "completed" | "partial" | "failed" {
   return failed === 0 && omitted === 0 ? "completed" : completed > 0 ? "partial" : "failed";
 }
@@ -838,10 +938,10 @@ function brainBatchTaskDigest(input: AutonomousBrainRequest): string {
   return digestJsonSync({ task: input.task });
 }
 
-function brainBatchRequestDigest(input: AutonomousBrainRequest, index: number): string {
+function brainBatchRequestDigest(input: AutonomousBrainRequest, index: number, mode: AutonomousBrainBatchMode = "brain"): string {
   return digestJsonSync({
     index,
-    mode: "brain",
+    mode,
     task_digest: brainBatchTaskDigest(input),
     domain: input.domain ?? null,
     capability: input.capability ?? null,
@@ -906,17 +1006,96 @@ function brainSemanticRoutingPolicyDigest(options: AutonomousBrainExecuteOptions
   });
 }
 
+/** Digest automatic controls without retaining prompts, connector values, credentials, or callbacks. */
+function brainAutomaticExecutionPolicyDigest(options: AutonomousBrainAutoExecuteOptions | undefined): string | null {
+  if (options === undefined) return null;
+  const planning = options.planning;
+  const planningProjection = planning === undefined ? null : {
+    candidates_digest: planning.candidates === undefined ? null : digestJsonSync(planning.candidates),
+    context_digest: planning.context === undefined ? null : digestJsonSync(planning.context),
+    prompt_selection_digest: planning.promptSelection === undefined ? null : digestJsonSync(planning.promptSelection),
+    prompt_learning_state_digest: planning.promptLearningState === undefined ? null : digestJsonSync(planning.promptLearningState),
+    prompt_learning_exploration: planning.promptLearningExploration ?? null,
+    prompt_stage: planning.promptStage ?? null,
+    max_input_tokens: planning.maxInputTokens ?? null,
+    max_output_tokens: planning.maxOutputTokens ?? null,
+    max_cost_per_million_tokens: planning.maxCostPerMillionTokens ?? null,
+    max_latency_ms: planning.maxLatencyMs ?? null,
+    min_quality: planning.minQuality ?? null,
+    min_selection_confidence: planning.minSelectionConfidence ?? null,
+    selection_weights_digest: planning.selectionWeights === undefined ? null : digestJsonSync(planning.selectionWeights),
+    selection_observations_digest: planning.selectionObservations === undefined ? null : digestJsonSync(planning.selectionObservations),
+    max_total_cost_units: planning.maxTotalCostUnits ?? null,
+    cost_budget_max: planning.costBudget instanceof AutonomousCostBudget ? planning.costBudget.maxCostUnits : null,
+    approve_provider_call: planning.approveProviderCall ?? false,
+    execution_controller_present: planning.execution !== undefined,
+    execution_policy_digest: planning.execution?.state.policy_digest ?? null,
+    execution_attempt: planning.executionAttempt ?? null,
+    max_provider_failovers: planning.maxProviderFailovers ?? null,
+    domain_policy_mode: planning.domainPolicyMode ?? null,
+    domain_policy_evidence_ready: planning.domainPolicyEvidenceReady ?? null,
+    domain_policy_evaluator_configured: planning.domainPolicyEvaluatorConfigured ?? null,
+    domain_policy_effects_requested: planning.domainPolicyEffectsRequested ?? null,
+    domain_policy_effects_approved: planning.domainPolicyEffectsApproved ?? null,
+  };
+  return digestJsonSync({
+    schema: "bioprism-typescript-autonomous-brain-automatic-execution-policy/0.1",
+    planning_mode: options.planningMode ?? "deterministic",
+    approve_provider_call: options.approveProviderCall ?? false,
+    semantic_routing: options.semanticRouting === undefined || options.semanticRouting === false ? null : normalizeBrainSemanticRouting(options.semanticRouting),
+    accept_plan: options.acceptPlan ?? false,
+    candidates_digest: options.candidates === undefined ? null : digestJsonSync(options.candidates),
+    content_parts_digest: options.contentParts === undefined ? null : digestJsonSync(options.contentParts),
+    prompt_selection_digest: options.promptSelection === undefined ? null : digestJsonSync(options.promptSelection),
+    prompt_learning_state_digest: options.promptLearningState === undefined ? null : digestJsonSync(options.promptLearningState),
+    prompt_learning_exploration: options.promptLearningExploration ?? null,
+    prompt_stage: options.promptStage ?? null,
+    max_input_tokens: options.maxInputTokens ?? null,
+    max_output_tokens: options.maxOutputTokens ?? null,
+    max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
+    max_latency_ms: options.maxLatencyMs ?? null,
+    min_quality: options.minQuality ?? null,
+    min_selection_confidence: options.minSelectionConfidence ?? null,
+    selection_weights_digest: options.selectionWeights === undefined ? null : digestJsonSync(options.selectionWeights),
+    selection_observations_digest: options.selectionObservations === undefined ? null : digestJsonSync(options.selectionObservations),
+    max_total_cost_units: options.maxTotalCostUnits ?? null,
+    cost_budget_max: options.costBudget instanceof AutonomousCostBudget ? options.costBudget.maxCostUnits : null,
+    approve_effects: options.approveEffects ?? false,
+    connector_first: options.connectorFirst ?? true,
+    include_connector_observation: options.includeConnectorObservation ?? true,
+    tool_names: options.tools?.map((tool) => tool.name).sort() ?? null,
+    tool_read_only_present: options.toolReadOnly !== undefined,
+    authorize_and_execute_present: options.authorizeAndExecute !== undefined,
+    execution_controller_present: options.execution !== undefined,
+    execution_policy_digest: options.execution?.state.policy_digest ?? null,
+    execution_attempt: options.executionAttempt ?? null,
+    max_provider_failovers: options.maxProviderFailovers ?? null,
+    require_json: options.requireJson ?? false,
+    response_schema_digest: options.responseSchema === undefined ? null : digestJsonSync(options.responseSchema),
+    structured_domain_response: options.structuredDomainResponse ?? false,
+    temperature: options.temperature ?? null,
+    domain_policy_mode: options.domainPolicyMode ?? null,
+    domain_policy_evidence_ready: options.domainPolicyEvidenceReady ?? null,
+    domain_policy_evaluator_configured: options.domainPolicyEvaluatorConfigured ?? null,
+    domain_policy_plan_accepted: options.domainPolicyPlanAccepted ?? null,
+    domain_policy_effects_requested: options.domainPolicyEffectsRequested ?? null,
+    domain_policy_effects_approved: options.domainPolicyEffectsApproved ?? null,
+    planning: planningProjection,
+  });
+}
+
 function checkpointText(name: string, value: unknown): string {
   return boundedIdentifier(name, value);
 }
 
 function validateBrainBatchCheckpoint(value: unknown): AutonomousBrainBatchCheckpointJSON {
-  if (!isObject(value) || value.schema !== AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA || value.mode !== "brain") throw new ArgumentError("autonomous brain batch checkpoint schema is invalid");
-  const allowedKeys = new Set(["schema", "job_id", "mode", "batch_input_digest", "semantic_routing_policy_digest", "request_digests", "completed_indices", "completed_result_digests", "max_parallelism", "stop_on_error", "status", "checkpoint_digest", "retention", "secret_material"]);
+  if (!isObject(value) || value.schema !== AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA || !["brain", "automatic"].includes(value.mode as string)) throw new ArgumentError("autonomous brain batch checkpoint schema is invalid");
+  const allowedKeys = new Set(["schema", "job_id", "mode", "batch_input_digest", "semantic_routing_policy_digest", "automatic_execution_policy_digest", "request_digests", "completed_indices", "completed_result_digests", "max_parallelism", "stop_on_error", "status", "checkpoint_digest", "retention", "secret_material"]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) throw new ArgumentError("autonomous brain batch checkpoint contains unsupported metadata");
   const jobId = checkpointText("autonomous brain batch checkpoint job_id", value.job_id);
   const batchInputDigest = digest("autonomous brain batch checkpoint batch_input_digest", value.batch_input_digest);
   const semanticRoutingPolicyDigest = value.semantic_routing_policy_digest === undefined ? undefined : digest("autonomous brain batch checkpoint semantic_routing_policy_digest", value.semantic_routing_policy_digest);
+  const automaticExecutionPolicyDigest = value.automatic_execution_policy_digest === undefined ? undefined : digest("autonomous brain batch checkpoint automatic_execution_policy_digest", value.automatic_execution_policy_digest);
   const requestDigests = value.request_digests;
   if (!Array.isArray(requestDigests) || requestDigests.length < 1 || requestDigests.length > MAX_AUTONOMOUS_BRAIN_BATCH || requestDigests.some((entry) => typeof entry !== "string" || !/^[0-9a-f]{64}$/.test(entry))) throw new ArgumentError("autonomous brain batch checkpoint request_digests are invalid");
   if (!Array.isArray(value.completed_indices) || value.completed_indices.length > requestDigests.length || value.completed_indices.some((entry) => !Number.isSafeInteger(entry) || (entry as number) < 0 || (entry as number) >= requestDigests.length)) throw new ArgumentError("autonomous brain batch checkpoint completed_indices are invalid");
@@ -926,15 +1105,19 @@ function validateBrainBatchCheckpoint(value: unknown): AutonomousBrainBatchCheck
   if (!Number.isSafeInteger(value.max_parallelism) || (value.max_parallelism as number) < 1 || (value.max_parallelism as number) > MAX_AUTONOMOUS_BRAIN_PARALLELISM) throw new ArgumentError("autonomous brain batch checkpoint maxParallelism is invalid");
   if (typeof value.stop_on_error !== "boolean" || !["running", "partial", "completed"].includes(value.status as string)) throw new ArgumentError("autonomous brain batch checkpoint controls are invalid");
   if (value.status === "completed" && completedIndices.length !== requestDigests.length) throw new ArgumentError("completed autonomous brain batch checkpoint is incomplete");
-  const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: jobId, mode: "brain" as const, batch_input_digest: batchInputDigest, ...(semanticRoutingPolicyDigest === undefined ? {} : { semantic_routing_policy_digest: semanticRoutingPolicyDigest }), request_digests: [...requestDigests as string[]], completed_indices: completedIndices, completed_result_digests: [...(value.completed_result_digests as string[])], max_parallelism: value.max_parallelism as number, stop_on_error: value.stop_on_error as boolean, status: value.status as "running" | "partial" | "completed" };
+  if (value.mode === "automatic" && automaticExecutionPolicyDigest === undefined) throw new ArgumentError("automatic brain batch checkpoint requires an automatic execution policy digest");
+  if (value.mode === "brain" && automaticExecutionPolicyDigest !== undefined) throw new ArgumentError("direct brain batch checkpoint cannot contain an automatic execution policy digest");
+  const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: jobId, mode: value.mode as AutonomousBrainBatchMode, batch_input_digest: batchInputDigest, ...(semanticRoutingPolicyDigest === undefined ? {} : { semantic_routing_policy_digest: semanticRoutingPolicyDigest }), ...(automaticExecutionPolicyDigest === undefined ? {} : { automatic_execution_policy_digest: automaticExecutionPolicyDigest }), request_digests: [...requestDigests as string[]], completed_indices: completedIndices, completed_result_digests: [...(value.completed_result_digests as string[])], max_parallelism: value.max_parallelism as number, stop_on_error: value.stop_on_error as boolean, status: value.status as "running" | "partial" | "completed" };
   if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES) throw new ArgumentError("autonomous brain batch checkpoint exceeds its bounded size");
   if (digestJsonSync(payload) !== value.checkpoint_digest) throw new ArgumentError("autonomous brain batch checkpoint digest is invalid");
   if (value.retention !== "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted" || value.secret_material !== "never_returned") throw new ArgumentError("autonomous brain batch checkpoint retention contract is invalid");
   return { ...payload, checkpoint_digest: value.checkpoint_digest as string, retention: value.retention, secret_material: value.secret_material };
 }
 
-function makeBrainBatchCheckpoint(input: { jobId: string; requestDigests: readonly string[]; batchInputDigest: string; semanticRoutingPolicyDigest: string | null; completed: readonly { index: number; item: AutonomousBrainBatchItem }[]; maxParallelism: number; stopOnError: boolean; status: "running" | "partial" | "completed" }): AutonomousBrainBatchCheckpointJSON {
-  const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: input.jobId, mode: "brain" as const, batch_input_digest: input.batchInputDigest, ...(input.semanticRoutingPolicyDigest === null ? {} : { semantic_routing_policy_digest: input.semanticRoutingPolicyDigest }), request_digests: [...input.requestDigests], completed_indices: input.completed.map((entry) => entry.index), completed_result_digests: input.completed.map((entry) => batchItemDigest(entry.item)), max_parallelism: input.maxParallelism, stop_on_error: input.stopOnError, status: input.status };
+function makeBrainBatchCheckpoint(input: { jobId: string; mode?: AutonomousBrainBatchMode; requestDigests: readonly string[]; batchInputDigest: string; semanticRoutingPolicyDigest: string | null; automaticExecutionPolicyDigest?: string | null; completed: readonly { index: number; item: AutonomousBrainBatchItem | AutonomousBrainAutoBatchItem }[]; maxParallelism: number; stopOnError: boolean; status: "running" | "partial" | "completed" }): AutonomousBrainBatchCheckpointJSON {
+  const mode = input.mode ?? "brain";
+  if (mode === "automatic" && input.automaticExecutionPolicyDigest === undefined) throw new ArgumentError("automatic brain batch checkpoint requires an automatic execution policy digest");
+  const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: input.jobId, mode, batch_input_digest: input.batchInputDigest, ...(input.semanticRoutingPolicyDigest === null ? {} : { semantic_routing_policy_digest: input.semanticRoutingPolicyDigest }), ...(input.automaticExecutionPolicyDigest === undefined || input.automaticExecutionPolicyDigest === null ? {} : { automatic_execution_policy_digest: input.automaticExecutionPolicyDigest }), request_digests: [...input.requestDigests], completed_indices: input.completed.map((entry) => entry.index), completed_result_digests: input.completed.map((entry) => batchItemDigest(entry.item)), max_parallelism: input.maxParallelism, stop_on_error: input.stopOnError, status: input.status };
   if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES) throw new ArgumentError("autonomous brain batch checkpoint exceeds its bounded size");
   return { ...payload, checkpoint_digest: digestJsonSync(payload), retention: "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted", secret_material: "never_returned" };
 }
@@ -1962,7 +2145,7 @@ export class AutonomousBrainFacade {
     const batchInputDigest = digestJsonSync({ schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, mode: "brain", request_digests: requestDigests, ...(semanticRoutingPolicyDigest === null ? {} : { semantic_routing_policy_digest: semanticRoutingPolicyDigest }) });
     const restored = options.checkpoint === undefined ? null : validateBrainBatchCheckpoint(options.checkpoint);
     if (restored !== null) {
-      if (restored.job_id !== jobId || JSON.stringify(restored.request_digests) !== JSON.stringify(requestDigests)) throw new ArgumentError("autonomous brain batch checkpoint does not match the current requests");
+      if (restored.mode !== "brain" || restored.job_id !== jobId || JSON.stringify(restored.request_digests) !== JSON.stringify(requestDigests)) throw new ArgumentError("autonomous brain batch checkpoint does not match the current requests or mode");
       if (semanticRoutingPolicyDigest !== null && restored.semantic_routing_policy_digest === undefined) throw new ArgumentError("legacy autonomous brain batch checkpoint requires explicit semantic-routing policy rebinding");
       if ((restored.semantic_routing_policy_digest ?? null) !== semanticRoutingPolicyDigest) throw new ArgumentError("autonomous brain batch checkpoint semantic-routing policy does not match");
       if (restored.batch_input_digest !== batchInputDigest) throw new ArgumentError("autonomous brain batch checkpoint does not match the current execution policy");
@@ -2042,6 +2225,119 @@ export class AutonomousBrainFacade {
     queueCheckpoint(normalized, result.status === "completed" ? "completed" : "partial");
     await persistChain;
     return result;
+  }
+
+  /**
+   * Run automatic batches with metadata-only restart checkpoints. Completed automatic envelopes
+   * are rehydrated by the caller and verified against the automatic route/plan result digest;
+   * resumed items never fall back to direct execution or silently re-plan under new controls.
+   */
+  async executeAutoBatchResumable(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainAutoBatchResumableOptions): Promise<AutonomousBrainAutoBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic resumable batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (!options || options.jobId === undefined) throw new ArgumentError("autonomous brain automatic resumable batch requires jobId");
+    const normalizedInputs = inputs.map((input) => validateRequest(input));
+    const { maxParallelism, stopOnError } = boundedBatchControls(options);
+    const jobId = checkpointText("autonomous brain automatic batch jobId", options.jobId);
+    if (options.checkpointSink !== undefined && typeof options.checkpointSink !== "function") throw new ArgumentError("autonomous brain automatic batch checkpointSink must be callable");
+    if (options.rehydrateExecution !== undefined && typeof options.rehydrateExecution !== "function") throw new ArgumentError("autonomous brain automatic batch rehydrateExecution must be callable");
+    const taskDigests = normalizedInputs.map((input) => brainBatchTaskDigest(input));
+    const requestDigests = normalizedInputs.map((input, index) => brainBatchRequestDigest(input, index, "automatic"));
+    const automaticExecutionPolicyDigest = brainAutomaticExecutionPolicyDigest(options.execution ?? {})!;
+    const batchInputDigest = digestJsonSync({ schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, mode: "automatic", request_digests: requestDigests, automatic_execution_policy_digest: automaticExecutionPolicyDigest });
+    const restored = options.checkpoint === undefined ? null : validateBrainBatchCheckpoint(options.checkpoint);
+    if (restored !== null) {
+      if (restored.mode !== "automatic" || restored.job_id !== jobId || JSON.stringify(restored.request_digests) !== JSON.stringify(requestDigests)) throw new ArgumentError("autonomous brain automatic batch checkpoint does not match the current requests or mode");
+      if (restored.automatic_execution_policy_digest !== automaticExecutionPolicyDigest) throw new ArgumentError("autonomous brain automatic batch checkpoint automatic execution policy does not match");
+      if (restored.batch_input_digest !== batchInputDigest) throw new ArgumentError("autonomous brain automatic batch checkpoint does not match the current execution policy");
+      if (restored.max_parallelism !== maxParallelism || restored.stop_on_error !== stopOnError) throw new ArgumentError("autonomous brain automatic batch checkpoint controls do not match");
+      if (restored.completed_indices.length > 0 && options.rehydrateExecution === undefined) throw new ArgumentError("resuming an autonomous brain automatic batch requires rehydrateExecution");
+    }
+    const items: Array<AutonomousBrainAutoBatchItem | undefined> = new Array(normalizedInputs.length);
+    if (restored !== null) {
+      for (let position = 0; position < restored.completed_indices.length; position += 1) {
+        const index = restored.completed_indices[position]!;
+        const context: AutonomousBrainBatchRehydrationContext = { job_id: jobId, index, mode: "automatic", request_digest: requestDigests[index]!, task_digest: taskDigests[index]!, expected_result_digest: restored.completed_result_digests[position]! };
+        let execution: AutonomousBrainAutoExecution;
+        try {
+          execution = await options.rehydrateExecution!(context);
+        } catch {
+          throw new ArgumentError(`rehydrated autonomous brain automatic batch item ${index} failed`);
+        }
+        if (!execution || execution.status !== "completed" || execution.plan.task_digest !== taskDigests[index]) throw new ArgumentError(`rehydrated autonomous brain automatic batch item ${index} is not a matching successful execution`);
+        const item: AutonomousBrainAutoBatchItem = { index, status: "succeeded", task_digest: taskDigests[index]!, execution };
+        if (batchItemDigest(item) !== restored.completed_result_digests[position]) throw new ArgumentError(`rehydrated autonomous brain automatic batch item ${index} does not match its checkpoint digest`);
+        items[index] = item;
+      }
+    }
+    let persistChain: Promise<void> = Promise.resolve();
+    const queueCheckpoint = (snapshot: readonly (AutonomousBrainAutoBatchItem | undefined)[], status: "running" | "partial" | "completed"): void => {
+      if (options.checkpointSink === undefined) return;
+      const completed = snapshot.flatMap((item, index) => item?.status === "succeeded" ? [{ index, item }] : []);
+      const checkpoint = makeBrainBatchCheckpoint({ mode: "automatic", jobId, requestDigests, batchInputDigest, semanticRoutingPolicyDigest: null, automaticExecutionPolicyDigest, completed, maxParallelism, stopOnError, status });
+      persistChain = persistChain.then(() => options.checkpointSink!(checkpoint));
+    };
+    queueCheckpoint(items, "running");
+    let nextIndex = 0;
+    let halted = false;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= normalizedInputs.length) return;
+        if (items[index] !== undefined) continue;
+        if (halted) {
+          items[index] = { index, status: "omitted", task_digest: null };
+          continue;
+        }
+        try {
+          const execution = await this.executeAuto(normalizedInputs[index]!, options.execution ?? {});
+          const succeeded = execution.status === "completed";
+          const refused = automaticBatchRefused(execution.status);
+          const item: AutonomousBrainAutoBatchItem = { index, status: succeeded ? "succeeded" : refused ? "refused" : "failed", task_digest: execution.plan.task_digest, execution };
+          items[index] = item;
+          if (succeeded) queueCheckpoint([...items], "running");
+          if (stopOnError && !succeeded) halted = true;
+        } catch (error) {
+          const projection = errorProjection(error);
+          items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
+          if (stopOnError) halted = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(maxParallelism, normalizedInputs.length) }, () => worker()));
+    const normalized = items.map((item, index) => item ?? { index, status: "failed" as const, task_digest: null, error_class: "AutonomousBrainError", failure_code: "missing_batch_result" });
+    const completed = normalized.filter((item) => item.status === "succeeded").length;
+    const failed = normalized.filter((item) => item.status === "failed" || item.status === "refused").length;
+    const omitted = normalized.filter((item) => item.status === "omitted").length;
+    const result: AutonomousBrainAutoBatchResult = {
+      schema: AUTONOMOUS_BRAIN_AUTO_BATCH_SCHEMA,
+      status: batchStatus(completed, failed, omitted),
+      items: normalized,
+      completed_count: completed,
+      failed_count: failed,
+      omitted_count: omitted,
+      max_parallelism: maxParallelism,
+      stop_on_error: stopOnError,
+      batch_digest: batchDigest(normalized),
+      retention: "metadata_only_tasks_and_automatic_connector_values_transient",
+      secret_material: "never_returned",
+    };
+    queueCheckpoint(normalized, result.status === "completed" ? "completed" : "partial");
+    await persistChain;
+    return result;
+  }
+
+  /** Resume automatic batches only after re-reviewing every current provider-free route. */
+  async executeAutoBatchResumableWithLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoBatchResumableOptions,
+  ): Promise<AutonomousBrainAutoBatchResult> {
+    if (options?.execution?.semanticRouting !== undefined && options.execution.semanticRouting !== false) throw new ArgumentError("launch-admitted automatic resumable batch requires provider-free routing; admit semantic routing separately before enabling it");
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic resumable batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const policy = options?.execution ?? {};
+    await this.authorizeAutoBatchLaunchAdmission(inputs, inputs.map(() => policy), admission);
+    return this.executeAutoBatchResumable(inputs, options);
   }
 
   /** Resume a batch only after re-reviewing the complete current route set. */
@@ -2607,11 +2903,12 @@ export class AutonomousBrainBatchJobController {
   constructor(
     readonly brain: AutonomousBrainFacade,
     readonly persistence: AutonomousBrainBatchCheckpointStore,
-    readonly options: { protectedRehydration?: AutonomousBrainBatchProtectedRehydrator } = {},
+    readonly options: { protectedRehydration?: AutonomousBrainBatchProtectedRehydrator; automaticProtectedRehydration?: AutonomousBrainAutoBatchProtectedRehydrator } = {},
   ) {
     if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain batch controller requires an AutonomousBrainFacade");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("autonomous brain batch checkpoint store is malformed");
     if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousBrainBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller protectedRehydration is malformed");
+    if (options.automaticProtectedRehydration !== undefined && !(options.automaticProtectedRehydration instanceof AutonomousBrainAutoBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller automaticProtectedRehydration is malformed");
   }
 
   private requireRestored(): void {
@@ -2667,6 +2964,32 @@ export class AutonomousBrainBatchJobController {
     this.running = true;
     try {
       const batch = await this.brain.executeBatchResumable(inputs, {
+        ...options,
+        ...(rehydrateExecution === undefined ? {} : { rehydrateExecution }),
+        checkpoint: this.checkpoint ?? undefined,
+        checkpointSink: async (checkpoint) => {
+          const verified = validateBrainBatchCheckpoint(checkpoint);
+          await this.persistence.write(verified);
+          this.checkpoint = verified;
+        },
+      });
+      return { controller: this.projection(batch.status, inputs.length, options.jobId), batch };
+    } finally {
+      this.running = false;
+    }
+  }
+
+  /** Run a restart-safe automatic batch while sharing the controller's verified checkpoint. */
+  async runAutomatic(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainAutoBatchControllerRunOptions): Promise<AutonomousBrainAutoBatchControllerRun> {
+    this.requireRestored();
+    this.requireIdle();
+    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain automatic batch controller run requires jobId");
+    const runtimeOptions = options as AutonomousBrainAutoBatchResumableOptions & Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain automatic batch controller owns checkpoint and checkpointSink");
+    const rehydrateExecution = options.rehydrateExecution ?? (this.options.automaticProtectedRehydration === undefined ? undefined : this.options.automaticProtectedRehydration.resolve.bind(this.options.automaticProtectedRehydration));
+    this.running = true;
+    try {
+      const batch = await this.brain.executeAutoBatchResumable(inputs, {
         ...options,
         ...(rehydrateExecution === undefined ? {} : { rehydrateExecution }),
         checkpoint: this.checkpoint ?? undefined,

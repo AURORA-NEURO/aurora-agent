@@ -659,6 +659,26 @@ provider/cross-domain path, while `executeAuto()` is the explicit route -> bluep
 planning path. This makes the chosen autonomy level visible in application code instead of
 silently changing the behavior of existing callers.
 
+For long-running workers, `executeAutoBatchResumable()` extends automatic execution with a
+restart-safe, metadata-only checkpoint. The checkpoint binds the automatic mode, every request
+digest, bounded concurrency controls, and a digest of the complete automatic execution policy,
+including planning, model-selection, approval, connector-observation, tool, structured-output,
+and domain-policy controls. It never stores task text, prompts, connector payloads, provider
+responses, credentials, or callbacks. A restart must provide `rehydrateExecution(context)` for
+each completed item; the facade verifies the automatic envelope, task digest, and result digest
+before it schedules any unfinished item, and it never falls back to direct execution.
+
+`AutonomousBrainBatchJobController.runAutomatic()` owns that lifecycle for a process: restore and
+validate the checkpoint at startup, serialize one active run, atomically write each checkpoint
+through the caller-owned store, and keep the controller projection metadata-only. Protected
+stores can use `AutonomousBrainAutoBatchProtectedRehydrator` with the existing
+`AutonomousProtectedRehydrationBoundary`; its receipt must include the automatic mode and exact
+job/index/request/task/result identity, while tenant scope, authorization, replay fencing, and
+value-digest verification remain enforced by the protected boundary. Direct batch rehydrators
+are rejected for automatic contexts, automatic checkpoints are rejected by direct resumable
+execution, and any policy, control, request, mode, or checkpoint-digest drift fails closed before
+rehydration.
+
 For `executeBatchResumable()`, the checkpoint adds a non-secret digest of the semantic-routing
 thresholds, inherited selection gates, and candidate metadata. A changed policy—or adding
 semantic routing to a legacy deterministic checkpoint—is rejected before rehydration or a new

@@ -1995,6 +1995,7 @@ export {
   AutonomousBrainFacade,
   AutonomousBrainBatchJobController,
   AutonomousBrainBatchProtectedRehydrator,
+  AutonomousBrainAutoBatchProtectedRehydrator,
   InMemoryAutonomousBrainBatchCheckpointStore,
   createAutonomousBrainFacade,
 } from "./autonomous-brain-facade.js";
@@ -2057,12 +2058,16 @@ export type {
   AutonomousBrainBatchResult,
   AutonomousBrainBatchCheckpointJSON,
   AutonomousBrainBatchRehydrationContext,
+  AutonomousBrainBatchMode,
   AutonomousBrainResumableBatchOptions,
+  AutonomousBrainAutoBatchResumableOptions,
   AutonomousBrainBatchCheckpointStore,
   AutonomousBrainBatchControllerStatus,
   AutonomousBrainBatchControllerProjection,
   AutonomousBrainBatchControllerRun,
   AutonomousBrainBatchControllerRunOptions,
+  AutonomousBrainAutoBatchControllerRun,
+  AutonomousBrainAutoBatchControllerRunOptions,
 } from "./autonomous-brain-facade.js";
 export {
   AUTONOMOUS_ACTION_PLAN_SCHEMA,
