@@ -7040,3 +7040,13 @@ __all__ += [
     "ProtocolSimulationAssuranceReceipt",
     "verify_protocol_simulation",
 ]
+
+from .federated_mechanism_control_plane import (
+    FederatedMechanismReceipt,
+    operate_federated_mechanisms,
+)
+
+__all__ += [
+    "FederatedMechanismReceipt",
+    "operate_federated_mechanisms",
+]

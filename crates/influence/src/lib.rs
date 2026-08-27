@@ -140,6 +140,7 @@ pub mod domains;
 pub mod error;
 pub mod exact;
 pub mod federated_continual_interpretation_gateway;
+pub mod federated_mechanism_control_plane;
 pub mod gibbs;
 pub mod interpret;
 pub mod manifest;
@@ -186,6 +187,14 @@ pub use federated_continual_interpretation_gateway::{
     FEATURE_ID as FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
     INPUT_SCHEMA as FEDERATED_CONTINUAL_INTERPRETATION_INPUT_SCHEMA,
     OUTPUT_SCHEMA as FEDERATED_CONTINUAL_INTERPRETATION_OUTPUT_SCHEMA,
+};
+pub use federated_mechanism_control_plane::{
+    capability_manifest as federated_mechanism_capability_manifest,
+    operate as operate_federated_mechanism_control, FederatedMechanismAdmission,
+    FederatedMechanismControlRequest, FederatedMechanismError, FederatedMechanismReceipt,
+    MechanismCandidate, MechanismDecision,
+    FEATURE_ID as FEDERATED_MECHANISM_CONTROL_FEATURE_ID,
+    FEATURE_VERSION as FEDERATED_MECHANISM_CONTROL_VERSION,
 };
 pub use manifest::{omission_group, omission_group_from_analysis, summarise, BoundedSummary};
 pub use measure::{total_variation, AnswerDistribution};

@@ -3484,6 +3484,15 @@ export {
   validateCliProtocolSimulationAssuranceReceipt,
 } from "./research-contracts.js";
 export type { CliProtocolSimulationAssuranceReceipt } from "./research-contracts.js";
+export {
+  FEDERATED_MECHANISM_CONTROL_FEATURE_ID,
+  FEDERATED_MECHANISM_CONTROL_VERSION,
+  FEDERATED_MECHANISM_CONTROL_INPUT_SCHEMA,
+  FEDERATED_MECHANISM_CONTROL_OUTPUT_SCHEMA,
+  federatedMechanismReceiptDigest,
+  validateFederatedMechanismReceipt,
+} from "./research-contracts.js";
+export type { FederatedMechanismReceipt } from "./research-contracts.js";
 
 export {
   CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,
