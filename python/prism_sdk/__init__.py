@@ -7210,3 +7210,13 @@ __all__ += [
     "StatisticalAnalysisWorkflowRun",
     "assure_statistical_analysis_workflow",
 ]
+
+from .quality_control_workflow_fabric import (
+    QualityControlWorkflowRun,
+    assure_quality_control_workflow,
+)
+
+__all__ += [
+    "QualityControlWorkflowRun",
+    "assure_quality_control_workflow",
+]

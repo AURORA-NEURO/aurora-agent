@@ -3984,3 +3984,12 @@ export {
   validateExamplesStatisticalAnalysisWorkflowRun,
 } from "./research-contracts.js";
 export type { ExamplesStatisticalAnalysisWorkflowRun } from "./research-contracts.js";
+export {
+  CLI_QUALITY_CONTROL_WORKFLOW_FEATURE_ID,
+  CLI_QUALITY_CONTROL_WORKFLOW_CONTRACT_VERSION,
+  CLI_QUALITY_CONTROL_WORKFLOW_INPUT_SCHEMA,
+  CLI_QUALITY_CONTROL_WORKFLOW_OUTPUT_SCHEMA,
+  cliQualityControlWorkflowRunDigest,
+  validateCliQualityControlWorkflowRun,
+} from "./research-contracts.js";
+export type { CliQualityControlWorkflowRun } from "./research-contracts.js";
