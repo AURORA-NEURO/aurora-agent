@@ -93,6 +93,12 @@ from .autonomous_cross_domain_response import (
     AutonomousCrossDomainResponseAssessment,
     assess_autonomous_cross_domain_response_set,
 )
+from .autonomous_recovery import (
+    AutonomousRecoveryHandoffLedger,
+    AutonomousRecoveryObservation,
+    AutonomousRecoveryPlan,
+    plan_autonomous_recovery,
+)
 from .autonomous_workflow_response import (
     evaluate_autonomous_workflow_stage_response,
     replay_autonomous_workflow_stage_response_evaluation,
@@ -18892,6 +18898,31 @@ class AutonomousAgent:
             )
         except (ArgumentError, ValueError, TypeError) as error:
             raise BrainRunError("provider receipt evaluation failed") from error
+
+    def plan_recovery(self, observation: Mapping[str, Any] | AutonomousRecoveryObservation) -> AutonomousRecoveryPlan:
+        """Build a deterministic recovery plan from a caller-owned failure projection."""
+
+        try:
+            return plan_autonomous_recovery(observation)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("autonomous recovery observation was rejected") from error
+
+    def submit_recovery_handoff(
+        self,
+        ledger: AutonomousRecoveryHandoffLedger,
+        observation: Mapping[str, Any] | AutonomousRecoveryObservation,
+        *,
+        run_id_digest: str,
+        attempt: int = 0,
+    ) -> dict[str, Any]:
+        """Queue a recovery plan in caller-owned metadata without retrying or dispatching it."""
+
+        if not isinstance(ledger, AutonomousRecoveryHandoffLedger):
+            raise BrainRunError("autonomous recovery handoff requires an AutonomousRecoveryHandoffLedger")
+        try:
+            return ledger.submit(self.plan_recovery(observation), run_id_digest=run_id_digest, attempt=attempt)
+        except (ArgumentError, TypeError, ValueError) as error:
+            raise BrainRunError("autonomous recovery handoff was rejected") from error
 
     def readiness(
         self,

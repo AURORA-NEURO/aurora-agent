@@ -1964,3 +1964,13 @@ all twelve domains. Reconciliation outranks retry, missing credentials remain a 
 and exhausted/unclassified failures stop and escalate. The plan is digest- and retention-validated
 and contains no task text, prompts, provider values, credentials, tool arguments, or effect data;
 it is a guidance handoff only and does not execute recovery or grant authority.
+
+The recovery path now also has a durable review process in both SDKs. `AutonomousRecoveryHandoffLedger`
+accepts idempotent plan/run-digest/attempt submissions, retains only bounded metadata, and exposes
+revision-fenced decisions for retry approval, uncertain-effect reconciliation, escalation, and
+closure. Credential collection cannot be bypassed by retry approval, reconciliation cannot be
+downgraded into a provider retry, and all transitions are independently digest-bound. Canonical
+snapshot persistence and optional compare-and-swap coordinators restore the queue without replaying
+provider work. The control plane remains intentionally non-executing: deployment-owned request
+rehydration, provider/source/tool/effect authority, external reconciliation, reviewer identity,
+encryption, tenant isolation, retention, leases, and evaluator settlement are still required.

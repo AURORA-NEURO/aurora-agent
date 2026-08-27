@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 
 from prism_sdk import (
     AUTONOMOUS_RECOVERY_ACTIONS,
+    AutonomousAgent,
     AutonomousRecoveryPlan,
+    AutonomousRecoveryHandoffLedger,
+    AutonomousRecoveryHandoffPersistenceCoordinator,
+    LLMRuntime,
+    TransactionalJsonAutonomousRecoveryHandoffPersistence,
     plan_autonomous_recovery,
+    validate_autonomous_recovery_handoff,
+    validate_autonomous_recovery_handoff_snapshot,
     validate_autonomous_recovery_plan,
 )
 from prism_sdk.domain_tools import AUTONOMOUS_DOMAIN_NAMES
@@ -109,3 +117,101 @@ def test_recovery_plans_reject_secret_shaped_observations_and_tampering() -> Non
         plan_autonomous_recovery({"domain": "coding", "capability": "review", "status": "failed", "response_quality_passed": "yes"})
     assert "complete" in AUTONOMOUS_RECOVERY_ACTIONS
     assert isinstance(plan, AutonomousRecoveryPlan)
+
+
+def test_recovery_handoffs_are_idempotent_review_gated_and_cover_every_domain() -> None:
+    ledger = AutonomousRecoveryHandoffLedger()
+    for index, domain in enumerate(AUTONOMOUS_DOMAIN_NAMES, start=1):
+        plan = plan_autonomous_recovery({"domain": domain, "capability": "provider_call", "status": "failed", "failure_code": "provider_error"})
+        result = ledger.submit(plan, run_id_digest=str(index).zfill(64), attempt=0)
+        assert result["status"] == "accepted"
+        assert result["handoff"]["status"] == "queued"
+        assert result["handoff"]["domain"] == domain
+        assert validate_autonomous_recovery_handoff(result["handoff"])["handoff_digest"] == result["handoff"]["handoff_digest"]
+        assert "private task" not in str(result["handoff"])
+        assert "gsk-" not in str(result["handoff"])
+
+    retry_plan = plan_autonomous_recovery({"domain": "coding", "capability": "provider_call", "status": "failed", "retryable": True, "retry_count": 0, "max_retries": 2})
+    accepted = ledger.submit(retry_plan, run_id_digest="a" * 64, attempt=0)
+    duplicate = ledger.submit(retry_plan, run_id_digest="a" * 64, attempt=0)
+    assert duplicate["status"] == "duplicate"
+    with pytest.raises(ArgumentError, match="stale"):
+        ledger.review(accepted["handoff"]["handoff_id"], decision="approve_retry", expected_revision=99, reviewer_digest="b" * 64)
+    reviewed = ledger.review(accepted["handoff"]["handoff_id"], decision="approve_retry", expected_revision=1, reviewer_digest="b" * 64)
+    assert reviewed["handoff"]["status"] == "retry_approved"
+    assert reviewed["handoff"]["selected_action"] == "retry_provider"
+    with pytest.raises(ArgumentError, match="already reviewed"):
+        ledger.review(accepted["handoff"]["handoff_id"], decision="close", expected_revision=2, reviewer_digest="b" * 64)
+    snapshot = ledger.snapshot()
+    assert validate_autonomous_recovery_handoff_snapshot(snapshot)["snapshot_digest"] == snapshot["snapshot_digest"]
+    restored = AutonomousRecoveryHandoffLedger()
+    restored.restore(snapshot)
+    assert restored.get(accepted["handoff"]["handoff_id"]).handoff_digest == reviewed["handoff"]["handoff_digest"]
+    assert len(restored.entries(status="retry_approved", domain="coding")) == 1
+
+
+def test_recovery_handoff_decisions_fail_closed_for_credentials_reconcile_and_cas() -> None:
+    ledger = AutonomousRecoveryHandoffLedger()
+    credential = ledger.submit(
+        plan_autonomous_recovery({"domain": "science", "capability": "provider_call", "status": "failed", "failure_code": "credential"}),
+        run_id_digest="c" * 64,
+        attempt=0,
+    )
+    with pytest.raises(ArgumentError, match="does not authorize"):
+        ledger.review(credential["handoff"]["handoff_id"], decision="approve_retry", expected_revision=1, reviewer_digest="d" * 64)
+    uncertain = ledger.submit(
+        plan_autonomous_recovery({"domain": "operations", "capability": "incident_response", "status": "failed", "reconciliation_required": True}),
+        run_id_digest="e" * 64,
+        attempt=0,
+    )
+    reconciled = ledger.review(uncertain["handoff"]["handoff_id"], decision="approve_reconciliation", expected_revision=1, reviewer_digest="f" * 64)
+    assert reconciled["handoff"]["status"] == "reconciliation_required"
+    assert reconciled["handoff"]["selected_action"] == "reconcile_external_effect"
+
+    class Store:
+        value: str | None = None
+
+        def read(self) -> str | None:
+            return self.value
+
+        def write(self, value: str) -> None:
+            self.value = value
+
+        def write_if_unchanged(self, expected: str | None, value: str) -> bool:
+            current = None if self.value is None else json.loads(self.value)["snapshot_digest"]
+            if current != expected:
+                return False
+            self.value = value
+            return True
+
+    persistence = TransactionalJsonAutonomousRecoveryHandoffPersistence(Store())
+    first = AutonomousRecoveryHandoffLedger()
+    first_coordinator = AutonomousRecoveryHandoffPersistenceCoordinator(first, persistence)
+    assert first_coordinator.restore() is None
+    first_coordinator.flush()
+    second = AutonomousRecoveryHandoffLedger()
+    second_coordinator = AutonomousRecoveryHandoffPersistenceCoordinator(second, persistence)
+    second_coordinator.restore()
+    first.submit(plan_autonomous_recovery({"domain": "data", "capability": "audit", "status": "failed"}), run_id_digest="1" * 64, attempt=0)
+    first_coordinator.flush()
+    second.submit(plan_autonomous_recovery({"domain": "browser", "capability": "search", "status": "failed"}), run_id_digest="2" * 64, attempt=0)
+    with pytest.raises(ArgumentError, match="compare-and-swap"):
+        second_coordinator.flush()
+    forged = copy.deepcopy(first.snapshot())
+    forged["entries"][0]["status"] = "escalated"
+    with pytest.raises(ArgumentError, match="digest|inconsistent"):
+        validate_autonomous_recovery_handoff_snapshot(forged)
+
+
+def test_high_level_agent_exposes_recovery_without_widening_execution_authority() -> None:
+    agent = AutonomousAgent(object(), LLMRuntime())
+    ledger = AutonomousRecoveryHandoffLedger()
+    result = agent.submit_recovery_handoff(
+        ledger,
+        {"domain": "multimodal", "capability": "alignment", "status": "failed", "failure_code": "provider_error"},
+        run_id_digest="9" * 64,
+        attempt=1,
+    )
+    assert result["handoff"]["domain"] == "multimodal"
+    assert result["handoff"]["status"] == "queued"
+    assert agent.plan_recovery({"domain": "multimodal", "capability": "alignment", "status": "completed"}).next_action == "complete"

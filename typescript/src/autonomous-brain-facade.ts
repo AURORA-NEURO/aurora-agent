@@ -108,6 +108,13 @@ import type {
   AutonomousActionPlanApproval,
   AutonomousActionPlanJSON,
 } from "./autonomous-action-plan.js";
+import {
+  planAutonomousRecovery,
+  AutonomousRecoveryHandoffLedger,
+  type AutonomousRecoveryHandoffSubmissionResult,
+  type AutonomousRecoveryObservation,
+  type AutonomousRecoveryPlan,
+} from "./autonomous-recovery.js";
 
 /**
  * The application-facing composition boundary for the autonomous brain.
@@ -1143,6 +1150,21 @@ export class AutonomousBrainFacade {
     const request = validateRequest(input);
     const route = await this.agent.route(request.task, { domain: request.domain, hints: request.hints, allowCrossDomain: request.allow_cross_domain ?? true });
     return this.buildPlanForRoute(request, route, null);
+  }
+
+  /** Convert a caller-owned execution failure projection into a deterministic recovery plan. */
+  planRecovery(observation: AutonomousRecoveryObservation): AutonomousRecoveryPlan {
+    return planAutonomousRecovery(observation);
+  }
+
+  /** Submit a recovery plan to a caller-owned review ledger without dispatching recovery work. */
+  submitRecoveryHandoff(
+    ledger: AutonomousRecoveryHandoffLedger,
+    input: { observation: AutonomousRecoveryObservation; run_id_digest: string; attempt?: number },
+  ): AutonomousRecoveryHandoffSubmissionResult {
+    if (!(ledger instanceof AutonomousRecoveryHandoffLedger)) throw new ArgumentError("autonomous brain recovery handoff requires an AutonomousRecoveryHandoffLedger");
+    if (!input || typeof input !== "object") throw new ArgumentError("autonomous brain recovery handoff input must be an object");
+    return ledger.submit({ plan: this.planRecovery(input.observation), run_id_digest: input.run_id_digest, attempt: input.attempt ?? 0 });
   }
 
   /**

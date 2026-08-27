@@ -241,6 +241,46 @@ operator record. Recovery planning never invokes a provider, resolves a key, exe
 settles learning, or reconciles an external effect; it makes the next autonomous decision
 inspectable without turning guidance into authority.
 
+### Recovery handoff control plane
+
+The planner is now backed by an explicit review queue in both SDKs. `AutonomousRecoveryHandoffLedger`
+accepts a validated plan together with only a digest of the caller's private run identity and a
+bounded attempt number. Repeating the same run/attempt/plan is idempotent; a queue record never
+stores the observation, task, prompt, provider request/response, credential, tool arguments,
+effect value, or raw exception. Every retained handoff carries its plan digest, domain, capability,
+retry counters, recommended action, review revision, transition digest, and an independent
+handoff digest.
+
+```typescript
+const ledger = new AutonomousRecoveryHandoffLedger();
+const queued = ledger.submit({
+  plan: recovery,
+  run_id_digest: runIdDigest,
+  attempt: 0,
+});
+const reviewed = ledger.review({
+  handoff_id: queued.handoff.handoff_id,
+  decision: "approve_retry",
+  expected_revision: 1,
+  reviewer_digest: reviewerIdentityDigest,
+});
+// reviewed.handoff.status === "retry_approved"
+// The caller must still rehydrate the transient request and invoke its normal gates.
+```
+
+Review is compare-and-swap fenced: only a queued row at the caller's expected revision can move
+to `retry_approved`, `reconciliation_required`, `escalated`, or `closed`. A credential-collection
+handoff cannot be approved as a retry; an uncertain-effect handoff cannot be downgraded to a
+provider retry. The ledger never performs the selected action, and a `reconciliation_required`
+row is not evidence that an external effect succeeded or failed. `snapshot()` / `restore()` provide
+canonical, hash-chained metadata-only persistence, while
+`AutonomousRecoveryHandoffPersistenceCoordinator` adds caller-owned JSON storage and optional
+compare-and-swap writes. Before sending a record across a worker or service boundary, call
+`validateAutonomousRecoveryHandoff(...)` or
+`validateAutonomousRecoveryHandoffSnapshot(...)` (and the snake-case Python equivalents).
+This gives deployments a real failure process without turning a safety handoff into an implicit
+retry engine or an external truth oracle.
+
 Semantic provider routing is covered by the same boundary. `route_with_provider`,
 `prepare_auto_with_provider`, and Python `run_auto(..., semantic_routing=True)` perform a
 provider-free cross-domain admission before model selection or classifier invocation. A strict
