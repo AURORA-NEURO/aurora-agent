@@ -217,6 +217,15 @@ opaque credential handles, approval callbacks, memory, tools, and policy at exec
 twelve domains, including `cross_domain`, use the same facade path; no resolver or provider value
 is copied into goal or loop metadata.
 
+For one metadata-only observability record across the complete batch, call
+`runtime.run_with_trace(trace_store=trace_store, run_id="goal-batch-001", ...)`. The trace spans
+goal planning, rehydrated worker execution, selector/provider lifecycle, evaluator settlement,
+learning metadata, and the final loop status across all twelve domains. The returned
+`AutonomousGoalAgentTracedRunResult.result` stays live in the initiating process; its
+`to_dict()` projection, trace summary, and trace snapshot retain only digests, counters, bounded
+identifiers, and failure metadata. Task text, prompts, parameters, credentials, provider
+responses, and live results are never serialized, and caller observers/callbacks remain composed.
+
 For deployments that already have an operator-approved action record, add an
 `action_handoff_resolver(goal, row, task)` to the runtime (or to
 `run_goal_control_loop`). It may return the verified handoff directly, or

@@ -3346,6 +3346,8 @@ export type {
   AutonomousGoalRecoveryStatus,
 } from "./autonomous-goal-recovery.js";
 export {
+  AUTONOMOUS_GOAL_AGENT_TRACE_RETENTION,
+  AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA,
   AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION,
   AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA,
   AutonomousGoalAgentRuntime,
@@ -3354,8 +3356,11 @@ export type {
   AutonomousGoalAgentActionHandoffBinding,
   AutonomousGoalAgentActionHandoffRequest,
   AutonomousGoalAgentActionHandoffResolver,
+  AutonomousGoalAgentLoopRunOptions,
   AutonomousGoalAgentRunOptionsFactory,
   AutonomousGoalAgentTaskResolver,
+  AutonomousGoalAgentTraceOptions,
+  AutonomousGoalAgentTracedRunResult,
 } from "./autonomous-goal-agent.js";
 export {
   AUTONOMOUS_MODEL_HEALTH_EVENT_SCHEMA,

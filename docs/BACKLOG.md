@@ -18,6 +18,15 @@ omissions, and aggregate completion while persisting only digests and bounded fa
 Resumable checkpoint recovery remains a separate explicit boundary so restoring observability can
 never authorize provider, tool, source, learner, or effect work.
 
+The long-horizon goal-agent bridge now has matching TypeScript/Python `runWithTrace`/
+`run_with_trace` controls. One trace covers the bounded goal plan, per-goal execution identity,
+selector/provider lifecycle, evaluator settlement, online-learning summary, and terminal control
+status across the twelve-domain catalogue. It composes caller observers, propagates cross-domain
+coverage, supports run IDs and recovery-compatible checkpoints, and keeps task text, prompts,
+parameters, credentials, responses, evidence, and live results out of serialized output. Remaining
+deployment work is trace-store durability/CAS across hosts, operator query and retention policy,
+evaluator/source authority, and external effect reconciliation.
+
 The TypeScript application-facing brain now exposes the durable mission replanning kernel through
 `AutonomousBrainFacade.runMissionReplanCycle()`, with provider-free launch-admission checks and
 metadata-only traced variants. The facade validates all mission step domains and exact tool

@@ -7088,6 +7088,19 @@ provider output enters the goal, schedule, worker, control, or evaluator project
 the loop usable as an actual agent service while retaining the caller's authority over keys and
 effect approvals.
 
+The long-horizon facade also exposes `runWithTrace` in TypeScript and `run_with_trace` in Python.
+These methods establish one append-only, hash-chained trace for the entire scheduler/worker/
+evaluator/learner control loop instead of forcing operators to correlate independent provider
+traces. The trace begins with a digest of bounded goal identities, emits per-goal plan and
+evaluation-settlement events, composes the normal selector and provider observers, and closes with
+learning counters plus an explicit `completed`, `partial`, `paused`, `failed`, or `unknown`
+status. Cross-domain subtask domains are added to event coverage only after validating them against
+the built-in catalogue. The task resolver, options factory, prompts, provider payloads,
+credentials, evaluator evidence, and live execution results remain outside the serialized trace;
+the direct result property is intentionally caller-owned. The run ID can also be passed through
+the ordinary control-loop API, so trace identity, checkpoints, recovery, and learner state can be
+joined without making observability an authorization boundary.
+
 When a deployment uses an operator review ledger, configure `action_handoff_resolver` alongside the
 task and execution-options factories. The resolver can return a plain verified handoff when the
 goal domain is sufficient, or `{handoff, request}` when a cross-domain replay needs transient

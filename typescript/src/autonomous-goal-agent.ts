@@ -43,9 +43,19 @@ import type { AutonomousGoalScheduleRow } from "./autonomous-goal-scheduler.js";
 import type { JsonObject } from "./types.js";
 import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
 import { digestJsonSync } from "./tooling.js";
+import {
+  autonomousRunTraceStatus,
+  AutonomousRunTraceSession,
+  type AutonomousRunTraceStatus,
+  type AutonomousRunTraceStore,
+  type AutonomousRunTraceSummary,
+} from "./autonomous-run-trace.js";
+import type { ProviderInvocationObserver, AutonomousModelSelectionTraceEventCallback } from "./llm.js";
 
 export const AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA = "bioprism-autonomous-goal-agent-runtime/0.1" as const;
 export const AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION = "metadata_only_goal_agent_bridge;tasks_prompts_parameters_credentials_and_results_not_retained" as const;
+export const AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA = "bioprism-autonomous-goal-agent-trace/0.1" as const;
+export const AUTONOMOUS_GOAL_AGENT_TRACE_RETENTION = "metadata_only_goal_control_trace;goal_task_prompts_parameters_credentials_and_results_not_retained" as const;
 
 export type AutonomousGoalAgentTaskResolver = (goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow) => string | Promise<string>;
 export type AutonomousGoalAgentRunOptionsFactory = (goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow) => Record<string, unknown> | Promise<Record<string, unknown>>;
@@ -59,6 +69,30 @@ export type AutonomousGoalAgentActionHandoffResolver = (
   row: AutonomousGoalScheduleRow,
   task: string,
 ) => AutonomousActionDispatchHandoff | AutonomousGoalAgentActionHandoffBinding | null | undefined | Promise<AutonomousActionDispatchHandoff | AutonomousGoalAgentActionHandoffBinding | null | undefined>;
+
+export interface AutonomousGoalAgentLoopRunOptions {
+  schedule_options?: Record<string, unknown>;
+  options_factory?: AutonomousGoalControlLoopOptionsFactory;
+  max_cycles?: number;
+  max_total_runs?: number;
+  run_id?: string;
+  resume_snapshot?: AutonomousGoalControlLoopCheckpoint | null;
+  checkpoint?: (snapshot: AutonomousGoalControlLoopCheckpoint) => unknown | Promise<unknown>;
+}
+
+export interface AutonomousGoalAgentTraceOptions extends Omit<AutonomousGoalAgentLoopRunOptions, "run_id"> {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+export interface AutonomousGoalAgentTracedRunResult {
+  schema: typeof AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA;
+  /** The live loop result is available to the initiating caller only. */
+  result: AutonomousGoalControlLoopResult;
+  trace: AutonomousRunTraceSummary;
+  retention: typeof AUTONOMOUS_GOAL_AGENT_TRACE_RETENTION;
+  secret_material: "never_returned";
+}
 
 function fail(message: string): never {
   throw new ArgumentError(`autonomous goal agent runtime ${message}`);
@@ -84,6 +118,60 @@ function runOptions(value: unknown): Record<string, unknown> {
 function subtasks(value: unknown): readonly AutonomousCrossDomainSubtask[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 64 || value.some((item) => !isObject(item))) fail("cross-domain run options require 1..64 subtasks");
   return value as unknown as readonly AutonomousCrossDomainSubtask[];
+}
+
+function composeGoalInvocationObservers(...observers: readonly (ProviderInvocationObserver | undefined)[]): ProviderInvocationObserver | undefined {
+  const active = observers.filter((observer): observer is ProviderInvocationObserver => observer !== undefined);
+  if (!active.length) return undefined;
+  return {
+    before: async (metadata) => {
+      for (const observer of active) await observer.before?.(metadata);
+    },
+    after: async (metadata, outcome) => {
+      for (const observer of active) await observer.after?.(metadata, outcome);
+    },
+  };
+}
+
+function composeGoalSelectionCallbacks(...callbacks: readonly (AutonomousModelSelectionTraceEventCallback | undefined)[]): AutonomousModelSelectionTraceEventCallback | undefined {
+  const active = callbacks.filter((callback): callback is AutonomousModelSelectionTraceEventCallback => callback !== undefined);
+  if (!active.length) return undefined;
+  return async (event) => {
+    for (const callback of active) await callback(event);
+  };
+}
+
+function goalTraceDomains(goal: AutonomousGoalRecord, options?: Record<string, unknown>): AutonomousDomainName[] {
+  const domains: AutonomousDomainName[] = [goal.domain as AutonomousDomainName];
+  if (goal.domain === "cross_domain" && Array.isArray(options?.subtasks)) {
+    for (const item of options.subtasks) {
+      if (!isObject(item) || typeof item.domain !== "string") continue;
+      if ((AUTONOMOUS_DOMAIN_NAMES as readonly string[]).includes(item.domain)) domains.push(item.domain as AutonomousDomainName);
+    }
+  }
+  return [...new Set(domains)];
+}
+
+function goalTraceStatus(value: unknown): AutonomousRunTraceStatus {
+  const status = isObject(value) && typeof value.status === "string" ? value.status : "unknown";
+  return autonomousRunTraceStatus(status);
+}
+
+function controlLoopTraceStatus(result: AutonomousGoalControlLoopResult): AutonomousRunTraceStatus {
+  const count = (name: string): number => {
+    const value = result.status_counts[name];
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  };
+  const completed = count("completed");
+  const paused = count("paused");
+  const blocked = count("blocked");
+  const failed = count("failed");
+  if (failed > 0 && completed === 0 && paused === 0 && blocked === 0) return "failed";
+  if (paused > 0 || blocked > 0) return completed > 0 ? "partial" : "paused";
+  if (failed > 0) return completed > 0 ? "partial" : "failed";
+  if (result.stop_reason === "all_terminal") return "completed";
+  if (completed > 0) return "partial";
+  return result.stop_reason === "no_admissible_work" ? "paused" : "unknown";
 }
 
 const ACTION_HANDOFF_REQUEST_KEYS = new Set(["domain", "capability", "hints", "allow_cross_domain", "context", "connector"]);
@@ -135,6 +223,11 @@ export class AutonomousGoalAgentRuntime {
   readonly loop: AutonomousGoalControlLoop;
   readonly recovery: AutonomousGoalRecoveryCoordinator | undefined;
   readonly batch_id_prefix: string;
+  private trace_context: {
+    session: AutonomousRunTraceSession;
+    observer: ProviderInvocationObserver;
+    selection_event_callback: AutonomousModelSelectionTraceEventCallback;
+  } | undefined;
 
   constructor(options: {
     agent: AutonomousAgent;
@@ -213,22 +306,69 @@ export class AutonomousGoalAgentRuntime {
 
   private async execute(request: AutonomousGoalExecutionRequest): Promise<unknown> {
     const options = await this.executionOptions(request.goal, request.schedule_row);
+    const traceContext = this.trace_context;
+    const traceDomains = goalTraceDomains(request.goal, options);
+    const planDigest = traceContext === undefined ? null : digestJsonSync({
+      schema: AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA,
+      goal_id: request.goal.goal_id,
+      task_digest: request.goal.task_digest,
+      domain: request.goal.domain,
+      capability: request.goal.capability,
+      risk_class: request.goal.risk_class,
+      attempt: request.goal.attempt,
+      max_attempts: request.goal.max_attempts,
+      revision: request.goal.revision,
+      schedule_digest: request.schedule_digest,
+    });
+    if (traceContext !== undefined) {
+      await traceContext.session.record({
+        phase: "plan_compiled",
+        status: "running",
+        domains: traceDomains,
+        plan_digest: planDigest,
+        detail_digest: digestJsonSync({
+          goal_id: request.goal.goal_id,
+          attempt: request.goal.attempt,
+          revision: request.goal.revision,
+          execution_binding_digest: request.execution_binding_digest,
+        }),
+      });
+    }
+    const tracedOptions = traceContext === undefined
+      ? options
+      : {
+        ...options,
+        observer: composeGoalInvocationObservers(options.observer as ProviderInvocationObserver | undefined, traceContext.observer),
+        selectionEventCallback: composeGoalSelectionCallbacks(options.selectionEventCallback as AutonomousModelSelectionTraceEventCallback | undefined, traceContext.selection_event_callback),
+    };
     const binding = actionHandoff(request.parameters.action_handoff, request.goal);
+    let result: unknown;
     if (binding !== undefined) {
       if (this.brain === undefined) fail("action handoff execution requires a brain facade");
-      return this.brain.executeActionHandoff({ ...binding.request, task: request.task }, binding.handoff, options as AutonomousActionHandoffExecutionOptions);
+      result = await this.brain.executeActionHandoff({ ...binding.request, task: request.task }, binding.handoff, tracedOptions as AutonomousActionHandoffExecutionOptions);
+    } else if (request.goal.domain === "cross_domain") {
+      const { subtasks: childSubtasks, ...rest } = tracedOptions;
+      result = await this.agent.runCrossDomain(request.task, { ...rest, subtasks: childSubtasks } as unknown as AutonomousCrossDomainRunOptions);
+    } else {
+      const domain = request.goal.domain as AutonomousDomainName;
+      if (!(AUTONOMOUS_DOMAIN_NAMES as readonly string[]).includes(domain)) fail(`goal ${request.goal.goal_id} has an unsupported autonomous domain`);
+      result = await this.agent.run(request.task, { ...tracedOptions, domain } as unknown as AutonomousRunOptions);
     }
-    if (request.goal.domain === "cross_domain") {
-      const { subtasks: childSubtasks, ...rest } = options;
-      return this.agent.runCrossDomain(request.task, { ...rest, subtasks: childSubtasks } as unknown as AutonomousCrossDomainRunOptions);
+    if (traceContext !== undefined) {
+      const resultStatus = isObject(result) && typeof result.status === "string" ? result.status : "unknown";
+      await traceContext.session.record({
+        phase: "evaluation_settled",
+        status: goalTraceStatus(result),
+        domains: traceDomains,
+        plan_digest: planDigest,
+        detail_digest: digestJsonSync({ goal_id: request.goal.goal_id, attempt: request.goal.attempt, result_status: resultStatus }),
+      });
     }
-    const domain = request.goal.domain as AutonomousDomainName;
-    if (!(AUTONOMOUS_DOMAIN_NAMES as readonly string[]).includes(domain)) fail(`goal ${request.goal.goal_id} has an unsupported autonomous domain`);
-    return this.agent.run(request.task, { ...options, domain } as unknown as AutonomousRunOptions);
+    return result;
   }
 
   metadata(): Record<string, unknown> {
-    return { schema: AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA, batch_id_prefix: this.batch_id_prefix, domain_count: AUTONOMOUS_DOMAIN_NAMES.length, domains: [...AUTONOMOUS_DOMAIN_NAMES], execution_surface: this.action_handoff_resolver === undefined ? "autonomous_agent_facade" : "autonomous_goal_action_handoff_facade", action_handoff_execution: this.action_handoff_resolver === undefined ? "not_configured" : "verified_handoff_replay_before_run_boundary", task_rehydration: this.protected_rehydration === undefined ? "caller_task_resolver_precedence" : "protected_receipt_adapter_fallback", recovery_execution: this.recovery === undefined ? "caller_composed" : "ordered_journal_then_control_checkpoint", retention: AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION, secret_material: "never_returned" };
+    return { schema: AUTONOMOUS_GOAL_AGENT_RUNTIME_SCHEMA, batch_id_prefix: this.batch_id_prefix, domain_count: AUTONOMOUS_DOMAIN_NAMES.length, domains: [...AUTONOMOUS_DOMAIN_NAMES], execution_surface: this.action_handoff_resolver === undefined ? "autonomous_agent_facade" : "autonomous_goal_action_handoff_facade", action_handoff_execution: this.action_handoff_resolver === undefined ? "not_configured" : "verified_handoff_replay_before_run_boundary", task_rehydration: this.protected_rehydration === undefined ? "caller_task_resolver_precedence" : "protected_receipt_adapter_fallback", recovery_execution: this.recovery === undefined ? "caller_composed" : "ordered_journal_then_control_checkpoint", trace_execution: "metadata_only_goal_control_trace", retention: AUTONOMOUS_GOAL_AGENT_RUNTIME_RETENTION, secret_material: "never_returned" };
   }
 
   async restore(options: { now_ns?: number } = {}): Promise<AutonomousGoalRecoveryReport> {
@@ -236,12 +376,83 @@ export class AutonomousGoalAgentRuntime {
     return this.recovery.restore(options);
   }
 
-  run(options: { schedule_options?: Record<string, unknown>; options_factory?: AutonomousGoalControlLoopOptionsFactory; max_cycles?: number; max_total_runs?: number; checkpoint?: (snapshot: AutonomousGoalControlLoopCheckpoint) => unknown | Promise<unknown> } = {}): Promise<AutonomousGoalControlLoopResult> {
+  run(options: AutonomousGoalAgentLoopRunOptions = {}): Promise<AutonomousGoalControlLoopResult> {
     if (this.recovery === undefined) return this.loop.run(options);
     if (options.checkpoint !== undefined) fail("checkpoint is owned by the recovery coordinator");
     return this.recovery.resume(this.loop, {
       ...options,
       checkpoint: (snapshot: AutonomousGoalControlLoopCheckpoint) => this.recovery!.checkpoint(snapshot),
     });
+  }
+
+  /**
+   * Run the complete scheduler/worker/evaluator/learner loop under one metadata-only trace.
+   * Goal task text, transient run options, provider payloads, credentials, and live results
+   * remain caller-owned and are intentionally absent from the serialized envelope.
+   */
+  async runWithTrace(options: AutonomousGoalAgentTraceOptions): Promise<AutonomousGoalAgentTracedRunResult> {
+    if (!options || typeof options !== "object") fail("runWithTrace options must be an object");
+    if (!options.traceStore || typeof options.traceStore.append !== "function" || typeof options.traceStore.events !== "function") fail("runWithTrace requires a trace store");
+    if (this.trace_context !== undefined) fail("runWithTrace cannot be re-entered while another trace is active");
+    const goals = this.ledger.list({ limit: 512 });
+    const unsupported = goals.filter((goal) => !(AUTONOMOUS_DOMAIN_NAMES as readonly string[]).includes(goal.domain));
+    if (unsupported.length > 0) fail(`runWithTrace found unsupported goal domains: ${unsupported.map((goal) => goal.domain).join(", ")}`);
+    const domains = goals.length
+      ? [...new Set(goals.map((goal) => goal.domain as AutonomousDomainName))]
+      : ["cross_domain" as AutonomousDomainName];
+    const goalMetadata = goals.map((goal) => ({
+      goal_id: goal.goal_id,
+      task_digest: goal.task_digest,
+      domain: goal.domain,
+      capability: goal.capability,
+      risk_class: goal.risk_class,
+      status: goal.status,
+      attempt: goal.attempt,
+      max_attempts: goal.max_attempts,
+      revision: goal.revision,
+    }));
+    const taskDigest = digestJsonSync({ schema: AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA, run_id: options.runId, goals: goalMetadata });
+    const planDigest = digestJsonSync({ schema: AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA, batch_id_prefix: this.batch_id_prefix, goals: goalMetadata });
+    const session = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains });
+    await session.started(digestJsonSync({ goal_count: goalMetadata.length, domain_count: domains.length }));
+    await session.record({ phase: "plan_compiled", status: "running", domains, plan_digest: planDigest, detail_digest: digestJsonSync({ goal_count: goalMetadata.length, domain_count: domains.length }) });
+    this.trace_context = {
+      session,
+      observer: session.providerObserver(),
+      selection_event_callback: session.selectionEventCallback(),
+    };
+    try {
+      const { traceStore: _traceStore, runId: _runId, ...loopOptions } = options;
+      const result = await this.run({ ...loopOptions, run_id: options.runId });
+      await session.record({
+        phase: "learning_prepared",
+        status: "running",
+        domains,
+        plan_digest: planDigest,
+        detail_digest: digestJsonSync({
+          total_selected: result.total_selected,
+          total_claimed: result.total_claimed,
+          total_runs: result.total_runs,
+          evaluation_count: result.evaluation_count,
+          evaluation_digest: result.evaluation_digest,
+          learning_state_digest: result.learning_state_digest,
+          stop_reason: result.stop_reason,
+        }),
+      });
+      await session.complete({ status: controlLoopTraceStatus(result), domains, plan_digest: planDigest, detail_digest: digestJsonSync(result.toJSON()) });
+      return {
+        schema: AUTONOMOUS_GOAL_AGENT_TRACE_SCHEMA,
+        result,
+        trace: await session.summary(),
+        retention: AUTONOMOUS_GOAL_AGENT_TRACE_RETENTION,
+        secret_material: "never_returned",
+      };
+    } catch (error) {
+      const failureClass = error instanceof Error ? error.constructor.name : "UnknownError";
+      await session.fail({ failure_class: failureClass, failure_code: "goal_control_loop_error", detail_digest: digestJsonSync({ failure_class: failureClass }) }).catch(() => undefined);
+      throw error;
+    } finally {
+      this.trace_context = undefined;
+    }
   }
 }

@@ -27,6 +27,7 @@ import {
   CredentialStore,
   InMemoryAutonomousCycleReplanStateStore,
   InMemoryAutonomousGoalLedger,
+  InMemoryAutonomousRunTraceStore,
   JsonAutonomousGoalPersistence,
   JsonAutonomousGoalWorkerJournalPersistence,
   LLMRuntime,
@@ -681,6 +682,65 @@ test("goal agent runtime uses protected task rehydration across every domain", a
   assert.equal(serialized.includes("protected child task"), false);
   assert.deepEqual(new Set(ledger.list({ limit: domains.length }).map((goal) => goal.status)), new Set(["completed"]));
   assert.equal(ledger.verifyIntegrity().ok, true);
+});
+
+test("goal agent runtime traces the complete adaptive loop across every domain without payload retention", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 650 });
+  for (const domain of domains) ledger.create({ goal_id: `trace-agent-${domain}`, task_digest: goalTaskDigest(`private trace task ${domain}`), domain, now_ns: 0 });
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached in trace bridge test"); } }));
+  const calls = [];
+  let callerObserverBefore = 0;
+  let callerObserverAfter = 0;
+  let callerSelectionEvents = 0;
+  const callerObserver = { before: () => { callerObserverBefore += 1; }, after: () => { callerObserverAfter += 1; } };
+  const callerSelectionEventCallback = () => { callerSelectionEvents += 1; };
+  const emitLifecycle = async (options) => {
+    await options.observer?.before?.({ provider: "local", model: "trace-fixture", kind: "chat", inputTokens: 3, requestedOutputTokens: 2, toolCount: 0 });
+    await options.selectionEventCallback?.({ phase: "model_selection_started", status: "running", attempt: 1, failover: false, candidate_count: 1, eligible_candidate_count: 1, strategy: "deterministic_health_utility", selected_provider: null, selected_model: null, selection_digest: null, detail_digest: null, failure_code: null });
+    await options.selectionEventCallback?.({ phase: "model_selection_finished", status: "selected", attempt: 1, failover: false, candidate_count: 1, eligible_candidate_count: 1, strategy: "deterministic_health_utility", selected_provider: "local", selected_model: "trace-fixture", selection_digest: "a".repeat(64), detail_digest: null, failure_code: null });
+    await options.observer?.after?.({ provider: "local", model: "trace-fixture", kind: "chat", inputTokens: 3, requestedOutputTokens: 2, toolCount: 0 }, { success: true, status: "completed", latencyMs: 1, inputTokens: 3, outputTokens: 2, statusCode: 200 });
+  };
+  agent.run = async (task, options) => { calls.push({ kind: "single", task, options }); await emitLifecycle(options); return { status: "completed", output: "private provider output" }; };
+  agent.runCrossDomain = async (task, options) => { calls.push({ kind: "cross", task, options }); await emitLifecycle(options); return { status: "completed", output: "private cross-domain output" }; };
+  const runtime = new AutonomousGoalAgentRuntime({
+    agent,
+    ledger,
+    task_resolver: (goal) => `private trace task ${goal.domain}`,
+    run_options_factory: (goal) => ({
+      observer: callerObserver,
+      selectionEventCallback: callerSelectionEventCallback,
+      ...(goal.domain === "cross_domain" ? { subtasks: [{ domain: "coding", task: "private child trace task" }] } : {}),
+    }),
+    evaluator: (cycle) => cycle.batch.runs.map((run) => ({ goal_id: run.goal_id, evaluator_id: "trace-evaluator", evaluator_version: "1", reward: 1, passed: true })),
+  });
+  const traceStore = new InMemoryAutonomousRunTraceStore({ clock: () => 650 });
+  const traced = await runtime.runWithTrace({
+    traceStore,
+    runId: "goal-trace-every-domain",
+    schedule_options: { now_ns: 650, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains },
+    max_cycles: 2,
+    max_total_runs: domains.length,
+  });
+  assert.equal(traced.result.stop_reason, "all_terminal");
+  assert.equal(traced.trace.status, "completed");
+  assert.equal(traced.trace.provider_invocations, domains.length);
+  assert.deepEqual(new Set(traced.trace.domains), new Set(domains));
+  const events = traceStore.events({ run_id: "goal-trace-every-domain" });
+  assert.ok(events.filter((event) => event.phase === "plan_compiled").length >= domains.length + 1);
+  assert.ok(events.some((event) => event.phase === "model_selection_finished" && event.selection_digest === "a".repeat(64)));
+  assert.ok(events.some((event) => event.phase === "evaluation_settled"));
+  assert.ok(events.some((event) => event.phase === "learning_prepared"));
+  const serialized = JSON.stringify(traced);
+  assert.equal(serialized.includes("private trace task"), false);
+  assert.equal(serialized.includes("private child trace task"), false);
+  assert.equal(serialized.includes("private provider output"), false);
+  assert.equal(JSON.stringify(traceStore.snapshot()).includes("private provider output"), false);
+  assert.equal(calls.length, domains.length);
+  assert.equal(callerObserverBefore, domains.length);
+  assert.equal(callerObserverAfter, domains.length);
+  assert.equal(callerSelectionEvents, domains.length * 2);
+  assert.equal(traceStore.verifyIntegrity().verified, true);
 });
 
 test("goal agent runtime replays caller-owned action handoffs before the run boundary across every domain", async () => {

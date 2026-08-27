@@ -37,6 +37,7 @@ from prism_sdk.autonomous_goal_control_persistence import (
 )
 from prism_sdk.autonomous_goal_recovery import AutonomousGoalRecoveryCoordinator, validate_autonomous_goal_recovery_report
 from prism_sdk.autonomous_goal_agent import AutonomousGoalAgentRuntime
+from prism_sdk.autonomous_run_trace import InMemoryAutonomousRunTraceStore
 from prism_sdk.autonomous_goal_worker_journal import (
     AutonomousGoalWorkerJournal,
     JsonAutonomousGoalWorkerJournalPersistence,
@@ -888,6 +889,121 @@ def test_goal_agent_runtime_uses_protected_task_rehydration_across_every_domain(
     assert "protected child task" not in serialized
     assert all(record.status == "completed" for record in ledger.list(limit=len(AUTONOMOUS_DOMAINS)))
     assert ledger.verify_integrity()["ok"] is True
+
+
+def test_goal_agent_runtime_traces_the_complete_adaptive_loop_across_every_domain_without_payload_retention() -> None:
+    orchestrator = object.__new__(AutonomousTaskOrchestrator)
+    calls: list[tuple[str, dict[str, object]]] = []
+    caller_observer_counts = {"before": 0, "after": 0}
+    caller_selection_events = 0
+
+    class CallerObserver:
+        def before(self, _metadata):
+            caller_observer_counts["before"] += 1
+
+        def after(self, _metadata, _response, _error, _latency_ms):
+            caller_observer_counts["after"] += 1
+
+    caller_observer = CallerObserver()
+
+    def caller_trace_callback(**_event):
+        nonlocal caller_selection_events
+        caller_selection_events += 1
+
+    def emit_lifecycle(kwargs: dict[str, object]) -> None:
+        observer = kwargs.get("invocation_observer")
+        metadata = SimpleNamespace(provider="local", model="trace-fixture", input_tokens=3, tool_count=0)
+        if observer is not None:
+            observer.before(metadata)  # type: ignore[union-attr]
+        callback = kwargs.get("trace_event_callback")
+        if callback is not None:
+            callback(
+                phase="model_selection_started",
+                status="running",
+                attempt=1,
+                failover=False,
+                candidate_count=1,
+                eligible_candidate_count=1,
+                strategy="deterministic_health_utility",
+                selected_provider=None,
+                selected_model=None,
+                selection_digest=None,
+                detail_digest=None,
+                failure_code=None,
+            )  # type: ignore[operator]
+            callback(
+                phase="model_selection_finished",
+                status="selected",
+                attempt=1,
+                failover=False,
+                candidate_count=1,
+                eligible_candidate_count=1,
+                strategy="deterministic_health_utility",
+                selected_provider="local",
+                selected_model="trace-fixture",
+                selection_digest="a" * 64,
+                detail_digest=None,
+                failure_code=None,
+            )  # type: ignore[operator]
+        if observer is not None:
+            observer.after(metadata, SimpleNamespace(usage={"input_tokens": 3, "output_tokens": 2}), None, 1.0)  # type: ignore[union-attr]
+
+    def run_single(**kwargs: object):
+        calls.append(("single", dict(kwargs)))
+        emit_lifecycle(dict(kwargs))
+        return SimpleNamespace(status="completed", output="private provider output")
+
+    def run_cross(**kwargs: object):
+        calls.append(("cross", dict(kwargs)))
+        emit_lifecycle(dict(kwargs))
+        return SimpleNamespace(status="completed", output="private cross-domain output")
+
+    orchestrator.run = run_single
+    orchestrator.run_cross_domain = run_cross
+    ledger = AutonomousGoalLedger(clock=lambda: 650, max_goals=len(AUTONOMOUS_DOMAINS))
+    for domain in AUTONOMOUS_DOMAINS:
+        ledger.create(goal_id=f"trace-agent-{domain}", task_digest=_digest(f"private trace task {domain}"), domain=domain, now_ns=0)
+
+    runtime = AutonomousGoalAgentRuntime(
+        orchestrator,
+        ledger,
+        task_resolver=lambda goal, _row: f"private trace task {goal.domain}",
+        run_options_factory=lambda goal, _row: {
+            "invocation_observer": caller_observer,
+            "trace_event_callback": caller_trace_callback,
+            **({"subtasks": ({"domain": "coding", "task": "private child trace task"},)} if goal.domain == "cross_domain" else {}),
+        },
+        evaluator=lambda cycle: [
+            {"goal_id": run.goal_id, "evaluator_id": "trace-evaluator", "evaluator_version": "1", "reward": 1, "passed": True}
+            for run in cycle.batch.runs
+        ],
+    )
+    trace_store = InMemoryAutonomousRunTraceStore(clock=lambda: 650)
+    traced = runtime.run_with_trace(
+        trace_store=trace_store,
+        run_id="goal-trace-every-domain",
+        schedule_options={"now_ns": 650, "max_selected": len(AUTONOMOUS_DOMAINS), "max_concurrent": len(AUTONOMOUS_DOMAINS), "required_domains": list(AUTONOMOUS_DOMAINS)},
+        max_cycles=2,
+        max_total_runs=len(AUTONOMOUS_DOMAINS),
+    )
+    assert traced.result.stop_reason == "all_terminal"
+    assert traced.trace.status == "completed"
+    assert traced.trace.provider_invocations == len(AUTONOMOUS_DOMAINS)
+    assert set(traced.trace.domains) == set(AUTONOMOUS_DOMAINS)
+    events = trace_store.events({"run_id": "goal-trace-every-domain"})
+    assert sum(event.phase == "plan_compiled" for event in events) >= len(AUTONOMOUS_DOMAINS) + 1
+    assert any(event.phase == "model_selection_finished" and event.selection_digest == "a" * 64 for event in events)
+    assert any(event.phase == "evaluation_settled" for event in events)
+    assert any(event.phase == "learning_prepared" for event in events)
+    serialized = json.dumps(traced.to_dict(), sort_keys=True)
+    assert "private trace task" not in serialized
+    assert "private child trace task" not in serialized
+    assert "private provider output" not in serialized
+    assert "private provider output" not in json.dumps(trace_store.snapshot().to_dict(), sort_keys=True)
+    assert len(calls) == len(AUTONOMOUS_DOMAINS)
+    assert caller_observer_counts == {"before": len(AUTONOMOUS_DOMAINS), "after": len(AUTONOMOUS_DOMAINS)}
+    assert caller_selection_events == len(AUTONOMOUS_DOMAINS) * 2
+    assert trace_store.verify_integrity()["verified"] is True
 
 
 def test_goal_agent_runtime_replays_caller_owned_action_handoffs_before_run_boundary() -> None:

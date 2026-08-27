@@ -265,9 +265,12 @@ from .autonomous_goal_recovery import (
     validate_autonomous_goal_recovery_report,
 )
 from .autonomous_goal_agent import (
+    GOAL_AGENT_TRACE_RETENTION,
+    GOAL_AGENT_TRACE_SCHEMA,
     GOAL_AGENT_RUNTIME_RETENTION,
     GOAL_AGENT_RUNTIME_SCHEMA,
     AutonomousGoalAgentRuntime,
+    AutonomousGoalAgentTracedRunResult,
     GoalAgentActionHandoffRequest,
     GoalAgentActionHandoffResolver,
     GoalAgentRunOptionsFactory,
@@ -4719,7 +4722,10 @@ __all__ = [
     "validate_autonomous_goal_recovery_report",
     "GOAL_AGENT_RUNTIME_RETENTION",
     "GOAL_AGENT_RUNTIME_SCHEMA",
+    "GOAL_AGENT_TRACE_RETENTION",
+    "GOAL_AGENT_TRACE_SCHEMA",
     "AutonomousGoalAgentRuntime",
+    "AutonomousGoalAgentTracedRunResult",
     "GoalAgentActionHandoffRequest",
     "GoalAgentActionHandoffResolver",
     "GoalAgentRunOptionsFactory",

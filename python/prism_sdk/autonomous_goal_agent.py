@@ -11,6 +11,7 @@ effects, and online learning; this module only composes it with the bounded goal
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from .authoring import content_digest
@@ -29,11 +30,20 @@ from .autonomous_goal_scheduler import AutonomousGoalScheduleRow
 from .autonomous_goal_worker import AutonomousGoalExecutionRequest, AutonomousGoalWorker
 from .autonomous_goal_worker_journal import AutonomousGoalWorkerJournal
 from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
+from .autonomous_run_trace import (
+    AutonomousRunTraceSession,
+    AutonomousRunTraceStore,
+    AutonomousRunTraceSummary,
+    autonomous_run_trace_status,
+)
 from .goals import AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord
+from .llm_runtime import CompositeProviderInvocationObserver
 
 
 GOAL_AGENT_RUNTIME_SCHEMA = "bioprism-autonomous-goal-agent-runtime/0.1"
 GOAL_AGENT_RUNTIME_RETENTION = "metadata_only_goal_agent_bridge;tasks_prompts_parameters_credentials_and_results_not_retained"
+GOAL_AGENT_TRACE_SCHEMA = "bioprism-autonomous-goal-agent-trace/0.1"
+GOAL_AGENT_TRACE_RETENTION = "metadata_only_goal_control_trace;goal_task_prompts_parameters_credentials_and_results_not_retained"
 _FORBIDDEN_RUN_OPTION_KEYS = frozenset({"task", "domain"})
 
 GoalAgentTaskResolver = Callable[[AutonomousGoalRecord, AutonomousGoalScheduleRow], str]
@@ -41,6 +51,28 @@ GoalAgentRunOptionsFactory = Callable[[AutonomousGoalRecord, AutonomousGoalSched
 GoalAgentActionHandoffRequest = Mapping[str, Any]
 GoalAgentActionHandoffResolver = Callable[[AutonomousGoalRecord, AutonomousGoalScheduleRow, str], Mapping[str, Any] | None]
 _ACTION_HANDOFF_REQUEST_KEYS = frozenset({"domain", "capability", "hints", "allow_cross_domain", "context", "connector"})
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousGoalAgentTracedRunResult:
+    """Live caller-owned loop result plus a payload-free trace summary."""
+
+    result: AutonomousGoalControlLoopResult
+    trace: AutonomousRunTraceSummary
+
+    @property
+    def status(self) -> str:
+        return self.trace.status
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": GOAL_AGENT_TRACE_SCHEMA,
+            "status": self.status,
+            "trace": self.trace.to_dict(),
+            "result": "caller_owned_live_result_not_serialized",
+            "retention": GOAL_AGENT_TRACE_RETENTION,
+            "secret_material": "never_returned",
+        }
 
 
 def _fail(message: str) -> None:
@@ -71,6 +103,78 @@ def _subtasks(value: Any) -> tuple[Mapping[str, Any], ...]:
     if any(not isinstance(item, Mapping) for item in value):
         _fail("cross-domain subtasks must contain mappings")
     return tuple(value)
+
+
+def _trace_domains(goal: AutonomousGoalRecord, options: Mapping[str, Any] | None = None) -> tuple[str, ...]:
+    domains = [goal.domain]
+    if goal.domain == "cross_domain" and options is not None:
+        raw_subtasks = options.get("subtasks")
+        if isinstance(raw_subtasks, Sequence) and not isinstance(raw_subtasks, (str, bytes, bytearray)):
+            for item in raw_subtasks:
+                if isinstance(item, Mapping) and item.get("domain") in AUTONOMOUS_DOMAINS:
+                    domains.append(str(item["domain"]))
+    return tuple(dict.fromkeys(domains))
+
+
+def _goal_result_trace_status(result: Any) -> str:
+    status = result.get("status") if isinstance(result, Mapping) else getattr(result, "status", None)
+    return autonomous_run_trace_status(status if isinstance(status, str) else "unknown")
+
+
+def _control_loop_trace_status(result: AutonomousGoalControlLoopResult) -> str:
+    def count(name: str) -> int:
+        value = result.status_counts.get(name, 0)
+        return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
+
+    completed = count("completed")
+    paused = count("paused")
+    blocked = count("blocked")
+    failed = count("failed")
+    if failed and not completed and not paused and not blocked:
+        return "failed"
+    if paused or blocked:
+        return "partial" if completed else "paused"
+    if failed:
+        return "partial" if completed else "failed"
+    if result.stop_reason == "all_terminal":
+        return "completed"
+    if completed:
+        return "partial"
+    return "paused" if result.stop_reason == "no_admissible_work" else "unknown"
+
+
+def _selection_trace_callback(session: AutonomousRunTraceSession, existing: Any | None = None) -> Callable[..., Any]:
+    """Translate selector-local statuses into the shared trace status vocabulary."""
+
+    def callback(**event: Any) -> Any:
+        if existing is not None:
+            existing(**event)
+        raw_status = event.get("status")
+        status = {
+            "running": "running",
+            "selected": "completed",
+            "abstained": "refused",
+        }.get(raw_status, "failed")
+        detail_digest = event.get("detail_digest") or content_digest(
+            {
+                "candidate_count": event.get("candidate_count"),
+                "eligible_candidate_count": event.get("eligible_candidate_count"),
+                "strategy": event.get("strategy"),
+                "failover": event.get("failover"),
+            }
+        )
+        return session.record(
+            phase=event.get("phase"),
+            status=status,
+            provider=event.get("selected_provider"),
+            model=event.get("selected_model"),
+            selection_digest=event.get("selection_digest"),
+            attempt=event.get("attempt"),
+            detail_digest=detail_digest,
+            failure_code=event.get("failure_code"),
+        )
+
+    return callback
 
 
 def _action_handoff(value: Any, goal: AutonomousGoalRecord) -> dict[str, Any] | None:
@@ -181,6 +285,7 @@ class AutonomousGoalAgentRuntime:
         self.action_handoff_resolver = action_handoff_resolver
         self.recovery = recovery
         self.batch_id_prefix = batch_id_prefix.strip()
+        self._trace_context: dict[str, Any] | None = None
         self.worker = AutonomousGoalWorker(
             ledger,
             resolver=self._resolve,
@@ -237,6 +342,48 @@ class AutonomousGoalAgentRuntime:
 
     def _execute(self, request: AutonomousGoalExecutionRequest) -> Any:
         options = self._run_options(request.goal, request.schedule_row)
+        trace_context = self._trace_context
+        trace_domains = _trace_domains(request.goal, options)
+        plan_digest = None if trace_context is None else content_digest(
+            {
+                "schema": GOAL_AGENT_TRACE_SCHEMA,
+                "goal_id": request.goal.goal_id,
+                "task_digest": request.goal.task_digest,
+                "domain": request.goal.domain,
+                "capability": request.goal.capability,
+                "risk_class": request.goal.risk_class,
+                "attempt": request.goal.attempt,
+                "max_attempts": request.goal.max_attempts,
+                "revision": request.goal.revision,
+                "schedule_digest": request.schedule_digest,
+            }
+        )
+        if trace_context is not None:
+            trace_context["session"].record(
+                phase="plan_compiled",
+                status="running",
+                domains=trace_domains,
+                plan_digest=plan_digest,
+                detail_digest=content_digest(
+                    {
+                        "goal_id": request.goal.goal_id,
+                        "attempt": request.goal.attempt,
+                        "revision": request.goal.revision,
+                        "execution_binding_digest": request.execution_binding_digest,
+                    }
+                ),
+            )
+            existing_observer = options.get("invocation_observer")
+            if existing_observer is not None:
+                options["invocation_observer"] = CompositeProviderInvocationObserver(
+                    [existing_observer, trace_context["observer"]]
+                )
+            else:
+                options["invocation_observer"] = trace_context["observer"]
+            options["trace_event_callback"] = _selection_trace_callback(
+                trace_context["session"],
+                options.get("trace_event_callback"),
+            )
         binding = _action_handoff(request.parameters.get("action_handoff"), request.goal)
         if binding is not None:
             if self.agent is None:
@@ -245,15 +392,33 @@ class AutonomousGoalAgentRuntime:
             overlap = sorted(set(replay_request).intersection(options))
             if overlap:
                 _fail("action handoff request overlaps run options: " + ", ".join(overlap))
-            return self.agent.execute_action_handoff(task=request.task, handoff=binding["handoff"], **replay_request, **options)
-        if request.goal.domain == "cross_domain":
+            result = self.agent.execute_action_handoff(task=request.task, handoff=binding["handoff"], **replay_request, **options)
+        elif request.goal.domain == "cross_domain":
             subtasks = options.pop("subtasks")
             if self.agent is not None:
-                return self.agent.run_cross_domain(task=request.task, subtasks=subtasks, **options)
-            return self.orchestrator.run_cross_domain(task=request.task, subtasks=subtasks, **options)
-        if self.agent is not None:
-            return self.agent.run(task=request.task, domain=request.goal.domain, **options)
-        return self.orchestrator.run(task=request.task, domain=request.goal.domain, **options)
+                result = self.agent.run_cross_domain(task=request.task, subtasks=subtasks, **options)
+            else:
+                result = self.orchestrator.run_cross_domain(task=request.task, subtasks=subtasks, **options)
+        elif self.agent is not None:
+            result = self.agent.run(task=request.task, domain=request.goal.domain, **options)
+        else:
+            result = self.orchestrator.run(task=request.task, domain=request.goal.domain, **options)
+        if trace_context is not None:
+            status = result.get("status") if isinstance(result, Mapping) else getattr(result, "status", None)
+            trace_context["session"].record(
+                phase="evaluation_settled",
+                status=_goal_result_trace_status(result),
+                domains=trace_domains,
+                plan_digest=plan_digest,
+                detail_digest=content_digest(
+                    {
+                        "goal_id": request.goal.goal_id,
+                        "attempt": request.goal.attempt,
+                        "result_status": status if isinstance(status, str) else "unknown",
+                    }
+                ),
+            )
+        return result
 
     def metadata(self) -> dict[str, Any]:
         return {
@@ -265,6 +430,7 @@ class AutonomousGoalAgentRuntime:
             "action_handoff_execution": "verified_handoff_replay_before_run_boundary" if self.action_handoff_resolver is not None else "not_configured",
             "task_rehydration": "protected_receipt_adapter_fallback" if self.task_resolver is None else "caller_task_resolver_precedence",
             "recovery_execution": "ordered_journal_then_control_checkpoint" if self.recovery is not None else "caller_composed",
+            "trace_execution": "metadata_only_goal_control_trace",
             "retention": GOAL_AGENT_RUNTIME_RETENTION,
             "secret_material": "never_returned",
         }
@@ -276,11 +442,15 @@ class AutonomousGoalAgentRuntime:
         options_factory: GoalLoopOptionsFactory | None = None,
         max_cycles: int = 128,
         max_total_runs: int = 8_192,
+        run_id: str | None = None,
+        resume_snapshot: Mapping[str, Any] | None = None,
         checkpoint: GoalLoopCheckpoint | None = None,
     ) -> AutonomousGoalControlLoopResult:
         if self.recovery is not None:
             if checkpoint is not None:
                 _fail("checkpoint is owned by the recovery coordinator")
+            if resume_snapshot is not None:
+                _fail("resume_snapshot is owned by the recovery coordinator")
             return self.recovery.resume(
                 self.loop,
                 options={
@@ -288,6 +458,7 @@ class AutonomousGoalAgentRuntime:
                     "options_factory": options_factory,
                     "max_cycles": max_cycles,
                     "max_total_runs": max_total_runs,
+                    "run_id": run_id,
                     "checkpoint": self.recovery.checkpoint,
                 },
             )
@@ -296,8 +467,107 @@ class AutonomousGoalAgentRuntime:
             options_factory=options_factory,
             max_cycles=max_cycles,
             max_total_runs=max_total_runs,
+            run_id=run_id,
+            resume_snapshot=resume_snapshot,
             checkpoint=checkpoint,
         )
+
+    def run_with_trace(
+        self,
+        *,
+        trace_store: AutonomousRunTraceStore,
+        run_id: str,
+        schedule_options: Mapping[str, Any] | None = None,
+        options_factory: GoalLoopOptionsFactory | None = None,
+        max_cycles: int = 128,
+        max_total_runs: int = 8_192,
+        resume_snapshot: Mapping[str, Any] | None = None,
+        checkpoint: GoalLoopCheckpoint | None = None,
+    ) -> AutonomousGoalAgentTracedRunResult:
+        if not all(callable(getattr(trace_store, name, None)) for name in ("append", "events")):
+            _fail("run_with_trace requires a trace store")
+        if self._trace_context is not None:
+            _fail("run_with_trace cannot be re-entered while another trace is active")
+        goals = self.ledger.list(limit=512)
+        unsupported = [goal.domain for goal in goals if goal.domain not in AUTONOMOUS_DOMAINS]
+        if unsupported:
+            _fail("run_with_trace found unsupported goal domains: " + ", ".join(unsupported))
+        domains = tuple(dict.fromkeys(goal.domain for goal in goals)) or ("cross_domain",)
+        goal_metadata = [
+            {
+                "goal_id": goal.goal_id,
+                "task_digest": goal.task_digest,
+                "domain": goal.domain,
+                "capability": goal.capability,
+                "risk_class": goal.risk_class,
+                "status": goal.status,
+                "attempt": goal.attempt,
+                "max_attempts": goal.max_attempts,
+                "revision": goal.revision,
+            }
+            for goal in goals
+        ]
+        task_digest = content_digest({"schema": GOAL_AGENT_TRACE_SCHEMA, "run_id": run_id, "goals": goal_metadata})
+        plan_digest = content_digest({"schema": GOAL_AGENT_TRACE_SCHEMA, "batch_id_prefix": self.batch_id_prefix, "goals": goal_metadata})
+        session = AutonomousRunTraceSession(trace_store, run_id=run_id, task_digest=task_digest, domains=domains)
+        session.started(detail_digest=content_digest({"goal_count": len(goal_metadata), "domain_count": len(domains)}))
+        session.record(
+            phase="plan_compiled",
+            status="running",
+            domains=domains,
+            plan_digest=plan_digest,
+            detail_digest=content_digest({"goal_count": len(goal_metadata), "domain_count": len(domains)}),
+        )
+        self._trace_context = {
+            "session": session,
+            "observer": session.provider_observer(),
+        }
+        try:
+            result = self.run(
+                schedule_options=schedule_options,
+                options_factory=options_factory,
+                max_cycles=max_cycles,
+                max_total_runs=max_total_runs,
+                run_id=run_id,
+                resume_snapshot=resume_snapshot,
+                checkpoint=checkpoint,
+            )
+            session.record(
+                phase="learning_prepared",
+                status="running",
+                domains=domains,
+                plan_digest=plan_digest,
+                detail_digest=content_digest(
+                    {
+                        "total_selected": result.total_selected,
+                        "total_claimed": result.total_claimed,
+                        "total_runs": result.total_runs,
+                        "evaluation_count": result.evaluation_count,
+                        "evaluation_digest": result.evaluation_digest,
+                        "learning_state_digest": result.learning_state_digest,
+                        "stop_reason": result.stop_reason,
+                    }
+                ),
+            )
+            session.complete(
+                status=_control_loop_trace_status(result),
+                domains=domains,
+                plan_digest=plan_digest,
+                detail_digest=content_digest(result.to_dict()),
+            )
+            return AutonomousGoalAgentTracedRunResult(result=result, trace=session.summary())
+        except Exception as error:
+            try:
+                session.fail(
+                    failure_class=type(error).__name__,
+                    failure_code="goal_control_loop_error",
+                    detail_digest=content_digest({"failure_class": type(error).__name__}),
+                )
+            except Exception:
+                pass
+            raise
+        finally:
+            self._trace_context = None
 
     def restore(self, *, now_ns: int | None = None) -> dict[str, Any]:
         if self.recovery is None:
@@ -306,9 +576,12 @@ class AutonomousGoalAgentRuntime:
 
 
 __all__ = [
+    "GOAL_AGENT_TRACE_RETENTION",
+    "GOAL_AGENT_TRACE_SCHEMA",
     "GOAL_AGENT_RUNTIME_RETENTION",
     "GOAL_AGENT_RUNTIME_SCHEMA",
     "AutonomousGoalAgentRuntime",
+    "AutonomousGoalAgentTracedRunResult",
     "GoalAgentActionHandoffRequest",
     "GoalAgentActionHandoffResolver",
     "GoalAgentRunOptionsFactory",

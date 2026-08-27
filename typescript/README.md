@@ -1367,6 +1367,25 @@ goal. Single-domain and `cross_domain` goals then use the same routing, prompt, 
 provider, evaluator, and online-learning paths as direct runs. The callbacks and all live values
 remain outside goal, worker, control-loop, and evaluator projections.
 
+Use `runtime.runWithTrace({ traceStore, runId, ... })` when the whole long-horizon batch needs one
+restart-safe observability record. It traces the outer goal plan, each rehydrated execution,
+model-selection/provider lifecycle, evaluation settlement, learning metadata, and terminal loop
+status across all twelve domains. `traced.result` remains live for the initiating caller, while
+`traced.trace`, `JSON.stringify(traced)`, and the trace snapshot contain only digests, counters,
+bounded identifiers, and failure metadata; task text, prompts, parameters, credentials, provider
+responses, and live results never enter the trace. Caller-supplied observers and selection
+callbacks are composed with the trace hooks rather than replaced.
+
+```typescript
+const traced = await runtime.runWithTrace({
+  traceStore,
+  runId: "goal-batch-001",
+  schedule_options: { max_selected: 12, max_concurrent: 4 },
+  max_cycles: 128,
+});
+console.log(traced.trace.status, traced.trace.provider_invocations);
+```
+
 Long-running loops can add `run_id`, `checkpoint`, and `resume_snapshot` to make the outer
 decision process restart-safe:
 
