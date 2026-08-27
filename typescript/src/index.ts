@@ -4273,3 +4273,13 @@ export {
   validateOraclexCertifiedDecisionSection,
 } from "./research-contracts.js";
 export type { OraclexCertifiedDecisionSection } from "./research-contracts.js";
+
+export {
+  REGISTRY_KNOWLEDGE_ASSURANCE_FEATURE_ID,
+  REGISTRY_KNOWLEDGE_ASSURANCE_CONTRACT_VERSION,
+  REGISTRY_KNOWLEDGE_ASSURANCE_INPUT_SCHEMA,
+  REGISTRY_KNOWLEDGE_ASSURANCE_OUTPUT_SCHEMA,
+  registryKnowledgeAssuranceDigest,
+  validateRegistryTypedKnowledgeWorld,
+} from "./research-contracts.js";
+export type { RegistryTypedKnowledgeWorld } from "./research-contracts.js";

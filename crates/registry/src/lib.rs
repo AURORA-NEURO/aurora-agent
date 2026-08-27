@@ -52,6 +52,7 @@
 pub mod context_assurance;
 pub mod gate;
 pub mod index;
+pub mod knowledge_representation_assurance;
 pub mod pack;
 pub mod promote;
 pub mod resource_assurance;
@@ -68,6 +69,15 @@ pub use context_assurance::{
 };
 pub use gate::{gate, gate_document, GateFinding, GateOutcome, Policy};
 pub use index::{PackStatus, PublicationEvent, RegistryError, RegistryIndex};
+pub use knowledge_representation_assurance::{
+    assure_knowledge_representation, assure_knowledge_representation_json,
+    knowledge_representation_assurance_manifest, validate_knowledge_representation_json,
+    KnowledgeAssuranceError, KnowledgeDisposition, KnowledgePeer, ScopedClaim,
+    ScopedResearchClaims, TypedKnowledgeWorld,
+    CONTRACT_VERSION as KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+    TOOL_NAME as KNOWLEDGE_REPRESENTATION_ASSURANCE_TOOL,
+};
 pub use pack::{
     BenchmarkPack, OracleDisagreement, PackBuilder, PackError, PackInstance, ParentRef,
     PostconditionEvidence, Provenance, RebuildAttestation, Resolution, ReviewFinding, ReviewRecord,

@@ -7565,3 +7565,10 @@ from .oraclex_context_compilation_research_copilot import (
 )
 
 __all__ += ["OraclexCertifiedDecisionSection", "compile_oraclex_context"]
+
+from .registry_knowledge_representation_assurance import (
+    TypedKnowledgeWorld as RegistryTypedKnowledgeWorld,
+    assure_knowledge_representation as assure_registry_knowledge_representation,
+)
+
+__all__ += ["RegistryTypedKnowledgeWorld", "assure_registry_knowledge_representation"]

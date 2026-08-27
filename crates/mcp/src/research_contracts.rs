@@ -825,6 +825,16 @@ pub fn validate_oraclex_context_json(
     bioprism_oraclex::context_compilation_research_copilot::validate_context_json(value)
 }
 
+pub fn assure_registry_knowledge_representation_json(value: &Value) -> Result<Value, String> {
+    bioprism_registry::assure_knowledge_representation_json(value)
+}
+
+pub fn validate_registry_knowledge_representation_json(
+    value: &Value,
+) -> Result<bioprism_registry::TypedKnowledgeWorld, String> {
+    bioprism_registry::validate_knowledge_representation_json(value)
+}
+
 pub fn validate_harmonized_research_object_json(
     value: &Value,
 ) -> Result<HarmonizedResearchObject, String> {

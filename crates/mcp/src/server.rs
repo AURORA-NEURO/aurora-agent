@@ -2014,6 +2014,7 @@ impl Server {
             "weavelang_computational_execution_assurance" => self.weavelang_computational_execution_assurance(&arguments),
             "mcp_knowledge_representation_contract" => self.mcp_knowledge_representation_contract(&arguments),
             "registry_multimodal_scale_frontier_assurance" => self.registry_multimodal_scale_frontier_assurance(&arguments),
+            "registry_knowledge_representation_assurance" => self.registry_knowledge_representation_assurance(&arguments),
             "oraclex_context_compilation_research_copilot" => self.oraclex_context_compilation_research_copilot(&arguments),
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
@@ -26480,6 +26481,32 @@ impl Server {
         }))
     }
 
+    fn registry_knowledge_representation_assurance(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized ScopedResearchClaims")?;
+        let receipt = crate::research_contracts::assure_registry_knowledge_representation_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_registry::KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "scoped claim identities, peer summaries, evidence states, and effect receipts are canonical and partitioned",
+                "minimum peer quorum, semantic profile, signed aggregate-only locality, provenance/replay, policy, approval, and protected-closure gates are explicit",
+                "unknown, speculative, contradicted, omitted, negative, and adversarial evidence cannot be promoted to a qualified knowledge world",
+                "raw study payloads remain institution-local and the route never infers biology or makes a clinical decision"
+            ],
+            "limitations": [
+                "the assurance harness verifies caller-supplied claims and peer summaries; it does not infer relations from raw studies",
+                "a qualified typed world is a release-readiness receipt and still requires independent replication and governance review"
+            ]
+        }))
+    }
+
     fn oraclex_context_compilation_research_copilot(
         &self,
         arguments: &Value,
@@ -38220,7 +38247,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "registry_multimodal_scale_frontier_assurance", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_harmonization_coverage", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "registry_multimodal_scale_frontier_assurance", "registry_knowledge_representation_assurance", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_harmonization_coverage", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -40691,6 +40718,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 },
                 "required": ["request"]
             }
+        }),
+        json!({
+            "name": "registry_knowledge_representation_assurance",
+            "description": "Verify federated continual ScopedResearchClaims4 attestations and signed aggregate-only peer summaries into a deterministic TypedKnowledgeWorld7 receipt. The route enforces semantic-profile, provenance/replay, quorum, policy, approval, protected-closure, locality, and adversarial gates without moving raw studies or making biological or clinical decisions.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized bioprism-registry ScopedResearchClaims with required claims, peer summaries, minimum quorum, replay identity, policy and locality controls, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "oraclex_context_compilation_research_copilot",
