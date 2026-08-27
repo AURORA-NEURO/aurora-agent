@@ -7408,3 +7408,17 @@ __all__ += [
     "evaluate_experiment_design",
     "metricsExperimentDesignDigest",
 ]
+
+from .bioethics_dependency_composition_assurance import (
+    BioethicsCompositionResult,
+    bioethics_dependency_composition_manifest,
+    evaluate_bioethics_composition,
+    bioethics_dependency_composition_digest,
+)
+
+__all__ += [
+    "BioethicsCompositionResult",
+    "bioethics_dependency_composition_manifest",
+    "evaluate_bioethics_composition",
+    "bioethics_dependency_composition_digest",
+]

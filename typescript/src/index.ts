@@ -4143,3 +4143,13 @@ export {
   validateMetricsExecutableExperimentDesign,
 } from "./research-contracts.js";
 export type { MetricsExecutableExperimentDesign } from "./research-contracts.js";
+
+export {
+  BIOETHICS_DEPENDENCY_COMPOSITION_FEATURE_ID,
+  BIOETHICS_DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+  BIOETHICS_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
+  BIOETHICS_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
+  bioethicsDependencyCompositionDigest,
+  validateBioethicsCompositionReceipt,
+} from "./research-contracts.js";
+export type { BioethicsCompositionReceipt } from "./research-contracts.js";
