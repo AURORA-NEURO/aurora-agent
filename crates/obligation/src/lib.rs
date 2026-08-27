@@ -36,6 +36,7 @@
 pub mod budget;
 pub mod capsule;
 pub mod error;
+pub mod evidence_gateway;
 pub mod gate;
 pub mod graph;
 pub mod invariants;
@@ -49,6 +50,12 @@ pub use budget::{
 };
 pub use capsule::{BioContextCapsule, CAPSULE_SCHEMA_VERSION};
 pub use error::{BudgetError, CapsuleError, LedgerError, ObligationError};
+pub use evidence_gateway::{
+    evidence_gateway_manifest, integrate_evidence_feed, EvidenceFeed,
+    EvidenceGatewayError, EvidenceObservation, QualifiedEvidenceSet,
+    CONTRACT_VERSION as EVIDENCE_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_GATEWAY_FEATURE_ID,
+};
 pub use gate::{
     may_perform, Action, BlockReason, Gate, ObligationPredicate, RegretClass, UnmetPrerequisite,
 };

@@ -4073,3 +4073,13 @@ export {
   validateOracleContextFederationEnvelope,
 } from "./research-contracts.js";
 export type { OracleContextFederationEnvelope } from "./research-contracts.js";
+
+export {
+  OBLIGATION_EVIDENCE_GATEWAY_FEATURE_ID,
+  OBLIGATION_EVIDENCE_GATEWAY_CONTRACT_VERSION,
+  OBLIGATION_EVIDENCE_GATEWAY_INPUT_SCHEMA,
+  OBLIGATION_EVIDENCE_GATEWAY_OUTPUT_SCHEMA,
+  obligationEvidenceGatewayDigest,
+  validateObligationEvidenceGatewaySet,
+} from "./research-contracts.js";
+export type { ObligationQualifiedEvidenceSet } from "./research-contracts.js";
