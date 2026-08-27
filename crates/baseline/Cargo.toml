@@ -9,6 +9,7 @@ description = "Equal-engineering context baselines: full-context, k-hop incidenc
 
 [dependencies]
 bioprism-fiber = { workspace = true }
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-world = { workspace = true }

@@ -4123,3 +4123,13 @@ export {
   validateBioirReliableCapabilityResult,
 } from "./research-contracts.js";
 export type { BioirReliableCapabilityResult } from "./research-contracts.js";
+
+export {
+  BASELINE_INTERPRETATION_ASSURANCE_FEATURE_ID,
+  BASELINE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+  BASELINE_INTERPRETATION_ASSURANCE_INPUT_SCHEMA,
+  BASELINE_INTERPRETATION_ASSURANCE_OUTPUT_SCHEMA,
+  baselineInterpretationAssuranceDigest,
+  validateBaselineInterpretationAssuranceReceipt,
+} from "./research-contracts.js";
+export type { BaselineInterpretationAssuranceReceipt } from "./research-contracts.js";
