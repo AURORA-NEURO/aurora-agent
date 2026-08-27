@@ -7091,6 +7091,12 @@ __all__ += [
     "operate_federated_mechanisms",
 ]
 
+from .megafactory_mechanism_exploration_federated_control_plane import (
+    operate_megafactory_mechanisms,
+)
+
+__all__ += ["operate_megafactory_mechanisms"]
+
 from .federated_analysis_assurance import (
     FederatedAnalysisReceipt,
     assure_federated_analysis,

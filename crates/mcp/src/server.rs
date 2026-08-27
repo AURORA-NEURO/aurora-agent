@@ -1832,6 +1832,9 @@ impl Server {
             "federated_mechanism_control_plane" => {
                 self.federated_mechanism_control_plane(&arguments)
             }
+            "megafactory_mechanism_exploration_federated_control_plane" => {
+                self.megafactory_mechanism_exploration_federated_control_plane(&arguments)
+            }
             "federated_mechanism_gateway" => self.federated_mechanism_gateway(&arguments),
             "evidence_surveillance_copilot" => self.evidence_surveillance_copilot(&arguments),
             "adapter_local_evidence_surveillance_research_copilot" => {
@@ -24999,6 +25002,33 @@ impl Server {
         }))
     }
 
+    fn megafactory_mechanism_exploration_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a FederatedMechanismControlRequest")?;
+        let receipt = crate::research_contracts::operate_megafactory_mechanism_exploration_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_megafactory::mechanism_exploration_federated_control_plane::FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "ranked competing mechanisms and origin quorum remain deterministic",
+                "A2 policy, approval, replay, locality, federation, and protected-closure gates remain explicit",
+                "unknown, speculative, contradicted, omitted, and negative evidence remain visible",
+                "qualified effects are limited to permitted summaries and local capability management"
+            ],
+            "limitations": [
+                "the route validates caller-supplied mechanism metadata and does not infer mechanisms or execute experiments",
+                "raw institution-local factor tables never cross the federation boundary",
+                "a passed receipt is a governed mechanism-operation gate, not a biological or clinical conclusion"
+            ]
+        }))
+    }
+
     fn federated_mechanism_gateway(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -38137,7 +38167,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "megafactory_scale_and_oracles",
             "domains": ["mechanistic twin simulation", "model discrepancy", "distributed placement", "oracle independence", "fencing and duplicate execution"],
             "crates": ["bioprism-megafactory", "bioprism-scale", "bioprism-factory"],
-            "mcp_tools": ["megafactory_twin_audit", "megafactory_placement_audit", "scale_family_split_verify", "factory_lifecycle_simulate"],
+            "mcp_tools": ["megafactory_twin_audit", "megafactory_placement_audit", "scale_family_split_verify", "factory_lifecycle_simulate", "megafactory_mechanism_exploration_federated_control_plane"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -40790,6 +40820,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized MechanismControlPlaneRequest with question identity, required/admitted candidate ids, evidence receipt digest, policy decision, approval reference, protected closure, and preclinical boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "megafactory_mechanism_exploration_federated_control_plane",
+            "description": "Operate the A2 Megafactory federated-continual mechanism-exploration control plane. Rank competing mechanism attestations and govern digest-only exchange with deterministic origin quorum, replay, evidence, policy, protected-closure, approval, locality, capacity, and negative-result gates; emit no experiment or clinical decision.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-megafactory FederatedMechanismControlRequest with mechanism candidates, origin quorum, checkpoint, policy/approval/federation controls, raw-data locality, and preclinical boundary." }
                 },
                 "required": ["request"]
             }

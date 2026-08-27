@@ -152,6 +152,15 @@ pub mod placement;
 pub mod semisynthetic;
 pub mod trajectory;
 pub mod twin;
+pub mod mechanism_exploration_federated_control_plane;
+
+pub use mechanism_exploration_federated_control_plane::{
+    capability_manifest as mechanism_exploration_control_manifest,
+    operate as operate_mechanism_exploration_control, FederatedMechanismAdmission,
+    FederatedMechanismControlRequest, FederatedMechanismError, FederatedMechanismReceipt,
+    MechanismCandidate, MechanismDecision,
+    FEATURE_ID as MEGAFACTORY_MECHANISM_EXPLORATION_FEATURE_ID,
+};
 
 pub use authoring::{
     check_release_lineage, ArtifactForm, ArtifactRecord, AuthoredWorld, AuthoringFinding,

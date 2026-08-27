@@ -469,6 +469,11 @@ use bioprism_ops::{
     assure_knowledge_representation, KnowledgeRepresentationAssuranceReceipt,
     KnowledgeRepresentationAssuranceRequest, KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
 };
+use bioprism_megafactory::{
+    operate_mechanism_exploration_control, FederatedMechanismControlRequest,
+    FederatedMechanismReceipt,
+    MEGAFACTORY_MECHANISM_EXPLORATION_FEATURE_ID as MEGAFACTORY_MECHANISM_FEATURE_ID,
+};
 use bioprism_policy::{
     admit_autonomy_batch, BatchAdmissionReceipt, BatchAdmissionRequest, AUTONOMY_BATCH_FEATURE_ID,
 };
@@ -1316,6 +1321,27 @@ pub fn validate_mechanism_control_plane_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != MECHANISM_CONTROL_PLANE_FEATURE_ID {
         return Err("mechanism control-plane feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn operate_megafactory_mechanism_exploration_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedMechanismControlRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid megafactory mechanism exploration request: {error}"))?;
+    let receipt = operate_mechanism_exploration_control(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize megafactory mechanism receipt: {error}"))
+}
+
+pub fn validate_megafactory_mechanism_exploration_json(
+    value: &Value,
+) -> Result<FederatedMechanismReceipt, String> {
+    let receipt: FederatedMechanismReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid megafactory mechanism receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != MEGAFACTORY_MECHANISM_FEATURE_ID {
+        return Err("megafactory mechanism feature id mismatch".into());
     }
     Ok(receipt)
 }

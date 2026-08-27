@@ -3504,6 +3504,15 @@ export {
 } from "./research-contracts.js";
 export type { FederatedMechanismReceipt } from "./research-contracts.js";
 export {
+  MEGAFACTORY_MECHANISM_EXPLORATION_FEATURE_ID,
+  MEGAFACTORY_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+  MEGAFACTORY_MECHANISM_EXPLORATION_INPUT_SCHEMA,
+  MEGAFACTORY_MECHANISM_EXPLORATION_OUTPUT_SCHEMA,
+  megafactoryMechanismExplorationReceiptDigest,
+  validateMegafactoryMechanismExplorationReceipt,
+} from "./research-contracts.js";
+export type { MegafactoryMechanismExplorationReceipt } from "./research-contracts.js";
+export {
   FEDERATED_ANALYSIS_ASSURANCE_FEATURE_ID,
   FEDERATED_ANALYSIS_ASSURANCE_CONTRACT_VERSION,
   FEDERATED_ANALYSIS_ASSURANCE_INPUT_SCHEMA,
