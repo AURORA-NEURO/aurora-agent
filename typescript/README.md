@@ -2004,6 +2004,28 @@ const submission = await brainWorker.submit({
 const batch = await brainWorker.run({ limit: 4 });
 ```
 
+Both high-level workers support bounded parallel draining when the deployment has enough provider,
+credential, evaluator, and effect capacity. `maxParallelism` controls the number of independent
+leases in flight; it is bounded by the requested limit and the worker's hard batch cap, and the
+default remains `1` for a conservative migration path. Results are returned in drain-assignment
+order and the batch includes `requested_count`, `max_parallelism`, and `stopped_on_non_terminal`
+metadata. Approval, retry, and reconciliation backpressure stops new claims by default after
+already-started leases settle. Set `continueOnNonTerminal: true` only when the caller explicitly
+wants the bounded drain to keep processing independent queued jobs:
+
+```typescript
+const batch = await brainWorker.run({
+  limit: 32,
+  maxParallelism: 8,
+  continueOnNonTerminal: false,
+});
+```
+
+Parallelism is only a scheduling optimization: every claim still has its own lease heartbeat,
+protected credential session, approval check, trace publication, result digest, and conservative
+post-dispatch reconciliation boundary. The worker never shares private requests or provider
+responses between jobs, and the control-plane projection remains metadata-only.
+
 The resolver must reproduce the exact digest-bound request, mode, and policy from caller-owned
 storage. Drift fails before facade/provider dispatch; a typed retryable resolver failure is
 requeued, while failures after the `unknown` dispatch boundary become reconciliation quarantine.

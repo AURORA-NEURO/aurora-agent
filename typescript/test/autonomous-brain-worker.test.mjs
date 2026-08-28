@@ -72,6 +72,25 @@ function makeBrain(onRequest = () => {}, modelHealthStore = undefined) {
   return { runtime, agent, brain: new AutonomousBrainFacade({ agent }) };
 }
 
+function makeDelayedBrain(delayMs = 15) {
+  let active = 0;
+  let maxActive = 0;
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("network must not be reached"); } });
+  runtime.registerInMemoryProvider("worker-offline", async () => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return { output_text: "worker delayed bounded result" };
+    } finally {
+      active -= 1;
+    }
+  });
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  return { runtime, brain: new AutonomousBrainFacade({ agent }), get active() { return active; }, get maxActive() { return maxActive; } };
+}
+
 function policyDigest(letter = "p") {
   return letter.repeat(64);
 }
@@ -643,6 +662,51 @@ test("worker batch reports retry backpressure without hot-looping a queued job",
   assert.equal(batch.failed_count, 0);
   assert.equal(calls, 1);
   assert.equal(scheduler.get("worker-job-50").state, "queued");
+});
+
+test("worker batch drains approved jobs with bounded parallelism across the domain catalogue", async () => {
+  const delayed = makeDelayedBrain();
+  const scheduler = new InMemoryAutonomousBrainJobScheduler({ maxJobs: 32, clock: () => 13_500 });
+  const domains = AUTONOMOUS_DOMAIN_NAMES.filter((domain) => domain !== "cross_domain").slice(0, 6);
+  const policies = new Map();
+  for (const [index, domain] of domains.entries()) {
+    const request = requestFor(domain);
+    const selectedPolicy = policyDigest("abcdef"[index]);
+    const jobId = `worker-job-${index}`;
+    policies.set(jobId, selectedPolicy);
+    scheduler.submit(jobFor(index, request, "execute", selectedPolicy), 13_500 + index);
+  }
+  const worker = new AutonomousBrainJobWorker({
+    brain: delayed.brain,
+    scheduler,
+    workerId: "worker-parallel",
+    resolve: ({ job }) => ({
+      specDigest: job.spec_digest,
+      policyDigest: policies.get(job.job_id),
+      request: requestFor(job.domain),
+      mode: "execute",
+      execute: { run: { candidates: [model] } },
+    }),
+  });
+
+  for (const [index] of domains.entries()) {
+    const jobId = `worker-job-${index}`;
+    assert.equal((await worker.runOnce(jobId, 13_600 + index)).status, "waiting_approval");
+    scheduler.resumeApproval(jobId, "parallel-operator", "approved bounded parallel run", 13_700 + index);
+  }
+
+  const batch = await worker.run({ limit: domains.length, maxParallelism: 3 });
+  assert.equal(batch.status, "completed");
+  assert.equal(batch.requested_count, domains.length);
+  assert.equal(batch.max_parallelism, 3);
+  assert.equal(batch.stopped_on_non_terminal, false);
+  assert.equal(batch.runs.length, domains.length);
+  assert.equal(batch.succeeded_count, domains.length);
+  assert.ok(delayed.maxActive >= 2, `expected overlapping provider calls, saw ${delayed.maxActive}`);
+  assert.ok(delayed.maxActive <= 3, `parallelism exceeded bound: ${delayed.maxActive}`);
+  assert.equal(delayed.active, 0);
+  assert.equal(scheduler.inventory({ limit: 32 }).every((job) => job.state === "succeeded"), true);
+  assert.equal(JSON.stringify(batch).includes("private-task-never-retained"), false);
 });
 
 test("worker restores a metadata-only scheduler and persists approval recovery across every domain", async () => {

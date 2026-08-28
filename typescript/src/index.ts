@@ -2370,6 +2370,7 @@ export type {
   AutonomousBrainJobWorkerOptions,
   AutonomousBrainJobWorkerRun,
   AutonomousBrainJobWorkerBatch,
+  AutonomousBrainJobWorkerRunOptions,
 } from "./autonomous-brain-worker.js";
 export {
   AUTONOMOUS_DURABLE_BRAIN_JOB_WORKER_SCHEMA,
@@ -2390,6 +2391,7 @@ export type {
   AutonomousDurableBrainJobWorkerOptions,
   AutonomousDurableBrainJobWorkerRun,
   AutonomousDurableBrainJobWorkerBatch,
+  AutonomousDurableBrainJobWorkerRunOptions,
 } from "./autonomous-durable-brain-worker.js";
 export {
   AUTONOMOUS_BRAIN_CONTROL_PLANE_MONITOR_SCHEMA,

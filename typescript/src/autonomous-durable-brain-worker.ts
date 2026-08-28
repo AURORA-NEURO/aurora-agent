@@ -127,9 +127,24 @@ export interface AutonomousDurableBrainJobWorkerBatch {
   retry_scheduled_count: number;
   failed_count: number;
   already_terminal_count: number;
+  requested_count: number;
+  max_parallelism: number;
+  stopped_on_non_terminal: boolean;
   batch_digest: string;
   retention: "remote_job_metadata_only;private_brain_values_transient_to_caller";
   secret_material: "never_returned";
+}
+
+/**
+ * Bounded drain controls for a remote worker. Parallel claims share the same worker identity but
+ * retain independent leases and metadata-only settlement; the default remains serial for easy
+ * migration from older callers.
+ */
+export interface AutonomousDurableBrainJobWorkerRunOptions {
+  limit?: number;
+  maxParallelism?: number;
+  /** Continue claiming after a job enters approval, retry, or reconciliation backpressure. */
+  continueOnNonTerminal?: boolean;
 }
 
 const RETENTION = "remote_job_metadata_only;private_brain_values_transient_to_caller" as const;
@@ -481,15 +496,29 @@ export class AutonomousDurableBrainJobWorker {
     }
   }
 
-  async run(options: { limit?: number } = {}): Promise<AutonomousDurableBrainJobWorkerBatch> {
+  async run(options: AutonomousDurableBrainJobWorkerRunOptions = {}): Promise<AutonomousDurableBrainJobWorkerBatch> {
     const limit = boundedInteger("durable brain worker limit", options.limit ?? 1, 1, MAX_AUTONOMOUS_DURABLE_BRAIN_WORKER_BATCH);
-    const runs: AutonomousDurableBrainJobWorkerRun[] = [];
-    for (let index = 0; index < limit; index += 1) {
-      const result = await this.runOnce();
-      if (result === null) break;
-      runs.push(result);
-      if (result.status === "waiting_approval" || result.status === "retry_scheduled" || result.status === "reconciliation_required") break;
-    }
+    const maxParallelism = boundedInteger("durable brain worker maxParallelism", options.maxParallelism ?? 1, 1, Math.min(limit, MAX_AUTONOMOUS_DURABLE_BRAIN_WORKER_BATCH));
+    if (options.continueOnNonTerminal !== undefined && typeof options.continueOnNonTerminal !== "boolean") throw new ArgumentError("durable brain worker continueOnNonTerminal must be boolean");
+    const continueOnNonTerminal = options.continueOnNonTerminal ?? false;
+    const indexedRuns: Array<{ index: number; result: AutonomousDurableBrainJobWorkerRun }> = [];
+    let nextIndex = 0;
+    let stoppedOnNonTerminal = false;
+    const drain = async (): Promise<void> => {
+      while (!stoppedOnNonTerminal) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= limit) return;
+        const result = await this.runOnce();
+        if (result === null) return;
+        indexedRuns.push({ index, result });
+        if (!continueOnNonTerminal && (result.status === "waiting_approval" || result.status === "retry_scheduled" || result.status === "reconciliation_required")) {
+          stoppedOnNonTerminal = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: maxParallelism }, () => drain()));
+    const runs = indexedRuns.sort((left, right) => left.index - right.index).map((entry) => entry.result);
     const succeeded = runs.filter((run) => run.status === "succeeded").length;
     const waiting = runs.filter((run) => run.status === "waiting_approval").length;
     const reconciliation = runs.filter((run) => run.status === "reconciliation_required").length;
@@ -508,6 +537,9 @@ export class AutonomousDurableBrainJobWorker {
       retry_scheduled_count: retryScheduled,
       failed_count: failed,
       already_terminal_count: terminal,
+      requested_count: limit,
+      max_parallelism: maxParallelism,
+      stopped_on_non_terminal: stoppedOnNonTerminal,
       batch_digest: digestJsonSync(runs.map((run) => ({ job_id: run.job_id, status: run.status, record_digest: run.job.record_digest, trace_digest: run.trace?.trace_digest ?? null }))),
       retention: RETENTION,
       secret_material: SECRET_MATERIAL,

@@ -9142,6 +9142,30 @@ const submission = await brainWorker.submit({
 const result = await brainWorker.run({ limit: 4 });
 ```
 
+The local and remote high-level worker implementations also expose bounded parallel draining:
+`run({ limit, maxParallelism, continueOnNonTerminal })`. `maxParallelism` limits independent
+claims and defaults to `1`; it cannot exceed the requested limit or the worker batch ceiling.
+The returned metadata records `requested_count`, `max_parallelism`, and
+`stopped_on_non_terminal`. With the default `continueOnNonTerminal: false`, the first approval,
+retry, or reconciliation result stops new claims while already-started leases are allowed to
+settle. This makes backpressure visible without abandoning work already within a leased boundary.
+An explicit `continueOnNonTerminal: true` is available for deployments that want a bounded drain
+to continue through independent queued jobs. The option is still finite (`limit` is mandatory by
+contract) and does not weaken approval, credential, trace, effect, or post-dispatch reconciliation
+controls:
+
+```typescript
+const batch = await brainWorker.run({
+  limit: 32,
+  maxParallelism: 8,
+  continueOnNonTerminal: false,
+});
+```
+
+Parallel claims use separate leases and transient private resolutions. No task text, prompt,
+credential, provider response, evaluator value, or connector payload is moved into the batch
+projection; digest ordering is derived from the bounded drain assignment order.
+
 The resolver must return the same private request, mode, and policy digest that were used at
 submission. A mismatch is a non-dispatch failure; a typed retryable resolver/transport failure
 can return the job to `queued`; any error after the worker records `unknown` is quarantined for

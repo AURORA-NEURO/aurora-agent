@@ -1,5 +1,14 @@
 # Remaining backlog
 
+Both TypeScript high-level brain workers now support bounded parallel draining with explicit
+`maxParallelism` and `continueOnNonTerminal` controls. The conservative serial default remains
+unchanged; opted-in claims preserve per-job approval, lease heartbeat, protected credential,
+trace, digest, retry, and reconciliation boundaries. Batch projections report requested work,
+parallelism, and whether backpressure stopped new claims, with offline all-domain coverage for
+local and remote workers. This improves throughput for deployments with independent capacity;
+it does not provide distributed scheduling, provider quotas, external authorization, or durable
+multi-host lease consensus.
+
 The TypeScript `AutonomousBrainFacade` now exposes a reusable `providerSetup` onboarding boundary
 for the normal user-key lifecycle: provider registration, redacted instructions, short-lived
 credential sessions, opaque handles, readiness projection, and revocation. Offline coverage

@@ -264,6 +264,47 @@ test("remote brain worker submits, approval-gates, and executes every built-in s
   assert.equal(traceRegistry.verifyIntegrity().runs, submitted.length);
 });
 
+test("remote brain worker drains approved jobs with bounded parallel claims", async () => {
+  const runtime = makeBrain();
+  const { brain } = runtime;
+  const api = remoteBrainApi();
+  const worker = new AutonomousDurableBrainJobWorker({
+    brain,
+    apiClient: api,
+    workerId: "remote-parallel-worker",
+    resolve: ({ job }) => ({
+      specDigest: job.spec_digest,
+      policyDigest: policy("abcdef"[Number(job.job_id.split("-").at(-1)) - 1]),
+      request: { task: tasks[job.domain], domain: job.domain, capability: "bounded_task" },
+      mode: "execute",
+      execute: { run: { candidates: [model] } },
+    }),
+  });
+  const domains = ["coding", "browser", "data", "science"];
+  const submitted = [];
+  for (const [index, domain] of domains.entries()) {
+    const request = { task: tasks[domain], domain, capability: "bounded_task" };
+    const selectedPolicy = policy("abcdef"[index]);
+    const result = await worker.submit({ idempotencyKey: `remote-parallel-${domain}`, request, mode: "execute", policyDigest: selectedPolicy });
+    assert.equal(result.status, "submitted", domain);
+    submitted.push({ job: result.job, request, selectedPolicy });
+  }
+  for (const { job } of submitted) {
+    assert.equal((await worker.runOnce(job.job_id)).status, "waiting_approval", job.domain);
+    await worker.approval(job.job_id, "approve", { authorizationDigest: "p".repeat(64) });
+  }
+  const batch = await worker.run({ limit: submitted.length, maxParallelism: 2 });
+  assert.equal(batch.status, "completed");
+  assert.equal(batch.requested_count, submitted.length);
+  assert.equal(batch.max_parallelism, 2);
+  assert.equal(batch.stopped_on_non_terminal, false);
+  assert.equal(batch.runs.length, submitted.length);
+  assert.equal(batch.succeeded_count, submitted.length);
+  assert.equal(batch.failed_count, 0);
+  assert.equal(api.seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "task")), true);
+  assert.equal(api.seen.every((row) => !Object.prototype.hasOwnProperty.call(row.args, "prompt")), true);
+});
+
 test("remote brain worker rehydrates protected receipts across every domain and preserves explicit resolver precedence", async () => {
   const runtime = makeBrain();
   const { brain } = runtime;
