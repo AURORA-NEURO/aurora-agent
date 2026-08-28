@@ -64,6 +64,12 @@ status. Launch-admitted trace variants reject semantic rerouting before source d
 returned live result still belongs to the caller, while the trace summary and every trace event
 are safe for append-only telemetry, operator queries, and caller-owned persistence.
 
+`runWithReviewedEvidenceResumableWithTrace` extends the same guarantee across restart boundaries.
+It composes the caller's checkpoint writer, records checkpoint status/digests after persistence,
+and maps `provider_pending` or `provider_reconciliation_required` to a paused trace. It never
+turns a checkpoint into permission to replay a provider: recovery still requires the explicit
+rehydrator or resume decision defined by the underlying evidence controller.
+
 ## Domain execution policies
 
 Every built-in domain now has a versioned, provider-free execution policy in both SDKs. The

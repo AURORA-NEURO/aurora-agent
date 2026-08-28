@@ -481,6 +481,34 @@ test("brain facade traced launch admission preserves evidence review and blocks 
   assert.equal(traceStore.verifyIntegrity().verified, true);
 });
 
+test("brain facade traces restart-safe evidence checkpoints without replaying provider payloads", async () => {
+  const { agent, registry, calls } = await setup();
+  const brain = new AutonomousBrainFacade({ agent });
+  const plan = await agent.evidencePlan(["evaluation"]);
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+  const checkpoints = [];
+  const traced = await brain.runWithReviewedEvidenceResumableWithTrace("Traced restart-safe evaluation review.", {
+    registry,
+    ...evidenceOptions(plan),
+    jobId: "facade-evidence-traced-resume",
+    checkpointSink: (checkpoint) => checkpoints.push(checkpoint),
+    traceStore,
+    runId: "facade-evidence-traced-resume",
+  });
+  assert.equal(traced.run.status, "completed");
+  assert.equal(traced.trace.status, "completed");
+  assert.equal(traced.trace.provider_invocations, 1);
+  assert.ok(checkpoints.length >= 2);
+  assert.equal(checkpoints.at(-1).status, "completed");
+  assert.doesNotMatch(JSON.stringify(traced), /transient-evidence-claim/);
+  const events = traceStore.events({ run_id: "facade-evidence-traced-resume" });
+  assert.ok(events.some((event) => event.phase === "plan_compiled"));
+  assert.ok(events.some((event) => event.phase === "provider_invocation_finished"));
+  assert.ok(events.some((event) => event.phase === "evaluation_settled"));
+  assert.equal(traceStore.verifyIntegrity().verified, true);
+  assert.equal(calls.provider, 1);
+});
+
 async function catalogueSetup() {
   const profiles = await builtinAutonomousDomainProfiles();
   const sourceProfiles = builtinAutonomousDomainEvidenceSourceProfiles();

@@ -2117,6 +2117,8 @@ export type {
   AutonomousBrainDomainEvidenceBrainTraceOptions,
   AutonomousBrainTracedEvidenceBackedRunResult,
   AutonomousBrainTracedDomainEvidenceBrainRunResult,
+  AutonomousBrainEvidenceBackedResumableTraceOptions,
+  AutonomousBrainTracedEvidenceBackedResumableRun,
   AutonomousBrainExecuteOptions,
   AutonomousBrainTraceOptions,
   AutonomousBrainTracedExecution,

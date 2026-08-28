@@ -26,6 +26,12 @@ selection, provider invocation, evidence/reconciliation settlement, conservative
 launch-admission refusal, and all-domain reviewed adapter execution while keeping raw source
 values, prompt chunks, provider output, and credentials out of trace events and projections.
 
+Restart-safe evidence now has a first-class traced facade path as well. The wrapper composes
+caller checkpoint persistence, emits status/digest-only checkpoint lifecycle events, captures
+provider receipts through the existing observer, preserves explicit pending/reconciliation
+states, and refuses to turn restored state into implicit provider replay. Focused coverage verifies
+checkpoint ordering, terminal completion, trace integrity, and redaction.
+
 Provider-assisted planning now has a symmetric failure contract across Python and TypeScript.
 Single-domain, ordered-step, cross-domain, automatic, and direct plan-and-run entrypoints convert
 credential-boundary and operational provider failures into metadata-only `provider_failed`

@@ -502,6 +502,12 @@ export type AutonomousBrainEvidenceBackedResumableExecutionOptions = AutonomousE
 /** Restart-safe evidence result; provider dispatch after a pending checkpoint remains explicit. */
 export type AutonomousBrainEvidenceBackedResumableRun = AutonomousEvidenceBackedResumableRun;
 
+/** Restart-safe evidence controls plus a caller-owned hash-chained metadata trace. */
+export interface AutonomousBrainEvidenceBackedResumableTraceOptions extends AutonomousBrainEvidenceBackedResumableExecutionOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
 /** Evidence-backed facade controls plus one caller-owned hash-chained metadata trace. */
 export interface AutonomousBrainEvidenceBackedTraceOptions extends AutonomousBrainEvidenceBackedRunOptions {
   traceStore: AutonomousRunTraceStore;
@@ -527,6 +533,14 @@ export interface AutonomousBrainTracedDomainEvidenceBrainRunResult {
   result: AutonomousBrainDomainEvidenceBrainRunResult;
   trace: AutonomousRunTraceSummary;
   retention: "result_values_caller_owned;trace_metadata_only_no_evidence_prompts_responses_or_credentials";
+  secret_material: "never_returned";
+}
+
+/** Restart-safe evidence result paired with its checkpoint and metadata-only trace. */
+export interface AutonomousBrainTracedEvidenceBackedResumableRun {
+  run: AutonomousBrainEvidenceBackedResumableRun;
+  trace: AutonomousRunTraceSummary;
+  retention: "result_values_and_checkpoints_caller_owned;trace_metadata_only_no_evidence_prompts_responses_or_credentials";
   secret_material: "never_returned";
 }
 
@@ -1143,7 +1157,7 @@ function evidenceTraceRouteDigest(result: EvidenceTraceResult): string | null {
 }
 
 function evidenceTraceStatus(status: string): ReturnType<typeof autonomousRunTraceStatus> {
-  if (status === "evidence_review_required" || status === "evidence_blocked") return "paused";
+  if (status === "evidence_review_required" || status === "evidence_blocked" || status === "provider_pending" || status === "provider_reconciliation_required") return "paused";
   if (status === "evidence_incomplete") return "partial";
   if (status === "evidence_failed") return "failed";
   return autonomousRunTraceStatus(status);
@@ -1991,6 +2005,104 @@ export class AutonomousBrainFacade {
     this.rejectLaunchAdmittedSemanticRouting(options?.run?.semanticRouting, "launch-admitted resumable evidence execution requires provider-free routing; admit semantic routing separately before enabling it");
     authorizeAutonomousLaunchDomains(admission, domains);
     return this.runWithReviewedEvidenceResumable(task, options);
+  }
+
+  /**
+   * Trace restart-safe evidence execution while keeping checkpoint persistence and provider
+   * recovery in the caller's authority. Checkpoint events contain only status and digests; the
+   * direct resumable result retains its caller-owned transient values outside the trace.
+   */
+  async runWithReviewedEvidenceResumableWithTrace(
+    task: string,
+    options: AutonomousBrainEvidenceBackedResumableTraceOptions,
+  ): Promise<AutonomousBrainTracedEvidenceBackedResumableRun> {
+    const taskDigest = digestJsonSync({ task });
+    const trace = new AutonomousRunTraceSession(options.traceStore, {
+      run_id: options.runId,
+      task_digest: taskDigest,
+      domains: evidenceTraceDomains(options.domains, options.runMode),
+    });
+    await trace.started();
+    let planRecorded = false;
+    try {
+      const {
+        traceStore: _traceStore,
+        runId: _runId,
+        checkpointSink: callerCheckpointSink,
+        ...runOptions
+      } = options;
+      const run = await this.runWithReviewedEvidenceResumable(task, {
+        ...runOptions,
+        checkpointSink: async (checkpoint) => {
+          if (!planRecorded) {
+            planRecorded = true;
+            await trace.record({
+              phase: "plan_compiled",
+              status: "running",
+              plan_digest: checkpoint.execution_plan_digest,
+              detail_digest: digestJsonSync({ checkpoint_status: checkpoint.status }),
+            });
+          }
+          await callerCheckpointSink(checkpoint);
+          await trace.record({
+            phase: "evaluation_settled",
+            status: "running",
+            plan_digest: checkpoint.execution_plan_digest,
+            detail_digest: digestJsonSync({
+              checkpoint_status: checkpoint.status,
+              checkpoint_digest: checkpoint.checkpoint_digest,
+              provider_result_digest: checkpoint.provider_result_digest,
+              provider_rehydrated: checkpoint.provider_result_digest !== null,
+            }),
+          });
+        },
+        run: tracedEvidenceRunOptions(runOptions.run, trace),
+      });
+      const evidenceResult = run.result;
+      if (!planRecorded) {
+        await trace.record({
+          phase: "plan_compiled",
+          status: "running",
+          plan_digest: evidenceResult.execution_plan.plan_digest,
+          detail_digest: digestJsonSync({
+            evidence_status: evidenceResult.evidence?.status ?? null,
+            resumable_status: run.status,
+            provider_rehydrated: run.provider_rehydrated,
+          }),
+        });
+      }
+      const metadataRun = evidenceTraceMetadataRun(evidenceResult);
+      await trace.complete({
+        status: evidenceTraceStatus(run.status),
+        domains: evidenceTraceDomains(options.domains, options.runMode),
+        route_digest: evidenceTraceRouteDigest(evidenceResult),
+        plan_digest: evidenceResult.execution_plan.plan_digest,
+        selection_digest: metadataRun?.selection ? digestJsonSync(metadataRun.selection) : null,
+        detail_digest: digestJsonSync({ status: run.status, checkpoint_status: run.checkpoint.status }),
+      });
+      return {
+        run,
+        trace: await trace.summary(),
+        retention: "result_values_and_checkpoints_caller_owned;trace_metadata_only_no_evidence_prompts_responses_or_credentials",
+        secret_material: "never_returned",
+      };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Launch-admitted restart-safe evidence trace with provider rerouting refused up front. */
+  async runWithReviewedEvidenceResumableWithLaunchAdmissionAndTrace(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainEvidenceBackedResumableTraceOptions,
+  ): Promise<AutonomousBrainTracedEvidenceBackedResumableRun> {
+    const domains = options?.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    this.rejectLaunchAdmittedSemanticRouting(options?.run?.semanticRouting, "launch-admitted traced resumable evidence execution requires provider-free routing; admit semantic routing separately before enabling it");
+    authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWithReviewedEvidenceResumableWithTrace(task, options);
   }
 
   /** Create a serialized, CAS-capable evidence controller for a caller-owned job. */
