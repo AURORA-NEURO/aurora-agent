@@ -3568,6 +3568,24 @@ def test_cross_domain_provider_failures_become_redacted_child_results_and_respec
     }
     assert "sensitive provider diagnostic" not in json.dumps(synthesis_failed.to_dict())
 
+    all_failed = agent.run_cross_domain(
+        task="Coordinate a biomedical and neuroscience review when every specialist provider fails.",
+        subtasks=[
+            {"id": "failing-biomedical", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "failing-neuroscience", "task": "FAIL_CHILD review the neuroscience signal limits.", "domain": "neuroscience"},
+        ],
+        credentials={},
+        approve_provider_call=True,
+        allow_partial=True,
+        max_parallelism=2,
+    )
+    assert all_failed.status == "child_failed"
+    assert all_failed.synthesis_result is None
+    assert [result.status for result in all_failed.child_results] == [
+        "provider_failed",
+        "provider_failed",
+    ]
+
 
 def test_cross_domain_learning_provider_failures_preserve_ordered_evaluator_settlement(tmp_path: Path):
     runtime = LLMRuntime()
@@ -3637,6 +3655,27 @@ def test_cross_domain_learning_provider_failures_preserve_ordered_evaluator_sett
         assert blocked.cross_domain.synthesis_result is None
         assert blocked.cross_domain.child_results[0].status == "provider_failed"
         assert blocked.evaluations == ()
+
+        all_failed = agent.run_cross_domain_learning(
+            task="Learn from a review where every specialist provider fails.",
+            subtasks=[
+                {"id": "failing-biomedical", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+                {"id": "failing-neuroscience", "task": "FAIL_CHILD review the neuroscience signal limits.", "domain": "neuroscience"},
+            ],
+            credentials={},
+            model_candidates=_model(),
+            evaluator=evaluator,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            approve_provider_call=True,
+            allow_partial=True,
+        )
+        assert all_failed.status == "child_failed"
+        assert all_failed.cross_domain.synthesis_result is None
+        assert [result.status for result in all_failed.cross_domain.child_results] == [
+            "provider_failed",
+            "provider_failed",
+        ]
+        assert all_failed.evaluations == ()
     finally:
         memory.close()
 

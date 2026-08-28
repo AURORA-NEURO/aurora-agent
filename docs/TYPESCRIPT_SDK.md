@@ -1835,7 +1835,8 @@ attributable to a child. The synthesis prompt receives only bounded local output
 IDs, domains, statuses, and output digests. A child that is approval-blocked or fails prevents
 synthesis by default; children already in flight may finish, but a bounded failure prevents new
 children from being scheduled. `allowPartial: true` is an explicit choice to synthesize incomplete
-evidence; `synthesize: false` returns child results without claiming an integrated conclusion.
+but non-empty evidence; if no child completes, the result remains blocked with `synthesis: null`.
+`synthesize: false` returns child results without claiming an integrated conclusion.
 `run()` automatically delegates to this path when it receives an ambiguous task with more than one
 selected domain and no explicit domain override.
 

@@ -2787,3 +2787,66 @@ test("cross-domain provider failures become redacted child results and respect p
   assert.equal(synthesisFailed.synthesis?.failure?.error_class, "ProviderRuntimeError");
   assert.equal(JSON.stringify(synthesisFailed).includes("sensitive provider diagnostic"), false);
 });
+
+test("cross-domain credential failures become redacted child results without contacting the provider", async () => {
+  let fetchCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      fetchCalls += 1;
+      throw new Error("credential failure must stop before transport");
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("credentialed-cross", "https://credentialed-cross.invalid", { requiresCredential: true }));
+  const agent = new AutonomousAgent(llm);
+  // Keep the target provider readiness gate open, then deliberately pass a handle owned by a
+  // different provider. The runtime must reject the mismatch before the fetch implementation.
+  llm.credentials.register("credentialed-cross", "local-fixture-credential");
+  const mismatchedCredential = llm.credentials.register("different-provider", "other-local-fixture");
+  const model = candidate("credentialed-cross", "credential-model", [
+    "reasoning", "coordination", "biomedical", "neuroscience", "science", "structured_output",
+  ]);
+  agent.registerModel(model);
+  const task = "Coordinate a biomedical and neuroscience review when one credential is unavailable.";
+  const subtasks = [
+    { id: "credentialed-biomedical", domain: "biomedical", task: "Review the biomedical evidence." },
+    { id: "credentialed-neuroscience", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+  ];
+
+  const partial = await agent.runCrossDomain(task, {
+    candidates: [model],
+    subtasks,
+    credential: mismatchedCredential,
+    approveProviderCall: true,
+    allowPartial: true,
+    maxParallelChildren: 2,
+  });
+  assert.equal(partial.status, "child_failed");
+  assert.equal(partial.completed_children, 0);
+  assert.equal(partial.synthesis, null);
+  assert.deepEqual(partial.child_runs.map((child) => child.result.status), ["child_failed", "child_failed"]);
+  for (const child of partial.child_runs) {
+    assert.equal(child.result.failure?.error_class, "CredentialError");
+    assert.equal(child.result.failure?.code, "credential");
+    assert.equal(child.result.failure?.retryable, false);
+    assert.equal(child.result.failure?.status_code, null);
+    assert.equal(child.result.failure?.circuit_open, false);
+  }
+  assert.equal(JSON.stringify(partial).includes("credential failure must stop before transport"), false);
+  assert.equal(fetchCalls, 0);
+
+  const strict = await agent.runCrossDomain(task, {
+    candidates: [model],
+    subtasks,
+    credential: mismatchedCredential,
+    approveProviderCall: true,
+    allowPartial: false,
+    synthesize: true,
+    maxParallelChildren: 1,
+  });
+  assert.equal(strict.status, "child_failed");
+  assert.equal(strict.synthesis, null);
+  assert.equal(strict.child_runs.length, 1);
+  assert.equal(strict.child_runs[0].result.failure?.error_class, "CredentialError");
+  assert.equal(fetchCalls, 0);
+});

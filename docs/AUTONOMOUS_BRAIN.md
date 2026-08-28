@@ -4529,6 +4529,8 @@ retryability, circuit state, and bounded status code; exception text, request me
 material, provider responses, and wire payloads are never copied into the parent result. With
 `allow_partial=True`, healthy siblings remain available and synthesis may complete, so the parent
 can report `completed` while the failed child remains explicitly `provider_failed`/`child_failed`.
+If no specialist reaches `completed`, both SDKs return the typed blocking status with `synthesis: null`;
+`allow_partial` never creates a fan-in conclusion from zero usable evidence.
 The same envelope is used when synthesis itself fails, yielding an explicit provider failure
 instead of losing the completed child state. With `allow_partial=False`, the parent returns
 `child_failed` without synthesis once a strict child failure is observed. Programming,

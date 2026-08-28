@@ -1,4 +1,4 @@
-import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
+import { ArgumentError, CredentialError, ProviderRuntimeError, isObject } from "./errors.js";
 import type { ProviderErrorCode } from "./errors.js";
 import { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous-domains.js";
 import type { AutonomousDomainName } from "./autonomous-domains.js";
@@ -1132,8 +1132,8 @@ export type AutonomousRunStatus = "completed" | "route_review_required" | "appro
  * in the parent execution receipt.
  */
 export interface AutonomousProviderFailureProjection extends JsonObject {
-  error_class: "ProviderRuntimeError";
-  code: ProviderErrorCode;
+  error_class: "ProviderRuntimeError" | "CredentialError";
+  code: ProviderErrorCode | "credential";
   retryable: boolean;
   status_code: number | null;
   circuit_open: boolean;
@@ -1193,15 +1193,15 @@ export interface AutonomousRunResult {
 function providerFailureRunResult(
   parentRoute: AutonomousRouteProposal,
   blueprint: AutonomousTaskBlueprint,
-  error: ProviderRuntimeError,
+  error: ProviderRuntimeError | CredentialError,
   learning: AutonomousRunResult["learning"],
 ): AutonomousRunResult {
   const failure: AutonomousProviderFailureProjection = {
-    error_class: "ProviderRuntimeError",
-    code: error.code,
-    retryable: error.retryable,
-    status_code: error.statusCode ?? null,
-    circuit_open: error.circuitOpen,
+    error_class: error instanceof CredentialError ? "CredentialError" : "ProviderRuntimeError",
+    code: error instanceof CredentialError ? "credential" : error.code,
+    retryable: error instanceof CredentialError ? false : error.retryable,
+    status_code: error instanceof CredentialError ? null : error.statusCode ?? null,
+    circuit_open: error instanceof CredentialError ? false : error.circuitOpen,
     retention: "metadata_only;provider_error_message_and_payloads_not_retained",
     secret_material: "never_returned",
   };
@@ -9124,13 +9124,14 @@ export class AutonomousAgent {
     if (!blueprint.child_blueprints.some((child) => child.response_contract !== undefined) && blueprint.synthesis_blueprint.response_contract === undefined) return null;
     const entries: AutonomousCrossDomainResponseEntry[] = [];
     for (const childRun of childRuns) {
+      if (childRun.result.status !== "completed") continue;
       const child = blueprint.child_blueprints[blueprint.child_ids.indexOf(childRun.id)];
       if (!child?.response_contract) continue;
       const structured = childRun.result.response?.structured;
       if (structured === null || structured === undefined) throw new ProviderRuntimeError(`structured response is missing for cross-domain child ${childRun.id}`);
       entries.push({ domain: child.domain_profile.domain, contract: child.response_contract, response: structured, role: "specialist" });
     }
-    if (synthesis?.blueprint?.response_contract) {
+    if (synthesis?.status === "completed" && synthesis.blueprint?.response_contract) {
       const structured = synthesis.response?.structured;
       if (structured === null || structured === undefined) throw new ProviderRuntimeError("structured response is missing for cross-domain synthesis");
       entries.push({ domain: "cross_domain", contract: synthesis.blueprint.response_contract, response: structured, role: "synthesis" });
@@ -9300,7 +9301,7 @@ export class AutonomousAgent {
           maxToolRiskClass: options.maxToolRiskClass,
         });
       } catch (error) {
-        if (!(error instanceof ProviderRuntimeError)) throw error;
+        if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
         // Provider/credential failures are expected operational outcomes for a bounded child.
         // Convert them to metadata-only results so allowPartial can preserve healthy siblings
         // and synthesis can explicitly see the omission without receiving an error message or
@@ -9375,7 +9376,11 @@ export class AutonomousAgent {
         });
       }
     }
-    if (!allChildrenCompleted && !options.allowPartial) {
+    // Partial fan-in is useful only when at least one specialist produced usable evidence.
+    // Never spend another provider call synthesizing an empty or entirely blocked fan-out.
+    // This also keeps credential/provider failures from being accidentally upgraded into a
+    // successful-looking conclusion when allowPartial is enabled.
+    if (!allChildrenCompleted && (!options.allowPartial || (options.synthesize !== false && completedChildren === 0))) {
       const hasReconciliation = childRuns.some((child) => child.result.status === "reconciliation_required");
       return finish({ schema: AUTONOMOUS_CROSS_DOMAIN_RESULT_SCHEMA, status: hasReconciliation ? "reconciliation_required" : hasApproval ? "approval_required" : hasTurnLimit ? "turn_limit_reached" : "child_failed", route, blueprint, child_runs: childRuns, synthesis: null, completed_children: completedChildren, total_children: blueprint.child_blueprints.length, partial: completedChildren > 0, plan_refinement_digest: planRefinementDigest, response_assessment: responseAssessment, ...(domainPolicyAdmissions === undefined ? {} : { domain_policy_admissions: domainPolicyAdmissions }), learning_episode_ids: learningEpisodeIds, response_learning_episode_ids: responseLearningEpisodeIds, learning, retention: "provider_responses_local; child_digests_only_in_synthesis_metadata" });
     }
@@ -9454,7 +9459,7 @@ export class AutonomousAgent {
         maxToolRiskClass: options.maxToolRiskClass,
       });
     } catch (error) {
-      if (!(error instanceof ProviderRuntimeError)) throw error;
+      if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
       // Keep synthesis failures on the same typed boundary as child failures. The parent
       // remains explicit about the failed synthesis and never serializes provider diagnostics.
       synthesis = providerFailureRunResult(route, blueprint.synthesis_blueprint, error, learning);

@@ -14514,7 +14514,10 @@ class AutonomousTaskOrchestrator:
                     minimum_alignment_confidence=float(minimum_response_alignment_confidence),
                     contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
                 )
-        if not all(complete) and not allow_partial:
+        # Partial fan-in is useful only when at least one specialist produced usable evidence.
+        # Never spend another provider call synthesizing an empty or entirely blocked fan-out.
+        # This keeps provider/credential failures from becoming a successful-looking conclusion.
+        if not all(complete) and (not allow_partial or (synthesize and not any(complete))):
             status = (
                 "reconciliation_required"
                 if any(result.status == "reconciliation_required" for result in child_results)
@@ -15014,7 +15017,7 @@ class AutonomousTaskOrchestrator:
                 break
 
         complete = [result.status.startswith("completed") for result in child_results]
-        if not all(complete) and not allow_partial:
+        if not all(complete) and (not allow_partial or (synthesize and not any(complete))):
             status = (
                 "approval_required"
                 if any(result.status == "approval_required" for result in child_results)

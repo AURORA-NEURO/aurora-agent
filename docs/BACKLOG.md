@@ -2186,3 +2186,16 @@ and other incomplete legs receive no episode, reward, evaluator receipt, or memo
 runs fail before evaluator invocation when any leg is incomplete. This closes the remaining
 Python delayed-credit path where typed failure envelopes could otherwise be admitted by the
 generic trajectory preparer; distributed retry and reconciliation remain deployment-owned.
+
+TypeScript cross-domain fan-out now also isolates credential-boundary failures. Missing, expired,
+revoked, or provider-mismatched opaque handles become the same redacted child failure envelope as
+provider transport failures, with only `CredentialError`, `credential`, and bounded retry/circuit
+metadata retained. Partial fan-out can therefore preserve healthy work without contacting a
+credentialed provider, while strict fan-out stops before synthesis and leaves credential
+collection/retry authority with the caller.
+
+Cross-domain fan-in now also rejects zero-evidence partial runs in both SDKs. When every specialist
+is blocked, incomplete, or fails at the provider/credential boundary, `allow_partial` returns the
+typed blocking result with no synthesis call. Structured-response assessment likewise ignores
+incomplete child envelopes, preventing a failed child from being treated as missing structured
+evidence that aborts otherwise healthy sibling work.
