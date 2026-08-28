@@ -13112,6 +13112,12 @@ const preview = runtime.preview({
 });
 ```
 
+The application-facing facades also expose `preview_goal_control_loop()` /
+`previewGoalControlLoop()`. These helpers may construct a preview-only runtime with just the
+ledger and scheduling policy; task rehydration is not required until execution is requested. If
+that same runtime is later used for `run()`, the caller must attach a task resolver or protected
+rehydration adapter before any goal can be claimed.
+
 The result contains the digest-bound schedule, `admissible_work`, `all_terminal`, or
 `no_admissible_work` status, eligible-goal count, decision and reason histograms, lifecycle
 status counts, and dependency-blocked goal identities. When the built-in goal bandit is

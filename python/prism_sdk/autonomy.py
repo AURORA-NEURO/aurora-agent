@@ -17049,7 +17049,7 @@ class AutonomousAgent:
         self,
         ledger: AutonomousGoalLedger,
         *,
-        task_resolver: Callable[[Any, Any], str],
+        task_resolver: Callable[[Any, Any], str] | None = None,
         run_options_factory: Callable[[Any, Any], Mapping[str, Any]] | None = None,
         action_handoff_resolver: Callable[[Any, Any, str], Mapping[str, Any] | None] | None = None,
         evaluator: Any | None = None,
@@ -17123,6 +17123,27 @@ class AutonomousAgent:
             max_cycles=max_cycles,
             max_total_runs=max_total_runs,
         )
+
+    def preview_goal_control_loop(
+        self,
+        ledger: AutonomousGoalLedger,
+        *,
+        batch_id_prefix: str = "autonomous-goal-agent",
+        schedule_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Inspect the next goal admission decision without requiring task rehydration.
+
+        The preview is provider-free and does not call a resolver, open credentials, invoke an
+        evaluator, mutate learner state, or enter any execution boundary.  A task resolver is
+        still required when the returned runtime is later used for ``run``.
+        """
+
+        runtime = self.goal_agent_runtime(
+            ledger,
+            task_resolver=None,
+            batch_id_prefix=batch_id_prefix,
+        )
+        return runtime.preview(schedule_options=schedule_options)
 
     def register_model(
         self,

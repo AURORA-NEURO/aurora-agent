@@ -264,8 +264,6 @@ class AutonomousGoalAgentRuntime:
             _fail("task_resolver must be callable or None")
         if protected_rehydration is not None and not isinstance(protected_rehydration, AutonomousProtectedRehydrationAdapter):
             _fail("protected_rehydration must be an AutonomousProtectedRehydrationAdapter or None")
-        if task_resolver is None and protected_rehydration is None:
-            _fail("one of task_resolver or protected_rehydration is required")
         if run_options_factory is not None and not callable(run_options_factory):
             _fail("run_options_factory must be callable or None")
         if action_handoff_resolver is not None and not callable(action_handoff_resolver):
@@ -312,7 +310,7 @@ class AutonomousGoalAgentRuntime:
             _fail(f"goal {goal.goal_id} has an unsupported autonomous domain")
         if self.task_resolver is not None:
             task = self.task_resolver(goal, row)
-        else:
+        elif self.protected_rehydration is not None:
             receipt = {
                 "goal_id": goal.goal_id,
                 "task_digest": goal.task_digest,
@@ -330,6 +328,8 @@ class AutonomousGoalAgentRuntime:
                 one_time=False,
                 digest_scheme="utf8_sha256",
             )
+        else:
+            _fail("task rehydration is not configured")
         if not isinstance(task, str) or not task.strip() or "\x00" in task or len(task.encode("utf-8")) > 32_000:
             _fail(f"resolved task is invalid for goal {goal.goal_id}")
         resolved_handoff = None if self.action_handoff_resolver is None else self.action_handoff_resolver(goal, row, task)
@@ -436,7 +436,7 @@ class AutonomousGoalAgentRuntime:
             "domains": list(AUTONOMOUS_DOMAINS),
             "execution_surface": "autonomous_goal_action_handoff_facade" if self.action_handoff_resolver is not None else ("autonomous_agent_facade" if self.agent is not None else "autonomous_task_orchestrator"),
             "action_handoff_execution": "verified_handoff_replay_before_run_boundary" if self.action_handoff_resolver is not None else "not_configured",
-            "task_rehydration": "protected_receipt_adapter_fallback" if self.task_resolver is None else "caller_task_resolver_precedence",
+            "task_rehydration": "caller_task_resolver_precedence" if self.task_resolver is not None else ("protected_receipt_adapter_fallback" if self.protected_rehydration is not None else "not_configured_preview_only"),
             "recovery_execution": "ordered_journal_then_control_checkpoint" if self.recovery is not None else "caller_composed",
             "trace_execution": "metadata_only_goal_control_trace",
             "retention": GOAL_AGENT_RUNTIME_RETENTION,

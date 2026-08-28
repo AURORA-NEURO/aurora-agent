@@ -131,6 +131,8 @@ def test_goal_control_loop_preview_is_provider_free_and_explains_all_domain_admi
     public = json.dumps(preview.to_dict(), sort_keys=True)
     assert "private preview task" not in public
     assert "private preview blocked task" not in public
+    facade_preview = AutonomousAgent(None, LLMRuntime()).preview_goal_control_loop(ledger, schedule_options=preview_options)
+    assert facade_preview.schedule.schedule_digest == preview.schedule.schedule_digest
 
 
 def test_goal_control_loop_preview_reports_terminal_and_policy_blocked_states() -> None:

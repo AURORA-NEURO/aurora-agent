@@ -105,6 +105,9 @@ test("goal control loop preview is provider-free and explains all-domain admissi
   assert.equal(learner.snapshot().generation, 0);
   assert.equal(JSON.stringify(preview).includes("private preview task"), false);
   assert.equal(JSON.stringify(preview).includes("private preview blocked task"), false);
+  const previewBrain = new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("preview must not reach a provider"); } })) });
+  const facadePreview = previewBrain.previewGoalControlLoop({ runtime: { ledger }, schedule_options });
+  assert.equal(facadePreview.schedule.schedule_digest, preview.schedule.schedule_digest);
 });
 
 test("goal control loop preview reports terminal and retry-policy-blocked states", () => {

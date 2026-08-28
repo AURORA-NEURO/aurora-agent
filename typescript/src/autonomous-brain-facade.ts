@@ -19,7 +19,7 @@ import {
   type AutonomousGoalAgentLoopRunOptions,
   type AutonomousGoalAgentRuntimeOptions,
 } from "./autonomous-goal-agent.js";
-import type { AutonomousGoalControlLoopResult } from "./autonomous-goal-control-loop.js";
+import { AutonomousGoalControlLoopPreview, type AutonomousGoalControlLoopResult } from "./autonomous-goal-control-loop.js";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   validateAutonomousRouteOverride,
@@ -546,6 +546,15 @@ export interface AutonomousBrainGoalAgentControlOptions {
 
 /** Value-only control-loop result returned to the initiating caller. */
 export type AutonomousBrainGoalAgentControlResult = AutonomousGoalControlLoopResult;
+
+/** One-call, provider-free goal admission inspection with no task rehydration requirement. */
+export interface AutonomousBrainGoalAgentPreviewOptions {
+  runtime: AutonomousBrainGoalAgentRuntimeOptions;
+  schedule_options?: Record<string, unknown>;
+}
+
+/** Digest-bound metadata-only goal admission preview. */
+export type AutonomousBrainGoalAgentPreview = AutonomousGoalControlLoopPreview;
 
 /** Restart-safe evidence controls plus a caller-owned hash-chained metadata trace. */
 export interface AutonomousBrainEvidenceBackedResumableTraceOptions extends AutonomousBrainEvidenceBackedResumableExecutionOptions {
@@ -2060,6 +2069,17 @@ export class AutonomousBrainFacade {
     if (!options.runtime || typeof options.runtime !== "object" || Array.isArray(options.runtime)) throw new ArgumentError("autonomous brain goal control runtime must be an object");
     if (options.run !== undefined && (typeof options.run !== "object" || options.run === null || Array.isArray(options.run))) throw new ArgumentError("autonomous brain goal control run options must be an object");
     return this.createGoalAgentRuntime(options.runtime).run(options.run ?? {});
+  }
+
+  /**
+   * Inspect the next goal admission decision without requiring task text, credentials, or a
+   * resolver. The returned preview is explanatory metadata, not an execution authorization.
+   */
+  previewGoalControlLoop(options: AutonomousBrainGoalAgentPreviewOptions): AutonomousBrainGoalAgentPreview {
+    if (!options || typeof options !== "object" || Array.isArray(options)) throw new ArgumentError("autonomous brain goal preview options must be an object");
+    if (!options.runtime || typeof options.runtime !== "object" || Array.isArray(options.runtime)) throw new ArgumentError("autonomous brain goal preview runtime must be an object");
+    if (options.schedule_options !== undefined && (typeof options.schedule_options !== "object" || options.schedule_options === null || Array.isArray(options.schedule_options))) throw new ArgumentError("autonomous brain goal preview schedule options must be an object");
+    return this.createGoalAgentRuntime(options.runtime).preview({ schedule_options: options.schedule_options });
   }
 
   /** Compile routing and workflow metadata without contacting a provider or connector. */
