@@ -195,6 +195,17 @@ and cursors whose status or next index disagrees with the recorded history. This
 worker fail closed before it can dispatch from ambiguous state while still preserving the
 provider-neutral metadata needed for review and deterministic recovery.
 
+The lower execution controller enforces the same distinction at the request boundary. Provider
+call count, persisted failover transitions, cost, tool/effect counts, and evaluator-requested
+replans are separate counters. A fallback observer marks only the first turn of its selected
+attempt as a failover, so a tool-loop continuation cannot spend extra model-transition budget by
+accident. Replan events retain an instruction digest rather than the transient instruction text.
+On Python and TypeScript, a non-retryable provider failure is projected as `error` when
+`stop_on_error` is enabled and must be explicitly finalized by the caller; retryable failures may
+continue only within the reviewed continuation ladder. These counters and decisions are included
+in metadata-only restart snapshots, making a resumed worker subject to the same ceilings as the
+original process.
+
 ## Domain operating kits
 
 The SDK also exposes a digest-bound operating kit for every built-in domain. A kit composes the

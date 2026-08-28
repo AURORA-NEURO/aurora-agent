@@ -44,6 +44,28 @@ test("execution controller enforces provider/tool budgets and records metadata-o
   );
 });
 
+test("execution controller persists bounded failovers and explicit replans across resume", async () => {
+  const journal = new InMemoryAutonomousExecutionJournal({ maxEvents: 32 });
+  const policy = { max_steps: 8, max_provider_calls: 4, max_provider_failovers: 1, max_replans: 1 };
+  const first = await AutonomousExecutionController.create({ executionId: "execution-recovery-1", domain: "coding", capability: "implementation_review", riskClass: "read_only", policy, journal });
+  await first.admitProviderCall({ provider: "primary", model: "model-a", invocationKind: "answer", attempt: 0, turn: 0, failover: false });
+  await first.admitProviderCall({ provider: "fallback", model: "model-b", invocationKind: "answer", attempt: 1, turn: 0, failover: true });
+  assert.equal(first.state.provider_failovers, 1);
+  await first.replan({ instructionDigest: digest("c"), reason: "evaluator_requested_revision", attempt: 1 });
+  assert.equal(first.state.replans, 1);
+  const replan = (await journal.events({ executionId: "execution-recovery-1" })).find((row) => row.event.kind === "replan");
+  assert.equal(replan?.event.instruction_digest, digest("c"));
+
+  const resumed = await AutonomousExecutionController.create({ executionId: "execution-recovery-1", domain: "coding", capability: "implementation_review", riskClass: "read_only", policy, journal, resume: true });
+  assert.equal(resumed.state.provider_failovers, 1);
+  assert.equal(resumed.state.replans, 1);
+  await assert.rejects(
+    resumed.admitProviderCall({ provider: "second-fallback", model: "model-c", invocationKind: "answer", attempt: 2, turn: 0, failover: true }),
+    /max_provider_failovers/,
+  );
+  await assert.rejects(resumed.replan({ instructionDigest: digest("d"), reason: "second_revision" }), /max_replans/);
+});
+
 test("execution journal resumes only with the same policy and rejects terminal resumes", async () => {
   const journal = new InMemoryAutonomousExecutionJournal();
   const policy = { max_steps: 8, max_provider_calls: 4, max_cost_units: 8 };

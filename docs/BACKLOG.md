@@ -1734,6 +1734,14 @@ The seven Python profiles whose default capability was previously absent from th
 catalogue are now closed over that capability. Runtime availability, source truth, authorization,
 and deployment observability remain explicit external gates.
 
+The Python execution controller now matches the TypeScript accounting contract for the remaining
+runtime boundary: persisted provider-failover counters, explicit digest-only replan events,
+retryability-aware provider receipts, stop-on-error halting, approval pause semantics, and direct
+input validation all survive restart through the hash-chained journal. Fallback sessions charge
+one failover transition on their first turn and only provider-call budget on later continuation
+turns. Adversarial and all-domain coverage is included in the SDK test suites; production
+credential resolution, evaluator truth, external effects, and durable storage remain caller-owned.
+
 Python now closes the cross-SDK control-plane supervision gap. `AutonomousBrainControlPlaneMonitor`
 and its async counterpart build on `BrainControlClient` to provide bounded status fan-out across
 all twelve domains, hash-chain event cursor validation, explicit approval routing, and bounded

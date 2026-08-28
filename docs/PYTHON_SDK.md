@@ -11,6 +11,32 @@ the integration layer above the deterministic kernel described by [ADR-001](ADR-
 Python can orchestrate and author requests, while Rust remains the owner of canonical bytes,
 domain invariants, release gates, and evidence semantics.
 
+### Restart-safe autonomous execution accounting
+
+`AutonomousExecutionController` is the Python policy boundary for provider turns, tool intents,
+evaluator settlements, and bounded replans. Its optional `AutonomousExecutionJournal` is an
+append-only, hash-chained metadata journal; it never stores task text, prompts, provider payloads,
+tool arguments/results, credentials, or raw evaluator instructions. `resume=True` requires the
+same execution id and policy digest, so a worker can rehydrate counters without pretending that a
+provider conversation or an external effect was reconstructed.
+
+Provider admission accepts `failover=True` only for a reviewed fallback transition and persists
+`state.provider_failovers` separately from total `state.provider_calls`. The provider observer
+marks only the first turn of a selected fallback session as a failover; continuation turns consume
+the provider-call budget but cannot inflate the failover budget. The policy therefore survives a
+process restart and prevents a fresh worker from bypassing the configured failover ceiling. A
+provider outcome also records a metadata-only `retryable` flag. With `stop_on_error=True`, a
+non-retryable failure moves the controller to `error` and requires an explicit `fail()` decision;
+retryable failures remain eligible for the caller's bounded continuation ladder.
+
+An evaluator-approved planning transition is recorded with
+`controller.replan(instruction_digest=..., reason=..., attempt=...)`. Only the instruction digest,
+bounded reason, attempt index, and incremented replan counter enter the journal. `max_replans`
+is enforced before the transition and is restored with the rest of the execution state. This
+keeps planning guidance transient while making recovery decisions auditable and deterministic.
+The same metadata-only fields are validated by the TypeScript execution controller, preserving
+cross-SDK replay and failure semantics.
+
 The artifact registry is available through typed `ArtifactRegistrationRequest`,
 `ArtifactQueryRequest`, `ArtifactGetRequest`, `ArtifactRegistrationReport`, `ArtifactQueryReport`,
 `ArtifactGetReport`, `ArtifactLineageReport`, `ArtifactDomainEvidenceLineageRequest`,

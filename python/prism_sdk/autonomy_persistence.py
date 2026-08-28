@@ -43,6 +43,7 @@ AUTONOMY_EVENT_KINDS = (
     "checkpoint",
     "approval_required",
     "evaluation",
+    "replan",
     "paused",
     "completed",
     "failed",
@@ -262,6 +263,7 @@ class AutonomousExecutionState:
     policy_digest: str
     step_index: int = 0
     provider_calls: int = 0
+    provider_failovers: int = 0
     tool_calls: int = 0
     effectful_calls: int = 0
     cost_units: float = 0.0
@@ -283,6 +285,7 @@ class AutonomousExecutionState:
         for name, value, maximum in (
             ("step_index", self.step_index, MAX_AUTONOMY_STEPS),
             ("provider_calls", self.provider_calls, MAX_AUTONOMY_PROVIDER_CALLS),
+            ("provider_failovers", self.provider_failovers, MAX_AUTONOMY_PROVIDER_FAILOVERS),
             ("tool_calls", self.tool_calls, MAX_AUTONOMY_TOOL_CALLS),
             ("effectful_calls", self.effectful_calls, MAX_AUTONOMY_EFFECTFUL_CALLS),
             ("replans", self.replans, MAX_AUTONOMY_REPLANS),
@@ -312,6 +315,7 @@ class AutonomousExecutionState:
             "policy_digest": self.policy_digest,
             "step_index": self.step_index,
             "provider_calls": self.provider_calls,
+            "provider_failovers": self.provider_failovers,
             "tool_calls": self.tool_calls,
             "effectful_calls": self.effectful_calls,
             "cost_units": float(self.cost_units),
@@ -341,6 +345,7 @@ class AutonomousExecutionState:
             policy_digest=value.get("policy_digest"),
             step_index=value.get("step_index", 0),
             provider_calls=value.get("provider_calls", 0),
+            provider_failovers=value.get("provider_failovers", 0),
             tool_calls=value.get("tool_calls", 0),
             effectful_calls=value.get("effectful_calls", 0),
             cost_units=value.get("cost_units", 0.0),
@@ -613,14 +618,14 @@ class AutonomousExecutionJournal:
             raise AutonomyPersistenceError("execution event must be a mapping")
         allowed = {
             "execution_id", "kind", "domain", "capability", "risk_class", "status", "policy_digest", "state",
-            "step_index", "provider_calls", "tool_calls", "effectful_calls", "cost_units", "replans",
+            "step_index", "provider_calls", "provider_failovers", "tool_calls", "effectful_calls", "cost_units", "replans",
             "tool", "call_id", "read_only", "approval_required", "schema_digest", "arguments_digest",
             "output_digest", "outcome_digest", "evaluation_digest", "evaluator_id", "evaluator_version",
             "reward", "passed", "failure_class", "reason", "metadata", "provider", "model",
             "invocation_kind", "attempt", "turn", "selection_digest", "provider_outcome",
             "latency_ms", "input_tokens", "output_tokens", "estimated_cost_units", "actual_cost_units",
             "request_id_digest", "status_code", "effect_id", "effect_status", "dispatch_attempt",
-            "reconciliation_digest",
+            "reconciliation_digest", "instruction_digest", "failover", "retryable",
         }
         if set(event).difference(allowed):
             raise AutonomyPersistenceError("execution event contains unsupported fields")
@@ -637,7 +642,7 @@ class AutonomousExecutionJournal:
             "status": _identifier("event status", event.get("status")),
             "policy_digest": _digest("event policy_digest", event.get("policy_digest")),
         }
-        for name, maximum in (("step_index", MAX_AUTONOMY_STEPS), ("provider_calls", MAX_AUTONOMY_PROVIDER_CALLS), ("tool_calls", MAX_AUTONOMY_TOOL_CALLS), ("effectful_calls", MAX_AUTONOMY_EFFECTFUL_CALLS), ("replans", MAX_AUTONOMY_REPLANS)):
+        for name, maximum in (("step_index", MAX_AUTONOMY_STEPS), ("provider_calls", MAX_AUTONOMY_PROVIDER_CALLS), ("provider_failovers", MAX_AUTONOMY_PROVIDER_FAILOVERS), ("tool_calls", MAX_AUTONOMY_TOOL_CALLS), ("effectful_calls", MAX_AUTONOMY_EFFECTFUL_CALLS), ("replans", MAX_AUTONOMY_REPLANS)):
             if name in event:
                 value = event[name]
                 if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= maximum:
@@ -651,7 +656,7 @@ class AutonomousExecutionJournal:
         for name in ("tool", "call_id", "evaluator_id", "evaluator_version", "failure_class", "reason"):
             if name in event and event[name] is not None:
                 normalized[name] = _identifier(f"event {name}", event[name], maximum=2048 if name == "reason" else 512)
-        for name in ("schema_digest", "arguments_digest", "output_digest", "outcome_digest", "evaluation_digest"):
+        for name in ("schema_digest", "arguments_digest", "output_digest", "outcome_digest", "evaluation_digest", "instruction_digest"):
             if name in event and event[name] is not None:
                 normalized[name] = _digest(f"event {name}", event[name])
         for name in ("selection_digest", "request_id_digest"):
@@ -679,7 +684,7 @@ class AutonomousExecutionJournal:
                 if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) or value < 0:
                     raise AutonomyPersistenceError(f"event {name} is outside its bound")
                 normalized[name] = float(value)
-        for name in ("read_only", "approval_required", "passed"):
+        for name in ("read_only", "approval_required", "passed", "failover", "retryable"):
             if name in event and event[name] is not None:
                 if not isinstance(event[name], bool):
                     raise AutonomyPersistenceError(f"event {name} must be a boolean")
@@ -930,14 +935,34 @@ class AutonomousExecutionController:
         turn: int | None = None,
         selection_digest: str | None = None,
         estimated_cost_units: float | None = None,
+        failover: bool = False,
     ) -> AutonomousExecutionState:
         self._ensure_active()
         self._ensure_step()
         if self.state.provider_calls >= self.policy.max_provider_calls:
             raise AutonomyPolicyError("max_provider_calls exceeded")
+        if not isinstance(failover, bool):
+            raise AutonomyPersistenceError("failover must be a boolean")
+        if failover and self.state.provider_failovers >= self.policy.max_provider_failovers:
+            raise AutonomyPolicyError("max_provider_failovers exceeded")
+        if provider is not None:
+            provider = _text("provider", provider)
+        if model is not None:
+            model = _text("model", model)
+        if invocation_kind is not None:
+            invocation_kind = _identifier("invocation_kind", invocation_kind, maximum=128)
+        if attempt is not None and (not isinstance(attempt, int) or isinstance(attempt, bool) or not 0 <= attempt <= 8):
+            raise AutonomyPersistenceError("attempt is outside its bound")
+        if turn is not None and (not isinstance(turn, int) or isinstance(turn, bool) or not 0 <= turn <= 32):
+            raise AutonomyPersistenceError("turn is outside its bound")
+        if selection_digest is not None:
+            selection_digest = _digest("selection_digest", selection_digest)
         self._ensure_cost(cost_units)
-        self.state = replace(self.state, step_index=self.state.step_index + 1, provider_calls=self.state.provider_calls + 1, cost_units=self.state.cost_units + float(cost_units), last_event_kind="provider_call", status="running")
-        fields: dict[str, Any] = {"cost_units": cost_units}
+        estimated_cost = None if estimated_cost_units is None else float(estimated_cost_units)
+        if estimated_cost_units is not None:
+            self._ensure_cost(estimated_cost_units)
+        self.state = replace(self.state, step_index=self.state.step_index + 1, provider_calls=self.state.provider_calls + 1, provider_failovers=self.state.provider_failovers + int(failover), cost_units=self.state.cost_units + float(cost_units), last_event_kind="provider_call", status="running")
+        fields: dict[str, Any] = {"cost_units": float(cost_units), "failover": failover}
         for name, value in (
             ("provider", provider),
             ("model", model),
@@ -945,7 +970,7 @@ class AutonomousExecutionController:
             ("attempt", attempt),
             ("turn", turn),
             ("selection_digest", selection_digest),
-            ("estimated_cost_units", estimated_cost_units),
+            ("estimated_cost_units", estimated_cost),
         ):
             if value is not None:
                 fields[name] = value
@@ -971,26 +996,53 @@ class AutonomousExecutionController:
         request_id_digest: str | None = None,
         failure_class: str | None = None,
         status_code: int | None = None,
+        retryable: bool = False,
     ) -> AutonomousExecutionState:
         """Persist one bounded provider result without changing call-count admission."""
 
         self._ensure_active()
+        provider = _text("provider", provider)
+        model = _text("model", model)
+        invocation_kind = _identifier("invocation_kind", invocation_kind, maximum=128)
+        if not isinstance(attempt, int) or isinstance(attempt, bool) or not 0 <= attempt <= 8:
+            raise AutonomyPersistenceError("attempt is outside its bound")
+        if not isinstance(turn, int) or isinstance(turn, bool) or not 0 <= turn <= 32:
+            raise AutonomyPersistenceError("turn is outside its bound")
         if outcome not in {"success", "failure"}:
             raise AutonomyPersistenceError("provider outcome must be success or failure")
         if status not in {"completed", "provider_refused"}:
             raise AutonomyPersistenceError("provider outcome status is unsupported")
+        if not isinstance(retryable, bool):
+            raise AutonomyPersistenceError("retryable must be a boolean")
+        if not isinstance(input_tokens, int) or isinstance(input_tokens, bool) or not 0 <= input_tokens <= 100_000_000:
+            raise AutonomyPersistenceError("input_tokens is outside its bound")
+        if not isinstance(output_tokens, int) or isinstance(output_tokens, bool) or not 0 <= output_tokens <= 100_000_000:
+            raise AutonomyPersistenceError("output_tokens is outside its bound")
+        for name, value in (("latency_ms", latency_ms), ("estimated_cost_units", estimated_cost_units), ("actual_cost_units", actual_cost_units)):
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)) or value < 0:
+                raise AutonomyPersistenceError(f"{name} must be finite and non-negative")
+        if selection_digest is not None:
+            selection_digest = _digest("selection_digest", selection_digest)
+        outcome_digest = _digest("outcome_digest", outcome_digest)
+        if request_id_digest is not None:
+            request_id_digest = _digest("request_id_digest", request_id_digest)
+        if failure_class is not None:
+            failure_class = _identifier("failure_class", failure_class, maximum=512)
+        if status_code is not None and (not isinstance(status_code, int) or isinstance(status_code, bool) or not 0 <= status_code <= 999):
+            raise AutonomyPersistenceError("status_code is outside its bound")
+        lifecycle_status = "error" if outcome == "failure" and not retryable and self.policy.stop_on_error else "running"
         self.state = replace(
             self.state,
             last_event_kind="provider_call",
-            last_outcome_digest=_digest("outcome_digest", outcome_digest),
-            status="running",
+            last_outcome_digest=outcome_digest,
+            status=lifecycle_status,
         )
         return self._persist(
             "provider_call",
             status,
-            provider=_text("provider", provider),
-            model=_text("model", model),
-            invocation_kind=_text("invocation_kind", invocation_kind, maximum=128),
+            provider=provider,
+            model=model,
+            invocation_kind=invocation_kind,
             attempt=attempt,
             turn=turn,
             provider_outcome=outcome,
@@ -1004,6 +1056,7 @@ class AutonomousExecutionController:
             request_id_digest=request_id_digest,
             failure_class=failure_class,
             status_code=status_code,
+            retryable=retryable,
         )
 
     def admit_tool_call(
@@ -1017,6 +1070,10 @@ class AutonomousExecutionController:
     ) -> AutonomousExecutionState:
         self._ensure_active()
         self._ensure_step()
+        if not isinstance(read_only, bool):
+            raise AutonomyPersistenceError("read_only must be a boolean")
+        if not isinstance(approval_required, bool):
+            raise AutonomyPersistenceError("approval_required must be a boolean")
         tool = _identifier("tool", tool)
         call_id = _identifier("call_id", call_id, maximum=512)
         if self.state.tool_calls >= self.policy.max_tool_calls:
@@ -1036,7 +1093,7 @@ class AutonomousExecutionController:
             last_tool=tool,
             last_call_id=call_id,
             last_event_kind="tool_intent",
-            status="approval_required" if approval_required else "running",
+            status="approval_required" if approval_required and self.policy.pause_on_approval else "running",
         )
         return self._persist(
             "tool_intent",
@@ -1058,8 +1115,22 @@ class AutonomousExecutionController:
         reason: str | None = None,
     ) -> AutonomousExecutionState:
         self._ensure_active()
-        self.state = replace(self.state, last_tool=_identifier("tool", tool), last_call_id=_identifier("call_id", call_id, maximum=512), last_outcome_digest=None if outcome_digest is None else _digest("outcome_digest", outcome_digest), last_event_kind="tool_outcome", status=_identifier("tool outcome status", status))
-        return self._persist("tool_outcome", self.state.status, tool=tool, call_id=call_id, outcome_digest=outcome_digest, reason=reason)
+        tool = _identifier("tool", tool)
+        call_id = _identifier("call_id", call_id, maximum=512)
+        outcome_status = _identifier("tool outcome status", status)
+        outcome_digest = None if outcome_digest is None else _digest("outcome_digest", outcome_digest)
+        reason = None if reason is None else _identifier("tool reason", reason, maximum=2_048)
+        lifecycle_status = (
+            "reconciliation_required"
+            if outcome_status == "reconciliation_required"
+            else "approval_required"
+            if outcome_status == "authorization_required" and self.policy.pause_on_approval
+            else "error"
+            if outcome_status == "failed" and self.policy.stop_on_error
+            else "running"
+        )
+        self.state = replace(self.state, last_tool=tool, last_call_id=call_id, last_outcome_digest=outcome_digest, last_event_kind="tool_outcome", status=lifecycle_status)
+        return self._persist("tool_outcome", outcome_status, tool=tool, call_id=call_id, outcome_digest=outcome_digest, reason=reason)
 
     def record_effect_reconciliation(
         self,
@@ -1158,9 +1229,45 @@ class AutonomousExecutionController:
         self.state = replace(self.state, last_evaluation_digest=evaluation_digest, last_event_kind="evaluation", status="evaluated")
         return self._persist("evaluation", "evaluated", evaluator_id=evaluator_id, evaluator_version=evaluator_version, reward=reward, passed=passed, evaluation_digest=evaluation_digest, failure_class=failure_class)
 
+    def replan(
+        self,
+        *,
+        instruction_digest: str | None = None,
+        reason: str | None = None,
+        attempt: int | None = None,
+    ) -> AutonomousExecutionState:
+        """Record an evaluator-approved planning transition without persisting its instruction."""
+
+        self._ensure_active()
+        if self.state.replans >= self.policy.max_replans:
+            raise AutonomyPolicyError("max_replans exceeded")
+        if instruction_digest is not None:
+            instruction_digest = _digest("replan instruction_digest", instruction_digest)
+        if reason is not None:
+            reason = _identifier("replan reason", reason, maximum=2_048)
+        if attempt is not None and (not isinstance(attempt, int) or isinstance(attempt, bool) or not 0 <= attempt <= 64):
+            raise AutonomyPersistenceError("replan attempt is outside its bound")
+        self.state = replace(
+            self.state,
+            replans=self.state.replans + 1,
+            last_event_kind="replan",
+            status="replanning",
+        )
+        return self._persist(
+            "replan",
+            "replanning",
+            instruction_digest=instruction_digest,
+            reason=reason,
+            attempt=attempt,
+        )
+
     def checkpoint(self, *, status: str = "paused", reason: str | None = None) -> AutonomousExecutionState:
         self._ensure_active()
-        self.state = replace(self.state, status=_identifier("checkpoint status", status), last_event_kind="checkpoint")
+        status = _identifier("checkpoint status", status)
+        if status in AUTONOMY_TERMINAL_STATUSES:
+            raise AutonomyPolicyError("checkpoint status cannot be terminal")
+        reason = None if reason is None else _identifier("checkpoint reason", reason, maximum=2_048)
+        self.state = replace(self.state, status=status, last_event_kind="checkpoint")
         return self._persist("checkpoint", self.state.status, reason=reason)
 
     def complete(self, *, status: str = "completed") -> AutonomousExecutionState:
@@ -1171,7 +1278,9 @@ class AutonomousExecutionController:
         return self.state
 
     def fail(self, *, reason: str, status: str = "failed") -> AutonomousExecutionState:
-        self._ensure_active()
+        if self._terminal or self.state.status in AUTONOMY_TERMINAL_STATUSES:
+            raise AutonomyPolicyError("execution is terminal")
+        reason = _identifier("failure reason", reason, maximum=2_048)
         self.state = replace(self.state, status=_identifier("failure status", status), last_event_kind="failed")
         self._persist("failed", self.state.status, reason=reason)
         self._terminal = True
@@ -1195,8 +1304,8 @@ class AutonomousExecutionController:
         return self.state
 
     def _ensure_active(self) -> None:
-        if self._terminal or self.state.status in AUTONOMY_TERMINAL_STATUSES:
-            raise AutonomyPolicyError("execution is terminal")
+        if self._terminal or self.state.status in AUTONOMY_TERMINAL_STATUSES or (self.policy.stop_on_error and self.state.status == "error"):
+            raise AutonomyPolicyError("execution is terminal or halted")
 
     def _ensure_step(self) -> None:
         if self.state.step_index >= self.policy.max_steps:

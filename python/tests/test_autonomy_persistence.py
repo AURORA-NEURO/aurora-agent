@@ -15,6 +15,7 @@ from prism_sdk import (
     AutonomousExecutionPolicy,
     TransactionalJsonAutonomousExecutionSnapshotPersistence,
     AutonomyPersistenceError,
+    AutonomyPolicyError,
     ProviderToolCall,
 )
 
@@ -126,6 +127,74 @@ def test_journal_rejects_tampering_and_transient_metadata(tmp_path) -> None:
     path.write_text(json.dumps(row) + "\n", encoding="utf-8")
     with pytest.raises(AutonomyPersistenceError):
         journal.verify_integrity()
+
+
+def test_execution_budget_persists_failovers_and_replans_across_restart(tmp_path) -> None:
+    path = tmp_path / "bounded-recovery.jsonl"
+    policy = AutonomousExecutionPolicy(
+        max_steps=8,
+        max_provider_calls=4,
+        max_provider_failovers=1,
+        max_replans=1,
+    )
+    controller = AutonomousExecutionController(
+        execution_id="bounded-recovery",
+        domain="coding",
+        capability="implementation_review",
+        risk_class="read_only",
+        policy=policy,
+        journal=AutonomousExecutionJournal(path),
+    )
+    controller.admit_provider_call(
+        provider="primary",
+        model="model-a",
+        invocation_kind="answer",
+        attempt=0,
+        turn=0,
+    )
+    assert controller.state.provider_failovers == 0
+    controller.admit_provider_call(
+        provider="fallback",
+        model="model-b",
+        invocation_kind="answer",
+        attempt=1,
+        turn=0,
+        failover=True,
+    )
+    assert controller.state.provider_failovers == 1
+    controller.replan(
+        instruction_digest="c" * 64,
+        reason="evaluator_requested_revision",
+        attempt=1,
+    )
+    assert controller.state.replans == 1
+    serialized = path.read_text(encoding="utf-8")
+    assert "evaluator_requested_revision" in serialized
+    assert "raw replan instruction" not in serialized
+    assert {row["event"]["kind"] for row in AutonomousExecutionJournal(path).events()} >= {"replan"}
+
+    resumed = AutonomousExecutionController(
+        execution_id="bounded-recovery",
+        domain="coding",
+        capability="implementation_review",
+        risk_class="read_only",
+        policy=policy,
+        journal=AutonomousExecutionJournal(path),
+        resume=True,
+    )
+    assert resumed.state.provider_failovers == 1
+    assert resumed.state.replans == 1
+    with pytest.raises(AutonomyPolicyError, match="max_provider_failovers"):
+        resumed.admit_provider_call(
+            provider="second-fallback",
+            model="model-c",
+            invocation_kind="answer",
+            attempt=2,
+            turn=0,
+            failover=True,
+        )
+    with pytest.raises(AutonomyPolicyError, match="max_replans"):
+        resumed.replan(instruction_digest="d" * 64, reason="second_revision")
 
 
 def test_execution_snapshot_persistence_rehydrates_all_domains_and_fences_stale_writers(tmp_path) -> None:
