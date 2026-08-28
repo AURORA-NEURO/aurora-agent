@@ -24284,9 +24284,52 @@ class AutonomousAgent:
                 initial_status="route_review_required",
             )
         if len(route.selected_domains) != 1:
-            raise BrainRunError(
-                "run_auto_stream selected multiple domains; use an explicit cross-domain stream lifecycle"
+            cross_blueprint = automatic.cross_domain_blueprint
+            if cross_blueprint is None:
+                raise BrainRunError("run_auto_stream route selected multiple domains without a cross-domain blueprint")
+            subtasks = [
+                {
+                    "id": child_id,
+                    "task": child.spec.task,
+                    "domain": child.profile.domain,
+                    "capability": child.spec.capability,
+                    "risk_class": child.spec.risk_class,
+                    "constraints": child.spec.constraints,
+                    "desired_outputs": child.spec.desired_outputs,
+                    "context": child.spec.context,
+                    "max_steps": child.spec.max_steps,
+                    "require_json": child.spec.require_json,
+                    "structured_domain_response": child.spec.structured_domain_response,
+                    "response_schema": child.spec.response_schema,
+                    "execution_mode": "provider",
+                    "required_model_capabilities": child.required_capabilities,
+                }
+                for child_id, child in zip(cross_blueprint.child_ids, cross_blueprint.child_blueprints)
+            ]
+            cross_options = dict(kwargs)
+            for name in (
+                "hints",
+                "min_confidence",
+                "min_margin",
+                "max_domains",
+                "allow_cross_domain",
+                "semantic_routing",
+                "semantic_weight",
+                "planning_mode",
+                "route_override",
+            ):
+                cross_options.pop(name, None)
+            handle = self.run_cross_domain_stream(
+                task=task,
+                subtasks=subtasks,
+                credentials=credentials,
+                model_candidates=model_candidates,
+                **cross_options,
             )
+            if not hasattr(handle, "route"):
+                raise BrainRunError("run_auto_stream cross-domain stream returned an invalid handle")
+            handle.route = route.to_dict()
+            return handle
         selected_domain = route.selected_domains[0]
         direct_options = dict(kwargs)
         for name in (
@@ -24311,6 +24354,313 @@ class AutonomousAgent:
             raise BrainRunError("run_auto_stream direct stream returned an invalid handle")
         handle.route = route.to_dict()
         return handle
+
+    def run_cross_domain_stream(
+        self,
+        *,
+        task: str,
+        subtasks: Sequence[Mapping[str, Any]],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Stream bounded specialist fan-out followed by optional synthesis.
+
+        The parent plan is compiled and run through the normal provider-free cross-domain
+        preflight before a handle is returned.  Each child then uses :meth:`run_stream`, so
+        model eligibility, prompt assembly, provider failover, caller approval, and secret
+        redaction remain identical to a direct stream.  Child and synthesis output is live-only:
+        the fan-in buffer is bounded, and only metadata-only completion receipts survive.
+
+        This synchronous façade intentionally does not combine durable execution checkpoints,
+        evaluator settlement, missions, tool loops, or provider-assisted planning with a live
+        transcript.  Those paths already have explicit resumable APIs; replaying a partial stream
+        would risk duplicating model output or effects.
+        """
+
+        from .autonomous_agent_stream import (
+            AutonomousCrossDomainStreamHandle,
+            MAX_AUTONOMOUS_CROSS_DOMAIN_STREAM_CHILDREN,
+        )
+
+        if execution_id is not None or resume_execution:
+            raise BrainRunError(
+                "run_cross_domain_stream does not support execution persistence; use a resumable cross-domain controller"
+            )
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("cross-domain stream task must be a non-empty string")
+        if not isinstance(subtasks, Sequence) or isinstance(subtasks, (str, bytes)) or not subtasks:
+            raise BrainRunError("cross-domain stream subtasks must be a non-empty sequence")
+        if len(subtasks) > MAX_AUTONOMOUS_CROSS_DOMAIN_STREAM_CHILDREN:
+            raise BrainRunError("cross-domain stream exceeds its bounded child count")
+        if any(not isinstance(item, Mapping) for item in subtasks):
+            raise BrainRunError("cross-domain stream subtasks must contain mappings")
+
+        requested_approval = kwargs.pop("approve_provider_call", False)
+        if not isinstance(requested_approval, bool):
+            raise BrainRunError("cross-domain stream approve_provider_call must be a boolean")
+        child_execution_mode = kwargs.pop("child_execution_mode", "provider")
+        synthesis_execution_mode = kwargs.pop("synthesis_execution_mode", "provider")
+        if child_execution_mode not in (None, "provider") or synthesis_execution_mode not in (None, "provider"):
+            raise BrainRunError("cross-domain streaming supports only provider child and synthesis modes")
+        synthesize = kwargs.pop("synthesize", True)
+        allow_partial = kwargs.pop("allow_partial", False)
+        max_parallelism = kwargs.pop("max_parallelism", 1)
+        if not isinstance(synthesize, bool) or not isinstance(allow_partial, bool):
+            raise BrainRunError("cross-domain stream synthesize and allow_partial must be booleans")
+        if (
+            isinstance(max_parallelism, bool)
+            or not isinstance(max_parallelism, int)
+            or not 1 <= max_parallelism <= MAX_AUTONOMOUS_CROSS_DOMAIN_STREAM_CHILDREN
+        ):
+            raise BrainRunError("cross-domain stream max_parallelism must be between 1 and 8")
+        if kwargs.get("mission_policy") is not None or kwargs.get("tool_loop_options") is not None:
+            raise BrainRunError(
+                "cross-domain streaming cannot execute missions or tool loops; use run_cross_domain()"
+            )
+        if kwargs.get("learn") is True or kwargs.get("evaluator") is not None or kwargs.get("evidence") is not None:
+            raise BrainRunError(
+                "cross-domain streaming cannot settle evaluator learning; use run_cross_domain_learning()"
+            )
+        if kwargs.get("execution_controller") is not None:
+            raise BrainRunError(
+                "cross-domain streaming cannot attach a durable execution controller"
+            )
+        if kwargs.get("semantic_routing") is True:
+            raise BrainRunError(
+                "cross-domain streaming requires an explicit reviewed subtask route; use prepare_auto() for routing"
+            )
+        if kwargs.get("auto_route") is True:
+            raise BrainRunError("cross-domain streaming does not run automatic route resolution")
+        if kwargs.get("execution_mode") not in (None, "provider"):
+            raise BrainRunError("cross-domain streaming supports only execution_mode='provider'")
+
+        run_options = self._prompt_learning_options(kwargs)
+        child_domains = tuple(
+            item.get("domain") for item in subtasks if isinstance(item.get("domain"), str)
+        )
+        if len(child_domains) != len(subtasks):
+            raise BrainRunError("cross-domain stream every subtask requires a string domain")
+        candidates, resolved_credentials, resolved_options, execution_controller = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=run_options,
+            tool_domains=(*child_domains, "cross_domain"),
+            task=task,
+            resume_learning=False,
+        )
+        if execution_controller is not None:
+            raise BrainRunError(
+                "cross-domain streaming cannot attach a durable execution controller; use a resumable controller"
+            )
+
+        # Keep only options accepted by the canonical cross-domain runner.  `_execution_inputs`
+        # may add reviewed ledger/memory/tool context, while unsupported façade-only flags must
+        # never leak into the lower-level call as an accidental override.
+        cross_domain_keys = {
+            "context",
+            "content_parts",
+            "prompt_template",
+            "prompt_registry",
+            "prompt_selection",
+            "prompt_stage",
+            "prompt_learning_state",
+            "prompt_learning_exploration",
+            "execution_plan_context",
+            "desired_outputs",
+            "max_steps",
+            "require_json",
+            "structured_domain_response",
+            "response_schema",
+            "ledger",
+            "memory",
+            "memory_query",
+            "memory_limit",
+            "memory_consolidator",
+            "memory_lesson_resolver",
+            "memory_lesson_context_resolver",
+            "consolidated_memory_limit",
+            "retrieve_consolidated_memory",
+            "consolidated_memory_required",
+            "contextual_observations",
+            "input_tokens",
+            "requested_output_tokens",
+            "max_cost_per_million_tokens",
+            "max_latency_ms",
+            "min_quality",
+            "selection_overrides",
+            "selection_weights",
+            "selection_observations",
+            "approve_mission_dispatch",
+            "run_id",
+            "max_output_tokens",
+            "temperature",
+            "idempotency_key",
+            "mission_policy",
+            "mission_options",
+            "route_request",
+            "enforce_route_tools",
+            "require_resolved_route",
+            "provider_tools",
+            "tool_choice",
+            "max_provider_failovers",
+            "domain_policy_mode",
+            "domain_policy_evidence_ready",
+            "domain_policy_evaluator_configured",
+            "domain_policy_plan_accepted",
+            "domain_policy_effects_requested",
+            "domain_policy_effects_approved",
+            "bandit_state",
+            "accepted_plan_refinement",
+            "response_alignments",
+            "require_response_alignment",
+            "minimum_response_reward",
+            "minimum_response_alignment_confidence",
+            "response_contradiction_confidence_threshold",
+            "invocation_observer",
+            "trace_event_callback",
+        }
+        preflight_options = {
+            key: resolved_options[key]
+            for key in cross_domain_keys
+            if key in resolved_options
+        }
+        preflight_options.update({
+            "child_execution_mode": "provider",
+            "synthesis_execution_mode": "provider",
+            "approve_provider_call": False,
+            "approve_mission_dispatch": False,
+            "synthesize": synthesize,
+            "allow_partial": allow_partial,
+            "max_parallelism": max_parallelism,
+        })
+        preflight = self.orchestrator.run_cross_domain(
+            task=task,
+            subtasks=subtasks,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            **preflight_options,
+        )
+        if not isinstance(preflight, AutonomousCrossDomainResult):
+            raise BrainRunError("cross-domain stream preflight returned an invalid result")
+        blueprint = preflight.blueprint
+        blueprint_public = blueprint.to_dict()
+        blueprint_digest = content_digest(blueprint_public)
+        task_digest = content_digest({"task": task})
+        initial_failure_statuses = {
+            "route_review_required",
+            "plan_refused",
+            "selection_refused",
+            "response_review_required",
+            "reconciliation_required",
+            "provider_failed",
+            "child_failed",
+            "child_incomplete",
+            "children_completed",
+            "children_partial",
+        }
+        if preflight.status != "approval_required":
+            status = preflight.status if preflight.status in initial_failure_statuses else "plan_refused"
+            return AutonomousCrossDomainStreamHandle(
+                selection={
+                    "strategy": "cross_domain_preflight",
+                    "child_count": len(blueprint.child_ids),
+                    "retention": "selection_metadata_only",
+                },
+                route=None,
+                blueprint=blueprint_public,
+                task_digest=task_digest,
+                blueprint_digest=blueprint_digest,
+                child_specs=(),
+                synthesis_spec={},
+                open_stream=self.run_stream,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                base_options={},
+                synthesize=synthesize,
+                allow_partial=allow_partial,
+                max_parallelism=max_parallelism,
+                initial_status=status,
+            )
+        if not requested_approval:
+            return AutonomousCrossDomainStreamHandle(
+                selection={
+                    "strategy": "cross_domain_preflight",
+                    "child_count": len(blueprint.child_ids),
+                    "retention": "selection_metadata_only",
+                },
+                route=None,
+                blueprint=blueprint_public,
+                task_digest=task_digest,
+                blueprint_digest=blueprint_digest,
+                child_specs=(),
+                synthesis_spec={},
+                open_stream=self.run_stream,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                base_options={},
+                synthesize=synthesize,
+                allow_partial=allow_partial,
+                max_parallelism=max_parallelism,
+                initial_status="approval_required",
+            )
+
+        def stream_spec(item: AutonomousTaskBlueprint, item_id: str) -> dict[str, Any]:
+            return {
+                "id": item_id,
+                "task": item.spec.task,
+                "domain": item.profile.domain,
+                "capability": item.spec.capability,
+                "risk_class": item.spec.risk_class,
+                "constraints": item.spec.constraints,
+                "desired_outputs": item.spec.desired_outputs,
+                "context": dict(item.spec.context),
+                "max_steps": item.spec.max_steps,
+                "require_json": item.spec.require_json,
+                "structured_domain_response": item.spec.structured_domain_response,
+                "response_schema": item.spec.response_schema,
+                "required_model_capabilities": item.required_capabilities,
+            }
+
+        child_specs = tuple(
+            stream_spec(child, child_id)
+            for child_id, child in zip(blueprint.child_ids, blueprint.child_blueprints)
+        )
+        synthesis_spec = stream_spec(blueprint.synthesis_blueprint, "synthesis")
+        # The worker receives caller options, not the preflight-enriched context.  Each child
+        # must rebuild its own domain execution-plan/tool projection; copying the parent reserved
+        # contract would be rejected as a stale override by `_execution_inputs`.
+        stream_base_options = dict(run_options)
+        stream_base_options.update({
+            "child_execution_mode": "provider",
+            "synthesis_execution_mode": "provider",
+        })
+        return AutonomousCrossDomainStreamHandle(
+            selection={
+                "strategy": "cross_domain_child_streams",
+                "child_count": len(child_specs),
+                "child_ids": [spec["id"] for spec in child_specs],
+                "max_parallelism": max_parallelism,
+                "synthesis_enabled": synthesize,
+                "retention": "selection_metadata_only;child_choices_transient",
+                "secret_material": "never_returned",
+            },
+            route=None,
+            blueprint=blueprint_public,
+            task_digest=task_digest,
+            blueprint_digest=blueprint_digest,
+            child_specs=child_specs,
+            synthesis_spec=synthesis_spec,
+            open_stream=self.run_stream,
+            model_candidates=candidates,
+            credentials=resolved_credentials,
+            base_options=stream_base_options,
+            synthesize=synthesize,
+            allow_partial=allow_partial,
+            max_parallelism=max_parallelism,
+        )
 
     def run_mission_replan_cycle(
         self,

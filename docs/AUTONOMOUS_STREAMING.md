@@ -120,12 +120,41 @@ receipt = handle.completion
 
 `AutonomousAgent.run_stream()` compiles the ordinary domain blueprint and model selection with
 provider approval forced off, then lazily invokes the selected arm only after the caller has
-approved the call and consumes the iterator. `run_auto_stream()` adds deterministic single-domain
-routing. Semantic routing, provider planning, learning settlement, missions, tool loops, and
-cross-domain fan-out remain explicit non-streaming boundaries until their separate lifecycle and
-recovery contracts are selected. Python streaming also rejects durable execution-controller
-inputs: a partial provider transcript must be rehydrated by the caller rather than implicitly
-replayed after a restart.
+approved the call and consumes the iterator. `run_auto_stream()` adds deterministic routing and
+now fans out when the route selects multiple domains. An explicit cross-domain stream can also be
+opened with caller-declared specialist subtasks:
+
+```python
+handle = agent.run_cross_domain_stream(
+    task="Compare implementation risk with the scientific evidence",
+    subtasks=(
+        {"id": "engineering", "task": "Review implementation risk.", "domain": "coding"},
+        {"id": "evidence", "task": "Review evidence quality and uncertainty.", "domain": "science"},
+    ),
+    credentials=credential_session,
+    model_candidates=catalogue,
+    max_parallelism=2,
+    allow_partial=True,
+    approve_provider_call=True,
+)
+
+for item in handle.events:
+    if item.kind == "provider":
+        render(item.event.text_delta)
+    elif item.phase in {"child_started", "child_completed", "synthesis_started", "synthesis_completed"}:
+        trace_lifecycle(item)
+receipt = handle.completion
+```
+
+The cross-domain façade runs a provider-free parent preflight first. On consumption it opens a
+bounded worker pool for the specialist streams, multiplexes child deltas with typed lifecycle
+events, retains each specialist's text only in a bounded process-local synthesis buffer, and
+opens synthesis only when the partial-result policy permits it. `allow_partial=False` fails closed
+without synthesis after any child failure; `allow_partial=True` synthesizes only from completed
+children and never turns a missing specialist into evidence. Semantic provider routing, provider
+planning, evaluator settlement, missions, and tool loops remain separate authority boundaries.
+Python streaming rejects durable execution-controller inputs: a partial provider transcript must
+be rehydrated by the caller rather than implicitly replayed after a restart.
 
 ## Failover and partial-output safety
 
@@ -172,6 +201,11 @@ Both SDKs include in-memory provider fixtures that exercise:
 - explicit abandonment and single-consumer enforcement;
 - completion redaction checks; and
 - all twelve autonomous domains through the same provider-neutral event shape.
+
+The Python cross-domain façade additionally covers lazy approval, bounded concurrent child fan-out,
+typed child/synthesis lifecycle events, partial failure policy, transient synthesis fan-in, and
+metadata-only stage receipts. These tests use in-memory providers and do not require an API key or
+network access.
 
 These tests do not require an API key or network access. Production callers supply their own
 credential handles and provider transport; no key is read, generated, logged, or embedded by this

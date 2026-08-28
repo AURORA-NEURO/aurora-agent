@@ -16,10 +16,12 @@ The Python application façade now reaches that transport boundary without requi
 rebuild selection and prompt assembly. `AutonomousAgent.run_stream()` performs the ordinary
 domain blueprint and adaptive-selection preflight with provider approval forced off, then lazily
 dispatches the exact selected arm through the existing synchronous stream runtime after explicit
-approval. `run_auto_stream()` adds deterministic single-domain routing; semantic classifier calls,
-provider planning, evaluator settlement, mission/tool-loop continuations, durable execution
-controllers, and cross-domain fan-out remain explicit boundaries rather than being hidden behind
-an incomplete streamed result shape. The completion receipt remains digest- and metadata-only.
+approval. `run_auto_stream()` adds deterministic routing and bounded multi-domain fan-out, while
+`run_cross_domain_stream()` exposes explicit specialist lifecycle events, bounded concurrent
+children, partial-result policy, and transient synthesis. Semantic classifier calls, provider
+planning, evaluator settlement, mission/tool-loop continuations, and durable execution
+controllers remain explicit authority boundaries. Completion receipts remain digest- and
+metadata-only.
 
 The TypeScript and Python autonomous provider boundaries now expose an explicit, deterministic
 context-window budget. Before selection and invocation, callers can cap estimated input tokens

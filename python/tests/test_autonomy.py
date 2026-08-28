@@ -3122,6 +3122,184 @@ def test_agent_run_auto_stream_keeps_provider_free_routing_and_allows_only_one_d
         )
 
 
+def test_agent_run_cross_domain_stream_is_lazy_bounded_and_synthesizes_without_retention():
+    calls: list[ProviderRequest] = []
+
+    def stream_handler(request: ProviderRequest) -> list[ProviderStreamEvent]:
+        calls.append(request)
+        is_synthesis = request.messages[-1]["content"].startswith("Synthesize the domain analyses")
+        text = "synthesis answer" if is_synthesis else f"{request.model} specialist answer"
+        return [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.done",
+                text_delta=text,
+                done=True,
+            )
+        ]
+
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda _request: "unused",
+        stream_handler=stream_handler,
+    )
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    subtasks = [
+        {"id": "code", "task": "inspect the implementation", "domain": "coding"},
+        {"id": "science", "task": "inspect the evidence", "domain": "science"},
+    ]
+
+    waiting = agent.run_cross_domain_stream(
+        task="combine engineering and evidence review",
+        subtasks=subtasks,
+        credentials={},
+        model_candidates=_model(),
+    )
+    assert waiting.completion is not None
+    assert waiting.completion.status == "approval_required"
+    assert list(waiting.events) == []
+    assert calls == []
+
+    live = agent.run_cross_domain_stream(
+        task="combine engineering and evidence review",
+        subtasks=subtasks,
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+        max_parallelism=2,
+    )
+    events = list(live.events)
+    lifecycle = [event for event in events if event.kind == "lifecycle"]
+    assert {event.phase for event in lifecycle} == {
+        "child_started",
+        "child_completed",
+        "synthesis_started",
+        "synthesis_completed",
+    }
+    assert {event.child_id for event in lifecycle if event.phase == "child_completed"} == {"code", "science"}
+    assert [event.event.text_delta for event in events if event.kind == "provider"] == [
+        "test-model specialist answer",
+        "test-model specialist answer",
+        "synthesis answer",
+    ]
+    assert live.completion is not None
+    assert live.completion.status == "completed"
+    assert live.completion.stage_count == 3
+    assert len(live.completion.inner_completions) == 3
+    serialized = json.dumps(live.completion.to_dict())
+    assert "specialist answer" not in serialized
+    assert "synthesis answer" not in serialized
+    assert live.blueprint is not None
+    assert len(calls) == 3
+    with pytest.raises(ProviderError, match="single-consumer"):
+        _ = live.events
+
+
+def test_agent_run_auto_stream_fans_out_when_deterministic_route_selects_multiple_domains():
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda _request: "unused",
+        stream_handler=lambda request: [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.done",
+                text_delta="auto cross-domain",
+                done=True,
+            )
+        ],
+    )
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    live = agent.run_auto_stream(
+        task="review coding and science",
+        credentials={},
+        model_candidates=_model(),
+        hints=("coding", "science"),
+        max_domains=2,
+        allow_cross_domain=True,
+        approve_provider_call=True,
+    )
+    assert live.route is not None
+    assert live.route.get("cross_domain") is True
+    events = list(live.events)
+    assert any(event.stage == "child" for event in events)
+    assert any(event.stage == "synthesis" for event in events)
+    assert live.completion is not None
+    assert live.completion.status == "completed"
+
+
+def test_agent_run_cross_domain_stream_preserves_partial_policy_and_redacts_failures():
+    calls: list[ProviderRequest] = []
+
+    def stream_handler(request: ProviderRequest) -> list[ProviderStreamEvent]:
+        calls.append(request)
+        request_text = json.dumps(list(request.messages))
+        if "FAIL_CHILD" in request_text:
+            raise ProviderError(
+                "sensitive stream diagnostic",
+                retryable=True,
+                status_code=503,
+                code="upstream_unavailable",
+            )
+        return [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.done",
+                text_delta="healthy stream output",
+                done=True,
+            )
+        ]
+
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider("openai", lambda _request: "unused", stream_handler=stream_handler)
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    subtasks = [
+        {"id": "failing", "task": "FAIL_CHILD inspect the biomedical evidence", "domain": "biomedical"},
+        {"id": "healthy", "task": "inspect the neuroscience evidence", "domain": "neuroscience"},
+    ]
+
+    blocked = agent.run_cross_domain_stream(
+        task="coordinate a bounded biomedical and neuroscience review",
+        subtasks=subtasks,
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+        allow_partial=False,
+        max_parallelism=2,
+    )
+    blocked_events = list(blocked.events)
+    assert blocked.completion is not None
+    assert blocked.completion.status == "child_failed"
+    assert blocked.completion.stage_count == 2
+    assert not any(event.phase == "synthesis_started" for event in blocked_events if event.kind == "lifecycle")
+    assert "sensitive stream diagnostic" not in json.dumps(blocked.completion.to_dict())
+
+    partial = agent.run_cross_domain_stream(
+        task="coordinate a bounded biomedical and neuroscience review",
+        subtasks=subtasks,
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+        allow_partial=True,
+        max_parallelism=2,
+    )
+    partial_events = list(partial.events)
+    assert partial.completion is not None
+    assert partial.completion.status == "completed"
+    assert partial.completion.stage_count == 3
+    assert any(event.phase == "synthesis_started" for event in partial_events if event.kind == "lifecycle")
+    assert "healthy stream output" not in json.dumps(partial.completion.to_dict())
+    assert "sensitive stream diagnostic" not in json.dumps(partial.completion.to_dict())
+    assert len(calls) == 5
+
+
 def test_run_autonomous_learning_records_explicit_reward_and_only_metadata_in_memory(tmp_path: Path):
     runtime, store, server, thread = _runtime()
     workspace = _Workspace()
