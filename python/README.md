@@ -900,6 +900,15 @@ with the same evaluator and contextual-bandit contract as workflow and cross-dom
 The protected graph-contract digest is included in the planning learning identity, so evaluator
 credit cannot replay across two different caller-owned graphs; transport success alone still earns
 no reward.
+For a typed connector `MissionRequest`, `AutonomousAgent.run_connector_mission_with_provider_planning()`
+provides the corresponding two-phase bridge: the provider receives only the redacted step
+catalogue, a completed non-review proposal must match the order-independent protected mission
+digest and dependency graph, and `accept_plan=True` is still separate from connector
+`approved=True`. Review-required proposals return without connector calls. On restart, callers can
+pass the previously retained `accepted_plan_refinement` to avoid replaying the planner provider;
+the connector checkpoint and output rehydration rules remain unchanged.
+`run_connector_mission_with_provider_planning_and_launch_admission()` performs the same two-phase
+handoff only after all mission domains pass the process-boundary launch admission.
 The provider-evidence registry helpers extend the same retention contract to provider-observed CI
 artifacts, logs, and attestations. They re-audit before import, preserve failed/unknown runs, expose
 digest-ordered provider/run/plan queries and exact lookup, and carry separate record-family digests

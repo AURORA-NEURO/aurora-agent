@@ -1673,6 +1673,14 @@ replacement attempts. This closes the planning-to-learning handoff without persi
 tasks, credentials, provider transcripts, or evaluator payloads; the remaining production work is
 caller integration of explicit evaluator signals and durable storage policy for each deployment.
 
+Python connector missions now close the same planning-to-execution gap for caller-owned DAGs.
+`run_connector_mission_with_provider_planning()` exposes a redacted ordered-step planning phase,
+an order-independent protected mission digest, exact dependency-preserving acceptance, and a
+separate connector approval phase. Review-required proposals stop before connector setup, and
+`accepted_plan_refinement` provides a caller-owned replay path after restart. The launch-admitted
+variant authorizes every mission domain before planner credential resolution; neither launch
+admission nor plan acceptance replaces the provider or connector approval gates.
+
 The TypeScript facade now has the same high-level automatic entrypoint as Python. `runAuto()` can
 route and execute any built-in domain or a bounded cross-domain fan-out, while preserving the
 provider-free blueprint boundary and returning a typed next action for route, plan, provider, or

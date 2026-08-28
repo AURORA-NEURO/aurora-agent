@@ -732,7 +732,8 @@ The same ordering now covers the remaining execution surfaces: use
 `run_resumable_llm_evidence_with_launch_admission(...)` variants for evidence acquisition and
 restart. Connector workflow/mission dispatch uses
 `run_connector_workflow_with_launch_admission(...)` and
-`run_connector_mission_with_launch_admission(...)`; low-level reviewed tool execution uses
+`run_connector_mission_with_launch_admission(...)` and
+`run_connector_mission_with_provider_planning_and_launch_admission(...)`; low-level reviewed tool execution uses
 `execute_capability_with_launch_admission(...)` and
 `execute_capability_batch_with_launch_admission(...)`. These checks happen before trace-store,
 evidence-adapter, connector-runtime, capability-runtime, learner, or credential setup. An
@@ -1348,6 +1349,34 @@ classes; they never retain goals, objectives, arguments, connector values, or cr
 completed step is needed by a later step after restart, the caller must supply `resume_outputs`.
 If a receipt is replayed, `rehydrate_payload` must return a JSON-safe value with exactly the stored
 payload digest or the mission pauses in `reconciliation_required`.
+
+For an existing connector mission that needs model-guided prioritization, use the explicit
+two-phase `run_connector_mission_with_provider_planning(...)` façade. The planner receives only
+the step catalogue (`id`, domain, capability, objective, dependencies, and requiredness); the
+connector arguments and authorization contract remain caller-owned:
+
+```python
+planned = agent.run_connector_mission_with_provider_planning(
+    mission=mission,
+    credentials=credential_session,
+    model_candidates=catalogue,
+    provider_planning_options={"approve_provider_call": True},
+    accept_plan=True,
+    execution_options={"approved": True},
+)
+```
+
+The planner proposal is never dispatch authority. A completed proposal must be explicitly
+accepted, must preserve the exact step permutation and dependency edges, and must match the
+order-independent protected mission digest before connector execution begins. If the proposal
+needs review, the method returns `planning_review_required` with no connector calls. On restart,
+pass the caller-retained `accepted_plan_refinement` instead of replaying the planner provider;
+the normal connector checkpoint and output rehydration rules still apply. The serialized result
+contains only the plan projection/digests and connector metadata, never mission arguments or
+provider material.
+Use `run_connector_mission_with_provider_planning_and_launch_admission(...)` when a deployment
+must authorize all mission domains before planner credential resolution or either execution phase;
+the launch gate does not collapse the planner and connector approvals into one permission.
 
 Connector status is deliberately not reward. A caller evaluator can settle a receipt later through
 `AutonomousConnectorMissionAdapter.settle_evaluator_feedback()` or at dispatch time through

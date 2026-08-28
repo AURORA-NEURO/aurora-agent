@@ -19008,6 +19008,156 @@ class AutonomousAgent:
         except Exception as error:
             raise BrainRunError("connector mission execution failed") from error
 
+    def run_connector_mission_with_provider_planning(
+        self,
+        *,
+        mission: Any,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        provider_planning_options: Mapping[str, Any] | None = None,
+        accepted_plan_refinement: Any | None = None,
+        accept_plan: bool = False,
+        execution_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Plan an existing connector mission, then execute only after explicit acceptance.
+
+        The provider sees a redacted step catalogue containing identifiers, domains,
+        capabilities, objectives, dependencies, and required flags.  It cannot see connector
+        arguments or receive a dispatch authority.  ``accepted_plan_refinement`` is the
+        restart-safe caller-owned replay path: pass the previously reviewed value-only proposal
+        to avoid replaying the planner provider on resume.  ``execution_options`` is forwarded
+        only after the plan passes every contract check.
+
+        A planning review or provider error returns a metadata-rich
+        ``AutonomousConnectorPlannedMissionRun`` with no connector calls.  A completed plan is
+        still not enough to execute; ``accept_plan=True`` and the ordinary connector approval in
+        ``execution_options`` are both required.
+        """
+
+        from .autonomous_connector_mission import (
+            AutonomousConnectorPlannedMissionRun,
+            _normalize_request,
+            apply_autonomous_ordered_step_plan,
+            connector_mission_planner_steps,
+            connector_mission_protected_contract_digest,
+        )
+
+        if not isinstance(accept_plan, bool):
+            raise BrainRunError("connector mission accept_plan must be boolean")
+        if provider_planning_options is not None and not isinstance(provider_planning_options, Mapping):
+            raise BrainRunError("provider_planning_options must be a mapping or None")
+        if execution_options is not None and not isinstance(execution_options, Mapping):
+            raise BrainRunError("execution_options must be a mapping or None")
+        if accepted_plan_refinement is not None and provider_planning_options is not None:
+            raise BrainRunError(
+                "accepted_plan_refinement cannot be combined with provider_planning_options; "
+                "choose a live planning pass or caller-owned replay"
+            )
+        request, steps = _normalize_request(mission)
+        protected_contract_digest = connector_mission_protected_contract_digest(request, steps=steps)
+        if accepted_plan_refinement is None:
+            planning_options = {} if provider_planning_options is None else dict(provider_planning_options)
+            forbidden = {
+                "task",
+                "steps",
+                "credentials",
+                "model_candidates",
+                "protected_contract_digest",
+            }
+            invalid = sorted(forbidden.intersection(planning_options))
+            if invalid:
+                raise BrainRunError(
+                    "provider_planning_options cannot override protected planner inputs: "
+                    + ", ".join(invalid)
+                )
+            refinement = self.plan_ordered_steps_with_provider(
+                task=request.goal,
+                steps=connector_mission_planner_steps(steps),
+                credentials=credentials,
+                model_candidates=model_candidates,
+                protected_contract_digest=protected_contract_digest,
+                **planning_options,
+            )
+        else:
+            refinement = accepted_plan_refinement
+
+        from .autonomy import AutonomousOrderedStepPlanRefinementResult
+
+        if not isinstance(refinement, AutonomousOrderedStepPlanRefinementResult):
+            raise BrainRunError("provider planning did not return an ordered-step refinement")
+        if refinement.status == "approval_required":
+            result_status = "planning_approval_required"
+        elif refinement.status in {"policy_review_required"}:
+            result_status = "planning_policy_review_required"
+        elif refinement.status in {"policy_blocked"}:
+            result_status = "planning_policy_blocked"
+        elif refinement.status in {"provider_invalid"}:
+            result_status = "planning_provider_invalid"
+        elif refinement.status in {"provider_disagreement", "plan_refused"}:
+            result_status = "planning_provider_disagreement"
+        elif refinement.status != "completed" or refinement.review_required or not accept_plan:
+            result_status = "planning_review_required"
+        else:
+            planned_mission = apply_autonomous_ordered_step_plan(
+                request,
+                refinement,
+                protected_contract_digest=protected_contract_digest,
+            )
+            options = {} if execution_options is None else dict(execution_options)
+            if "mission" in options:
+                raise BrainRunError("execution_options cannot override the planned mission")
+            execution = self.run_connector_mission(mission=planned_mission, **options)
+            return AutonomousConnectorPlannedMissionRun(
+                status=execution.status,
+                mission=planned_mission,
+                protected_contract_digest=protected_contract_digest,
+                plan_refinement=refinement,
+                execution=execution,
+            )
+
+        return AutonomousConnectorPlannedMissionRun(
+            status=result_status,
+            mission=request,
+            protected_contract_digest=protected_contract_digest,
+            plan_refinement=refinement,
+            execution=None,
+        )
+
+    def run_connector_mission_with_provider_planning_and_launch_admission(
+        self,
+        *,
+        mission: Any,
+        launch_admission: Mapping[str, Any],
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        provider_planning_options: Mapping[str, Any] | None = None,
+        accepted_plan_refinement: Any | None = None,
+        accept_plan: bool = False,
+        execution_options: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Run provider planning and connector execution behind the domain launch gate.
+
+        Domain admission occurs before planner credential resolution, provider invocation, or
+        connector setup.  The planner and connector still retain their independent approvals.
+        """
+
+        from .autonomous_connector_mission import _normalize_request
+
+        _request, steps = _normalize_request(mission)
+        _authorize_launch_admission_domains(
+            launch_admission,
+            tuple(dict.fromkeys(step.domain for step in steps)),
+        )
+        return self.run_connector_mission_with_provider_planning(
+            mission=mission,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            provider_planning_options=provider_planning_options,
+            accepted_plan_refinement=accepted_plan_refinement,
+            accept_plan=accept_plan,
+            execution_options=execution_options,
+        )
+
     def run_connector_mission_with_launch_admission(
         self,
         *,

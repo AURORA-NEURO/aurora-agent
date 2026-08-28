@@ -1490,6 +1490,7 @@ from .autonomous_connector_workflow import (
 )
 from .autonomous_connector_mission import (
     AUTONOMOUS_CONNECTOR_MISSION_SCHEMA,
+    AUTONOMOUS_CONNECTOR_PLANNED_MISSION_SCHEMA,
     AUTONOMOUS_CONNECTOR_MISSION_STEP_QUALITY_EVALUATION_SCHEMA,
     MAX_AUTONOMOUS_CONNECTOR_MISSION_STEP_CALLS,
     MAX_AUTONOMOUS_CONNECTOR_MISSION_OUTPUT_BYTES,
@@ -1500,6 +1501,10 @@ from .autonomous_connector_mission import (
     AutonomousConnectorMissionStepExecution,
     AutonomousConnectorMissionAdapter,
     AutonomousConnectorMissionRun,
+    AutonomousConnectorPlannedMissionRun,
+    connector_mission_planner_steps,
+    connector_mission_protected_contract_digest,
+    apply_autonomous_ordered_step_plan,
     run_autonomous_connector_mission,
 )
 from .workflow_cycle import (
@@ -7693,6 +7698,7 @@ __all__ = [
     "AutonomousEvidenceWorkerRow",
     "AutonomousEvidenceWorker",
     "AUTONOMOUS_CONNECTOR_MISSION_SCHEMA",
+    "AUTONOMOUS_CONNECTOR_PLANNED_MISSION_SCHEMA",
     "AUTONOMOUS_CONNECTOR_MISSION_STEP_QUALITY_EVALUATION_SCHEMA",
     "MAX_AUTONOMOUS_CONNECTOR_MISSION_STEP_CALLS",
     "MAX_AUTONOMOUS_CONNECTOR_MISSION_OUTPUT_BYTES",
@@ -7703,6 +7709,10 @@ __all__ = [
     "AutonomousConnectorMissionStepExecution",
     "AutonomousConnectorMissionAdapter",
     "AutonomousConnectorMissionRun",
+    "AutonomousConnectorPlannedMissionRun",
+    "connector_mission_planner_steps",
+    "connector_mission_protected_contract_digest",
+    "apply_autonomous_ordered_step_plan",
     "run_autonomous_connector_mission",
     "AUTONOMOUS_CONNECTOR_WORKFLOW_ADAPTER_SCHEMA",
     "MAX_AUTONOMOUS_CONNECTOR_WORKFLOW_STAGE_REQUEST_BYTES",

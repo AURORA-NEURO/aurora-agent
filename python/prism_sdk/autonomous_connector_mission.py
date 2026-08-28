@@ -45,6 +45,7 @@ from .mission import MAX_MISSION_STEPS, MissionRequest, MissionStep, MissionPoli
 
 
 AUTONOMOUS_CONNECTOR_MISSION_SCHEMA = "bioprism-python-autonomous-connector-mission/0.1"
+AUTONOMOUS_CONNECTOR_PLANNED_MISSION_SCHEMA = "bioprism-python-autonomous-connector-planned-mission/0.1"
 AUTONOMOUS_CONNECTOR_MISSION_STEP_QUALITY_EVALUATION_SCHEMA = "bioprism-python-autonomous-connector-mission-step-quality-evaluation/0.1"
 MAX_AUTONOMOUS_CONNECTOR_MISSION_STEP_CALLS = 256
 MAX_AUTONOMOUS_CONNECTOR_MISSION_OUTPUT_BYTES = 2_000_000
@@ -145,6 +146,135 @@ def _normalize_request(value: MissionRequest | Mapping[str, Any]) -> tuple[Missi
     if len({step.id for step in steps}) != len(steps):
         raise ArgumentError("connector mission step ids must be unique")
     return request, steps
+
+
+def connector_mission_planner_steps(
+    steps: Sequence[MissionStep | Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Project a mission graph into the provider-planner contract.
+
+    Arguments, tool names, bindings, and policy values are intentionally excluded from this
+    projection.  The provider may prioritize existing work, but it never receives the material
+    needed to invent or authorize a connector call.
+    """
+
+    normalized = tuple(_normalize_step(value) for value in steps)
+    if not 1 <= len(normalized) <= MAX_MISSION_STEPS:
+        raise ArgumentError(f"connector mission planner steps must contain between 1 and {MAX_MISSION_STEPS} entries")
+    ids = tuple(step.id for step in normalized)
+    if len(set(ids)) != len(ids):
+        raise ArgumentError("connector mission planner step ids must be unique")
+    known = set(ids)
+    for step in normalized:
+        if len(set(step.depends_on)) != len(step.depends_on) or step.id in step.depends_on:
+            raise ArgumentError(f"connector mission planner step {step.id} has invalid dependencies")
+        if any(dependency not in known for dependency in step.depends_on):
+            raise ArgumentError(f"connector mission planner step {step.id} depends on an unknown step")
+    return tuple(
+        {
+            "id": step.id,
+            "domain": step.domain,
+            "capability": step.capability,
+            "objective": step.objective,
+            "depends_on": list(step.depends_on),
+            "required": step.required,
+        }
+        for step in normalized
+    )
+
+
+def connector_mission_protected_contract_digest(
+    mission: MissionRequest | Mapping[str, Any],
+    *,
+    steps: Sequence[MissionStep | Mapping[str, Any]] | None = None,
+) -> str:
+    """Return an order-independent digest for a connector mission's protected contract.
+
+    An accepted provider ordering may change only the sequence of already-reviewed steps.  The
+    digest therefore sorts full step descriptors by id while retaining arguments, bindings,
+    policy, claims, route reviews, and every other caller-owned authorization input.
+    """
+
+    request, normalized_steps = _normalize_request(mission)
+    selected_steps = normalized_steps if steps is None else tuple(_normalize_step(value) for value in steps)
+    if (
+        len(selected_steps) != len(normalized_steps)
+        or len({step.id for step in selected_steps}) != len(selected_steps)
+        or {step.id for step in selected_steps} != {step.id for step in normalized_steps}
+    ):
+        raise ArgumentError("connector mission protected contract steps do not match the mission")
+    arguments = request.to_mcp_arguments()
+    descriptor = {key: value for key, value in arguments.items() if key != "steps"}
+    descriptor["steps"] = sorted(
+        (step.to_dict() for step in selected_steps),
+        key=lambda value: str(value["id"]),
+    )
+    return content_digest(descriptor)
+
+
+def apply_autonomous_ordered_step_plan(
+    mission: MissionRequest | Mapping[str, Any],
+    refinement: Any,
+    *,
+    protected_contract_digest: str | None = None,
+) -> MissionRequest:
+    """Apply one explicitly accepted ordered-step proposal to a connector mission.
+
+    This is the only promotion point from provider planning into connector scheduling.  It
+    requires a completed, non-review proposal with an exact permutation of the existing graph,
+    verifies every dependency edge, and rechecks the order-independent protected contract after
+    rebuilding the request.  It never changes tools, arguments, bindings, policy, or approvals.
+    """
+
+    from .autonomy import AutonomousOrderedStepPlanRefinementResult
+
+    if not isinstance(refinement, AutonomousOrderedStepPlanRefinementResult):
+        raise ArgumentError("connector mission refinement must be an AutonomousOrderedStepPlanRefinementResult")
+    request, steps = _normalize_request(mission)
+    if refinement.status != "completed" or refinement.review_required:
+        raise ArgumentError("only a completed, non-review connector mission plan may be accepted")
+    expected_task_digest = content_digest({"task": request.goal})
+    expected_base_digest = content_digest({"steps": list(connector_mission_planner_steps(steps))})
+    if refinement.task_digest != expected_task_digest:
+        raise ArgumentError("connector mission plan task does not match the mission goal")
+    if refinement.base_plan_digest != expected_base_digest:
+        raise ArgumentError("connector mission plan base does not match the mission step graph")
+    expected_contract = connector_mission_protected_contract_digest(request, steps=steps)
+    if protected_contract_digest is not None and protected_contract_digest != expected_contract:
+        raise ArgumentError("connector mission protected contract digest does not match the mission")
+    if refinement.protected_contract_digest not in (None, expected_contract):
+        raise ArgumentError("connector mission plan protected contract does not match the mission")
+
+    ids = tuple(step.id for step in steps)
+    known_ids = set(ids)
+    if any(dependency not in known_ids for step in steps for dependency in step.depends_on):
+        raise ArgumentError("connector mission plan references an unknown dependency")
+    priority = tuple(refinement.priority_step_ids)
+    if len(priority) != len(ids) or len(set(priority)) != len(priority) or set(priority) != set(ids):
+        raise ArgumentError("connector mission plan must contain every step exactly once")
+    positions = {step_id: index for index, step_id in enumerate(priority)}
+    if any(
+        positions[dependency] > positions[step.id]
+        for step in steps
+        for dependency in step.depends_on
+    ):
+        raise ArgumentError("connector mission plan violates step dependencies")
+    by_id = {step.id: step for step in steps}
+    reordered = tuple(by_id[step_id] for step_id in priority)
+    rebuilt = MissionRequest(
+        mission_id=request.mission_id,
+        goal=request.goal,
+        steps=reordered,
+        policy=request.policy,
+        operations_gate_acceptance=request.operations_gate_acceptance,
+        claim_requests=request.claim_requests,
+        evaluator_review=request.evaluator_review,
+        workflow_binding=request.workflow_binding,
+        route_review=request.route_review,
+    )
+    if connector_mission_protected_contract_digest(rebuilt) != expected_contract:
+        raise ArgumentError("accepted connector mission plan changed the protected contract")
+    return rebuilt
 
 
 def _policy_max_steps(request: MissionRequest) -> int:
@@ -912,6 +1042,78 @@ class AutonomousConnectorMissionRun:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class AutonomousConnectorPlannedMissionRun:
+    """Provider-planning handoff paired with an optional connector mission execution.
+
+    ``mission`` is caller-owned because it contains connector arguments.  The serialized result
+    deliberately exports only the protected contract identity, planning projection, and the
+    connector execution's metadata-only projection.
+    """
+
+    status: str
+    mission: MissionRequest
+    protected_contract_digest: str
+    plan_refinement: Any
+    execution: AutonomousConnectorMissionRun | None = None
+    schema: str = AUTONOMOUS_CONNECTOR_PLANNED_MISSION_SCHEMA
+
+    def __post_init__(self) -> None:
+        if self.schema != AUTONOMOUS_CONNECTOR_PLANNED_MISSION_SCHEMA:
+            raise ArgumentError("connector planned mission schema is invalid")
+        if self.status not in {
+            "planning_approval_required",
+            "planning_review_required",
+            "planning_policy_review_required",
+            "planning_policy_blocked",
+            "planning_provider_invalid",
+            "planning_provider_disagreement",
+            "completed",
+            "partial",
+            "paused",
+            "blocked",
+            "checkpoint_blocked",
+            "approval_required",
+            "refused",
+            "failed",
+            "reconciliation_required",
+        }:
+            raise ArgumentError("connector planned mission status is invalid")
+        if not isinstance(self.mission, MissionRequest):
+            raise ArgumentError("connector planned mission requires a MissionRequest")
+        _digest("connector planned mission protected_contract_digest", self.protected_contract_digest)
+        from .autonomy import AutonomousOrderedStepPlanRefinementResult
+
+        if not isinstance(self.plan_refinement, AutonomousOrderedStepPlanRefinementResult):
+            raise ArgumentError("connector planned mission refinement is invalid")
+        if self.execution is not None and not isinstance(self.execution, AutonomousConnectorMissionRun):
+            raise ArgumentError("connector planned mission execution is invalid")
+
+    @property
+    def plan_refinement_digest(self) -> str:
+        """Return the stable digest of the value-only planner projection."""
+
+        return content_digest(self.plan_refinement.to_dict())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "status": self.status,
+            "mission_id": self.mission.mission_id,
+            "goal_digest": content_digest({"goal": self.mission.goal}),
+            "protected_contract_digest": self.protected_contract_digest,
+            "plan_refinement_digest": self.plan_refinement_digest,
+            "plan_refinement": self.plan_refinement.to_dict(),
+            "execution": None if self.execution is None else self.execution.to_dict(),
+            "authorization": {
+                "provider_planning": "caller_approved_provider_boundary;proposal_only_until_accept_plan",
+                "connector_dispatch": "caller_approved_only",
+            },
+            "retention": "planning_projection_and_connector_metadata_only;mission_arguments_transient",
+            "secret_material": "never_returned",
+        }
+
+
 def run_autonomous_connector_mission(
     runtime: AutonomousConnectorRuntime,
     *,
@@ -1121,6 +1323,7 @@ def run_autonomous_connector_mission(
 
 __all__ = [
     "AUTONOMOUS_CONNECTOR_MISSION_SCHEMA",
+    "AUTONOMOUS_CONNECTOR_PLANNED_MISSION_SCHEMA",
     "MAX_AUTONOMOUS_CONNECTOR_MISSION_STEP_CALLS",
     "MAX_AUTONOMOUS_CONNECTOR_MISSION_OUTPUT_BYTES",
     "AUTONOMOUS_CONNECTOR_MISSION_STEP_STATUSES",
@@ -1129,5 +1332,9 @@ __all__ = [
     "AutonomousConnectorMissionStepExecution",
     "AutonomousConnectorMissionAdapter",
     "AutonomousConnectorMissionRun",
+    "AutonomousConnectorPlannedMissionRun",
+    "connector_mission_planner_steps",
+    "connector_mission_protected_contract_digest",
+    "apply_autonomous_ordered_step_plan",
     "run_autonomous_connector_mission",
 ]
