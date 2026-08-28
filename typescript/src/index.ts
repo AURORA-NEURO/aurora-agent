@@ -4413,3 +4413,13 @@ export {
   validateIdsLaboratoryIntegrationReport9,
 } from "./research-contracts.js";
 export type { IdsLaboratoryIntegrationReport9 } from "./research-contracts.js";
+
+export {
+  IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
+  IDS_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+  IDS_COMPUTATIONAL_EXECUTION_INPUT_SCHEMA,
+  IDS_COMPUTATIONAL_EXECUTION_OUTPUT_SCHEMA,
+  idsComputationalExecutionDigest,
+  validateIdsComputationalExecutionReport9,
+} from "./research-contracts.js";
+export type { IdsComputationalExecutionReport9 } from "./research-contracts.js";

@@ -7767,3 +7767,17 @@ __all__ += [
     "integrate_ids_laboratory_workflow",
     "idsLaboratoryIntegrationDigest",
 ]
+
+from .ids_computational_execution_workbench import (
+    ComputationalExecutionReport9 as IdsComputationalExecutionReport9,
+    computational_execution_manifest as ids_computational_execution_manifest,
+    compile_computational_execution as compile_ids_computational_execution,
+    idsComputationalExecutionDigest,
+)
+
+__all__ += [
+    "IdsComputationalExecutionReport9",
+    "ids_computational_execution_manifest",
+    "compile_ids_computational_execution",
+    "idsComputationalExecutionDigest",
+]

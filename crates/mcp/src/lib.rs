@@ -329,6 +329,10 @@ pub use research_contracts::{
     operate_ids_laboratory_integration_json, validate_ids_laboratory_integration_json,
     IDS_LABORATORY_INTEGRATION_TOOL,
 };
+pub use research_contracts::{
+    operate_ids_computational_execution_json, validate_ids_computational_execution_json,
+    IDS_COMPUTATIONAL_EXECUTION_TOOL,
+};
 pub use resource_discovery_contract::{
     compile_resource_discovery_contract_v2, ResourceDiscoveryContractError,
     ResourceDiscoveryContractRequest, ResourceDiscoveryContractResponse,

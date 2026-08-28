@@ -21,6 +21,7 @@ pub mod mechanism_exploration_assurance;
 pub mod experiment_design_workbench;
 pub mod protocol_simulation_workbench;
 pub mod laboratory_integration_workflow_fabric;
+pub mod computational_execution_workbench;
 pub mod throughput_evidence_surveillance_contract_model;
 
 pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
@@ -105,6 +106,13 @@ pub use laboratory_integration_workflow_fabric::{
     LaboratoryPeer6,
     CONTRACT_VERSION as IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION,
     FEATURE_ID as IDS_LABORATORY_INTEGRATION_FEATURE_ID,
+};
+pub use computational_execution_workbench::{
+    compile_computational_execution, computational_execution_manifest, ComputationNode6,
+    ComputationPeer6, ComputationalExecutionArtifact9, ComputationalExecutionError,
+    ComputationalExecutionReport9, ComputationalExecutionRequest6, ExecutionEvidenceState,
+    CONTRACT_VERSION as IDS_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+    FEATURE_ID as IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
 };
 pub use throughput_evidence_surveillance_contract_model::{
     model_throughput_evidence_surveillance_contract,

@@ -550,6 +550,10 @@ use bioprism_ids::{
     integrate_laboratory_workflow, LaboratoryIntegrationReport9, LaboratoryIntegrationRequest6,
     IDS_LABORATORY_INTEGRATION_FEATURE_ID,
 };
+use bioprism_ids::{
+    compile_computational_execution, ComputationalExecutionReport9,
+    ComputationalExecutionRequest6, IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
+};
 use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
     PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
@@ -3191,6 +3195,29 @@ pub fn validate_ids_laboratory_integration_json(value: &Value) -> Result<Laborat
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_LABORATORY_INTEGRATION_FEATURE_ID {
         return Err("ids laboratory-integration feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_COMPUTATIONAL_EXECUTION_TOOL: &str = "ids_computational_execution_workbench";
+
+pub fn operate_ids_computational_execution_json(value: &Value) -> Result<Value, String> {
+    let request: ComputationalExecutionRequest6 = serde_json::from_value(
+        value.get("request").cloned().ok_or("request is required")?,
+    )
+    .map_err(|error| format!("invalid ids computational-execution request: {error}"))?;
+    let receipt = compile_computational_execution(&request)
+        .map_err(|error| format!("ids computational execution failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids computational-execution receipt: {error}"))
+}
+
+pub fn validate_ids_computational_execution_json(value: &Value) -> Result<ComputationalExecutionReport9, String> {
+    let receipt: ComputationalExecutionReport9 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids computational-execution receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID {
+        return Err("ids computational-execution feature id mismatch".into());
     }
     Ok(receipt)
 }

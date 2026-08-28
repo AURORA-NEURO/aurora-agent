@@ -47,6 +47,7 @@ use bioprism_ids::{IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION, IDS_MECHANISM_EXP
 use bioprism_ids::{IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION, IDS_EXPERIMENT_DESIGN_FEATURE_ID};
 use bioprism_ids::{IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION, IDS_PROTOCOL_SIMULATION_FEATURE_ID};
 use bioprism_ids::{IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION, IDS_LABORATORY_INTEGRATION_FEATURE_ID};
+use bioprism_ids::{IDS_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION, IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -1852,6 +1853,7 @@ impl Server {
             "ids_experiment_design_workbench" => self.ids_experiment_design_workbench(&arguments),
             "ids_protocol_simulation_workbench" => self.ids_protocol_simulation_workbench(&arguments),
             "ids_laboratory_integration_workflow_fabric" => self.ids_laboratory_integration_workflow_fabric(&arguments),
+            "ids_computational_execution_workbench" => self.ids_computational_execution_workbench(&arguments),
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -24994,6 +24996,26 @@ impl Server {
         }))
     }
 
+    fn ids_computational_execution_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_ids_computational_execution_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
+            "contract_version": IDS_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "workflow dependencies are deterministically planned with explicit cycles, missing dependencies, retries, and node partitions",
+                "budget, replay, provenance, policy, federation quorum, authorization, locality, and negative evidence remain auditable",
+                "the route emits only a dry-run capability receipt and cannot dispatch jobs, move raw data, or make clinical decisions"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied workflow manifests and does not launch processes, containers, instruments, or networks",
+                "a qualified dry-run plan is not execution success, scientific validity, or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -41166,6 +41188,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized LaboratoryIntegrationRequest6 containing instrument endpoints, actions, peer summaries, workflow identity, safety gates, policy, federation, locality, budget, and replay declarations." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "ids_computational_execution_workbench",
+            "description": "Compile federated continual workflow node attestations into a deterministic dry-run computational execution plan. It checks dependencies, cycles, missing nodes, budgets, retries, replay, provenance, policy, peer quorum, locality, and negative evidence without dispatching jobs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ComputationalExecutionRequest6 containing typed nodes, dependency ids, peer attestations, engine version, budget, policy, federation, locality, and replay declarations." }
                 },
                 "required": ["request"]
             }
