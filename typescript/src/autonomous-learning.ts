@@ -553,7 +553,8 @@ export interface AutonomousEvaluatedRunResult {
  */
 export interface AutonomousEvaluatedCrossDomainRunResult {
   schema: typeof AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA;
-  status: "settled" | "not_eligible";
+  /** A partial fan-out may settle every completed specialist/synthesis episode that exists. */
+  status: "settled" | "partially_settled" | "not_eligible";
   run: AutonomousCrossDomainRunResult;
   rewards: Record<string, AutonomousEvaluatorRewardInput>;
   /** Value-only trajectory projection; the transient cross-domain result is available in `run`. */
@@ -2312,7 +2313,13 @@ export class AutonomousLearningController {
     const runOptions: Omit<AutonomousCrossDomainRunOptions, "learning" | "learningEpisodeId"> = options.run === undefined ? {} : { ...options.run };
     if (!options.evaluator && !this.runEvaluator) throw new ArgumentError("runCrossDomainLearning requires an evaluator callback or configured runEvaluator");
     const run = await this.agent.runCrossDomain(task, { ...runOptions, learning: this });
-    if (run.status !== "completed") return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, response_settlements: [], reason: "run_not_completed", retention: "run_caller_owned; rewards_and_settlement_value_only" };
+    // `children_partial` is still an eligible learning boundary when synthesis completed: the
+    // failed specialist has no episode, while healthy specialists and synthesis have independent
+    // completed episodes. `children_completed` is the same contract for an intentional
+    // no-synthesis fan-out. Do not admit approval, route-review, response-review, or hard-failure
+    // states because they do not establish a complete provider result for the missing work.
+    const learningEligible = run.status === "completed" || run.status === "children_completed" || run.status === "children_partial";
+    if (!learningEligible) return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, response_settlements: [], reason: "run_not_completed", retention: "run_caller_owned; rewards_and_settlement_value_only" };
     if (!run.learning_episode_ids.length) return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "not_eligible", run, rewards: {}, settlement: null, response_settlements: [], reason: "learning_episodes_not_prepared", retention: "run_caller_owned; rewards_and_settlement_value_only" };
     const evaluate = options.evaluator ?? (this.runEvaluator ? (candidate: AutonomousRunResult) => this.runEvaluator!.evaluate(candidate) : undefined);
     if (!evaluate) throw new ArgumentError("cross-domain learning requires an evaluator callback or configured runEvaluator");
@@ -2330,7 +2337,7 @@ export class AutonomousLearningController {
       idempotencyKey: options.idempotencyKey,
       outbox: options.outbox,
     });
-    return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: "settled", run, rewards, settlement: settlement.trajectory, response_settlements: settlement.response_settlements, reason: null, retention: "run_caller_owned; rewards_and_settlement_value_only" };
+    return { schema: AUTONOMOUS_EVALUATED_CROSS_DOMAIN_RUN_SCHEMA, status: run.partial ? "partially_settled" : "settled", run, rewards, settlement: settlement.trajectory, response_settlements: settlement.response_settlements, reason: null, retention: "run_caller_owned; rewards_and_settlement_value_only" };
   }
 
   async prepareRun(result: AutonomousRunResult, options: { episodeId: string; runId?: string; stageId?: string; parentJobId?: string; planRefinementDigest?: string | null; memoryEpisodeId?: string | null; responseOnly?: boolean }): Promise<AutonomousLearningEpisode> {

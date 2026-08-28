@@ -2169,3 +2169,10 @@ rewards or memory for failed items. Malformed input, programming, and configurat
 still propagate as hard failures. This closes the runtime gap between the documented
 `allow_partial` contract and actual provider outages; external retry orchestration, protected
 raw-result storage, distributed leases, and provider reconciliation remain deployment-owned.
+
+Evaluator-driven TypeScript cross-domain learning now follows the same partial settlement rule as
+Python: `children_partial` runs evaluate and settle only completed specialist and synthesis
+episodes, preserve execution order, and return `partially_settled` without creating credit for a
+failed leg. `children_completed` fan-out without synthesis is also eligible; route, approval,
+response-review, and hard-failure states remain ineligible. This closes the SDK learning mismatch
+without turning provider availability into task correctness or retaining raw diagnostics.

@@ -1973,6 +1973,13 @@ declared a completed workflow; the evaluator result remains `incomplete` until t
 finishes. Restart recovery reloads both caller-owned stores, verifies the original task/workflow
 digests through the executor, and does not silently recreate or overwrite a settled episode.
 
+`AutonomousLearningController.runCrossDomainLearning()` applies the same conservative rule to
+partial fan-out. A `children_partial` run evaluates and settles only completed specialist and
+synthesis episodes, preserves their execution order, and returns `partially_settled`; the failed
+leg has no learning episode or reward. An intentional `children_completed` run with synthesis
+disabled is also eligible. Approval, route-review, response-review, and hard-failure results stay
+`not_eligible`, so provider availability is never promoted to task correctness.
+
 `runAutonomousWorkflowCycle()` is the high-level supervisor for this boundary. It accepts an
 explicit evidence callback, invokes the built-in workflow evaluator, settles any pending stage
 trajectory through the supplied or executor-owned learning controller, and can perform up to

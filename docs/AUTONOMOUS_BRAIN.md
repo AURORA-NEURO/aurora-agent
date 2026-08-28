@@ -6415,6 +6415,14 @@ retain only identities, scores, bounded failure classes, and digests. Python alr
 equivalent synchronous `run_learning`, `run_cross_domain_learning`, and trajectory APIs through
 the application façade.
 
+The TypeScript controller also preserves this boundary for partial provider outcomes. When a
+specialist or synthesis leg fails at the provider boundary but healthy legs complete,
+`runCrossDomainLearning()` evaluates and settles only the prepared completed episodes in execution
+order, returns `status: "partially_settled"`, and creates no episode or reward for the failed leg.
+An intentional `children_completed` fan-out without synthesis remains eligible; approval, route
+review, response review, and hard-failure states remain ineligible so incomplete work cannot be
+promoted to full trajectory credit.
+
 ## Domain-aware autonomous task intake
 
 Applications that do not want to hand-assemble every prompt and plan can use the high-level
