@@ -352,6 +352,19 @@ export type {
 } from "./llm.js";
 export { validateLLMRuntimeHealthSnapshot } from "./llm.js";
 export {
+  AUTONOMOUS_CONTEXT_BUDGET_SCHEMA,
+  MAX_AUTONOMOUS_CONTEXT_INPUT_TOKENS,
+  MAX_AUTONOMOUS_CONTEXT_MESSAGES,
+  MAX_AUTONOMOUS_CONTEXT_RECENT_MESSAGES,
+  compactAutonomousProviderRequest,
+  normalizeAutonomousContextBudget,
+} from "./autonomous-context-budget.js";
+export type {
+  AutonomousContextBudgetOptions,
+  AutonomousContextBudgetPlan,
+  AutonomousContextBudgetResult,
+} from "./autonomous-context-budget.js";
+export {
   PROVIDER_CATALOG_SCHEMA,
   PROVIDER_SETUP_INPUT_METHODS,
   PROVIDER_SETUP_SCHEMA,

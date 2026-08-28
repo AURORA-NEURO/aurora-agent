@@ -265,6 +265,7 @@ from .autonomous_provider_evaluation import (
     settle_autonomous_provider_model_outcome,
 )
 from .autonomy_provider import AutonomousProviderInvocationReceipt
+from .autonomous_context_budget import AutonomousContextBudgetOptions
 from .llm_runtime import (
     CredentialError,
     CredentialHandle,
@@ -11813,6 +11814,7 @@ class AutonomousTaskOrchestrator:
         required_capabilities: Sequence[str],
         contextual_observations: Sequence[Mapping[str, Any]],
         input_tokens: int,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None,
         requested_output_tokens: int,
         max_cost_per_million_tokens: int | None,
         max_latency_ms: int | None,
@@ -11845,6 +11847,7 @@ class AutonomousTaskOrchestrator:
             "contextual_observations": [dict(item) for item in contextual_observations],
             "required_capabilities": list(required_capabilities),
             "input_tokens": input_tokens,
+            "context_budget": context_budget,
             "requested_output_tokens": requested_output_tokens,
             "approve_provider_call": approve_provider_call,
             "approve_mission_dispatch": approve_mission_dispatch,
@@ -11933,6 +11936,7 @@ class AutonomousTaskOrchestrator:
         content_parts: Sequence[Mapping[str, Any]] | None,
         contextual_observations: Sequence[Mapping[str, Any]],
         input_tokens: int,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None,
         requested_output_tokens: int,
         max_cost_per_million_tokens: int | None,
         max_latency_ms: int | None,
@@ -11978,6 +11982,7 @@ class AutonomousTaskOrchestrator:
                 contextual_observations=contextual_observations,
                 required_capabilities=blueprint.required_capabilities,
                 input_tokens=input_tokens,
+                context_budget=context_budget,
                 requested_output_tokens=requested_output_tokens,
                 max_cost_per_million_tokens=max_cost_per_million_tokens,
                 max_latency_ms=max_latency_ms,
@@ -12046,6 +12051,7 @@ class AutonomousTaskOrchestrator:
                 contextual_observations=contextual_observations,
                 required_capabilities=blueprint.required_capabilities,
                 input_tokens=input_tokens,
+                context_budget=context_budget,
                 requested_output_tokens=requested_output_tokens,
                 max_cost_per_million_tokens=max_cost_per_million_tokens,
                 max_latency_ms=max_latency_ms,
@@ -12069,6 +12075,7 @@ class AutonomousTaskOrchestrator:
             required_capabilities=blueprint.required_capabilities,
             contextual_observations=contextual_observations,
             input_tokens=input_tokens,
+            context_budget=context_budget,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,
@@ -12203,7 +12210,7 @@ class AutonomousTaskOrchestrator:
 
     def _run_prepared(self, blueprint: AutonomousTaskBlueprint, **kwargs: Any) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
         allowed = {
-            "model_candidates", "credentials", "ledger", "content_parts", "contextual_observations", "input_tokens",
+            "model_candidates", "credentials", "ledger", "content_parts", "contextual_observations", "input_tokens", "context_budget",
             "requested_output_tokens", "max_cost_per_million_tokens", "max_latency_ms", "min_quality",
             "selection_overrides", "approve_provider_call", "approve_mission_dispatch", "run_id",
             "max_output_tokens", "temperature", "response_schema", "idempotency_key", "mission_policy",
@@ -12856,6 +12863,7 @@ class AutonomousTaskOrchestrator:
         consolidated_memory_required: bool = False,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         input_tokens: int = 4_096,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         requested_output_tokens: int = 2_048,
         max_cost_per_million_tokens: int | None = None,
         max_latency_ms: int | None = None,
@@ -13164,6 +13172,7 @@ class AutonomousTaskOrchestrator:
                     "contextual_observations": contextual_observations,
                     "content_parts": normalized_content_parts,
                     "input_tokens": input_tokens,
+                    "context_budget": context_budget,
                     "requested_output_tokens": requested_output_tokens,
                     "max_cost_per_million_tokens": max_cost_per_million_tokens,
                     "max_latency_ms": max_latency_ms,
@@ -13200,6 +13209,7 @@ class AutonomousTaskOrchestrator:
             content_parts=normalized_content_parts,
             contextual_observations=contextual_observations,
             input_tokens=input_tokens,
+            context_budget=context_budget,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,

@@ -19,6 +19,11 @@ import type {
   AutonomousModelContinuationPlan,
   AutonomousModelContinuationState,
 } from "./autonomous-continuation.js";
+import {
+  compactAutonomousProviderRequest,
+  type AutonomousContextBudgetOptions,
+  type AutonomousContextBudgetPlan,
+} from "./autonomous-context-budget.js";
 
 /** Public schema for the cross-language, application-owned provider runtime. */
 export const LLM_RUNTIME_SCHEMA = "bioprism-typescript-llm-runtime/0.1" as const;
@@ -746,6 +751,8 @@ export interface ProviderInvocationOptions {
   reserveCost?: AutonomousCostReservationCallback;
   /** Optional process-local provider/model quota; the runtime quota is used by default. */
   providerQuota?: ProviderQuotaController;
+  /** Optional explicit history compaction applied before each tool-loop turn. */
+  contextBudget?: AutonomousContextBudgetOptions;
 }
 
 /**
@@ -1038,6 +1045,8 @@ export interface AutonomousExecutionPlan {
   minSelectionConfidence?: number;
   selectionWeights?: Partial<AutonomousSelectionWeights>;
   selectionObservations?: readonly AutonomousModelObservation[];
+  /** Optional explicit lossy history budget; omitted requests retain legacy behavior. */
+  contextBudget?: AutonomousContextBudgetOptions;
   candidates: readonly AutonomousModelCandidate[];
   request: ProviderRequest;
 }
@@ -1051,6 +1060,8 @@ export interface AutonomousExecutionResult {
   provider_invocations: AutonomousProviderInvocationReceipt[];
   /** Present only when bounded provider/model failover was actually used. */
   provider_failover: AutonomousProviderFailoverProjection | null;
+  /** Metadata-only record of any deterministic prompt-history compaction. */
+  context_budget?: AutonomousContextBudgetPlan | null;
 }
 
 export type AutonomousModelSelector = (request: AutonomousSelectionRequest) => AutonomousSelectionDecision | Promise<AutonomousSelectionDecision>;
@@ -3017,6 +3028,7 @@ export class LLMRuntime {
     const responses: ProviderResponse[] = [];
     let toolCalls = 0;
     for (let turn = 0; turn < maxTurns; turn += 1) {
+      if (options.contextBudget !== undefined) current = (await compactAutonomousProviderRequest(current, options.contextBudget)).request;
       const providerOptions = {
         ...options,
         executionTurn: turn + 1,
@@ -3486,6 +3498,13 @@ export class AutonomousRuntime {
     } = {},
   ): Promise<AutonomousSelectionDecision> {
     if (options.selectionEventCallback !== undefined && typeof options.selectionEventCallback !== "function") throw new ProviderRuntimeError("autonomous model selection trace callback must be callable");
+    // Selection must rank against the request that will actually be dispatched. This prevents a
+    // large stale transcript from making a model appear eligible before compaction and then
+    // overflowing the same model at the provider boundary.
+    if (plan.contextBudget !== undefined) {
+      const prepared = await compactAutonomousProviderRequest(plan.request, plan.contextBudget);
+      plan = { ...plan, request: prepared.request };
+    }
     const selectionEventCallback = options.selectionEventCallback;
     const traceEnabled = selectionEventCallback !== undefined;
     const request = this.selectionRequest(plan, options.excludedProviders, options.excludedModels);
@@ -3602,6 +3621,12 @@ export class AutonomousRuntime {
     } = {},
   ): Promise<AutonomousExecutionResult> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
+    let contextBudget: AutonomousContextBudgetPlan | null = null;
+    if (plan.contextBudget !== undefined) {
+      const prepared = await compactAutonomousProviderRequest(plan.request, plan.contextBudget);
+      plan = { ...plan, request: prepared.request };
+      contextBudget = prepared.plan;
+    }
     const initialSelection = await this.select(plan, { selectionEventCallback: options.selectionEventCallback, attempt: 1 });
     if (!initialSelection.selected_model) {
       if (selectionIsCredentialUnavailable(initialSelection.ranking)) throw new CredentialError("autonomous selection requires a user credential handle");
@@ -3646,7 +3671,7 @@ export class AutonomousRuntime {
         const response = await this.llm.invoke(provider, { ...plan.request, model: step.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost });
         continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, statusCode: response.statusCode });
         const projection = await autonomousProviderInvocationProjection(invocationSamples, continuationPlan);
-        return { selection, response, continuation_plan: continuationPlan, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover };
+        return { selection, response, continuation_plan: continuationPlan, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover, context_budget: contextBudget };
       } catch (error) {
         if (!(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
         const failureScope: AutonomousContinuationFailureScope = modelFailoverAllowed(error) ? "model" : "provider";
@@ -3675,8 +3700,14 @@ export class AutonomousRuntime {
       reserveCost?: AutonomousCostReservationCallback;
       toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
     },
-  ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult; continuation_plan: AutonomousModelContinuationPlan; provider_invocations: AutonomousProviderInvocationReceipt[]; provider_failover: AutonomousProviderFailoverProjection | null }> {
+  ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult; continuation_plan: AutonomousModelContinuationPlan; provider_invocations: AutonomousProviderInvocationReceipt[]; provider_failover: AutonomousProviderFailoverProjection | null; context_budget?: AutonomousContextBudgetPlan | null }> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
+    let contextBudget: AutonomousContextBudgetPlan | null = null;
+    if (plan.contextBudget !== undefined) {
+      const prepared = await compactAutonomousProviderRequest(plan.request, plan.contextBudget);
+      plan = { ...plan, request: prepared.request };
+      contextBudget = prepared.plan;
+    }
     const initialSelection = await this.select(plan, { selectionEventCallback: options.selectionEventCallback, attempt: 1 });
     if (!initialSelection.selected_model) {
       if (selectionIsCredentialUnavailable(initialSelection.ranking)) throw new CredentialError("autonomous selection requires a user credential handle");
@@ -3741,10 +3772,11 @@ export class AutonomousRuntime {
           reserveCost: options.reserveCost,
           costEstimator: (request) => estimatedProviderCostUnits(selectedCandidate, request),
           toolReadOnly: options.toolReadOnly,
+          contextBudget: plan.contextBudget,
         });
         continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, statusCode: loop.finalResponse?.statusCode ?? null });
         const projection = await autonomousProviderInvocationProjection(invocationSamples, continuationPlan);
-        return { selection, loop, continuation_plan: continuationPlan, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover };
+        return { selection, loop, continuation_plan: continuationPlan, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover, context_budget: contextBudget };
       } catch (error) {
         // Replaying a loop after any provider-issued tool call could duplicate an effect. A
         // failover is therefore permitted only before the first tool request is observed.

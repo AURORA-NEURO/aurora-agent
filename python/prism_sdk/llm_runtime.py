@@ -4528,6 +4528,7 @@ class LLMRuntime:
         invocation_kind: str = "tool_loop_turn",
         provider_quota: Any | None = None,
         estimated_cost_units: float = 0.0,
+        context_budget: Any | None = None,
     ) -> ProviderToolLoopResult:
         """Run bounded native tool continuation with a caller-owned authorization callback.
 
@@ -4553,6 +4554,14 @@ class LLMRuntime:
         total_tool_calls = 0
         response = initial_response
         for _turn in range(max_turns):
+            if context_budget is not None:
+                from .autonomous_context_budget import AutonomousContextBudgetError, compact_autonomous_provider_request
+
+                try:
+                    response_request = compact_autonomous_provider_request(current, context_budget)
+                except AutonomousContextBudgetError as error:
+                    raise ProviderError("autonomous provider context budget could not be satisfied", code="invalid_request") from error
+                current = response_request.request
             if response is None:
                 response = (
                     self.collect_stream(

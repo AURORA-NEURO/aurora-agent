@@ -11486,7 +11486,7 @@ evidence returned by the Rust kernel:
 
 ```python
 ledger = BrainLearningLedger("./state/brain-learning.jsonl")
-result = brain.run(
+result = agent.run(
     task="Summarize the bounded evidence packet.",
     model_selection=selection_request,
     prompt=prompt_request,
@@ -13005,3 +13005,56 @@ without exposing task text, prompts, arguments, outputs, credentials, evaluator 
 execution authority. The two-candidate per-stage bound keeps all-domain plans under the existing
 128 KiB contract, and the ceiling propagates through single-domain, automatic, and cross-domain
 child/synthesis blueprints in both SDKs.
+
+## Explicit context-window budgeting
+
+Long-running agents eventually outgrow a single provider context even when their planner and
+memory layers are correct. The SDKs therefore expose an opt-in, provider-neutral transcript
+budget at the autonomous invocation boundary. It is applied before model selection so capacity
+gates see the request that can actually be dispatched, and it is applied again after each
+approved tool result so a loop cannot grow past its own contract.
+
+```typescript
+const result = await agent.run(
+  "compare the reviewed evidence and produce the next bounded action",
+  {
+    domain: "research",
+    modelCandidates,
+    credentials,
+    approveProviderCall: true,
+    contextBudget: {
+      maxInputTokens: 12_000,
+      preserveRecentMessages: 10,
+      maxMessages: 96,
+    },
+  },
+);
+```
+
+Python accepts the equivalent snake_case fields:
+
+```python
+result = brain.run(
+    task=task,
+    domain="research",
+    model_candidates=model_candidates,
+    credentials=credentials,
+    approve_provider_call=True,
+    context_budget={
+        "max_input_tokens": 12_000,
+        "preserve_recent_messages": 10,
+        "max_messages": 96,
+    },
+)
+```
+
+Compaction is deterministic and loss-aware. System/developer instructions, the latest user
+message, and the configured recent tail are protected. The newest assistant tool-call message
+and its contiguous results are also protected for the next continuation; older tool turns are
+removed only as complete atomic units, so compaction never intentionally leaves half of a tool
+turn behind. The returned `context_budget` receipt contains only the schema, token/message
+counts, dropped indexes, structural shapes, and digests; prompt text, image URLs, inline image
+data, tool arguments, and provider responses are not retained in it. If the protected portion
+cannot fit, the call fails closed with `invalid_request`. The layer does not invoke a second LLM
+to summarize history: deployments that need semantic summarization must add a separately reviewed
+caller-owned policy and preserve its own authorization and provenance boundaries.

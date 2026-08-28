@@ -293,6 +293,7 @@ import {
   type LLMRuntimeHealthSnapshot,
 } from "./llm.js";
 import type { AutonomousModelContinuationPlan } from "./autonomous-continuation.js";
+import { normalizeAutonomousContextBudget, type AutonomousContextBudgetOptions, type AutonomousContextBudgetPlan } from "./autonomous-context-budget.js";
 import {
   buildAutonomousDomainResponseContract,
   evaluateAutonomousDomainResponse,
@@ -798,6 +799,8 @@ export interface AutonomousModelSelectionPreviewOptions {
   context?: readonly AutonomousPromptChunk[];
   candidates?: readonly AutonomousModelCandidate[];
   estimatedInputTokens?: number;
+  /** Apply the same explicit context budget used by an eventual invocation. */
+  contextBudget?: AutonomousContextBudgetOptions;
   requestedOutputTokens?: number;
   maxCostPerMillionTokens?: number;
   maxLatencyMs?: number;
@@ -827,6 +830,11 @@ export interface AutonomousModelSelectionContract extends JsonObject {
   min_selection_confidence: number | null;
   selection_weights: AutonomousSelectionWeights;
   selection_observations_digest: string;
+  context_budget: {
+    max_input_tokens: number;
+    preserve_recent_messages: number;
+    max_messages: number;
+  } | null;
 }
 
 /** Options for approving one previously reviewed model-selection preview. */
@@ -1171,6 +1179,8 @@ export interface AutonomousRunResult {
   provider_invocations?: AutonomousProviderInvocationReceipt[];
   /** Metadata-only failover projection; null when the selected provider completed directly. */
   provider_failover?: AutonomousProviderFailoverProjection | null;
+  /** Metadata-only prompt-history compaction receipt, when an explicit budget was configured. */
+  context_budget?: AutonomousContextBudgetPlan | null;
   /** Exact bounded model fallback ladder used by the provider invocation, when one was compiled. */
   continuation_plan?: AutonomousModelContinuationPlan | null;
   /** Digest-only identity for an explicitly selected versioned prompt; rendered messages remain transient. */
@@ -1222,6 +1232,7 @@ function providerFailureRunResult(
     response: null,
     provider_invocations: [],
     provider_failover: null,
+    context_budget: null,
     continuation_plan: null,
     prompt: null,
     response_evaluation: null,
@@ -1821,6 +1832,8 @@ export interface AutonomousRunOptions {
   maxDomains?: number;
   allowCrossDomain?: boolean;
   maxInputTokens?: number;
+  /** Explicit lossy context budget; system/developer instructions and recent turns are protected. */
+  contextBudget?: AutonomousContextBudgetOptions;
   maxOutputTokens?: number;
   /** Refuse candidates above this caller-owned cost prior. */
   maxCostPerMillionTokens?: number;
@@ -6668,11 +6681,17 @@ export class AutonomousAgent {
     const selectionWeights = normalizeAutonomousSelectionWeights(options.selectionWeights);
     const selectionObservations = normalizeAutonomousModelObservations(options.selectionObservations);
     const selectionObservationsDigest = await digestJson(selectionObservations);
+    const normalizedContextBudget = options.contextBudget === undefined
+      ? null
+      : normalizeAutonomousContextBudget(options.contextBudget);
+    const effectiveEstimatedInputTokens = normalizedContextBudget === null
+      ? estimatedInputTokens
+      : Math.min(estimatedInputTokens, normalizedContextBudget.maxInputTokens);
     const blueprintEnvelope = await this.blueprint(taskText, {
       domain: options.domain,
       capability: options.capability,
       context: options.context,
-      maxInputTokens: estimatedInputTokens,
+      maxInputTokens: effectiveEstimatedInputTokens,
     });
     const blueprint = blueprintEnvelope.blueprint;
     if (!blueprint || blueprintEnvelope.route.cross_domain) {
@@ -6705,6 +6724,7 @@ export class AutonomousAgent {
       minSelectionConfidence: options.minSelectionConfidence,
       selectionWeights,
       selectionObservations,
+      contextBudget: normalizedContextBudget === null ? undefined : normalizedContextBudget,
       candidates,
       request,
     };
@@ -6723,7 +6743,7 @@ export class AutonomousAgent {
       required_capabilities: [...blueprint.required_capabilities],
       candidates,
       selection_constraints: {
-        estimated_input_tokens: estimatedInputTokens,
+        estimated_input_tokens: effectiveEstimatedInputTokens,
         requested_output_tokens: requestedOutputTokens,
         max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
         max_latency_ms: options.maxLatencyMs ?? null,
@@ -6731,6 +6751,11 @@ export class AutonomousAgent {
         min_selection_confidence: options.minSelectionConfidence ?? null,
         selection_weights: selectionWeights,
         selection_observations_digest: selectionObservationsDigest,
+        context_budget: normalizedContextBudget === null ? null : {
+          max_input_tokens: normalizedContextBudget.maxInputTokens,
+          preserve_recent_messages: normalizedContextBudget.preserveRecentMessages,
+          max_messages: normalizedContextBudget.maxMessages,
+        },
       },
     });
     const selected = selection.selected_model !== null;
@@ -6762,7 +6787,7 @@ export class AutonomousAgent {
         task_decision_posture: blueprint.task_decision.posture,
         required_model_capabilities: [...blueprint.required_capabilities],
         candidate_ids: candidates.map((candidate) => `${candidate.provider}/${candidate.model}`),
-        input_tokens: estimatedInputTokens,
+        input_tokens: effectiveEstimatedInputTokens,
         requested_output_tokens: requestedOutputTokens,
         max_cost_per_million_tokens: options.maxCostPerMillionTokens ?? null,
         max_latency_ms: options.maxLatencyMs ?? null,
@@ -6770,6 +6795,11 @@ export class AutonomousAgent {
         min_selection_confidence: options.minSelectionConfidence ?? null,
         selection_weights: selectionWeights,
         selection_observations_digest: selectionObservationsDigest,
+        context_budget: normalizedContextBudget === null ? null : {
+          max_input_tokens: normalizedContextBudget.maxInputTokens,
+          preserve_recent_messages: normalizedContextBudget.preserveRecentMessages,
+          max_messages: normalizedContextBudget.maxMessages,
+        },
       },
       selection_audit: structuredClone(selection),
       review: {
@@ -6838,6 +6868,23 @@ export class AutonomousAgent {
     const selectedCandidates = candidates.filter((candidate) => `${candidate.provider}/${candidate.model}` === selectedId);
     if (selectedCandidates.length !== 1) throw new ProviderRuntimeError("approved model selection selected model is absent or duplicated");
 
+    const reviewedContextBudgetValue = contract.context_budget ?? null;
+    let reviewedContextBudget: AutonomousContextBudgetOptions | undefined;
+    if (reviewedContextBudgetValue !== null) {
+      if (!isObject(reviewedContextBudgetValue)) throw new ProviderRuntimeError("approved model selection context budget contract is malformed");
+      reviewedContextBudget = normalizeAutonomousContextBudget({
+        maxInputTokens: reviewedContextBudgetValue.max_input_tokens,
+        preserveRecentMessages: reviewedContextBudgetValue.preserve_recent_messages,
+        maxMessages: reviewedContextBudgetValue.max_messages,
+      });
+    }
+    if (options.contextBudget !== undefined) {
+      const suppliedContextBudget = normalizeAutonomousContextBudget(options.contextBudget);
+      if (canonicalJson(suppliedContextBudget) !== canonicalJson(reviewedContextBudget)) {
+        throw new ProviderRuntimeError("approved model selection context budget changed; re-review required");
+      }
+    }
+
     const inputTokens = options.maxInputTokens ?? contract.input_tokens;
     const requestedOutputTokens = options.maxOutputTokens ?? contract.requested_output_tokens;
     const capability = options.capability ?? contract.capability;
@@ -6863,6 +6910,7 @@ export class AutonomousAgent {
       candidates,
       estimatedInputTokens: inputTokens,
       requestedOutputTokens,
+      contextBudget: reviewedContextBudget,
       ...(maxCostPerMillionTokens === undefined ? {} : { maxCostPerMillionTokens }),
       ...(maxLatencyMs === undefined ? {} : { maxLatencyMs }),
       ...(minQuality === undefined ? {} : { minQuality }),
@@ -6905,6 +6953,7 @@ export class AutonomousAgent {
       ...(minSelectionConfidence === undefined ? {} : { minSelectionConfidence }),
       selectionWeights: suppliedWeights,
       selectionObservations: suppliedObservations,
+      contextBudget: reviewedContextBudget,
       approveProviderCall: true,
       maxProviderFailovers: 0,
     };
@@ -9216,7 +9265,7 @@ export class AutonomousAgent {
       tools: tools.length ? tools : undefined,
       toolChoice: tools.length ? "auto" : undefined,
     };
-    const executionPlan: AutonomousExecutionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: blueprint.selection_context.capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: effectiveMinSelectionConfidence, selectionWeights: options.selectionWeights, selectionObservations: options.selectionObservations, candidates, request };
+    const executionPlan: AutonomousExecutionPlan = { task: taskText, domain: blueprint.domain_profile.domain, capability: blueprint.selection_context.capability, riskClass: blueprint.domain_profile.risk_class, taskFamily: blueprint.selection_context.task_family ?? undefined, learningContextDigest: blueprint.learning_context_digest, requiredCapabilities, maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, minSelectionConfidence: effectiveMinSelectionConfidence, selectionWeights: options.selectionWeights, selectionObservations: options.selectionObservations, contextBudget: options.contextBudget, candidates, request };
     const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
     const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
@@ -9237,13 +9286,13 @@ export class AutonomousAgent {
         responseEvaluation,
         options.requireStructuredResponseReview,
       );
-      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, provider_invocations: loop.provider_invocations, provider_failover: loop.provider_failover, continuation_plan: loop.continuation_plan, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+      return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, provider_invocations: loop.provider_invocations, provider_failover: loop.provider_failover, continuation_plan: loop.continuation_plan, context_budget: loop.context_budget, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
     const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined });
     const responseEvaluation = options.structuredDomainResponse === true
       ? evaluateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract)
       : null;
-    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: directStructuredResponseStatus("completed", responseEvaluation, options.requireStructuredResponseReview), route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, provider_invocations: result.provider_invocations, provider_failover: result.provider_failover, continuation_plan: result.continuation_plan, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
+    return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: directStructuredResponseStatus("completed", responseEvaluation, options.requireStructuredResponseReview), route, blueprint, plan_refinement_digest: planRefinementDigest, selection: result.selection, response: result.response, provider_invocations: result.provider_invocations, provider_failover: result.provider_failover, continuation_plan: result.continuation_plan, context_budget: result.context_budget, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: null, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
   }
 
   private crossDomainResponseEntries(

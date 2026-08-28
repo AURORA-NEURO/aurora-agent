@@ -170,6 +170,25 @@ SDK's 60-second ceiling, and an external abort interrupts the delay immediately.
 observers receive the matching `failureClass`, `failureCode`, `requestId`, and `retryable`
 projection without prompt, response, tool, or credential data.
 
+Autonomous calls may also opt into deterministic context budgeting with `contextBudget`. The
+budget is enforced before selection and after every approved tool result. Protected system/
+developer instructions, the latest user task, recent turns, and the newest assistant/tool
+continuation remain intact; older tool turns are dropped only as complete atomic units. The
+returned `context_budget` receipt
+contains only counts, dropped indexes, structural digests, and retention metadata. A protected
+overflow fails closed with `invalid_request`; no summarization model is called and no prompt text
+is copied into the receipt.
+
+```typescript
+await agent.run(task, {
+  domain: "research",
+  modelCandidates,
+  credentials,
+  approveProviderCall: true,
+  contextBudget: { maxInputTokens: 12_000, preserveRecentMessages: 10, maxMessages: 96 },
+});
+```
+
 Model ids can be refreshed from the provider instead of being copied from stale configuration:
 
 ```typescript

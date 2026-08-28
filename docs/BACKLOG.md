@@ -1,5 +1,16 @@
 # Remaining backlog
 
+The TypeScript and Python autonomous provider boundaries now expose an explicit, deterministic
+context-window budget. Before selection and invocation, callers can cap estimated input tokens
+and message count; system/developer instructions, the latest user task, recent turns, and the
+newest assistant/tool continuation are protected, while older tool turns are dropped atomically.
+The metadata-only plan records counts, indexes, shapes, and digests without prompt content, and
+protected overflow fails closed as `invalid_request`. Tool loops re-apply the same budget after
+each approved result, and mission proposals use it before the provider decision as well. This is
+an operational transcript bound, not an LLM summarizer or a claim of semantic preservation;
+deployments that need richer compression should provide and review a separate caller-owned
+summarization policy.
+
 The provider runtime now has a shared, cross-language `ProviderQuotaController` seam. It admits
 every `LLMRuntime.invoke`, live stream, collected stream, and native tool-loop turn against
 provider-wide and provider/model fixed-window policies before transport, reserves concurrency,

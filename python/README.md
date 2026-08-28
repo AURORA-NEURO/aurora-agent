@@ -709,6 +709,29 @@ decision, settlement = agent.settle_structured_response(
 )
 ```
 
+For long-running transcripts, the same agent entry point accepts an explicit context budget:
+
+```python
+run = agent.run(
+    task="compare the reviewed evidence and produce the next bounded action",
+    domain="research",
+    model_candidates=model_candidates,
+    credentials=credentials,
+    approve_provider_call=True,
+    context_budget={
+        "max_input_tokens": 12_000,
+        "preserve_recent_messages": 10,
+        "max_messages": 96,
+    },
+)
+```
+
+The budget is applied before selection and after each approved tool result. System/developer
+instructions, the latest user task, recent turns, and the newest assistant/tool continuation are
+protected; older tool turns are removed only as complete atomic units. The `context_budget` result projection contains
+only counts, dropped indexes, structural digests, and retention metadata. Protected overflow
+fails closed with `invalid_request`, and no summarization model is called.
+
 After a restart, rehydrate only `episode.to_dict()` and the value-only
 `response_evaluation`; omit `contract` when the provider response is no longer retained. The
 settlement refuses altered evaluation digests, mismatched episode/run identities, duplicate

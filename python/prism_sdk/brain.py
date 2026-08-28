@@ -42,6 +42,12 @@ from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_fac
 from .tooling import ToolCatalogue, ToolSchemaError
 from .autonomy_persistence import AutonomousExecutionController
 from .autonomy_provider import AutonomousProviderInvocationSession
+from .autonomous_context_budget import (
+    AutonomousContextBudgetError,
+    AutonomousContextBudgetOptions,
+    compact_autonomous_provider_request,
+    normalize_autonomous_context_budget,
+)
 from .autonomous_selection_lab import (
     normalize_autonomous_model_observations,
     normalize_autonomous_selection_weights,
@@ -1570,6 +1576,8 @@ class BrainRunResult:
     # failed child.  The exception message, request, credential, response, and wire payload are
     # deliberately never retained here.
     failure: Mapping[str, Any] | None = None
+    # Metadata-only receipt for explicit provider prompt-history compaction.
+    context_budget: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         custom_prompt = self.prompt.get("autonomous_prompt") is not None
@@ -1612,6 +1620,8 @@ class BrainRunResult:
             result["response_evaluation"] = dict(self.response_evaluation)
         if self.failure is not None:
             result["failure"] = dict(self.failure)
+        if self.context_budget is not None:
+            result["context_budget"] = dict(self.context_budget)
         return result
 
 
@@ -3894,6 +3904,7 @@ class AutonomousBrain:
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         requested_output_tokens: int = 2_048,
         max_cost_per_million_tokens: int | None = None,
         max_latency_ms: int | None = None,
@@ -3912,6 +3923,13 @@ class AutonomousBrain:
         capability / risk context. No provider secret enters this request.
         """
 
+        normalized_context_budget = None
+        if context_budget is not None:
+            try:
+                normalized_context_budget = normalize_autonomous_context_budget(context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous context budget is invalid") from error
+
         if not isinstance(task, str) or not task.strip():
             raise BrainRunError("task must be a non-empty string")
         if not isinstance(model_candidates, Sequence) or isinstance(model_candidates, (str, bytes)):
@@ -3928,6 +3946,8 @@ class AutonomousBrain:
             raise BrainRunError("required_capabilities must contain non-empty strings")
         if not isinstance(input_tokens, int) or isinstance(input_tokens, bool) or input_tokens < 1:
             raise BrainRunError("input_tokens must be a positive integer")
+        if normalized_context_budget is not None:
+            input_tokens = min(input_tokens, normalized_context_budget.max_input_tokens)
         if not isinstance(requested_output_tokens, int) or isinstance(requested_output_tokens, bool) or requested_output_tokens < 1:
             raise BrainRunError("requested_output_tokens must be a positive integer")
         for name, value in (("max_cost_per_million_tokens", max_cost_per_million_tokens), ("max_latency_ms", max_latency_ms)):
@@ -4448,6 +4468,7 @@ class AutonomousBrain:
         bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
@@ -4476,6 +4497,13 @@ class AutonomousBrain:
         if not isinstance(max_provider_failovers, int) or isinstance(max_provider_failovers, bool) or not 0 <= max_provider_failovers <= 8:
             raise BrainRunError("max_provider_failovers must be within [0, 8]")
 
+        normalized_context_budget = None
+        if context_budget is not None:
+            try:
+                normalized_context_budget = normalize_autonomous_context_budget(context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous context budget is invalid") from error
+        effective_input_tokens = input_tokens if normalized_context_budget is None else min(input_tokens, normalized_context_budget.max_input_tokens)
         selection = self.build_adaptive_model_selection(
             task=task,
             model_candidates=model_candidates,
@@ -4485,7 +4513,7 @@ class AutonomousBrain:
             context=context,
             contextual_observations=contextual_observations,
             required_capabilities=required_capabilities,
-            input_tokens=input_tokens,
+            input_tokens=effective_input_tokens,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,
@@ -4573,6 +4601,7 @@ class AutonomousBrain:
                     contextual_observations=effective_contextual_observations,
                     tools=tools,
                     tool_choice=tool_choice,
+                    context_budget=normalized_context_budget,
                     invocation_observer=effective_observer,
                 )
                 if policy_observer is not None:
@@ -4668,6 +4697,7 @@ class AutonomousBrain:
         bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
@@ -4736,6 +4766,13 @@ class AutonomousBrain:
             if effective_context is None:
                 effective_context = route_context
             options["route_report"] = route_report
+        normalized_context_budget = None
+        if context_budget is not None:
+            try:
+                normalized_context_budget = normalize_autonomous_context_budget(context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous context budget is invalid") from error
+        effective_input_tokens = input_tokens if normalized_context_budget is None else min(input_tokens, normalized_context_budget.max_input_tokens)
         selection = self.build_adaptive_model_selection(
             task=task,
             model_candidates=model_candidates,
@@ -4745,7 +4782,7 @@ class AutonomousBrain:
             context=effective_context,
             contextual_observations=contextual_observations,
             required_capabilities=required_capabilities,
-            input_tokens=input_tokens,
+            input_tokens=effective_input_tokens,
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,
@@ -4803,6 +4840,7 @@ class AutonomousBrain:
             attempt_state: dict[str, Any] = {}
             attempt_options = dict(options)
             attempt_options["attempt_state"] = attempt_state
+            attempt_options["context_budget"] = normalized_context_budget
             policy_observer = None
             if execution_controller is not None:
                 policy_observer = AutonomousProviderInvocationSession(
@@ -4937,6 +4975,7 @@ class AutonomousBrain:
         bandit_state: Mapping[str, Any] | None = None,
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         required_capabilities: Sequence[str] = (),
         input_tokens: int = 4_096,
@@ -4984,6 +5023,13 @@ class AutonomousBrain:
         if route_request is not None and not isinstance(route_request, Mapping):
             raise BrainRunError("route_request must be a mapping or None")
 
+        normalized_context_budget = None
+        if context_budget is not None:
+            try:
+                normalized_context_budget = normalize_autonomous_context_budget(context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous context budget is invalid") from error
+
         effective_context = context
         route_report: dict[str, Any] | None = None
         if route_request is not None:
@@ -5003,7 +5049,11 @@ class AutonomousBrain:
             context=effective_context,
             contextual_observations=contextual_observations,
             required_capabilities=required_capabilities,
-            input_tokens=input_tokens,
+            input_tokens=(
+                input_tokens
+                if normalized_context_budget is None
+                else min(input_tokens, normalized_context_budget.max_input_tokens)
+            ),
             requested_output_tokens=requested_output_tokens,
             max_cost_per_million_tokens=max_cost_per_million_tokens,
             max_latency_ms=max_latency_ms,
@@ -5090,6 +5140,7 @@ class AutonomousBrain:
                     claim_requests=claim_requests,
                     context=effective_context,
                     content_parts=content_parts,
+                    context_budget=normalized_context_budget,
                     contextual_observations=effective_contextual_observations,
                     evaluator_review=evaluator_review,
                     workflow_binding=workflow_binding,
@@ -5221,6 +5272,7 @@ class AutonomousBrain:
         max_replans: int = 1,
         trajectory_discount: float | None = None,
         trajectory_terminal_reward: float | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         mission_options: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
@@ -5286,7 +5338,15 @@ class AutonomousBrain:
             raise BrainRunError("memory must be a BrainEpisodicMemory")
         if mission_options is not None and not isinstance(mission_options, Mapping):
             raise BrainRunError("mission_options must be a mapping or None")
+        normalized_context_budget = None
+        if context_budget is not None:
+            try:
+                normalized_context_budget = normalize_autonomous_context_budget(context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous context budget is invalid") from error
         options = {} if mission_options is None else dict(mission_options)
+        if normalized_context_budget is not None:
+            options["context_budget"] = normalized_context_budget
         if provider_health is not None:
             overrides = options.get("selection_overrides", {})
             if not isinstance(overrides, Mapping):
@@ -5323,6 +5383,7 @@ class AutonomousBrain:
             "contextual_observations",
             "required_capabilities",
             "input_tokens",
+            "context_budget",
             "requested_output_tokens",
             "max_cost_per_million_tokens",
             "max_latency_ms",
@@ -6888,6 +6949,7 @@ class AutonomousBrain:
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
     ) -> BrainRunResult:
         if not isinstance(task, str) or not task.strip():
@@ -7068,6 +7130,20 @@ class AutonomousBrain:
             tools=tuple(tools),
             tool_choice=tool_choice,
         )
+        context_budget_projection: Mapping[str, Any] | None = None
+        if context_budget is not None:
+            try:
+                compacted = compact_autonomous_provider_request(request, context_budget)
+            except AutonomousContextBudgetError as error:
+                raise BrainRunError("autonomous provider context budget could not be satisfied") from error
+            request = compacted.request
+            context_budget_projection = compacted.plan.to_dict()
+            prompt_report = {
+                **prompt_report,
+                "messages": [dict(message) for message in request.messages],
+                "context_budget": dict(context_budget_projection),
+                "retention": "provider_messages_transient;context_budget_metadata_only_projection",
+            }
         response = self.runtime.invoke(
             provider,
             request,
@@ -7086,6 +7162,7 @@ class AutonomousBrain:
             plan_report,
             response,
             provider_invocations=invocations,
+            context_budget=context_budget_projection,
         )
 
     def run_tool_loop(
@@ -7110,6 +7187,7 @@ class AutonomousBrain:
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         provider_tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         max_turns: int = 4,
         max_tool_calls: int = 128,
         stream: bool = False,
@@ -7307,6 +7385,7 @@ class AutonomousBrain:
             contextual_observations=contextual_observations,
             tools=provider_tools,
             tool_choice=tool_choice,
+            context_budget=context_budget,
             invocation_observer=invocation_observer,
         )
         if first.status != "completed_provider_call" or first.response is None:
@@ -7357,6 +7436,7 @@ class AutonomousBrain:
             initial_response=first.response,
             invocation_observer=invocation_observer,
             invocation_kind="tool_loop_turn",
+            context_budget=context_budget,
         )
         if isinstance(invocation_observer, AutonomousProviderInvocationSession):
             first = replace(first, provider_invocations=tuple(invocation_observer.evidence()))
@@ -7777,6 +7857,7 @@ class AutonomousBrain:
         claim_requests: Sequence[Mapping[str, Any]] = (),
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
+        context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         evaluator_review: Mapping[str, Any] | None = None,
         workflow_binding: Mapping[str, Any] | None = None,
@@ -7952,6 +8033,7 @@ class AutonomousBrain:
             idempotency_key=idempotency_key,
             context=context,
             content_parts=content_parts,
+            context_budget=context_budget,
             contextual_observations=contextual_observations,
             tools=provider_tools,
             tool_choice=tool_choice,
@@ -8072,6 +8154,7 @@ class AutonomousBrain:
         provider_invocations: Sequence[Mapping[str, Any]] = (),
         continuation_plan: Mapping[str, Any] | None = None,
         provider_failover: Mapping[str, Any] | None = None,
+        context_budget: Mapping[str, Any] | None = None,
     ) -> BrainRunResult:
         digest_input = {
             "status": status,
@@ -8102,6 +8185,7 @@ class AutonomousBrain:
             provider_failover=None if provider_failover is None else dict(provider_failover),
             provider_invocations=tuple(dict(receipt) for receipt in provider_invocations),
             continuation_plan=None if continuation_plan is None else dict(continuation_plan),
+            context_budget=None if context_budget is None else dict(context_budget),
         )
 
 
