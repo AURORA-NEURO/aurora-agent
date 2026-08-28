@@ -133,6 +133,10 @@ def test_goal_control_loop_preview_is_provider_free_and_explains_all_domain_admi
     assert "private preview blocked task" not in public
     facade_preview = AutonomousAgent(None, LLMRuntime()).preview_goal_control_loop(ledger, schedule_options=preview_options)
     assert facade_preview.schedule.schedule_digest == preview.schedule.schedule_digest
+    preview_runtime = AutonomousAgent(None, LLMRuntime()).goal_agent_runtime(ledger, task_resolver=None)
+    assert preview_runtime.metadata()["task_rehydration"] == "not_configured_preview_only"
+    with pytest.raises(AutonomousGoalError, match="task rehydration is not configured"):
+        preview_runtime.run(schedule_options={"now_ns": 100, "max_selected": 1, "max_concurrent": 1})
 
 
 def test_goal_control_loop_preview_reports_terminal_and_policy_blocked_states() -> None:

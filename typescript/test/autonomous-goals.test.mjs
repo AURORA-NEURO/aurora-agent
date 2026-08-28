@@ -69,7 +69,7 @@ test("goal scheduler prioritizes dependency-closed work across every domain", ()
   assert.equal(schedule.schedule_digest, "30451f0e55e23ad929f23415a2ffe0a9281e3c3632c51ac9420d00995c789654");
 });
 
-test("goal control loop preview is provider-free and explains all-domain admission", () => {
+test("goal control loop preview is provider-free and explains all-domain admission", async () => {
   const domains = [...AUTONOMOUS_DOMAIN_NAMES];
   const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length + 1, clock: () => 100 });
   for (const domain of domains) ledger.create({ goal_id: `preview-${domain}`, task_digest: goalTaskDigest(`private preview task ${domain}`), domain, now_ns: 0 });
@@ -108,6 +108,9 @@ test("goal control loop preview is provider-free and explains all-domain admissi
   const previewBrain = new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("preview must not reach a provider"); } })) });
   const facadePreview = previewBrain.previewGoalControlLoop({ runtime: { ledger }, schedule_options });
   assert.equal(facadePreview.schedule.schedule_digest, preview.schedule.schedule_digest);
+  const previewRuntime = previewBrain.createGoalAgentRuntime({ ledger });
+  assert.equal(previewRuntime.metadata().task_rehydration, "not_configured_preview_only");
+  await assert.rejects(() => previewRuntime.run({ schedule_options: { now_ns: 100, max_selected: 1, max_concurrent: 1 } }), /task rehydration is not configured/);
 });
 
 test("goal control loop preview reports terminal and retry-policy-blocked states", () => {
