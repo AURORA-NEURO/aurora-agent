@@ -2106,6 +2106,14 @@ def _continuation_identifier(value: Any, *, field: str, maximum: int) -> str:
     return value
 
 
+def _continuation_status_code(value: Any) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 599:
+        raise BrainRunError("model continuation status code is invalid")
+    return value
+
+
 def _continuation_candidate_digest(candidate: Mapping[str, Any]) -> str:
     return _json_digest(
         {
@@ -2285,6 +2293,18 @@ def create_model_continuation_state(plan: Mapping[str, Any]) -> dict[str, Any]:
 def validate_model_continuation_plan(plan: Mapping[str, Any]) -> None:
     if not isinstance(plan, Mapping) or plan.get("schema") != MODEL_CONTINUATION_SCHEMA:
         raise BrainRunError("model continuation plan has an invalid schema")
+    if set(plan.keys()) != {
+        "schema",
+        "selection_digest",
+        "strategy",
+        "max_failovers",
+        "steps",
+        "omitted_eligible_candidates",
+        "retention",
+        "secret_material",
+        "plan_digest",
+    }:
+        raise BrainRunError("model continuation plan contains unsupported fields")
     plan_digest = plan.get("plan_digest")
     if not _valid_digest(plan_digest):
         raise BrainRunError("model continuation plan digest is malformed")
@@ -2310,13 +2330,46 @@ def validate_model_continuation_plan(plan: Mapping[str, Any]) -> None:
         or plan["omitted_eligible_candidates"] < 0
     ):
         raise BrainRunError("model continuation omitted candidate count is invalid")
+    if plan.get("retention") != "selection_metadata_only_no_task_prompt_provider_payloads":
+        raise BrainRunError("model continuation plan retention contract is invalid")
+    if plan.get("secret_material") != "never_returned":
+        raise BrainRunError("model continuation plan secret-material contract is invalid")
+    seen_model_ids: set[str] = set()
     for index, step in enumerate(steps):
-        if not isinstance(step, Mapping) or step.get("order") != index:
+        if not isinstance(step, Mapping):
+            raise BrainRunError("model continuation plan step is malformed")
+        if set(step.keys()) != {
+            "order",
+            "provider",
+            "model",
+            "model_id",
+            "candidate_digest",
+            "ranking_index",
+            "failure_policy",
+        } or step.get("order") != index:
             raise BrainRunError("model continuation plan step ordering is invalid")
-        _continuation_identifier(step.get("provider"), field="continuation step provider", maximum=256)
-        _continuation_identifier(step.get("model"), field="continuation step model", maximum=512)
-        if step.get("model_id") != f"{step['provider']}/{step['model']}" or not _valid_digest(step.get("candidate_digest")):
+        provider = _continuation_identifier(
+            step.get("provider"), field="continuation step provider", maximum=256
+        )
+        model = _continuation_identifier(
+            step.get("model"), field="continuation step model", maximum=512
+        )
+        model_id = f"{provider}/{model}"
+        if step.get("model_id") != model_id or model_id in seen_model_ids:
             raise BrainRunError("model continuation plan step identity is invalid")
+        seen_model_ids.add(model_id)
+        if (
+            not isinstance(step.get("ranking_index"), int)
+            or isinstance(step.get("ranking_index"), bool)
+            or step["ranking_index"] < 0
+            or not _valid_digest(step.get("candidate_digest"))
+        ):
+            raise BrainRunError("model continuation plan step metadata is invalid")
+        if step.get("failure_policy") != {
+            "timeout_with_closed_circuit": "exclude_model",
+            "retryable_provider_error": "exclude_provider",
+        }:
+            raise BrainRunError("model continuation plan failure policy is invalid")
 
 
 def _validate_model_continuation_state(
@@ -2329,6 +2382,20 @@ def _validate_model_continuation_state(
         or state.get("plan_digest") != plan.get("plan_digest")
     ):
         raise BrainRunError("model continuation state is not bound to the supplied plan")
+    if set(state.keys()) != {
+        "schema",
+        "plan_digest",
+        "next_step_index",
+        "failovers_used",
+        "excluded_providers",
+        "excluded_models",
+        "attempts",
+        "status",
+        "retention",
+        "secret_material",
+        "state_digest",
+    }:
+        raise BrainRunError("model continuation state contains unsupported fields")
     state_digest = state.get("state_digest")
     if not _valid_digest(state_digest):
         raise BrainRunError("model continuation state digest is malformed")
@@ -2338,7 +2405,7 @@ def _validate_model_continuation_state(
     failovers = state.get("failovers_used")
     if not isinstance(failovers, int) or isinstance(failovers, bool) or not 0 <= failovers <= plan["max_failovers"]:
         raise BrainRunError("model continuation state failover count is invalid")
-    if not isinstance(state.get("attempts"), list) or len(state["attempts"]) > MAX_MODEL_CONTINUATION_STEPS:
+    if not isinstance(state.get("attempts"), list) or len(state["attempts"]) > len(plan["steps"]):
         raise BrainRunError("model continuation state attempts are outside their bounds")
     if state.get("status") not in {"ready", "completed", "exhausted"}:
         raise BrainRunError("model continuation state status is invalid")
@@ -2349,8 +2416,109 @@ def _validate_model_continuation_state(
         or not 0 <= next_index < len(plan["steps"])
     ):
         raise BrainRunError("model continuation state next step is invalid")
+    if state.get("retention") != "selection_metadata_only_no_task_prompt_provider_payloads":
+        raise BrainRunError("model continuation state retention contract is invalid")
+    if state.get("secret_material") != "never_returned":
+        raise BrainRunError("model continuation state secret-material contract is invalid")
     if not isinstance(state.get("excluded_providers"), list) or not isinstance(state.get("excluded_models"), list):
         raise BrainRunError("model continuation state exclusions are invalid")
+
+    plan_steps = plan["steps"]
+    allowed_providers = {step["provider"] for step in plan_steps}
+    allowed_models = {step["model_id"] for step in plan_steps}
+    for field, values, allowed in (
+        ("excluded_providers", state["excluded_providers"], allowed_providers),
+        ("excluded_models", state["excluded_models"], allowed_models),
+    ):
+        if len(values) > len(plan_steps):
+            raise BrainRunError(f"model continuation {field} exceed their bounds")
+        normalized = [
+            _continuation_identifier(value, field=f"model continuation {field}", maximum=768)
+            for value in values
+        ]
+        if len(set(normalized)) != len(normalized) or normalized != sorted(normalized):
+            raise BrainRunError(f"model continuation {field} must be sorted and unique")
+        if not set(normalized).issubset(allowed):
+            raise BrainRunError(f"model continuation {field} references an unknown arm")
+
+    attempts = state["attempts"]
+    expected_attempt_keys = {
+        "order",
+        "provider",
+        "model",
+        "outcome",
+        "failure_scope",
+        "failure_code",
+        "status_code",
+    }
+    previous_order = -1
+    expected_excluded_providers: set[str] = set()
+    expected_excluded_models: set[str] = set()
+    failure_count = 0
+    success_count = 0
+    for attempt in attempts:
+        if not isinstance(attempt, Mapping) or set(attempt.keys()) != expected_attempt_keys:
+            raise BrainRunError("model continuation state attempt is malformed")
+        order = attempt.get("order")
+        if (
+            not isinstance(order, int)
+            or isinstance(order, bool)
+            or not 0 <= order < len(plan_steps)
+            or order <= previous_order
+        ):
+            raise BrainRunError("model continuation state attempt ordering is invalid")
+        previous_order = order
+        step = plan_steps[order]
+        if attempt.get("provider") != step["provider"] or attempt.get("model") != step["model"]:
+            raise BrainRunError("model continuation state attempt identity is invalid")
+        outcome = attempt.get("outcome")
+        failure_scope = attempt.get("failure_scope")
+        if outcome == "failure":
+            if failure_scope not in {"model", "provider"}:
+                raise BrainRunError("model continuation state failure scope is invalid")
+            failure_count += 1
+            if failure_scope == "provider":
+                expected_excluded_providers.add(step["provider"])
+            else:
+                expected_excluded_models.add(step["model_id"])
+        elif outcome == "success":
+            success_count += 1
+            if failure_scope is not None or attempt.get("failure_code") is not None:
+                raise BrainRunError("model continuation successful attempt contains failure metadata")
+        else:
+            raise BrainRunError("model continuation state attempt outcome is invalid")
+        failure_code = attempt.get("failure_code")
+        if failure_code is not None:
+            _continuation_identifier(
+                failure_code, field="continuation failure code", maximum=128
+            )
+        _continuation_status_code(attempt.get("status_code"))
+    if failure_count != failovers:
+        raise BrainRunError("model continuation state failover count does not match attempts")
+    if success_count > 1 or (success_count and attempts[-1]["outcome"] != "success"):
+        raise BrainRunError("model continuation state has an invalid terminal attempt")
+    if set(state["excluded_providers"]) != expected_excluded_providers or set(state["excluded_models"]) != expected_excluded_models:
+        raise BrainRunError("model continuation state exclusions do not match attempts")
+    if attempts and attempts[0]["order"] != 0:
+        raise BrainRunError("model continuation state must begin with the selected model")
+    expected_next_index = next(
+        (
+            index
+            for index, step in enumerate(plan_steps)
+            if index > previous_order
+            and step["provider"] not in expected_excluded_providers
+            and step["model_id"] not in expected_excluded_models
+        ),
+        None,
+    )
+    if state["status"] == "ready":
+        if success_count or state["next_step_index"] != expected_next_index or expected_next_index is None:
+            raise BrainRunError("model continuation ready cursor is inconsistent")
+    elif state["status"] == "completed":
+        if state["next_step_index"] is not None or success_count != 1:
+            raise BrainRunError("model continuation completed cursor is inconsistent")
+    elif state["next_step_index"] is not None or expected_next_index is not None or not attempts:
+        raise BrainRunError("model continuation exhausted cursor is inconsistent")
 
 
 def validate_model_continuation_state(
@@ -2389,6 +2557,7 @@ def advance_model_continuation_state(
         excluded_models.add(current["model_id"])
     if failure_code is not None:
         _continuation_identifier(failure_code, field="continuation failure code", maximum=128)
+    _continuation_status_code(status_code)
     attempts = [*state["attempts"], {
         "order": current["order"],
         "provider": provider,
@@ -2438,6 +2607,7 @@ def complete_model_continuation_state(
     current = plan["steps"][state["next_step_index"]]
     if current["provider"] != provider or current["model"] != model:
         raise BrainRunError("model continuation success does not match the current step")
+    _continuation_status_code(status_code)
     body = {key: value for key, value in state.items() if key != "state_digest"}
     body.update(
         {
@@ -2509,6 +2679,72 @@ def _emit_model_selection_trace(
         detail_digest=_json_digest(detail),
         failure_code=failure_code,
     )
+
+
+def _prepare_fixed_selection_attempt(
+    selection: Mapping[str, Any],
+    continuation_plan: Mapping[str, Any] | None,
+    continuation_state: Mapping[str, Any] | None,
+    *,
+    attempt: int,
+    trace_event_callback: Callable[..., Any] | None,
+    scope: str,
+) -> tuple[dict[str, Any], Mapping[str, Any], dict[str, Any]]:
+    """Project one fixed continuation step without invoking the selector again.
+
+    The first selection is already authoritative for this run.  A fallback is a cursor move
+    over the sealed ladder, not a new optimization problem: provider health may be refreshed for
+    future runs, but it must not reorder or silently replace the current run's reviewed choice.
+    ``selection_override`` is consumed by the low-level provider bridge below and therefore
+    keeps the selector tool out of the fallback path entirely.
+    """
+
+    if continuation_plan is None:
+        projected = dict(selection)
+    else:
+        if not isinstance(continuation_state, Mapping):
+            raise BrainRunError(f"adaptive {scope} continuation state is missing")
+        next_index = continuation_state.get("next_step_index")
+        steps = continuation_plan.get("steps")
+        if not isinstance(next_index, int) or isinstance(next_index, bool) or not isinstance(steps, list):
+            raise BrainRunError(f"adaptive {scope} continuation cursor is malformed")
+        if not 0 <= next_index < len(steps) or not isinstance(steps[next_index], Mapping):
+            raise BrainRunError(f"adaptive {scope} continuation cursor points outside its plan")
+        step = steps[next_index]
+        provider = step.get("provider")
+        model = step.get("model")
+        if not isinstance(provider, str) or not isinstance(model, str):
+            raise BrainRunError(f"adaptive {scope} continuation step identity is malformed")
+        projected = dict(selection)
+        projected["selected_model"] = {"provider": provider, "model": model}
+        projected["selection_status"] = "selected"
+
+    selected = projected.get("selected_model")
+    if not isinstance(selected, Mapping):
+        raise BrainRunError(f"adaptive {scope} selection has no eligible provider")
+    provider = selected.get("provider")
+    model = selected.get("model")
+    if not isinstance(provider, str) or not provider or not isinstance(model, str) or not model:
+        raise BrainRunError(f"adaptive {scope} selection returned malformed provider metadata")
+    audit = build_model_selection_audit(projected)
+    projected["selection_audit"] = audit
+    _emit_model_selection_trace(
+        trace_event_callback,
+        phase="model_selection_started",
+        status="running",
+        attempt=attempt,
+        selection=projected,
+    )
+    _emit_model_selection_trace(
+        trace_event_callback,
+        phase="model_selection_finished",
+        status="completed",
+        attempt=attempt,
+        selection=projected,
+        audit=audit,
+        selected=selected,
+    )
+    return projected, selected, audit
 
 
 def _routing_health_evidence(subject: str, health: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -4019,6 +4255,19 @@ class AutonomousBrain:
                 if not isinstance(nested, Mapping):
                     raise BrainRunError("adaptive contextual selection preview omitted selection")
                 result = dict(nested)
+                normalized_context = _normalize_learning_context(context)
+                context_digest = report.get("context_digest")
+                expected_context_digest = _context_identity_digest(normalized_context)
+                if not _valid_digest(context_digest) or context_digest != expected_context_digest:
+                    raise BrainRunError(
+                        "adaptive contextual selection returned a context digest that does not match its identity"
+                    )
+                # Preserve the exact contextual binding that the low-level run path would have
+                # attached. Fallbacks consume this snapshot directly and must not lose the
+                # learning-domain identity merely because they skip selector re-entry.
+                result["context_digest"] = context_digest
+                result["context"] = normalized_context
+                result["contextual_selection_status"] = report.get("selection_status")
             if trace_event_callback is not None:
                 audit = build_model_selection_audit(result)
                 selected = result.get("selected_model")
@@ -4112,39 +4361,38 @@ class AutonomousBrain:
         invocation_receipts: list[Mapping[str, Any]] = []
         continuation_plan: dict[str, Any] | None = None
         continuation_state: dict[str, Any] | None = None
+        selection_snapshot: dict[str, Any] | None = None
         for attempt in range(max_provider_failovers + 1):
-            if continuation_plan is not None and continuation_state is not None:
-                next_index = continuation_state.get("next_step_index")
-                if not isinstance(next_index, int):
-                    raise BrainRunError("adaptive model continuation has no next step")
-                step = continuation_plan["steps"][next_index]
-                attempt_selection["models"] = [
-                    {
-                        **dict(candidate),
-                        "enabled": candidate.get("provider") == step["provider"]
-                        and candidate.get("model") == step["model"],
-                    }
-                    for candidate in selection.get("models", [])
-                    if isinstance(candidate, Mapping)
-                ]
-            preview = self._preview_adaptive_selection(
-                task=task,
-                selection=attempt_selection,
-                context=context,
-                trace_event_callback=trace_event_callback,
-                attempt=attempt + 1,
-            )
-            selected = preview.get("selected_model")
-            if not isinstance(selected, Mapping):
-                raise BrainRunError("adaptive selection has no eligible provider after failover")
-            attempt_audit = build_model_selection_audit(preview)
+            if continuation_plan is None:
+                preview = self._preview_adaptive_selection(
+                    task=task,
+                    selection=selection,
+                    context=context,
+                    trace_event_callback=trace_event_callback,
+                    attempt=attempt + 1,
+                )
+                attempt_selection = {**selection, **preview}
+                selected = attempt_selection.get("selected_model")
+                if not isinstance(selected, Mapping):
+                    raise BrainRunError("adaptive model selection has no eligible provider")
+                attempt_audit = build_model_selection_audit(attempt_selection)
+                selection_snapshot = dict(attempt_selection)
+            else:
+                attempt_selection, selected, attempt_audit = _prepare_fixed_selection_attempt(
+                    selection_snapshot if selection_snapshot is not None else selection,
+                    continuation_plan,
+                    continuation_state,
+                    attempt=attempt + 1,
+                    trace_event_callback=trace_event_callback,
+                    scope="model",
+                )
             provider = selected.get("provider")
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
                 raise BrainRunError("adaptive selection returned malformed provider metadata")
             if continuation_plan is None:
                 continuation_plan = build_model_continuation_plan(
-                    preview,
+                    attempt_selection,
                     [candidate for candidate in selection.get("models", []) if isinstance(candidate, Mapping)],
                     max_failovers=max_provider_failovers,
                 )
@@ -4166,6 +4414,7 @@ class AutonomousBrain:
                 result = self.run(
                     task=task,
                     model_selection=attempt_selection,
+                    selection_override=attempt_selection,
                     prompt=prompt,
                     plan=plan,
                     credentials=credentials,
@@ -4371,39 +4620,38 @@ class AutonomousBrain:
         invocation_receipts: list[Mapping[str, Any]] = []
         continuation_plan: dict[str, Any] | None = None
         continuation_state: dict[str, Any] | None = None
+        selection_snapshot: dict[str, Any] | None = None
         for attempt in range(max_provider_failovers + 1):
-            if continuation_plan is not None and continuation_state is not None:
-                next_index = continuation_state.get("next_step_index")
-                if not isinstance(next_index, int):
-                    raise BrainRunError("adaptive tool-loop continuation has no next step")
-                step = continuation_plan["steps"][next_index]
-                attempt_selection["models"] = [
-                    {
-                        **dict(candidate),
-                        "enabled": candidate.get("provider") == step["provider"]
-                        and candidate.get("model") == step["model"],
-                    }
-                    for candidate in selection.get("models", [])
-                    if isinstance(candidate, Mapping)
-                ]
-            preview = self._preview_adaptive_selection(
-                task=task,
-                selection=attempt_selection,
-                context=effective_context,
-                trace_event_callback=trace_event_callback,
-                attempt=attempt + 1,
-            )
-            selected = preview.get("selected_model")
-            if not isinstance(selected, Mapping):
-                raise BrainRunError("adaptive tool-loop selection has no eligible provider after failover")
-            attempt_audit = build_model_selection_audit(preview)
+            if continuation_plan is None:
+                preview = self._preview_adaptive_selection(
+                    task=task,
+                    selection=selection,
+                    context=effective_context,
+                    trace_event_callback=trace_event_callback,
+                    attempt=attempt + 1,
+                )
+                attempt_selection = {**selection, **preview}
+                selected = attempt_selection.get("selected_model")
+                if not isinstance(selected, Mapping):
+                    raise BrainRunError("adaptive tool-loop selection has no eligible provider")
+                attempt_audit = build_model_selection_audit(attempt_selection)
+                selection_snapshot = dict(attempt_selection)
+            else:
+                attempt_selection, selected, attempt_audit = _prepare_fixed_selection_attempt(
+                    selection_snapshot if selection_snapshot is not None else selection,
+                    continuation_plan,
+                    continuation_state,
+                    attempt=attempt + 1,
+                    trace_event_callback=trace_event_callback,
+                    scope="tool-loop",
+                )
             provider = selected.get("provider")
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
                 raise BrainRunError("adaptive tool-loop selection returned malformed provider metadata")
             if continuation_plan is None:
                 continuation_plan = build_model_continuation_plan(
-                    preview,
+                    attempt_selection,
                     [candidate for candidate in selection.get("models", []) if isinstance(candidate, Mapping)],
                     max_failovers=max_provider_failovers,
                 )
@@ -4428,6 +4676,7 @@ class AutonomousBrain:
                 result = self.run_tool_loop(
                     task=task,
                     model_selection=attempt_selection,
+                    selection_override=attempt_selection,
                     prompt=prompt,
                     plan=plan,
                     credentials=credentials,
@@ -4629,39 +4878,38 @@ class AutonomousBrain:
         invocation_receipts: list[Mapping[str, Any]] = []
         continuation_plan: dict[str, Any] | None = None
         continuation_state: dict[str, Any] | None = None
+        selection_snapshot: dict[str, Any] | None = None
         for attempt in range(max_provider_failovers + 1):
-            if continuation_plan is not None and continuation_state is not None:
-                next_index = continuation_state.get("next_step_index")
-                if not isinstance(next_index, int):
-                    raise BrainRunError("adaptive mission continuation has no next step")
-                step = continuation_plan["steps"][next_index]
-                attempt_selection["models"] = [
-                    {
-                        **dict(candidate),
-                        "enabled": candidate.get("provider") == step["provider"]
-                        and candidate.get("model") == step["model"],
-                    }
-                    for candidate in selection.get("models", [])
-                    if isinstance(candidate, Mapping)
-                ]
-            preview = self._preview_adaptive_selection(
-                task=task,
-                selection=attempt_selection,
-                context=effective_context,
-                trace_event_callback=trace_event_callback,
-                attempt=attempt + 1,
-            )
-            selected = preview.get("selected_model")
-            if not isinstance(selected, Mapping):
-                raise BrainRunError("adaptive mission selection has no eligible provider after failover")
-            attempt_audit = build_model_selection_audit(preview)
+            if continuation_plan is None:
+                preview = self._preview_adaptive_selection(
+                    task=task,
+                    selection=selection,
+                    context=effective_context,
+                    trace_event_callback=trace_event_callback,
+                    attempt=attempt + 1,
+                )
+                attempt_selection = {**selection, **preview}
+                selected = attempt_selection.get("selected_model")
+                if not isinstance(selected, Mapping):
+                    raise BrainRunError("adaptive mission selection has no eligible provider")
+                attempt_audit = build_model_selection_audit(attempt_selection)
+                selection_snapshot = dict(attempt_selection)
+            else:
+                attempt_selection, selected, attempt_audit = _prepare_fixed_selection_attempt(
+                    selection_snapshot if selection_snapshot is not None else selection,
+                    continuation_plan,
+                    continuation_state,
+                    attempt=attempt + 1,
+                    trace_event_callback=trace_event_callback,
+                    scope="mission",
+                )
             provider = selected.get("provider")
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
                 raise BrainRunError("adaptive mission selection returned malformed provider metadata")
             if continuation_plan is None:
                 continuation_plan = build_model_continuation_plan(
-                    preview,
+                    attempt_selection,
                     [candidate for candidate in selection.get("models", []) if isinstance(candidate, Mapping)],
                     max_failovers=max_provider_failovers,
                 )
@@ -4684,6 +4932,7 @@ class AutonomousBrain:
                 result = self.run_mission(
                     task=task,
                     model_selection=attempt_selection,
+                    selection_override=attempt_selection,
                     prompt=prompt,
                     plan=plan,
                     credentials=credentials,
@@ -6480,6 +6729,7 @@ class AutonomousBrain:
         *,
         task: str,
         model_selection: Mapping[str, Any],
+        selection_override: Mapping[str, Any] | None = None,
         prompt: Mapping[str, Any],
         plan: Mapping[str, Any],
         credentials: Mapping[str, CredentialHandle],
@@ -6511,7 +6761,29 @@ class AutonomousBrain:
             raise BrainRunError("run_id must be a bounded non-empty string")
         selection_args = dict(model_selection)
         selection_args["task"] = task
-        if context is None:
+        if selection_override is not None:
+            if not isinstance(selection_override, Mapping):
+                raise BrainRunError("selection_override must be a mapping")
+            selection = dict(selection_override)
+            BrainLearningLedger._assert_safe(selection)
+            override_selected = selection.get("selected_model")
+            if not isinstance(override_selected, Mapping):
+                raise BrainRunError("selection_override must contain selected_model metadata")
+            override_provider = override_selected.get("provider")
+            override_model = override_selected.get("model")
+            if not isinstance(override_provider, str) or not override_provider.strip() or not isinstance(override_model, str) or not override_model.strip():
+                raise BrainRunError("selection_override selected_model metadata is malformed")
+            override_models = selection.get("models")
+            if not isinstance(override_models, Sequence) or isinstance(override_models, (str, bytes)):
+                raise BrainRunError("selection_override must contain a model catalogue")
+            if not any(
+                isinstance(candidate, Mapping)
+                and candidate.get("provider") == override_provider
+                and candidate.get("model") == override_model
+                for candidate in override_models
+            ):
+                raise BrainRunError("selection_override selected model is absent from its catalogue")
+        elif context is None:
             if contextual_observations:
                 raise BrainRunError("contextual_observations require a context mapping")
             selection = self.workspace.tool("brain_model_select", selection_args)
@@ -6669,6 +6941,7 @@ class AutonomousBrain:
         *,
         task: str,
         model_selection: Mapping[str, Any],
+        selection_override: Mapping[str, Any] | None = None,
         prompt: Mapping[str, Any],
         plan: Mapping[str, Any],
         credentials: Mapping[str, CredentialHandle],
@@ -6866,6 +7139,7 @@ class AutonomousBrain:
         first = self.run(
             task=task,
             model_selection=model_selection,
+            selection_override=selection_override,
             prompt=prompt_request,
             plan=plan,
             credentials=credentials,
@@ -7336,6 +7610,7 @@ class AutonomousBrain:
         *,
         task: str,
         model_selection: Mapping[str, Any],
+        selection_override: Mapping[str, Any] | None = None,
         prompt: Mapping[str, Any],
         plan: Mapping[str, Any],
         credentials: Mapping[str, CredentialHandle],
@@ -7512,6 +7787,7 @@ class AutonomousBrain:
         brain_run = self.run(
             task=task,
             model_selection=model_selection,
+            selection_override=selection_override,
             prompt=prompt_request,
             plan=plan,
             credentials=credentials,

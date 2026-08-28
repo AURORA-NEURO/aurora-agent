@@ -94,6 +94,18 @@ function boundedFailureCode(value: string | null | undefined): string | null {
   return boundedIdentifier("continuation failure code", value, 128);
 }
 
+function boundedStatusCode(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > 599) throw new ArgumentError("continuation status code is invalid");
+  return value as number;
+}
+
+function hasExactKeys(value: JsonObject, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  return actual.length === sortedExpected.length && actual.every((key, index) => key === sortedExpected[index]);
+}
+
 function modelId(provider: string, model: string): string {
   return `${provider}/${model}`;
 }
@@ -210,12 +222,23 @@ function stateBody(state: AutonomousModelContinuationState): ContinuationStateBo
 }
 
 async function assertPlan(plan: AutonomousModelContinuationPlan): Promise<void> {
-  if (!isObject(plan) || plan.schema !== AUTONOMOUS_MODEL_CONTINUATION_SCHEMA || plan.strategy !== "fixed_selection_snapshot" || !Array.isArray(plan.steps) || plan.steps.length === 0 || plan.steps.length > MAX_AUTONOMOUS_MODEL_CONTINUATION_STEPS) throw new ArgumentError("autonomous continuation plan is malformed");
+  if (!isObject(plan) || !hasExactKeys(plan, ["schema", "selection_digest", "strategy", "max_failovers", "steps", "omitted_eligible_candidates", "retention", "secret_material", "plan_digest"]) || plan.schema !== AUTONOMOUS_MODEL_CONTINUATION_SCHEMA || plan.strategy !== "fixed_selection_snapshot" || !Array.isArray(plan.steps) || plan.steps.length === 0 || plan.steps.length > MAX_AUTONOMOUS_MODEL_CONTINUATION_STEPS) throw new ArgumentError("autonomous continuation plan is malformed");
   boundedDigest("continuation selection digest", plan.selection_digest);
   if (!Number.isSafeInteger(plan.max_failovers) || plan.max_failovers < 0 || plan.max_failovers > MAX_AUTONOMOUS_MODEL_CONTINUATION_FAILOVERS) throw new ArgumentError("autonomous continuation plan failover budget is malformed");
   if (!Number.isSafeInteger(plan.omitted_eligible_candidates) || plan.omitted_eligible_candidates < 0) throw new ArgumentError("autonomous continuation omitted candidate count is malformed");
+  if (plan.retention !== "selection_metadata_only_no_task_prompt_provider_payloads") throw new ArgumentError("autonomous continuation plan retention contract is malformed");
+  if (plan.secret_material !== "never_returned") throw new ArgumentError("autonomous continuation plan secret-material contract is malformed");
+  const seenModelIds = new Set<string>();
   for (const [index, step] of plan.steps.entries()) {
-    if (!isObject(step) || step.order !== index || typeof step.provider !== "string" || typeof step.model !== "string" || step.model_id !== modelId(step.provider, step.model) || !/^[0-9a-f]{64}$/.test(step.candidate_digest)) throw new ArgumentError("autonomous continuation plan step is malformed");
+    if (!isObject(step) || !hasExactKeys(step, ["order", "provider", "model", "model_id", "candidate_digest", "ranking_index", "failure_policy"]) || step.order !== index) throw new ArgumentError("autonomous continuation plan step is malformed");
+    const provider = boundedIdentifier("continuation step provider", step.provider, 128);
+    const model = boundedIdentifier("continuation step model", step.model, 512);
+    const id = modelId(provider, model);
+    if (step.model_id !== id || seenModelIds.has(id)) throw new ArgumentError("autonomous continuation plan step identity is malformed");
+    seenModelIds.add(id);
+    boundedDigest("continuation candidate digest", step.candidate_digest);
+    if (!Number.isSafeInteger(step.ranking_index) || step.ranking_index < 0) throw new ArgumentError("autonomous continuation plan ranking index is malformed");
+    if (!isObject(step.failure_policy) || !hasExactKeys(step.failure_policy, ["timeout_with_closed_circuit", "retryable_provider_error"]) || step.failure_policy.timeout_with_closed_circuit !== "exclude_model" || step.failure_policy.retryable_provider_error !== "exclude_provider") throw new ArgumentError("autonomous continuation plan failure policy is malformed");
   }
   boundedDigest("continuation plan digest", plan.plan_digest);
   const { plan_digest: _planDigest, ...body } = plan;
@@ -247,14 +270,69 @@ export async function createAutonomousModelContinuationState(plan: AutonomousMod
 
 async function assertState(plan: AutonomousModelContinuationPlan, state: AutonomousModelContinuationState): Promise<void> {
   await assertPlan(plan);
-  if (!isObject(state) || state.schema !== AUTONOMOUS_MODEL_CONTINUATION_STATE_SCHEMA || state.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous continuation state is not bound to the supplied plan");
+  if (!isObject(state) || !hasExactKeys(state, ["schema", "plan_digest", "next_step_index", "failovers_used", "excluded_providers", "excluded_models", "attempts", "status", "retention", "secret_material", "state_digest"]) || state.schema !== AUTONOMOUS_MODEL_CONTINUATION_STATE_SCHEMA || state.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous continuation state is not bound to the supplied plan");
   boundedDigest("continuation state digest", state.state_digest);
   if (await digestJson(stateBody(state)) !== state.state_digest) throw new ArgumentError("autonomous continuation state digest mismatch");
   if (!Number.isSafeInteger(state.failovers_used) || state.failovers_used < 0 || state.failovers_used > plan.max_failovers) throw new ArgumentError("autonomous continuation state failover count is outside its bounds");
-  if (!Array.isArray(state.attempts) || state.attempts.length > MAX_AUTONOMOUS_MODEL_CONTINUATION_STEPS) throw new ArgumentError("autonomous continuation state attempts are outside their bounds");
+  if (!Array.isArray(state.attempts) || state.attempts.length > plan.steps.length) throw new ArgumentError("autonomous continuation state attempts are outside their bounds");
   if (!["ready", "completed", "exhausted"].includes(state.status)) throw new ArgumentError("autonomous continuation state status is malformed");
   if (state.next_step_index !== null && (!Number.isSafeInteger(state.next_step_index) || state.next_step_index < 0 || state.next_step_index >= plan.steps.length)) throw new ArgumentError("autonomous continuation next step is malformed");
+  if (state.retention !== "selection_metadata_only_no_task_prompt_provider_payloads") throw new ArgumentError("autonomous continuation state retention contract is malformed");
+  if (state.secret_material !== "never_returned") throw new ArgumentError("autonomous continuation state secret-material contract is malformed");
   if (!Array.isArray(state.excluded_providers) || !Array.isArray(state.excluded_models)) throw new ArgumentError("autonomous continuation exclusions are malformed");
+  const allowedProviders = new Set(plan.steps.map((step) => step.provider));
+  const allowedModels = new Set(plan.steps.map((step) => step.model_id));
+  const normalizeExclusions = (name: string, values: string[], allowed: Set<string>): Set<string> => {
+    if (values.length > plan.steps.length) throw new ArgumentError(`autonomous continuation ${name} exceed their bounds`);
+    const normalized = values.map((value) => boundedIdentifier(name, value, 768));
+    const unique = new Set(normalized);
+    if (unique.size !== normalized.length || normalized.some((value, index) => value !== [...unique].sort()[index])) throw new ArgumentError(`autonomous continuation ${name} must be sorted and unique`);
+    if ([...unique].some((value) => !allowed.has(value))) throw new ArgumentError(`autonomous continuation ${name} references an unknown arm`);
+    return unique;
+  };
+  const excludedProviders = normalizeExclusions("excluded providers", state.excluded_providers, allowedProviders);
+  const excludedModels = normalizeExclusions("excluded models", state.excluded_models, allowedModels);
+  const expectedAttemptKeys = ["order", "provider", "model", "outcome", "failure_scope", "failure_code", "status_code"];
+  let previousOrder = -1;
+  let failureCount = 0;
+  let successCount = 0;
+  const expectedExcludedProviders = new Set<string>();
+  const expectedExcludedModels = new Set<string>();
+  for (const attempt of state.attempts) {
+    if (!isObject(attempt) || !hasExactKeys(attempt, expectedAttemptKeys)) throw new ArgumentError("autonomous continuation state attempt is malformed");
+    const order = attempt.order;
+    if (!Number.isSafeInteger(order) || order < 0 || order >= plan.steps.length || order <= previousOrder) throw new ArgumentError("autonomous continuation state attempt ordering is malformed");
+    previousOrder = order;
+    const step = plan.steps[order];
+    if (!step) throw new ArgumentError("autonomous continuation state attempt references an unknown step");
+    if (attempt.provider !== step.provider || attempt.model !== step.model) throw new ArgumentError("autonomous continuation state attempt identity is malformed");
+    if (attempt.outcome === "failure") {
+      if (attempt.failure_scope !== "model" && attempt.failure_scope !== "provider") throw new ArgumentError("autonomous continuation state failure scope is malformed");
+      failureCount += 1;
+      if (attempt.failure_scope === "provider") expectedExcludedProviders.add(step.provider);
+      else expectedExcludedModels.add(step.model_id);
+    } else if (attempt.outcome === "success") {
+      successCount += 1;
+      if (attempt.failure_scope !== null || attempt.failure_code !== null) throw new ArgumentError("autonomous continuation successful attempt contains failure metadata");
+    } else {
+      throw new ArgumentError("autonomous continuation state attempt outcome is malformed");
+    }
+    boundedFailureCode(attempt.failure_code);
+    boundedStatusCode(attempt.status_code);
+  }
+  if (failureCount !== state.failovers_used) throw new ArgumentError("autonomous continuation failover count does not match attempts");
+  if (successCount > 1 || (successCount > 0 && state.attempts[state.attempts.length - 1]?.outcome !== "success")) throw new ArgumentError("autonomous continuation state has an invalid terminal attempt");
+  if (excludedProviders.size !== expectedExcludedProviders.size || [...excludedProviders].some((value) => !expectedExcludedProviders.has(value)) || excludedModels.size !== expectedExcludedModels.size || [...excludedModels].some((value) => !expectedExcludedModels.has(value))) throw new ArgumentError("autonomous continuation state exclusions do not match attempts");
+  if (state.attempts.length > 0 && state.attempts[0]?.order !== 0) throw new ArgumentError("autonomous continuation state must begin with the selected model");
+  const expectedNextIndex = plan.steps.findIndex((step, index) => index > previousOrder && !expectedExcludedProviders.has(step.provider) && !expectedExcludedModels.has(step.model_id));
+  const expectedNext = expectedNextIndex < 0 ? null : expectedNextIndex;
+  if (state.status === "ready") {
+    if (successCount > 0 || expectedNext === null || state.next_step_index !== expectedNext) throw new ArgumentError("autonomous continuation ready cursor is inconsistent");
+  } else if (state.status === "completed") {
+    if (state.next_step_index !== null || successCount !== 1) throw new ArgumentError("autonomous continuation completed cursor is inconsistent");
+  } else if (state.next_step_index !== null || expectedNext !== null || state.attempts.length === 0) {
+    throw new ArgumentError("autonomous continuation exhausted cursor is inconsistent");
+  }
 }
 
 /** Validate a persisted continuation cursor and its binding to the exact plan. */
@@ -274,6 +352,8 @@ export async function advanceAutonomousModelContinuationState(
   if (state.failovers_used >= plan.max_failovers) throw new ArgumentError("autonomous continuation failover budget is exhausted");
   const current = plan.steps[state.next_step_index];
   if (!current || current.provider !== event.provider || current.model !== event.model) throw new ArgumentError("continuation failure does not match the current step");
+  if (event.failureScope !== "model" && event.failureScope !== "provider") throw new ArgumentError("continuation failure scope is malformed");
+  boundedStatusCode(event.statusCode);
   const excludedProviders = new Set(state.excluded_providers);
   const excludedModels = new Set(state.excluded_models);
   if (event.failureScope === "provider") excludedProviders.add(current.provider);
@@ -305,6 +385,7 @@ export async function completeAutonomousModelContinuationState(
   if (state.status !== "ready" || state.next_step_index === null) throw new ArgumentError("autonomous continuation is not ready for completion");
   const current = plan.steps[state.next_step_index];
   if (!current || current.provider !== event.provider || current.model !== event.model) throw new ArgumentError("continuation success does not match the current step");
+  boundedStatusCode(event.statusCode);
   return sealState({
     ...stateBody(state),
     next_step_index: null,

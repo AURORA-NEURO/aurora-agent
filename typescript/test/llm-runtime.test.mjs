@@ -1319,8 +1319,21 @@ test("model continuation plans are immutable, failure-scoped, and resumable with
   const completed = await completeAutonomousModelContinuationState(continuation, afterTimeout, { provider: "ladder", model: "sibling", statusCode: 200 });
   assert.equal(completed.status, "completed");
   assert.equal(completed.attempts.length, 2);
+  assert.deepEqual(await validateAutonomousModelContinuationState(continuation, completed), completed);
   await assert.rejects(advanceAutonomousModelContinuationState(continuation, { ...initialState, plan_digest: "0".repeat(64) }, { provider: "ladder", model: "primary", failureScope: "provider" }), /state digest mismatch|not bound/);
   await assert.rejects(compileAutonomousModelContinuationPlan({ ...plan, candidates: [...plan.candidates, { ...plan.candidates[0] }] }, selection, { maxFailovers: 2 }), /duplicate model/);
+
+  const invalidPolicy = structuredClone(continuation);
+  invalidPolicy.steps[0].failure_policy = { timeout_with_closed_circuit: "retry", retryable_provider_error: "exclude_provider" };
+  const { plan_digest: _invalidPlanDigest, ...invalidPlanBody } = invalidPolicy;
+  invalidPolicy.plan_digest = await digestJson(invalidPlanBody);
+  await assert.rejects(validateAutonomousModelContinuationPlan(invalidPolicy), /failure policy/);
+
+  const invalidAttempt = structuredClone(afterTimeout);
+  invalidAttempt.attempts[0].provider = "other";
+  const { state_digest: _invalidStateDigest, ...invalidStateBody } = invalidAttempt;
+  invalidAttempt.state_digest = await digestJson(invalidStateBody);
+  await assert.rejects(validateAutonomousModelContinuationState(continuation, invalidAttempt), /attempt identity/);
 });
 
 test("autonomous failover follows the compiled ladder even when a selector would change its mind", async () => {

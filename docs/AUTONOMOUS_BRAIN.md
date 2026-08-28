@@ -188,6 +188,13 @@ can advance; no cursor operation invokes a provider or rehydrates task text, pro
 arguments, or responses. This is a deterministic continuation/replay barrier, not distributed
 exactly-once delivery or a claim that a provider response is correct.
 
+The validators treat the artifact as an executable safety contract, not merely a checksum: they
+reject unknown fields, altered retention or secret-material markers, duplicate or unbounded arms,
+unsorted exclusions, attempts that do not bind to their ladder step, inconsistent failover counts,
+and cursors whose status or next index disagrees with the recorded history. This lets a restarted
+worker fail closed before it can dispatch from ambiguous state while still preserving the
+provider-neutral metadata needed for review and deterministic recovery.
+
 ## Domain operating kits
 
 The SDK also exposes a digest-bound operating kit for every built-in domain. A kit composes the

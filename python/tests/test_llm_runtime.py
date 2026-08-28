@@ -970,14 +970,13 @@ class LlmRuntimeTests(unittest.TestCase):
             [event["attempt"] for event in trace_events if event["phase"] == "model_selection_finished"],
             [1, 2],
         )
-        self.assertGreaterEqual(len(selections), 4)
-        for retry_selection in selections[2:]:
-            retry_enabled = {
-                f"{model['provider']}/{model['model']}"
-                for model in retry_selection
-                if model.get("enabled", True)
-            }
-            self.assertEqual(retry_enabled, {"fallback/backup"})
+        # The selector is consulted once. Fallback consumes the sealed continuation ladder and
+        # must not ask a stateful selector to re-rank after transport health changes.
+        self.assertEqual(len(selections), 1)
+        self.assertEqual(
+            {f"{model['provider']}/{model['model']}" for model in selections[0]},
+            {"openai/primary", "openai/secondary", "fallback/backup"},
+        )
         attempt = result.provider_failover["attempts"][0]  # type: ignore[index]
         self.assertEqual(attempt["provider_circuit_after_failure"], "open")
         self.assertEqual(attempt["provider_health_gate"], "provider_disabled")
@@ -1062,6 +1061,34 @@ class LlmRuntimeTests(unittest.TestCase):
         tampered["steps"] = [dict(plan["steps"][0]), dict(plan["steps"][2]), dict(plan["steps"][1])]
         with self.assertRaisesRegex(BrainRunError, "digest mismatch"):
             validate_model_continuation_plan(tampered)
+
+        def reseal(value: dict[str, object], digest_field: str) -> dict[str, object]:
+            body = {key: item for key, item in value.items() if key != digest_field}
+            value[digest_field] = hashlib.sha256(
+                json.dumps(
+                    body,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+            return value
+
+        invalid_policy = dict(plan)
+        invalid_policy["steps"] = [
+            {**plan["steps"][0], "failure_policy": {"timeout_with_closed_circuit": "retry"}},
+            *plan["steps"][1:],
+        ]
+        reseal(invalid_policy, "plan_digest")
+        with self.assertRaisesRegex(BrainRunError, "failure policy"):
+            validate_model_continuation_plan(invalid_policy)
+
+        invalid_attempt = dict(after_timeout)
+        invalid_attempt["attempts"] = [{**after_timeout["attempts"][0], "provider": "other"}]
+        reseal(invalid_attempt, "state_digest")
+        with self.assertRaisesRegex(BrainRunError, "attempt identity"):
+            validate_model_continuation_state(plan, invalid_attempt)
 
     def test_credential_session_groups_handles_and_revokes_on_expiry(self) -> None:
         store = CredentialStore()
@@ -3395,7 +3422,7 @@ class LlmRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result.status, "mission_dispatched")
         self.assertEqual(workspace.route_calls, 1)
-        self.assertEqual(len(workspace.selection_contexts), 2)
+        self.assertEqual(len(workspace.selection_contexts), 1)
         self.assertEqual(workspace.selection_contexts[0]["domain"], "cross_domain:engineering")
         self.assertEqual(len(workspace.missions), 2)
         self.assertFalse(workspace.missions[0]["policy"]["execute"])  # type: ignore[index]
