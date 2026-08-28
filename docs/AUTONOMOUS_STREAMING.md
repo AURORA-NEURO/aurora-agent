@@ -31,9 +31,12 @@ specialist text. Its event channel distinguishes `direct`, `child`, and `synthes
 
 Cross-domain stream output is never inserted into the completion receipt or memory/learning
 stores. The fan-in buffer is process-local and bounded per child; callers should consume the
-single-consumer event iterator promptly and close it when abandoning a stream. A caller abort
-signal cancels the child/synthesis boundary, while each child keeps the same credential resolver,
-execution controller, cost budget, and provider failover policy.
+single-consumer event iterator promptly and close it when abandoning a stream. TypeScript applies
+asynchronous backpressure when that bounded queue is full, so a fast provider is suspended until
+the consumer drains capacity; queue pressure is not misclassified as an upstream provider error
+and no provider delta is evicted. A caller abort signal cancels the child/synthesis boundary,
+while each child keeps the same credential resolver, execution controller, cost budget, and
+provider failover policy.
 
 ## Contract shape
 
@@ -199,6 +202,7 @@ Both SDKs include in-memory provider fixtures that exercise:
 - pre-event failover from a retryable primary to a backup arm;
 - refusal to replay after a partial delta;
 - explicit abandonment and single-consumer enforcement;
+- bounded cross-domain fan-in backpressure with a deliberately paused consumer;
 - completion redaction checks; and
 - all twelve autonomous domains through the same provider-neutral event shape.
 

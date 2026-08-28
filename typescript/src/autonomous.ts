@@ -9226,17 +9226,21 @@ export class AutonomousAgent {
     type QueueItem = { event?: AutonomousRunStreamEvent; done?: boolean; error?: unknown };
     const queued: AutonomousRunStreamEvent[] = [];
     const waiters: Array<(item: QueueItem) => void> = [];
+    const capacityWaiters: Array<() => void> = [];
     let queueClosed = false;
     let queueError: unknown = null;
-    const push = (event: AutonomousRunStreamEvent): void => {
-      if (queueClosed) return;
-      if (queued.length >= AUTONOMOUS_RUN_STREAM_MAX_QUEUED_EVENTS) {
-        queueError = new ProviderRuntimeError("cross-domain stream queue exceeded its bounded event capacity", { code: "invalid_response" });
-        queueClosed = true;
-        abortController.abort();
-        while (waiters.length) waiters.shift()!({ done: true, error: queueError });
-        return;
+    const wakeCapacityWaiter = (): void => {
+      if (queued.length >= AUTONOMOUS_RUN_STREAM_MAX_QUEUED_EVENTS) return;
+      capacityWaiters.shift()?.();
+    };
+    const push = async (event: AutonomousRunStreamEvent): Promise<void> => {
+      // Backpressure is part of the stream contract.  A provider is allowed to be faster than
+      // its consumer; that must suspend the producer at the bounded queue rather than inventing
+      // an invalid-response failure or dropping a caller-visible delta.
+      while (!queueClosed && queued.length >= AUTONOMOUS_RUN_STREAM_MAX_QUEUED_EVENTS && waiters.length === 0) {
+        await new Promise<void>((resolve) => capacityWaiters.push(resolve));
       }
+      if (queueClosed) return;
       const waiter = waiters.shift();
       if (waiter) waiter({ event });
       else queued.push(event);
@@ -9246,9 +9250,11 @@ export class AutonomousAgent {
       queueClosed = true;
       queueError = error;
       while (waiters.length) waiters.shift()!({ done: true, error });
+      while (capacityWaiters.length) capacityWaiters.shift()!();
     };
     const next = async (): Promise<QueueItem> => {
       const event = queued.shift();
+      if (event !== undefined) wakeCapacityWaiter();
       if (event !== undefined) return { event };
       if (queueClosed) return { done: true, error: queueError };
       return new Promise<QueueItem>((resolve) => waiters.push(resolve));
@@ -9324,7 +9330,7 @@ export class AutonomousAgent {
                 maxTotalCostUnits: undefined,
                 costBudget,
               });
-              push({ kind: "lifecycle", stage: "child", phase: "child_started", child_id: childId, domain: child.domain_profile.domain, selection_digest: handle.selection ? await digestJson(handle.selection) : null });
+              await push({ kind: "lifecycle", stage: "child", phase: "child_started", child_id: childId, domain: child.domain_profile.domain, selection_digest: handle.selection ? await digestJson(handle.selection) : null });
               let output = "";
               for await (const event of handle.events) {
                 if (event.kind === "provider") {
@@ -9332,7 +9338,7 @@ export class AutonomousAgent {
                   if (bytes(output) > 48_000) output = `${output.slice(0, 47_000)}\n[child output bounded locally]`;
                   eventCount += 1;
                   textDeltaBytes += bytes(event.event.textDelta);
-                  push({ kind: "provider", stage: "child", child_id: childId, event: event.event });
+                  await push({ kind: "provider", stage: "child", child_id: childId, event: event.event });
                 }
               }
               const childCompletion = await handle.completion;
@@ -9340,7 +9346,7 @@ export class AutonomousAgent {
               providerInvocations.push(...childCompletion.provider_invocations);
               const completed = childCompletion.status === "completed";
               childOutputsByIndex[index] = { id: childId, domain: child.domain_profile.domain, status: childCompletion.status, output: output.trim() || "[child returned no textual output]" };
-              push({ kind: "lifecycle", stage: "child", phase: "child_completed", child_id: childId, domain: child.domain_profile.domain, status: childCompletion.status, event_count: childCompletion.event_count, text_delta_bytes: childCompletion.text_delta_bytes });
+              await push({ kind: "lifecycle", stage: "child", phase: "child_completed", child_id: childId, domain: child.domain_profile.domain, status: childCompletion.status, event_count: childCompletion.event_count, text_delta_bytes: childCompletion.text_delta_bytes });
               if (!completed && !options.allowPartial) stopDispatch = true;
             } catch (error) {
               if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
@@ -9350,7 +9356,7 @@ export class AutonomousAgent {
                 providerInvocations.push(...childCompletion.provider_invocations);
               }
               childOutputsByIndex[index] = { id: childId, domain: child.domain_profile.domain, status: "failed", output: "[child stream failed]" };
-              push({ kind: "lifecycle", stage: "child", phase: "child_completed", child_id: childId, domain: child.domain_profile.domain, status: "failed" });
+              await push({ kind: "lifecycle", stage: "child", phase: "child_completed", child_id: childId, domain: child.domain_profile.domain, status: "failed" });
               stopDispatch = true;
               if (!options.allowPartial) return;
             }
@@ -9395,17 +9401,17 @@ export class AutonomousAgent {
             maxTotalCostUnits: undefined,
             costBudget,
           });
-          push({ kind: "lifecycle", stage: "synthesis", phase: "synthesis_started", domain: "cross_domain", selection_digest: synthesis.selection ? await digestJson(synthesis.selection) : null });
+            await push({ kind: "lifecycle", stage: "synthesis", phase: "synthesis_started", domain: "cross_domain", selection_digest: synthesis.selection ? await digestJson(synthesis.selection) : null });
           for await (const event of synthesis.events) {
             if (event.kind !== "provider") continue;
             eventCount += 1;
             textDeltaBytes += bytes(event.event.textDelta);
-            push({ kind: "provider", stage: "synthesis", event: event.event });
+            await push({ kind: "provider", stage: "synthesis", event: event.event });
           }
           const synthesisCompletion = await synthesis.completion;
           innerCompletions.push(synthesisCompletion);
           providerInvocations.push(...synthesisCompletion.provider_invocations);
-          push({ kind: "lifecycle", stage: "synthesis", phase: "synthesis_completed", domain: "cross_domain", status: synthesisCompletion.status, event_count: synthesisCompletion.event_count, text_delta_bytes: synthesisCompletion.text_delta_bytes });
+          await push({ kind: "lifecycle", stage: "synthesis", phase: "synthesis_completed", domain: "cross_domain", status: synthesisCompletion.status, event_count: synthesisCompletion.event_count, text_delta_bytes: synthesisCompletion.text_delta_bytes });
           await settle(synthesisCompletion.status === "completed" ? "completed" : synthesisCompletion.status === "abandoned" ? "abandoned" : "failed");
           close();
         } catch (error) {

@@ -23,8 +23,8 @@ const model = {
   reliability: 0.99,
 };
 
-const event = (input, sequence, textDelta, done = false) => ({
-  provider: "stream-agent-offline",
+const event = (input, sequence, textDelta, done = false, provider = "stream-agent-offline") => ({
+  provider,
   model: input.model,
   sequence,
   eventType: done ? "fixture.done" : "fixture.text",
@@ -103,6 +103,36 @@ test("cross-domain stream multiplexes bounded specialists before synthesis", asy
   assert.equal(completion.stage_count, 3);
   assert.equal(completion.inner_completions.length, 3);
   assert.equal(JSON.stringify(completion).includes("high-level"), false);
+});
+
+test("cross-domain stream applies backpressure instead of failing a slow consumer", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  const burstCount = 4_200;
+  runtime.registerInMemoryProvider("stream-agent-burst", () => "unused", {
+    stream: function* (input) {
+      for (let sequence = 0; sequence < burstCount; sequence += 1) yield event(input, sequence, "x", false, "stream-agent-burst");
+      yield event(input, burstCount, "", true, "stream-agent-burst");
+    },
+  });
+  const value = new AutonomousAgent(runtime);
+  value.registerModel({ ...model, provider: "stream-agent-burst" });
+  const route = await routeAutonomousEvidenceScope("compare coding and science evidence", ["coding", "science"]);
+  const handle = await value.runCrossDomainStream("compare coding and science evidence", {
+    routeOverride: route,
+    approveProviderCall: true,
+    synthesize: false,
+    maxParallelChildren: 1,
+  });
+  let providerEvents = 0;
+  for await (const item of handle.events) {
+    if (item.kind !== "provider") continue;
+    providerEvents += 1;
+    if (providerEvents === 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  const completion = await handle.completion;
+  assert.equal(completion.status, "completed");
+  assert.equal(providerEvents, (burstCount + 1) * 2);
+  assert.equal(completion.event_count, providerEvents);
 });
 
 test("brain facade exposes validated direct and automatic stream entrypoints", async () => {

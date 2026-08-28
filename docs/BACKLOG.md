@@ -12,6 +12,13 @@ not provide provider credentials, distributed stream recovery, remote reconcilia
 summarization; those remain deployment responsibilities. See
 [`AUTONOMOUS_STREAMING.md`](AUTONOMOUS_STREAMING.md).
 
+The TypeScript cross-domain fan-in now applies real asynchronous backpressure at its bounded
+queue. A burst-producing specialist suspends at capacity until the single consumer drains events,
+instead of turning ordinary consumer slowness into a synthetic provider failure or evicting a
+caller-visible delta. An offline stress fixture exercises more events than the queue capacity
+while deliberately pausing the consumer; the completion remains complete with exact event and
+UTF-8 byte accounting across both specialists.
+
 The Python application façade now reaches that transport boundary without requiring callers to
 rebuild selection and prompt assembly. `AutonomousAgent.run_stream()` performs the ordinary
 domain blueprint and adaptive-selection preflight with provider approval forced off, then lazily
