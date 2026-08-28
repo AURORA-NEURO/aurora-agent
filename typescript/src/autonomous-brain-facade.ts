@@ -1,6 +1,10 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
 import {
+  AutonomousGoalAgentRuntime,
+  type AutonomousGoalAgentRuntimeOptions,
+} from "./autonomous-goal-agent.js";
+import {
   AUTONOMOUS_DOMAIN_NAMES,
   validateAutonomousRouteOverride,
   type AutonomousAgent,
@@ -501,6 +505,12 @@ export type AutonomousBrainEvidenceBackedResumableExecutionOptions = AutonomousE
 
 /** Restart-safe evidence result; provider dispatch after a pending checkpoint remains explicit. */
 export type AutonomousBrainEvidenceBackedResumableRun = AutonomousEvidenceBackedResumableRun;
+
+/** Long-horizon goal runtime controls with the facade-owned agent and brain omitted. */
+export type AutonomousBrainGoalAgentRuntimeOptions = Omit<AutonomousGoalAgentRuntimeOptions, "agent" | "brain">;
+
+/** Long-horizon scheduler/worker/evaluator/learner runtime bound to this brain facade. */
+export type AutonomousBrainGoalAgentRuntime = AutonomousGoalAgentRuntime;
 
 /** Restart-safe evidence controls plus a caller-owned hash-chained metadata trace. */
 export interface AutonomousBrainEvidenceBackedResumableTraceOptions extends AutonomousBrainEvidenceBackedResumableExecutionOptions {
@@ -1667,6 +1677,19 @@ export class AutonomousBrainFacade {
         operationFacade: options.connectorOperations,
         route: (task, routeOptions) => this.agent.route(task, routeOptions),
       });
+  }
+
+  /**
+   * Create the long-horizon goal runtime bound to this facade's exact agent instance.
+   *
+   * The caller still owns the ledger, task rehydration, evaluator, learner, recovery journal,
+   * and any provider/effect approvals. Binding both `agent` and `brain` here prevents an action
+   * handoff resolver from planning with one agent and executing with another, while preserving
+   * the runtime's metadata-only persistence and explicit provider boundary.
+   */
+  createGoalAgentRuntime(options: AutonomousBrainGoalAgentRuntimeOptions): AutonomousBrainGoalAgentRuntime {
+    if (!options || typeof options !== "object" || Array.isArray(options)) throw new ArgumentError("autonomous brain goal runtime options must be an object");
+    return new AutonomousGoalAgentRuntime({ ...options, agent: this.agent, brain: this });
   }
 
   /** Compile routing and workflow metadata without contacting a provider or connector. */

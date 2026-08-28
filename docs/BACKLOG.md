@@ -1,5 +1,13 @@
 # Remaining backlog
 
+The TypeScript `AutonomousBrainFacade` now exposes `createGoalAgentRuntime()`, binding the
+long-horizon scheduler/worker/evaluator/bandit runtime to the exact facade agent and injecting the
+facade for reviewed action-handoff replay. Factory coverage exercises task rehydration, adaptive
+settlement, metadata-only traces, protected task receipts, and reviewed handoffs across all twelve
+autonomous domains, including the explicit cross-domain route. Remaining work is deployment
+hardening and external authority; the factory does not make the project complete or provide
+credentials, source truth, durable storage, or effect reconciliation.
+
 The TypeScript connector mission composition boundary is now implemented and tested across all
 twelve autonomous domains. The new bridge combines metadata-only provider ordering, protected
 mission-contract replay, explicit plan acceptance, connector approval, durable mission execution,

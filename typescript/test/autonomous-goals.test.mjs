@@ -610,6 +610,7 @@ test("goal agent runtime bridges the real facade across every domain without ret
   const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 600 });
   for (const domain of domains) ledger.create({ goal_id: `agent-${domain}`, task_digest: goalTaskDigest(`private agent task ${domain}`), domain, now_ns: 0 });
   const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached in bridge test"); } }));
+  const brain = new AutonomousBrainFacade({ agent });
   const calls = [];
   agent.run = async (task, options) => {
     calls.push({ kind: "single", task, options });
@@ -619,8 +620,7 @@ test("goal agent runtime bridges the real facade across every domain without ret
     calls.push({ kind: "cross", task, options });
     return { status: "completed" };
   };
-  const runtime = new AutonomousGoalAgentRuntime({
-    agent,
+  const runtime = brain.createGoalAgentRuntime({
     ledger,
     task_resolver: (goal) => `private agent task ${goal.domain}`,
     run_options_factory: (goal) => ({
@@ -643,7 +643,29 @@ test("goal agent runtime bridges the real facade across every domain without ret
   assert.equal(serialized.includes("private_runtime_handle"), false);
   assert.equal(runtime.metadata().domain_count, domains.length);
   assert.equal(runtime.metadata().execution_surface, "autonomous_agent_facade");
+  assert.equal(runtime.agent, agent);
+  assert.equal(runtime.brain, brain);
   assert.equal(ledger.verifyIntegrity().ok, true);
+});
+
+test("brain goal runtime factory owns agent and brain bindings before any goal is claimed", () => {
+  const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached"); } }));
+  const brain = new AutonomousBrainFacade({ agent });
+  const otherAgent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("other provider must not be reached"); } }));
+  const otherBrain = new AutonomousBrainFacade({ agent: otherAgent });
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: 1, clock: () => 600 });
+
+  // JavaScript callers can still provide forged properties; the factory's spread order must
+  // preserve the same binding guarantee as the TypeScript omission type.
+  const runtime = brain.createGoalAgentRuntime({
+    agent: otherAgent,
+    brain: otherBrain,
+    ledger,
+    task_resolver: () => "private factory task",
+  });
+  assert.equal(runtime.agent, agent);
+  assert.equal(runtime.brain, brain);
+  assert.throws(() => brain.createGoalAgentRuntime(null), /options must be an object/);
 });
 
 test("goal agent runtime uses protected task rehydration across every domain", async () => {
@@ -659,11 +681,11 @@ test("goal agent runtime uses protected task rehydration across every domain", a
     ledger.create({ goal_id: `protected-agent-${domain}`, task_digest: goalTaskDigest(task), domain, now_ns: 0 });
   }
   const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached in protected task test"); } }));
+  const brain = new AutonomousBrainFacade({ agent });
   const calls = [];
   agent.run = async (task, options) => { calls.push({ kind: "single", task, options }); return { status: "completed" }; };
   agent.runCrossDomain = async (task, options) => { calls.push({ kind: "cross", task, options }); return { status: "completed" }; };
-  const runtime = new AutonomousGoalAgentRuntime({
-    agent,
+  const runtime = brain.createGoalAgentRuntime({
     ledger,
     protected_rehydration: protectedRehydration,
     run_options_factory: (goal) => ({
@@ -690,6 +712,7 @@ test("goal agent runtime traces the complete adaptive loop across every domain w
   const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 650 });
   for (const domain of domains) ledger.create({ goal_id: `trace-agent-${domain}`, task_digest: goalTaskDigest(`private trace task ${domain}`), domain, now_ns: 0 });
   const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached in trace bridge test"); } }));
+  const brain = new AutonomousBrainFacade({ agent });
   const calls = [];
   let callerObserverBefore = 0;
   let callerObserverAfter = 0;
@@ -704,8 +727,7 @@ test("goal agent runtime traces the complete adaptive loop across every domain w
   };
   agent.run = async (task, options) => { calls.push({ kind: "single", task, options }); await emitLifecycle(options); return { status: "completed", output: "private provider output" }; };
   agent.runCrossDomain = async (task, options) => { calls.push({ kind: "cross", task, options }); await emitLifecycle(options); return { status: "completed", output: "private cross-domain output" }; };
-  const runtime = new AutonomousGoalAgentRuntime({
-    agent,
+  const runtime = brain.createGoalAgentRuntime({
     ledger,
     task_resolver: (goal) => `private trace task ${goal.domain}`,
     run_options_factory: (goal) => ({
@@ -763,9 +785,7 @@ test("goal agent runtime replays caller-owned action handoffs before the run bou
     return { status: "completed", execution_status: "completed" };
   };
   const controller = new AutonomousActionAdmissionController(new InMemoryAutonomousActionAdmissionLedger({ maxRecords: domains.length + 1 }));
-  const runtime = new AutonomousGoalAgentRuntime({
-    agent,
-    brain,
+  const runtime = brain.createGoalAgentRuntime({
     ledger,
     task_resolver: (goal) => `private handoff task ${goal.domain}`,
     action_handoff_resolver: async (goal, _row, task) => {

@@ -102,6 +102,30 @@ export interface AutonomousGoalAgentTracedRunResult {
   secret_material: "never_returned";
 }
 
+/**
+ * Construction boundary for the long-horizon goal runtime.
+ *
+ * The agent and optional brain are deliberately explicit in this type instead of being hidden
+ * inside a global singleton. Applications can therefore own the ledger, evaluator, learner,
+ * recovery journal, and protected task rehydration boundary while the brain facade supplies the
+ * already-bound routing/provider composition. Task text, provider options, credentials, and live
+ * results remain process-local values and are never part of the runtime metadata projection.
+ */
+export interface AutonomousGoalAgentRuntimeOptions {
+  agent: AutonomousAgent;
+  ledger: InMemoryAutonomousGoalLedger;
+  task_resolver?: AutonomousGoalAgentTaskResolver;
+  protected_rehydration?: AutonomousProtectedRehydrationAdapter;
+  run_options_factory?: AutonomousGoalAgentRunOptionsFactory;
+  action_handoff_resolver?: AutonomousGoalAgentActionHandoffResolver;
+  brain?: AutonomousBrainFacade;
+  evaluator?: AutonomousGoalControlLoopEvaluator;
+  learner?: AutonomousGoalControlLoopLearner | AutonomousGoalBanditLearner | null;
+  journal?: AutonomousGoalWorkerJournal;
+  recovery?: AutonomousGoalRecoveryCoordinator;
+  batch_id_prefix?: string;
+}
+
 function fail(message: string): never {
   throw new ArgumentError(`autonomous goal agent runtime ${message}`);
 }
@@ -237,20 +261,7 @@ export class AutonomousGoalAgentRuntime {
     selection_event_callback: AutonomousModelSelectionTraceEventCallback;
   } | undefined;
 
-  constructor(options: {
-    agent: AutonomousAgent;
-    ledger: InMemoryAutonomousGoalLedger;
-    task_resolver?: AutonomousGoalAgentTaskResolver;
-    protected_rehydration?: AutonomousProtectedRehydrationAdapter;
-    run_options_factory?: AutonomousGoalAgentRunOptionsFactory;
-    action_handoff_resolver?: AutonomousGoalAgentActionHandoffResolver;
-    brain?: AutonomousBrainFacade;
-    evaluator?: AutonomousGoalControlLoopEvaluator;
-    learner?: AutonomousGoalControlLoopLearner | AutonomousGoalBanditLearner | null;
-    journal?: AutonomousGoalWorkerJournal;
-    recovery?: AutonomousGoalRecoveryCoordinator;
-    batch_id_prefix?: string;
-  }) {
+  constructor(options: AutonomousGoalAgentRuntimeOptions) {
     if (!(options?.agent instanceof AutonomousAgent)) fail("agent must be an AutonomousAgent");
     if (!(options.ledger instanceof InMemoryAutonomousGoalLedger)) fail("ledger must be an InMemoryAutonomousGoalLedger");
     if (options.task_resolver !== undefined && typeof options.task_resolver !== "function") fail("task_resolver must be callable or undefined");

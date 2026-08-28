@@ -70,6 +70,54 @@ and maps `provider_pending` or `provider_reconciliation_required` to a paused tr
 turns a checkpoint into permission to replay a provider: recovery still requires the explicit
 rehydrator or resume decision defined by the underlying evidence controller.
 
+## Long-horizon goal execution through the brain facade
+
+The TypeScript `AutonomousBrainFacade` is also the canonical binding point for long-horizon
+autonomy. `createGoalAgentRuntime()` constructs an `AutonomousGoalAgentRuntime` with the exact
+agent that owns the facade and injects the facade as the runtime's brain. This removes a subtle
+composition hazard where a scheduler could plan with one agent while an action-handoff resolver
+executed through another. The factory does not create a ledger, acquire credentials, persist
+private task values, or grant provider/effect authority; those remain explicit application inputs.
+
+```typescript
+const brain = new AutonomousBrainFacade({ agent });
+const goals = new InMemoryAutonomousGoalLedger({ maxGoals: 128 });
+
+const runtime = brain.createGoalAgentRuntime({
+  ledger: goals,
+  task_resolver: resolveProtectedTaskAfterClaim,
+  run_options_factory: buildTransientRunOptions,
+  evaluator: evaluateGoalCycle,
+  learner: new AutonomousGoalBanditLearner(),
+  recovery,
+});
+
+const result = await runtime.run({
+  schedule_options: {
+    max_selected: 12,
+    max_concurrent: 4,
+    required_domains: [...AUTONOMOUS_DOMAIN_NAMES],
+  },
+});
+```
+
+The runtime uses the same bounded route, domain workflow, prompt, model-selection, provider,
+connector/tool, evaluator, and online-learning surfaces as direct brain calls. It schedules every
+built-in domain—including the explicit `cross_domain` fan-out/fan-in route—through one ledger and
+one control loop. Evaluator rewards and bandit arm state are value-only learning signals; provider
+transport success is not task quality. A `run_options_factory` may rehydrate model candidates,
+opaque credential handles, memory, tool callbacks, approvals, and observers only after a goal is
+claimed. For protected deployments, `protected_rehydration` replaces the plain task resolver and
+binds the task digest to the caller's authorization context.
+
+`action_handoff_resolver` can be supplied when every goal must replay a reviewed action plan. The
+facade-injected brain verifies that the handoff covers the goal domain before `executeActionHandoff`
+reaches provider or effect execution. `recovery` and `journal` can fence restart uncertainty, and
+`runWithTrace()` adds the existing hash-chained metadata trace across scheduling, selection,
+provider invocation, evaluation, and learning. Goal ledgers, checkpoints, journals, traces, and
+runtime metadata retain digests and bounded statuses only: task text, prompts, options, credentials,
+handoffs, evaluator payloads, provider output, and live results remain caller-owned.
+
 ## Domain execution policies
 
 Every built-in domain now has a versioned, provider-free execution policy in both SDKs. The
