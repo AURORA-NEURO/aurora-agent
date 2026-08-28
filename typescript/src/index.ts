@@ -4423,3 +4423,13 @@ export {
   validateIdsComputationalExecutionReport9,
 } from "./research-contracts.js";
 export type { IdsComputationalExecutionReport9 } from "./research-contracts.js";
+
+export {
+  IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID,
+  IDS_STATISTICAL_CAUSAL_ML_CONTRACT_VERSION,
+  IDS_STATISTICAL_CAUSAL_ML_INPUT_SCHEMA,
+  IDS_STATISTICAL_CAUSAL_ML_OUTPUT_SCHEMA,
+  idsStatisticalCausalMlDigest,
+  validateIdsQualifiedAnalysisResult10,
+} from "./research-contracts.js";
+export type { IdsQualifiedAnalysisResult10 } from "./research-contracts.js";

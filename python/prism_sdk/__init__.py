@@ -7781,3 +7781,17 @@ __all__ += [
     "compile_ids_computational_execution",
     "idsComputationalExecutionDigest",
 ]
+
+from .ids_statistical_causal_ml_research_copilot import (
+    QualifiedAnalysisResult10 as IdsQualifiedAnalysisResult10,
+    statistical_causal_ml_manifest as ids_statistical_causal_ml_manifest,
+    compile_statistical_causal_ml as compile_ids_statistical_causal_ml,
+    idsStatisticalCausalMlDigest,
+)
+
+__all__ += [
+    "IdsQualifiedAnalysisResult10",
+    "ids_statistical_causal_ml_manifest",
+    "compile_ids_statistical_causal_ml",
+    "idsStatisticalCausalMlDigest",
+]

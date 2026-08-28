@@ -29,25 +29,6 @@ use bioprism_atlas::{
     WeightingPolicy,
 };
 use bioprism_atlashub::{CiReport, ResultUnderReview, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID};
-use bioprism_epistemic::{
-    RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_CONTRACT_VERSION,
-    RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
-};
-use bioprism_ids::{
-    IDS_CONTEXT_COMPILATION_CONTRACT_VERSION, IDS_CONTEXT_COMPILATION_FEATURE_ID,
-};
-use bioprism_ids::{
-    IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION, IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
-};
-use bioprism_ids::{
-    IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
-};
-use bioprism_ids::{IDS_QUALITY_CONTROL_CONTRACT_VERSION, IDS_QUALITY_CONTROL_FEATURE_ID};
-use bioprism_ids::{IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION, IDS_MECHANISM_EXPLORATION_FEATURE_ID};
-use bioprism_ids::{IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION, IDS_EXPERIMENT_DESIGN_FEATURE_ID};
-use bioprism_ids::{IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION, IDS_PROTOCOL_SIMULATION_FEATURE_ID};
-use bioprism_ids::{IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION, IDS_LABORATORY_INTEGRATION_FEATURE_ID};
-use bioprism_ids::{IDS_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION, IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -244,6 +225,10 @@ use bioprism_epistemic::{
     RegretReduction as EpistemicRegretReduction, ScriptedExecutor as EpistemicScriptedExecutor,
     SetFunction as EpistemicSetFunction, ADAPTIVE_EXECUTION_SCHEMA,
 };
+use bioprism_epistemic::{
+    RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_CONTRACT_VERSION,
+    RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
+};
 use bioprism_evalengine::attribute as bioeval_design_attribute;
 use bioprism_evalengine::{
     CapabilityPosterior, CreditPolicy, Observation, ReleaseGate as EvalReleaseGate,
@@ -270,6 +255,28 @@ use bioprism_hubapi::{
     search as hub_search_query, Catalog as HubCatalog, Federation as HubFederation,
     Query as HubQuery, Request as HubRequest,
 };
+use bioprism_ids::{
+    IDS_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION, IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
+};
+use bioprism_ids::{IDS_CONTEXT_COMPILATION_CONTRACT_VERSION, IDS_CONTEXT_COMPILATION_FEATURE_ID};
+use bioprism_ids::{IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION, IDS_EXPERIMENT_DESIGN_FEATURE_ID};
+use bioprism_ids::{
+    IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION, IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+};
+use bioprism_ids::{
+    IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION, IDS_LABORATORY_INTEGRATION_FEATURE_ID,
+};
+use bioprism_ids::{
+    IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION, IDS_MECHANISM_EXPLORATION_FEATURE_ID,
+};
+use bioprism_ids::{
+    IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
+};
+use bioprism_ids::{IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION, IDS_PROTOCOL_SIMULATION_FEATURE_ID};
+use bioprism_ids::{IDS_QUALITY_CONTROL_CONTRACT_VERSION, IDS_QUALITY_CONTROL_FEATURE_ID};
+use bioprism_ids::{
+    IDS_STATISTICAL_CAUSAL_ML_CONTRACT_VERSION, IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID,
+};
 use bioprism_influence::{InfluenceAnalyzer, Perturbation};
 use bioprism_infra::{
     AccessRecord, Cache, CodeIdentity, ComputationKey, Dataset as QualityDataset,
@@ -277,6 +284,7 @@ use bioprism_infra::{
     KeySchema, Purpose, ReferenceSets, ResourceId, ReuseRule, StorageClass, StorageQuota, Tier,
     TieringPolicy,
 };
+use bioprism_interweave::interweave_contract_frontier_federated_control_plane::feature_id as INTERWEAVE_FRONTIER_FEATURE_ID;
 use bioprism_interweave::workflow::{
     catalogue as interweave_catalogue, outstanding_deliverables, WorkflowId as InterweaveWorkflowId,
 };
@@ -285,7 +293,6 @@ use bioprism_interweave::workflow_execution::{
     WorkflowExecutionReceipt as InterweaveWorkflowExecutionReceipt,
     WORKFLOW_EXECUTION_SCHEMA as INTERWEAVE_WORKFLOW_EXECUTION_SCHEMA,
 };
-use bioprism_interweave::interweave_contract_frontier_federated_control_plane::feature_id as INTERWEAVE_FRONTIER_FEATURE_ID;
 use bioprism_lab::{
     evolution::{ChangeProposal, ContaminationRecord, EvolutionCard},
     expand as expand_acquisitions,
@@ -1849,11 +1856,22 @@ impl Server {
                 self.ids_multimodal_ingestion_research_copilot(&arguments)
             }
             "ids_quality_control_assurance" => self.ids_quality_control_assurance(&arguments),
-            "ids_mechanism_exploration_assurance" => self.ids_mechanism_exploration_assurance(&arguments),
+            "ids_mechanism_exploration_assurance" => {
+                self.ids_mechanism_exploration_assurance(&arguments)
+            }
             "ids_experiment_design_workbench" => self.ids_experiment_design_workbench(&arguments),
-            "ids_protocol_simulation_workbench" => self.ids_protocol_simulation_workbench(&arguments),
-            "ids_laboratory_integration_workflow_fabric" => self.ids_laboratory_integration_workflow_fabric(&arguments),
-            "ids_computational_execution_workbench" => self.ids_computational_execution_workbench(&arguments),
+            "ids_protocol_simulation_workbench" => {
+                self.ids_protocol_simulation_workbench(&arguments)
+            }
+            "ids_laboratory_integration_workflow_fabric" => {
+                self.ids_laboratory_integration_workflow_fabric(&arguments)
+            }
+            "ids_computational_execution_workbench" => {
+                self.ids_computational_execution_workbench(&arguments)
+            }
+            "ids_statistical_causal_ml_research_copilot" => {
+                self.ids_statistical_causal_ml_research_copilot(&arguments)
+            }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -1885,142 +1903,143 @@ impl Server {
             "evidence_surveillance_copilot" => self.evidence_surveillance_copilot(&arguments),
             "adapter_local_evidence_surveillance_research_copilot" => {
                 self.adapter_local_evidence_surveillance_research_copilot(&arguments)
-            },
+            }
             "adapter_multimodal_evidence_surveillance_research_copilot" => {
                 self.adapter_multimodal_evidence_surveillance_research_copilot(&arguments)
-            },
+            }
             "adapter_throughput_evidence_surveillance_research_copilot" => {
                 self.adapter_throughput_evidence_surveillance_research_copilot(&arguments)
-            },
+            }
             "adapter_federated_continual_evidence_surveillance_research_copilot" => {
                 self.adapter_federated_continual_evidence_surveillance_research_copilot(&arguments)
-            },
+            }
             "adapter_local_evidence_surveillance_workflow_fabric" => {
                 self.adapter_local_evidence_surveillance_workflow_fabric(&arguments)
-            },
+            }
             "adapter_multimodal_evidence_surveillance_workflow_fabric" => {
                 self.adapter_multimodal_evidence_surveillance_workflow_fabric(&arguments)
-            },
+            }
             "adapter_throughput_evidence_surveillance_workflow_fabric" => {
                 self.adapter_throughput_evidence_surveillance_workflow_fabric(&arguments)
-            },
+            }
             "adapter_federated_continual_evidence_surveillance_workflow_fabric" => {
                 self.adapter_federated_continual_evidence_surveillance_workflow_fabric(&arguments)
-            },
+            }
             "adapter_local_evidence_surveillance_research_workbench" => {
                 self.adapter_local_evidence_surveillance_research_workbench(&arguments)
-            },
+            }
             "adapter_multimodal_evidence_surveillance_research_workbench" => {
                 self.adapter_multimodal_evidence_surveillance_research_workbench(&arguments)
-            },
+            }
             "adapter_throughput_evidence_surveillance_research_workbench" => {
                 self.adapter_throughput_evidence_surveillance_research_workbench(&arguments)
-            },
-            "adapter_federated_continual_evidence_surveillance_research_workbench" => {
-                self.adapter_federated_continual_evidence_surveillance_research_workbench(&arguments)
-            },
+            }
+            "adapter_federated_continual_evidence_surveillance_research_workbench" => self
+                .adapter_federated_continual_evidence_surveillance_research_workbench(&arguments),
             "multimodal_retrieval_synthesis" => self.multimodal_retrieval_synthesis(&arguments),
             "adapter_local_retrieval_synthesis_inference_engine" => {
                 self.adapter_local_retrieval_synthesis_inference_engine(&arguments)
-            },
+            }
             "adapter_local_retrieval_synthesis_contract_model" => {
                 self.adapter_local_retrieval_synthesis_contract_model(&arguments)
-            },
+            }
             "adapter_local_retrieval_synthesis_research_copilot" => {
                 self.adapter_local_retrieval_synthesis_research_copilot(&arguments)
-            },
+            }
             "adapter_multimodal_retrieval_synthesis_research_copilot" => {
                 self.adapter_multimodal_retrieval_synthesis_research_copilot(&arguments)
-            },
+            }
             "adapter_throughput_retrieval_synthesis_research_copilot" => {
                 self.adapter_throughput_retrieval_synthesis_research_copilot(&arguments)
-            },
+            }
             "adapter_federated_continual_retrieval_synthesis_research_copilot" => {
                 self.adapter_federated_continual_retrieval_synthesis_research_copilot(&arguments)
-            },
+            }
             "adapter_local_retrieval_synthesis_workflow_fabric" => {
                 self.adapter_local_retrieval_synthesis_workflow_fabric(&arguments)
-            },
+            }
             "adapter_multimodal_retrieval_synthesis_workflow_fabric" => {
                 self.adapter_multimodal_retrieval_synthesis_workflow_fabric(&arguments)
-            },
+            }
             "adapter_throughput_retrieval_synthesis_workflow_fabric" => {
                 self.adapter_throughput_retrieval_synthesis_workflow_fabric(&arguments)
-            },
+            }
             "adapter_federated_continual_retrieval_synthesis_workflow_fabric" => {
                 self.adapter_federated_continual_retrieval_synthesis_workflow_fabric(&arguments)
-            },
+            }
             "adapter_local_retrieval_synthesis_research_workbench" => {
                 self.adapter_local_retrieval_synthesis_research_workbench(&arguments)
-            },
+            }
             "adapter_multimodal_retrieval_synthesis_research_workbench" => {
                 self.adapter_multimodal_retrieval_synthesis_research_workbench(&arguments)
-            },
+            }
             "adapter_throughput_retrieval_synthesis_research_workbench" => {
                 self.adapter_throughput_retrieval_synthesis_research_workbench(&arguments)
-            },
+            }
             "adapter_federated_continual_retrieval_synthesis_research_workbench" => {
                 self.adapter_federated_continual_retrieval_synthesis_research_workbench(&arguments)
-            },
+            }
             "adapter_local_retrieval_synthesis_interoperability_gateway" => {
                 self.adapter_local_retrieval_synthesis_interoperability_gateway(&arguments)
-            },
+            }
             "adapter_multimodal_retrieval_synthesis_interoperability_gateway" => {
                 self.adapter_multimodal_retrieval_synthesis_interoperability_gateway(&arguments)
-            },
+            }
             "adapter_throughput_retrieval_synthesis_interoperability_gateway" => {
                 self.adapter_throughput_retrieval_synthesis_interoperability_gateway(&arguments)
-            },
-            "adapter_federated_continual_retrieval_synthesis_interoperability_gateway" => {
-                self.adapter_federated_continual_retrieval_synthesis_interoperability_gateway(&arguments)
-            },
+            }
+            "adapter_federated_continual_retrieval_synthesis_interoperability_gateway" => self
+                .adapter_federated_continual_retrieval_synthesis_interoperability_gateway(
+                    &arguments,
+                ),
             "adapter_local_retrieval_synthesis_assurance_harness" => {
                 self.adapter_local_retrieval_synthesis_assurance_harness(&arguments)
-            },
+            }
             "adapter_multimodal_retrieval_synthesis_assurance_harness" => {
                 self.adapter_multimodal_retrieval_synthesis_assurance_harness(&arguments)
-            },
+            }
             "adapter_throughput_retrieval_synthesis_assurance_harness" => {
                 self.adapter_throughput_retrieval_synthesis_assurance_harness(&arguments)
-            },
+            }
             "adapter_federated_continual_retrieval_synthesis_assurance_harness" => {
                 self.adapter_federated_continual_retrieval_synthesis_assurance_harness(&arguments)
-            },
+            }
             "adapter_local_retrieval_synthesis_federated_control_plane" => {
                 self.adapter_local_retrieval_synthesis_federated_control_plane(&arguments)
-            },
+            }
             "adapter_multimodal_retrieval_synthesis_federated_control_plane" => {
                 self.adapter_multimodal_retrieval_synthesis_federated_control_plane(&arguments)
-            },
+            }
             "adapter_throughput_retrieval_synthesis_federated_control_plane" => {
                 self.adapter_throughput_retrieval_synthesis_federated_control_plane(&arguments)
-            },
-            "adapter_federated_continual_retrieval_synthesis_federated_control_plane" => {
-                self.adapter_federated_continual_retrieval_synthesis_federated_control_plane(&arguments)
-            },
+            }
+            "adapter_federated_continual_retrieval_synthesis_federated_control_plane" => self
+                .adapter_federated_continual_retrieval_synthesis_federated_control_plane(
+                    &arguments,
+                ),
             "foundation_mechanism_exploration_assurance" => {
                 self.foundation_mechanism_exploration_assurance(&arguments)
-            },
+            }
             "oraclex_publication_release" => self.oraclex_publication_release(&arguments),
             "interweave_frontier_control" => self.interweave_frontier_control(&arguments),
             "influence_federated_continual_interpretation" => {
                 self.influence_federated_continual_interpretation(&arguments)
-            },
+            }
             "adapter_multimodal_retrieval_synthesis_inference_engine" => {
                 self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
-            },
+            }
             "adapter_throughput_retrieval_synthesis_inference_engine" => {
                 self.adapter_throughput_retrieval_synthesis_inference_engine(&arguments)
-            },
+            }
             "adapter_throughput_retrieval_synthesis_contract_model" => {
                 self.adapter_throughput_retrieval_synthesis_contract_model(&arguments)
-            },
+            }
             "adapter_federated_retrieval_synthesis_inference_engine" => {
                 self.adapter_federated_retrieval_synthesis_inference_engine(&arguments)
-            },
+            }
             "adapter_federated_retrieval_synthesis_contract_model" => {
                 self.adapter_federated_retrieval_synthesis_contract_model(&arguments)
-            },
+            }
             "adapter_context_compilation_assurance" => {
                 self.adapter_context_compilation_assurance(&arguments)
             }
@@ -2062,13 +2081,27 @@ impl Server {
             "research_release_batch_validate" => self.research_release_batch_validate(&arguments),
             "instrument_preflight" => self.instrument_preflight(&arguments),
             "multimodal_harmonize" => self.multimodal_harmonize(&arguments),
-            "mcp_multimodal_ingestion_assurance" => self.mcp_multimodal_ingestion_assurance(&arguments),
-            "weavelang_computational_execution_assurance" => self.weavelang_computational_execution_assurance(&arguments),
-            "mcp_knowledge_representation_contract" => self.mcp_knowledge_representation_contract(&arguments),
-            "registry_multimodal_scale_frontier_assurance" => self.registry_multimodal_scale_frontier_assurance(&arguments),
-            "registry_knowledge_representation_assurance" => self.registry_knowledge_representation_assurance(&arguments),
-            "ops_context_compilation_federated_control_plane" => self.ops_context_compilation_federated_control_plane(&arguments),
-            "oraclex_context_compilation_research_copilot" => self.oraclex_context_compilation_research_copilot(&arguments),
+            "mcp_multimodal_ingestion_assurance" => {
+                self.mcp_multimodal_ingestion_assurance(&arguments)
+            }
+            "weavelang_computational_execution_assurance" => {
+                self.weavelang_computational_execution_assurance(&arguments)
+            }
+            "mcp_knowledge_representation_contract" => {
+                self.mcp_knowledge_representation_contract(&arguments)
+            }
+            "registry_multimodal_scale_frontier_assurance" => {
+                self.registry_multimodal_scale_frontier_assurance(&arguments)
+            }
+            "registry_knowledge_representation_assurance" => {
+                self.registry_knowledge_representation_assurance(&arguments)
+            }
+            "ops_context_compilation_federated_control_plane" => {
+                self.ops_context_compilation_federated_control_plane(&arguments)
+            }
+            "oraclex_context_compilation_research_copilot" => {
+                self.oraclex_context_compilation_research_copilot(&arguments)
+            }
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
             "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
@@ -24785,7 +24818,8 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_atlashub_replication_control_json(arguments)?;
+        let receipt =
+            crate::research_contracts::operate_atlashub_replication_control_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -24808,7 +24842,8 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_epistemic_retrieval_synthesis_json(arguments)?;
+        let receipt =
+            crate::research_contracts::operate_epistemic_retrieval_synthesis_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -24854,7 +24889,8 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_knowledge_representation_json(arguments)?;
+        let receipt =
+            crate::research_contracts::operate_ids_knowledge_representation_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -24976,8 +25012,12 @@ impl Server {
         }))
     }
 
-    fn ids_laboratory_integration_workflow_fabric(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_laboratory_integration_json(arguments)?;
+    fn ids_laboratory_integration_workflow_fabric(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt =
+            crate::research_contracts::operate_ids_laboratory_integration_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -24997,7 +25037,8 @@ impl Server {
     }
 
     fn ids_computational_execution_workbench(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_computational_execution_json(arguments)?;
+        let receipt =
+            crate::research_contracts::operate_ids_computational_execution_json(arguments)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -25012,6 +25053,29 @@ impl Server {
             "limitations": [
                 "the route evaluates caller-supplied workflow manifests and does not launch processes, containers, instruments, or networks",
                 "a qualified dry-run plan is not execution success, scientific validity, or clinical advice"
+            ]
+        }))
+    }
+
+    fn ids_statistical_causal_ml_research_copilot(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_ids_statistical_causal_ml_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID,
+            "contract_version": IDS_STATISTICAL_CAUSAL_ML_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "analysis candidates are deterministically scored with stable selected and fallback portfolios",
+                "study identity, sample power, missingness, robustness, evidence, replay, provenance, policy, and locality gates remain explicit",
+                "the route emits a bounded local planning receipt and cannot fit models, move raw data, publish conclusions, or make clinical decisions"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied analysis manifests and does not execute statistical, causal, or ML computation",
+                "a qualified analysis plan is not a scientific conclusion, causal identification proof, model performance claim, or clinical advice"
             ]
         }))
     }
@@ -25339,7 +25403,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a FederatedMechanismControlRequest")?;
-        let receipt = crate::research_contracts::operate_megafactory_mechanism_exploration_json(request)?;
+        let receipt =
+            crate::research_contracts::operate_megafactory_mechanism_exploration_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -25409,10 +25474,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a LocalEvidenceSurveillanceResearchCopilotRequest")?;
-        let receipt = crate::research_contracts::run_local_evidence_surveillance_research_copilot_json(request)?;
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a LocalEvidenceSurveillanceResearchCopilotRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_local_evidence_surveillance_research_copilot_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -25438,7 +25506,10 @@ impl Server {
         let request = arguments.get("request").ok_or(
             "request is required and must be a MultimodalEvidenceSurveillanceResearchCopilotRequest",
         )?;
-        let receipt = crate::research_contracts::run_multimodal_evidence_surveillance_research_copilot_json(request)?;
+        let receipt =
+            crate::research_contracts::run_multimodal_evidence_surveillance_research_copilot_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -25465,7 +25536,10 @@ impl Server {
         let request = arguments.get("request").ok_or(
             "request is required and must be a ThroughputEvidenceSurveillanceResearchCopilotRequest",
         )?;
-        let receipt = crate::research_contracts::run_throughput_evidence_surveillance_research_copilot_json(request)?;
+        let receipt =
+            crate::research_contracts::run_throughput_evidence_surveillance_research_copilot_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -25514,10 +25588,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a LocalEvidenceSurveillanceWorkflowRequest",
-        )?;
-        let receipt = crate::research_contracts::run_local_evidence_surveillance_workflow_fabric_json(request)?;
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a LocalEvidenceSurveillanceWorkflowRequest")?;
+        let receipt =
+            crate::research_contracts::run_local_evidence_surveillance_workflow_fabric_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -25543,7 +25620,10 @@ impl Server {
         let request = arguments.get("request").ok_or(
             "request is required and must be a MultimodalEvidenceSurveillanceWorkflowRequest",
         )?;
-        let receipt = crate::research_contracts::run_multimodal_evidence_surveillance_workflow_fabric_json(request)?;
+        let receipt =
+            crate::research_contracts::run_multimodal_evidence_surveillance_workflow_fabric_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -25569,7 +25649,10 @@ impl Server {
         let request = arguments.get("request").ok_or(
             "request is required and must be a ThroughputEvidenceSurveillanceWorkflowRequest",
         )?;
-        let receipt = crate::research_contracts::run_throughput_evidence_surveillance_workflow_fabric_json(request)?;
+        let receipt =
+            crate::research_contracts::run_throughput_evidence_surveillance_workflow_fabric_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -25614,9 +25697,17 @@ impl Server {
         }))
     }
 
-    fn adapter_local_evidence_surveillance_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a LocalEvidenceSurveillanceResearchWorkbenchRequest")?;
-        let receipt = crate::research_contracts::run_local_evidence_surveillance_research_workbench_json(request)?;
+    fn adapter_local_evidence_surveillance_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a LocalEvidenceSurveillanceResearchWorkbenchRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_local_evidence_surveillance_research_workbench_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -25634,22 +25725,37 @@ impl Server {
         }))
     }
 
-    fn adapter_multimodal_evidence_surveillance_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_multimodal_evidence_surveillance_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalEvidenceSurveillanceResearchWorkbenchRequest")?;
         let receipt = crate::research_contracts::run_multimodal_evidence_surveillance_research_workbench_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal workbench preserves study/modality comparability, qualified, unknown, incomparable, missing, negative, and provenance views", "canonical view and panel order is replayable across clients", "raw preclinical data remains institution-local and no external effect is scheduled"], "limitations": ["the workbench renders caller-supplied evidence metadata and does not make clinical decisions", "operators remain responsible for semantic-profile governance and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal workbench preserves study/modality comparability, qualified, unknown, incomparable, missing, negative, and provenance views", "canonical view and panel order is replayable across clients", "raw preclinical data remains institution-local and no external effect is scheduled"], "limitations": ["the workbench renders caller-supplied evidence metadata and does not make clinical decisions", "operators remain responsible for semantic-profile governance and independent replication"]}),
+        )
     }
 
-    fn adapter_throughput_evidence_surveillance_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_throughput_evidence_surveillance_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a ThroughputEvidenceSurveillanceResearchWorkbenchRequest")?;
         let receipt = crate::research_contracts::run_throughput_evidence_surveillance_research_workbench_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput workbench preserves queue, capacity, checkpoint, qualified, unknown, overflow, negative, and provenance views", "canonical view and panel order is replayable across clients", "raw preclinical data remains institution-local and no external effect is scheduled"], "limitations": ["the workbench renders caller-supplied evidence metadata and does not make clinical decisions", "operators remain responsible for capacity policy, queue retention, and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput workbench preserves queue, capacity, checkpoint, qualified, unknown, overflow, negative, and provenance views", "canonical view and panel order is replayable across clients", "raw preclinical data remains institution-local and no external effect is scheduled"], "limitations": ["the workbench renders caller-supplied evidence metadata and does not make clinical decisions", "operators remain responsible for capacity policy, queue retention, and independent replication"]}),
+        )
     }
 
-    fn adapter_federated_continual_evidence_surveillance_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_federated_continual_evidence_surveillance_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest")?;
         let receipt = crate::research_contracts::run_federated_continual_evidence_surveillance_research_workbench_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual workbench exposes peer, aggregate, omission, denied, negative, qualified, unknown, and provenance views without moving raw observations", "canonical view and panel order is replayable across clients", "only permitted signed aggregate evidence is represented and raw preclinical data remains institution-local"], "limitations": ["the workbench renders caller-supplied aggregate evidence metadata and does not make clinical decisions", "operators remain responsible for federation policy, signer governance, and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual workbench exposes peer, aggregate, omission, denied, negative, qualified, unknown, and provenance views without moving raw observations", "canonical view and panel order is replayable across clients", "only permitted signed aggregate evidence is represented and raw preclinical data remains institution-local"], "limitations": ["the workbench renders caller-supplied aggregate evidence metadata and does not make clinical decisions", "operators remain responsible for federation policy, signer governance, and independent replication"]}),
+        )
     }
 
     fn multimodal_retrieval_synthesis(&self, arguments: &Value) -> Result<Value, String> {
@@ -25675,172 +25781,387 @@ impl Server {
         }))
     }
 
-    fn adapter_local_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a LocalRetrievalSynthesisInferenceEngineRequest")?;
-        let receipt = crate::research_contracts::run_local_retrieval_synthesis_inference_engine_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local retrieval engine computes a deterministic single-study evidence corpus from typed candidate metadata", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for source scope and replication"]}))
+    fn adapter_local_retrieval_synthesis_inference_engine(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a LocalRetrievalSynthesisInferenceEngineRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_local_retrieval_synthesis_inference_engine_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local retrieval engine computes a deterministic single-study evidence corpus from typed candidate metadata", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for source scope and replication"]}),
+        )
     }
 
-    fn adapter_local_retrieval_synthesis_contract_model(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a LocalRetrievalSynthesisContractModelRequest")?;
-        let receipt = crate::research_contracts::run_local_retrieval_synthesis_contract_model_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local typed data primitive validates schema profile, canonicalization, consumer identity, and deterministic single-study evidence corpus", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the contract model is not a clinical decision system", "operators remain responsible for schema evolution, source scope, and replication"]}))
+    fn adapter_local_retrieval_synthesis_contract_model(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a LocalRetrievalSynthesisContractModelRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_local_retrieval_synthesis_contract_model_json(request)?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local typed data primitive validates schema profile, canonicalization, consumer identity, and deterministic single-study evidence corpus", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the contract model is not a clinical decision system", "operators remain responsible for schema evolution, source scope, and replication"]}),
+        )
     }
 
-    fn adapter_local_retrieval_synthesis_research_copilot(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a LocalRetrievalSynthesisResearchCopilotRequest")?;
-        let receipt = crate::research_contracts::run_local_retrieval_synthesis_research_copilot_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 local research copilot ranks scoped evidence for a named agent and emits read-only evidence-ranked recommendations", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no clinical decision or external effect is scheduled"], "limitations": ["the copilot is advisory and not a clinical decision system", "operators remain responsible for source scope, approval, schema evolution, and independent replication"]}))
+    fn adapter_local_retrieval_synthesis_research_copilot(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a LocalRetrievalSynthesisResearchCopilotRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_local_retrieval_synthesis_research_copilot_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 local research copilot ranks scoped evidence for a named agent and emits read-only evidence-ranked recommendations", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no clinical decision or external effect is scheduled"], "limitations": ["the copilot is advisory and not a clinical decision system", "operators remain responsible for source scope, approval, schema evolution, and independent replication"]}),
+        )
     }
 
-    fn adapter_multimodal_retrieval_synthesis_research_copilot(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisResearchCopilotRequest")?;
-        let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_research_copilot_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 multimodal research copilot compares at least two institution-local modalities across studies and emits an approval-gated tool intent", "omissions, uncertainty, contradiction, comparability gaps, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external tool effect is scheduled without a non-empty approval token"], "limitations": ["the copilot is not a clinical decision system", "operators remain responsible for tool approval, source scope, schema evolution, and independent replication"]}))
+    fn adapter_multimodal_retrieval_synthesis_research_copilot(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a MultimodalRetrievalSynthesisResearchCopilotRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_multimodal_retrieval_synthesis_research_copilot_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 multimodal research copilot compares at least two institution-local modalities across studies and emits an approval-gated tool intent", "omissions, uncertainty, contradiction, comparability gaps, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external tool effect is scheduled without a non-empty approval token"], "limitations": ["the copilot is not a clinical decision system", "operators remain responsible for tool approval, source scope, schema evolution, and independent replication"]}),
+        )
     }
 
-    fn adapter_throughput_retrieval_synthesis_research_copilot(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisResearchCopilotRequest")?;
-        let receipt = crate::research_contracts::run_throughput_retrieval_synthesis_research_copilot_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 prospective high-throughput copilot admits bounded queue capacity with checkpoint identity and compares at least two institution-local modalities", "overflow, omissions, uncertainty, contradiction, comparability gaps, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external tool effect is scheduled without a non-empty approval token"], "limitations": ["the copilot is not a clinical decision system", "operators remain responsible for queue capacity, checkpoint durability, tool approval, source scope, and independent replication"]}))
+    fn adapter_throughput_retrieval_synthesis_research_copilot(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a ThroughputRetrievalSynthesisResearchCopilotRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_throughput_retrieval_synthesis_research_copilot_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 prospective high-throughput copilot admits bounded queue capacity with checkpoint identity and compares at least two institution-local modalities", "overflow, omissions, uncertainty, contradiction, comparability gaps, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external tool effect is scheduled without a non-empty approval token"], "limitations": ["the copilot is not a clinical decision system", "operators remain responsible for queue capacity, checkpoint durability, tool approval, source scope, and independent replication"]}),
+        )
     }
 
-    fn adapter_federated_continual_retrieval_synthesis_research_copilot(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_federated_continual_retrieval_synthesis_research_copilot(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisResearchCopilotRequest")?;
         let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_research_copilot_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 federated continual copilot enforces purpose-bound peer quorum, aggregate-only exchange, bounded capacity, and checkpoint identity while comparing at least two institution-local modalities", "overflow, omissions, uncertainty, contradiction, quorum gaps, comparability gaps, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external tool effect is scheduled without approval, quorum, and aggregate-only gates"], "limitations": ["the copilot is not a clinical decision system", "operators remain responsible for federation governance, queue capacity, checkpoint durability, tool approval, and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 federated continual copilot enforces purpose-bound peer quorum, aggregate-only exchange, bounded capacity, and checkpoint identity while comparing at least two institution-local modalities", "overflow, omissions, uncertainty, contradiction, quorum gaps, comparability gaps, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external tool effect is scheduled without approval, quorum, and aggregate-only gates"], "limitations": ["the copilot is not a clinical decision system", "operators remain responsible for federation governance, queue capacity, checkpoint durability, tool approval, and independent replication"]}),
+        )
     }
 
-    fn adapter_local_retrieval_synthesis_workflow_fabric(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a LocalRetrievalSynthesisWorkflowRequest")?;
-        let receipt = crate::research_contracts::run_local_retrieval_synthesis_workflow_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 local single-study workflow executes canonical retrieval, synthesis, persistence, and validation stages with durable checkpoints, budgets, compensation, and replay identity", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for approvals, replication, schema migration, and local artifact retention"]}))
+    fn adapter_local_retrieval_synthesis_workflow_fabric(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a LocalRetrievalSynthesisWorkflowRequest")?;
+        let receipt =
+            crate::research_contracts::run_local_retrieval_synthesis_workflow_json(request)?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 local single-study workflow executes canonical retrieval, synthesis, persistence, and validation stages with durable checkpoints, budgets, compensation, and replay identity", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for approvals, replication, schema migration, and local artifact retention"]}),
+        )
     }
 
-    fn adapter_multimodal_retrieval_synthesis_workflow_fabric(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisWorkflowRequest")?;
-        let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_workflow_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 multimodal multi-study workflow executes canonical checkpoint, comparability, synthesis, and artifact stages with budgets, compensation, and replay identity", "incomparable, omitted, uncertain, contradictory, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for approvals, replication, schema migration, and local artifact retention"]}))
+    fn adapter_multimodal_retrieval_synthesis_workflow_fabric(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a MultimodalRetrievalSynthesisWorkflowRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_multimodal_retrieval_synthesis_workflow_json(request)?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 multimodal multi-study workflow executes canonical checkpoint, comparability, synthesis, and artifact stages with budgets, compensation, and replay identity", "incomparable, omitted, uncertain, contradictory, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for approvals, replication, schema migration, and local artifact retention"]}),
+        )
     }
 
-    fn adapter_throughput_retrieval_synthesis_workflow_fabric(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisWorkflowRequest")?;
-        let receipt = crate::research_contracts::run_throughput_retrieval_synthesis_workflow_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 prospective high-throughput workflow enforces bounded queue admission, overflow retention, checkpoint continuity, budget compensation, replay identity, and output validation", "overflow, omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for approvals, queue retention, replication, schema migration, and local artifact retention"]}))
+    fn adapter_throughput_retrieval_synthesis_workflow_fabric(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a ThroughputRetrievalSynthesisWorkflowRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_throughput_retrieval_synthesis_workflow_json(request)?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 prospective high-throughput workflow enforces bounded queue admission, overflow retention, checkpoint continuity, budget compensation, replay identity, and output validation", "overflow, omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for approvals, queue retention, replication, schema migration, and local artifact retention"]}),
+        )
     }
 
-    fn adapter_federated_continual_retrieval_synthesis_workflow_fabric(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisWorkflowRequest")?;
-        let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_workflow_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 federated continual workflow enforces purpose-bound peer quorum, aggregate-only exchange, checkpoint continuity, bounded budget, compensation, replay identity, and output validation", "federation denials, omissions, uncertainty, contradiction, overflow, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for federation approvals, key rotation, replay, schema migration, and local artifact retention"]}))
+    fn adapter_federated_continual_retrieval_synthesis_workflow_fabric(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a FederatedContinualRetrievalSynthesisWorkflowRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_federated_continual_retrieval_synthesis_workflow_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 federated continual workflow enforces purpose-bound peer quorum, aggregate-only exchange, checkpoint continuity, bounded budget, compensation, replay identity, and output validation", "federation denials, omissions, uncertainty, contradiction, overflow, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for federation approvals, key rotation, replay, schema migration, and local artifact retention"]}),
+        )
     }
 
-    fn adapter_local_retrieval_synthesis_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a LocalRetrievalSynthesisResearchWorkbenchRequest")?;
-        let receipt = crate::research_contracts::run_local_retrieval_synthesis_research_workbench_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local read-only workbench renders canonical overview, evidence, omission, and provenance views over typed retrieval synthesis", "unknown, omitted, contradictory, and negative evidence remain explicit with deterministic replay and provenance digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for scope, local retention, independent replication, and schema migration"]}))
+    fn adapter_local_retrieval_synthesis_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a LocalRetrievalSynthesisResearchWorkbenchRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_local_retrieval_synthesis_research_workbench_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local read-only workbench renders canonical overview, evidence, omission, and provenance views over typed retrieval synthesis", "unknown, omitted, contradictory, and negative evidence remain explicit with deterministic replay and provenance digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for scope, local retention, independent replication, and schema migration"]}),
+        )
     }
 
-    fn adapter_multimodal_retrieval_synthesis_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_multimodal_retrieval_synthesis_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisResearchWorkbenchRequest")?;
-        let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_research_workbench_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal workbench renders canonical overview, evidence, omission, provenance, comparability, negative, and unknown views over multiple studies and modalities", "incomparable, omitted, uncertain, contradictory, and negative evidence remain explicit with replay and provenance digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for semantic-profile governance, scope, local retention, and independent replication"]}))
+        let receipt =
+            crate::research_contracts::run_multimodal_retrieval_synthesis_research_workbench_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal workbench renders canonical overview, evidence, omission, provenance, comparability, negative, and unknown views over multiple studies and modalities", "incomparable, omitted, uncertain, contradictory, and negative evidence remain explicit with replay and provenance digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for semantic-profile governance, scope, local retention, and independent replication"]}),
+        )
     }
 
-    fn adapter_throughput_retrieval_synthesis_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_throughput_retrieval_synthesis_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisResearchWorkbenchRequest")?;
-        let receipt = crate::research_contracts::run_throughput_retrieval_synthesis_research_workbench_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput workbench renders queue, overflow, omission, and provenance views over bounded retrieval synthesis", "capacity overflow, uncertainty, contradiction, and negative evidence remain explicit with replay and queue digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for queue retention, scope, local capacity, and independent replication"]}))
+        let receipt =
+            crate::research_contracts::run_throughput_retrieval_synthesis_research_workbench_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput workbench renders queue, overflow, omission, and provenance views over bounded retrieval synthesis", "capacity overflow, uncertainty, contradiction, and negative evidence remain explicit with replay and queue digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for queue retention, scope, local capacity, and independent replication"]}),
+        )
     }
 
-    fn adapter_federated_continual_retrieval_synthesis_research_workbench(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_federated_continual_retrieval_synthesis_research_workbench(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisResearchWorkbenchRequest")?;
         let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_research_workbench_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual workbench renders purpose-bound peer, aggregate, quorum, omission, negative, and provenance views", "quorum, partition, contradiction, uncertainty, negative evidence, and federation denials remain explicit with deterministic replay digests", "raw preclinical data remains institution-local; only permitted aggregate views are exposed and no clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for consortium membership, purpose policy, local retention, and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual workbench renders purpose-bound peer, aggregate, quorum, omission, negative, and provenance views", "quorum, partition, contradiction, uncertainty, negative evidence, and federation denials remain explicit with deterministic replay digests", "raw preclinical data remains institution-local; only permitted aggregate views are exposed and no clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for consortium membership, purpose policy, local retention, and independent replication"]}),
+        )
     }
 
-    fn adapter_local_retrieval_synthesis_interoperability_gateway(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_local_retrieval_synthesis_interoperability_gateway(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a LocalRetrievalSynthesisInteroperabilityGatewayRequest")?;
-        let receipt = crate::research_contracts::run_local_retrieval_synthesis_interoperability_gateway_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 local gateway negotiates pinned retrieval/synthesis protocol versions and records capability and semantic-loss receipts", "incompatible schemas, missing capabilities, protected-closure gaps, and policy denials fail closed", "raw preclinical data remains institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for endpoint trust, migration review, and independent replication"]}))
+        let receipt =
+            crate::research_contracts::run_local_retrieval_synthesis_interoperability_gateway_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 local gateway negotiates pinned retrieval/synthesis protocol versions and records capability and semantic-loss receipts", "incompatible schemas, missing capabilities, protected-closure gaps, and policy denials fail closed", "raw preclinical data remains institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for endpoint trust, migration review, and independent replication"]}),
+        )
     }
 
-    fn adapter_multimodal_retrieval_synthesis_interoperability_gateway(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_multimodal_retrieval_synthesis_interoperability_gateway(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInteroperabilityGatewayRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_interoperability_gateway_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal gateway negotiates pinned retrieval/synthesis protocol versions with comparability and semantic-loss receipts", "modality gaps, incompatible schemas, protected-closure gaps, and policy denials fail closed", "raw preclinical data remains institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for comparability governance, endpoint trust, migration review, and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal gateway negotiates pinned retrieval/synthesis protocol versions with comparability and semantic-loss receipts", "modality gaps, incompatible schemas, protected-closure gaps, and policy denials fail closed", "raw preclinical data remains institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for comparability governance, endpoint trust, migration review, and independent replication"]}),
+        )
     }
 
-    fn adapter_throughput_retrieval_synthesis_interoperability_gateway(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_throughput_retrieval_synthesis_interoperability_gateway(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisInteroperabilityGatewayRequest")?;
         let receipt = crate::research_contracts::run_throughput_retrieval_synthesis_interoperability_gateway_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput gateway negotiates pinned retrieval/synthesis protocol versions with bounded batch and checkpoint receipts", "capacity, migration loss, omissions, protected-closure gaps, and policy denials fail closed", "raw preclinical data remains institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for queue capacity, endpoint trust, migration review, and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput gateway negotiates pinned retrieval/synthesis protocol versions with bounded batch and checkpoint receipts", "capacity, migration loss, omissions, protected-closure gaps, and policy denials fail closed", "raw preclinical data remains institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for queue capacity, endpoint trust, migration review, and independent replication"]}),
+        )
     }
 
-    fn adapter_federated_continual_retrieval_synthesis_interoperability_gateway(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_federated_continual_retrieval_synthesis_interoperability_gateway(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest")?;
         let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_interoperability_gateway_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual gateway negotiates purpose-bound pinned retrieval/synthesis schemas with quorum and aggregate-only controls", "peer capability gaps, semantic loss, quorum failures, protected-closure gaps, and policy denials fail closed", "raw preclinical observations remain institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for consortium membership, purpose policy, endpoint trust, migration review, and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual gateway negotiates purpose-bound pinned retrieval/synthesis schemas with quorum and aggregate-only controls", "peer capability gaps, semantic loss, quorum failures, protected-closure gaps, and policy denials fail closed", "raw preclinical observations remain institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for consortium membership, purpose policy, endpoint trust, migration review, and independent replication"]}),
+        )
     }
 
-    fn adapter_local_retrieval_synthesis_assurance_harness(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a LocalRetrievalSynthesisAssuranceHarnessRequest")?;
-        let receipt = crate::research_contracts::run_local_retrieval_synthesis_assurance_harness_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates a local retrieval/synthesis workbench against explicit policy, protected-closure, provenance, and evidence predicates", "counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for baseline selection, independent replication, and institutional release governance"]}))
+    fn adapter_local_retrieval_synthesis_assurance_harness(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a LocalRetrievalSynthesisAssuranceHarnessRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_local_retrieval_synthesis_assurance_harness_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates a local retrieval/synthesis workbench against explicit policy, protected-closure, provenance, and evidence predicates", "counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for baseline selection, independent replication, and institutional release governance"]}),
+        )
     }
 
-    fn adapter_multimodal_retrieval_synthesis_assurance_harness(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisAssuranceHarnessRequest")?;
-        let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_assurance_harness_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates multimodal retrieval/synthesis against explicit modality, comparability, policy, protected-closure, provenance, and evidence predicates", "counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for comparability baselines, independent replication, and institutional release governance"]}))
+    fn adapter_multimodal_retrieval_synthesis_assurance_harness(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a MultimodalRetrievalSynthesisAssuranceHarnessRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_multimodal_retrieval_synthesis_assurance_harness_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates multimodal retrieval/synthesis against explicit modality, comparability, policy, protected-closure, provenance, and evidence predicates", "counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for comparability baselines, independent replication, and institutional release governance"]}),
+        )
     }
 
-    fn adapter_throughput_retrieval_synthesis_assurance_harness(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisAssuranceHarnessRequest")?;
-        let receipt = crate::research_contracts::run_throughput_retrieval_synthesis_assurance_harness_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates throughput retrieval/synthesis against batch, checkpoint, capacity, policy, protected-closure, provenance, and evidence predicates", "overflow, counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for queue baselines, independent replication, and institutional release governance"]}))
+    fn adapter_throughput_retrieval_synthesis_assurance_harness(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a ThroughputRetrievalSynthesisAssuranceHarnessRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_throughput_retrieval_synthesis_assurance_harness_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates throughput retrieval/synthesis against batch, checkpoint, capacity, policy, protected-closure, provenance, and evidence predicates", "overflow, counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for queue baselines, independent replication, and institutional release governance"]}),
+        )
     }
 
-    fn adapter_federated_continual_retrieval_synthesis_assurance_harness(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_federated_continual_retrieval_synthesis_assurance_harness(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisAssuranceHarnessRequest")?;
         let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_assurance_harness_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates federated continual retrieval/synthesis against purpose, peer quorum, aggregate-only locality, policy, protected-closure, provenance, and evidence predicates", "overflow, federation counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical observations remain institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for consortium baselines, independent replication, and institutional release governance"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates federated continual retrieval/synthesis against purpose, peer quorum, aggregate-only locality, policy, protected-closure, provenance, and evidence predicates", "overflow, federation counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical observations remain institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for consortium baselines, independent replication, and institutional release governance"]}),
+        )
     }
 
-    fn adapter_local_retrieval_synthesis_federated_control_plane(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a LocalRetrievalSynthesisFederatedControlPlaneRequest")?;
-        let receipt = crate::research_contracts::run_local_retrieval_synthesis_federated_control_plane_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 control plane admits institution-local retrieval/synthesis service work only under policy, federation-permission, signed-approval, health, and capacity gates", "degraded, approval-required, blocked, and saturated states remain explicit with omission and uncertainty receipts", "raw preclinical observations remain local and control-plane effects are content-addressed"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for service health attestations, capacity policy, and independent release governance"]}))
+    fn adapter_local_retrieval_synthesis_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a LocalRetrievalSynthesisFederatedControlPlaneRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_local_retrieval_synthesis_federated_control_plane_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 control plane admits institution-local retrieval/synthesis service work only under policy, federation-permission, signed-approval, health, and capacity gates", "degraded, approval-required, blocked, and saturated states remain explicit with omission and uncertainty receipts", "raw preclinical observations remain local and control-plane effects are content-addressed"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for service health attestations, capacity policy, and independent release governance"]}),
+        )
     }
 
-    fn adapter_multimodal_retrieval_synthesis_federated_control_plane(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_multimodal_retrieval_synthesis_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisFederatedControlPlaneRequest")?;
         let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_federated_control_plane_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits multimodal multi-study retrieval/synthesis only when peer quorum, modality comparability, capacity, health, federation, signed approval, and protected-closure gates pass", "aggregate-only federation keeps raw preclinical imaging and omics data institution-local while omission, uncertainty, counterexample, degraded, approval-required, and blocked states remain explicit", "replay and content-addressed control receipts support deterministic audit and recovery"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for peer trust, comparability profiles, health attestations, signed authorization, and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits multimodal multi-study retrieval/synthesis only when peer quorum, modality comparability, capacity, health, federation, signed approval, and protected-closure gates pass", "aggregate-only federation keeps raw preclinical imaging and omics data institution-local while omission, uncertainty, counterexample, degraded, approval-required, and blocked states remain explicit", "replay and content-addressed control receipts support deterministic audit and recovery"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for peer trust, comparability profiles, health attestations, signed authorization, and independent replication"]}),
+        )
     }
 
-    fn adapter_throughput_retrieval_synthesis_federated_control_plane(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_throughput_retrieval_synthesis_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisFederatedControlPlaneRequest")?;
         let receipt = crate::research_contracts::run_throughput_retrieval_synthesis_federated_control_plane_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits prospective high-throughput retrieval/synthesis only under purpose-bound peer quorum, queue/checkpoint continuity, capacity, health, policy, federation, signed approval, and protected-closure gates", "aggregate-only federation keeps raw preclinical data institution-local while overflow, omissions, uncertainty, counterexamples, degraded, approval-required, and blocked states remain explicit", "content-addressed queue, checkpoint, workbench, health, replay, and control digests support deterministic audit and recovery"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for queue policy, peer trust, checkpoint retention, health attestations, signed authorization, and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits prospective high-throughput retrieval/synthesis only under purpose-bound peer quorum, queue/checkpoint continuity, capacity, health, policy, federation, signed approval, and protected-closure gates", "aggregate-only federation keeps raw preclinical data institution-local while overflow, omissions, uncertainty, counterexamples, degraded, approval-required, and blocked states remain explicit", "content-addressed queue, checkpoint, workbench, health, replay, and control digests support deterministic audit and recovery"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for queue policy, peer trust, checkpoint retention, health attestations, signed authorization, and independent replication"]}),
+        )
     }
 
-    fn adapter_federated_continual_retrieval_synthesis_federated_control_plane(&self, arguments: &Value) -> Result<Value, String> {
+    fn adapter_federated_continual_retrieval_synthesis_federated_control_plane(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisFederatedControlPlaneRequest")?;
         let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_federated_control_plane_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits federated continual retrieval/synthesis only under purpose-bound peer quorum, checkpoint continuity, capacity, health, policy, federation, signed approval, and protected-closure gates", "aggregate-only locality keeps raw preclinical observations institution-local and preserves omissions, uncertainty, counterexamples, negative evidence, degraded, approval-required, and blocked states", "content-addressed workflow, workbench, health, replay, and control receipts support deterministic audit and bounded autonomy"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for consortium governance, peer trust, checkpoint retention, health attestations, signed authorization, and independent replication"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits federated continual retrieval/synthesis only under purpose-bound peer quorum, checkpoint continuity, capacity, health, policy, federation, signed approval, and protected-closure gates", "aggregate-only locality keeps raw preclinical observations institution-local and preserves omissions, uncertainty, counterexamples, negative evidence, degraded, approval-required, and blocked states", "content-addressed workflow, workbench, health, replay, and control receipts support deterministic audit and bounded autonomy"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for consortium governance, peer trust, checkpoint retention, health attestations, signed authorization, and independent replication"]}),
+        )
     }
 
-    fn foundation_mechanism_exploration_assurance(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a MechanismExplorationAssuranceRequest")?;
-        let receipt = crate::research_contracts::run_foundation_mechanism_exploration_assurance_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_foundation::FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance evaluates prospective high-throughput mechanism candidates against typed evidence, provenance, artifact, comparability, baseline, replay, policy, approval, protected-closure, and capacity gates", "unknown, speculative, contradicted, below-threshold, omitted, negative, and required-but-not-admitted candidates remain explicit", "non-qualified portfolios fail closed with block:unsafe-release and raw preclinical data remains local"], "limitations": ["the assurance harness is not a clinical decision system", "operators remain responsible for independent replication, causal interpretation, baseline selection, and release governance"]}))
+    fn foundation_mechanism_exploration_assurance(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a MechanismExplorationAssuranceRequest")?;
+        let receipt =
+            crate::research_contracts::run_foundation_mechanism_exploration_assurance_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_foundation::FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance evaluates prospective high-throughput mechanism candidates against typed evidence, provenance, artifact, comparability, baseline, replay, policy, approval, protected-closure, and capacity gates", "unknown, speculative, contradicted, below-threshold, omitted, negative, and required-but-not-admitted candidates remain explicit", "non-qualified portfolios fail closed with block:unsafe-release and raw preclinical data remains local"], "limitations": ["the assurance harness is not a clinical decision system", "operators remain responsible for independent replication, causal interpretation, baseline selection, and release governance"]}),
+        )
     }
 
     fn oraclex_publication_release(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a PublicationReleaseRequest")?;
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a PublicationReleaseRequest")?;
         let receipt = crate::research_contracts::run_oraclex_publication_release_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_oraclex::publication_release_contract_model::feature_id(), "receipt": receipt, "guarantees": ["A2 release admission requires typed artifact, provenance, workflow replay, evaluation baseline, standards, reproducibility, policy, protected closure, signed authority, federation permission, and raw-locality gates", "unknown and speculative evidence become conditional review, contradicted evidence and failed gates block release, and negative findings remain in the signed receipt", "release payloads are content-addressed and digest-only across the federation boundary; contract migration records semantic loss and preserves replay identity"], "limitations": ["the contract model does not mint signatures, upload payloads, or perform publication hosting", "the capability is not a clinical decision system and does not process human-subject or clinical-source data"]}))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_oraclex::publication_release_contract_model::feature_id(), "receipt": receipt, "guarantees": ["A2 release admission requires typed artifact, provenance, workflow replay, evaluation baseline, standards, reproducibility, policy, protected closure, signed authority, federation permission, and raw-locality gates", "unknown and speculative evidence become conditional review, contradicted evidence and failed gates block release, and negative findings remain in the signed receipt", "release payloads are content-addressed and digest-only across the federation boundary; contract migration records semantic loss and preserves replay identity"], "limitations": ["the contract model does not mint signatures, upload payloads, or perform publication hosting", "the capability is not a clinical decision system and does not process human-subject or clinical-source data"]}),
+        )
     }
 
     fn interweave_frontier_control(&self, arguments: &Value) -> Result<Value, String> {
@@ -25865,11 +26186,15 @@ impl Server {
         }))
     }
 
-    fn influence_federated_continual_interpretation(&self, arguments: &Value) -> Result<Value, String> {
+    fn influence_federated_continual_interpretation(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be an EvidenceBackedResult4")?;
-        let receipt = crate::research_contracts::run_federated_continual_interpretation_json(request)?;
+        let receipt =
+            crate::research_contracts::run_federated_continual_interpretation_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -25889,34 +26214,84 @@ impl Server {
         }))
     }
 
-    fn adapter_multimodal_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest")?;
-        let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal retrieval engine computes a deterministic imaging/omics multi-study evidence corpus with explicit comparability", "missing modalities, incomparable evidence, contradiction, uncertainty, and negative results remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for semantic-profile governance and independent replication"]}))
+    fn adapter_multimodal_retrieval_synthesis_inference_engine(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal retrieval engine computes a deterministic imaging/omics multi-study evidence corpus with explicit comparability", "missing modalities, incomparable evidence, contradiction, uncertainty, and negative results remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for semantic-profile governance and independent replication"]}),
+        )
     }
 
-    fn adapter_throughput_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisInferenceEngineRequest")?;
-        let receipt = crate::research_contracts::run_throughput_retrieval_synthesis_inference_engine_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 prospective high-throughput retrieval engine admits bounded batches with capacity and checkpoint receipts", "queue overflow, omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for queue retention, capacity policy, and independent replication"]}))
+    fn adapter_throughput_retrieval_synthesis_inference_engine(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a ThroughputRetrievalSynthesisInferenceEngineRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_throughput_retrieval_synthesis_inference_engine_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 prospective high-throughput retrieval engine admits bounded batches with capacity and checkpoint receipts", "queue overflow, omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for queue retention, capacity policy, and independent replication"]}),
+        )
     }
 
-    fn adapter_throughput_retrieval_synthesis_contract_model(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisContractModelRequest")?;
-        let receipt = crate::research_contracts::run_throughput_retrieval_synthesis_contract_model_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 prospective high-throughput typed data primitive validates schema profile, canonicalization, consumer identity, bounded batch, capacity, checkpoint, and deterministic retrieval corpus", "queue overflow, omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the contract model is not a clinical decision system", "operators remain responsible for queue retention, capacity policy, schema evolution, and independent replication"]}))
+    fn adapter_throughput_retrieval_synthesis_contract_model(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a ThroughputRetrievalSynthesisContractModelRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_throughput_retrieval_synthesis_contract_model_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 prospective high-throughput typed data primitive validates schema profile, canonicalization, consumer identity, bounded batch, capacity, checkpoint, and deterministic retrieval corpus", "queue overflow, omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the contract model is not a clinical decision system", "operators remain responsible for queue retention, capacity policy, schema evolution, and independent replication"]}),
+        )
     }
 
-    fn adapter_federated_retrieval_synthesis_inference_engine(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a FederatedRetrievalSynthesisInferenceEngineRequest")?;
-        let receipt = crate::research_contracts::run_federated_retrieval_synthesis_inference_engine_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual retrieval engine enforces purpose, peer quorum, aggregate-only, locality, and policy gates", "omissions, uncertainty, contradiction, negative evidence, and denied federation remain explicit", "raw preclinical source payloads remain institution-local and only permitted aggregate metadata is represented"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for federation governance, signer policy, and independent replication"]}))
+    fn adapter_federated_retrieval_synthesis_inference_engine(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a FederatedRetrievalSynthesisInferenceEngineRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_federated_retrieval_synthesis_inference_engine_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual retrieval engine enforces purpose, peer quorum, aggregate-only, locality, and policy gates", "omissions, uncertainty, contradiction, negative evidence, and denied federation remain explicit", "raw preclinical source payloads remain institution-local and only permitted aggregate metadata is represented"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for federation governance, signer policy, and independent replication"]}),
+        )
     }
 
-    fn adapter_federated_retrieval_synthesis_contract_model(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a FederatedRetrievalSynthesisContractModelRequest")?;
-        let receipt = crate::research_contracts::run_federated_retrieval_synthesis_contract_model_json(request)?;
-        Ok(json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual typed data primitive validates schema profile, canonicalization, consumer identity, purpose, peer quorum, aggregate-only, locality, policy, checkpoint, capacity, and deterministic retrieval corpus", "omissions, uncertainty, contradiction, negative evidence, and denied federation remain explicit", "raw preclinical source payloads remain institution-local and only permitted aggregate metadata is represented"], "limitations": ["the contract model is not a clinical decision system", "operators remain responsible for federation governance, schema evolution, signer policy, and independent replication"]}))
+    fn adapter_federated_retrieval_synthesis_contract_model(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a FederatedRetrievalSynthesisContractModelRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_federated_retrieval_synthesis_contract_model_json(
+                request,
+            )?;
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual typed data primitive validates schema profile, canonicalization, consumer identity, purpose, peer quorum, aggregate-only, locality, policy, checkpoint, capacity, and deterministic retrieval corpus", "omissions, uncertainty, contradiction, negative evidence, and denied federation remain explicit", "raw preclinical source payloads remain institution-local and only permitted aggregate metadata is represented"], "limitations": ["the contract model is not a clinical decision system", "operators remain responsible for federation governance, schema evolution, signer policy, and independent replication"]}),
+        )
     }
 
     fn adapter_context_compilation_assurance(&self, arguments: &Value) -> Result<Value, String> {
@@ -26167,10 +26542,13 @@ impl Server {
         &self,
         arguments: &Value,
     ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a FederatedContinualInterpretationAssuranceRequest")?;
-        let receipt = crate::research_contracts::assure_governance_federated_continual_interpretation_json(request)?;
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a FederatedContinualInterpretationAssuranceRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::assure_governance_federated_continual_interpretation_json(
+                request,
+            )?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26681,14 +27059,12 @@ impl Server {
         }))
     }
 
-    fn federated_publication_release_inference(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a FederatedPublicationReleaseInferenceRequest")?;
-        let receipt = crate::research_contracts::run_federated_publication_release_inference_json(request)?;
+    fn federated_publication_release_inference(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a FederatedPublicationReleaseInferenceRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_federated_publication_release_inference_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26732,7 +27108,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a MutationKnowledgeFederatedControlRequest")?;
-        let receipt = crate::research_contracts::run_mutation_knowledge_federated_control_json(request)?;
+        let receipt =
+            crate::research_contracts::run_mutation_knowledge_federated_control_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26777,7 +27154,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a serialized MultimodalIngestionRequest")?;
-        let receipt = crate::research_contracts::assure_multimodal_ingestion_assurance_json(request)?;
+        let receipt =
+            crate::research_contracts::assure_multimodal_ingestion_assurance_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26802,7 +27180,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a serialized ResearchWorkflowSpec")?;
-        let receipt = crate::research_contracts::assure_weavelang_computational_execution_json(request)?;
+        let receipt =
+            crate::research_contracts::assure_weavelang_computational_execution_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26824,7 +27203,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a serialized KnowledgeRepresentationRequest")?;
-        let receipt = crate::research_contracts::model_mcp_knowledge_representation_contract_json(request)?;
+        let receipt =
+            crate::research_contracts::model_mcp_knowledge_representation_contract_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -26875,7 +27255,8 @@ impl Server {
         let request = arguments
             .get("request")
             .ok_or("request is required and must be a serialized ScopedResearchClaims")?;
-        let receipt = crate::research_contracts::assure_registry_knowledge_representation_json(request)?;
+        let receipt =
+            crate::research_contracts::assure_registry_knowledge_representation_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
@@ -41199,6 +41580,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized ComputationalExecutionRequest6 containing typed nodes, dependency ids, peer attestations, engine version, budget, policy, federation, locality, and replay declarations." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "ids_statistical_causal_ml_research_copilot",
+            "description": "Compile local single-study statistical, causal, and ML analysis candidates into a deterministic qualified research plan. The bounded copilot scores robustness, uncertainty, missingness, sample support, replay, provenance, policy, and locality without fitting models or emitting clinical conclusions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized AnalysisCopilotRequest7 containing study identity, model portfolio version, typed analysis candidates, thresholds, budget, policy, approval, locality, and replay declarations." }
                 },
                 "required": ["request"]
             }
