@@ -2939,6 +2939,11 @@ def _run(
                 )
                 tool_surface["domain_binding"] = domain_binding
                 tool_surface["mode"] = "domain_registry"
+            activation_stale = bool(
+                activation_resumed
+                and isinstance(domain_binding, Mapping)
+                and domain_binding.get("activation_status") == "stale"
+            )
             common = {
                 "task": args.task,
                 "credentials": session,
@@ -2982,7 +2987,23 @@ def _run(
                         read_only_tools=_registered_tool_posture(agent),
                     ),
                 }
-            if args.automatic:
+            if activation_stale:
+                # A restarted process must not attempt a provider call against an empty or
+                # changed domain-tool surface.  Returning a structured no-op keeps the CLI
+                # restart-safe and lets the operator inspect the redacted stale binding before
+                # explicitly re-activating the fresh catalogue.  In particular, do not feed a
+                # provider's stale tool call into the runtime with zero advertised tools: that
+                # would turn a safe activation refusal into an opaque provider transport error.
+                result = {
+                    "status": "activation_stale",
+                    "execution": "not_started",
+                    "provider_call": False,
+                    "tool_calls": 0,
+                    "reason": "domain_tool_activation_requires_fresh_approval",
+                    "retention": "activation_digests_and_status_only; no_task_prompt_or_provider_payloads",
+                    "secret_material": "never_returned",
+                }
+            elif args.automatic:
                 automatic_options = {
                     **common,
                     "learning_mode": args.learning_mode,

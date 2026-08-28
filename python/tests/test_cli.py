@@ -1710,6 +1710,8 @@ def test_cli_persists_and_rehydrates_redacted_domain_activation(tmp_path) -> Non
     )
     assert stale_code == 0
     assert stale_errors == ""
+    assert stale["result"]["status"] == "activation_stale"
+    assert stale["result"]["provider_call"] is False
     assert stale["tool_surface"]["domain_binding"]["registered_tools"] == []
     assert stale["tool_surface"]["domain_binding"]["activation_status"] == "stale"
 

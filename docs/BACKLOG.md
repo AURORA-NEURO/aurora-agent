@@ -1,5 +1,14 @@
 # Remaining backlog
 
+The autonomous provider boundary now compiles a digest-bound model continuation plan in both SDKs.
+It preserves the exact eligible fallback ladder, separates model-scoped timeout recovery from
+provider-scoped outages, and exposes an independently sealed cursor for restart/resume without
+reselection. Adaptive provider, tool-loop, and mission paths consume the same plan before their
+existing approval and effect gates; projections retain only model/provider metadata, candidate
+digests, statuses, and bounded failure codes. This improves deterministic execution continuity,
+but does not claim distributed exactly-once delivery, provider truth, evaluator correctness, or
+replace caller-owned durable encrypted storage and external-effect reconciliation.
+
 48 code-bearing blueprint modules are not yet cited by any crate or design note,
 across 9 sections. This is the enumerated form of `docs/COVERAGE.md`'s
 percentage: a percentage says how far there is to go, a list says what is actually left.

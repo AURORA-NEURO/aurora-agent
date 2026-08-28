@@ -10,10 +10,16 @@ import {
   AutonomousCostBudgetError,
   AutonomousRuntime,
   AutonomousExecutionController,
+  advanceAutonomousModelContinuationState,
   AutonomousEffectBoundary,
   AutonomousEffectReconciliationRequiredError,
   InMemoryAutonomousEffectJournal,
   InMemoryAutonomousExecutionJournal,
+  compileAutonomousModelContinuationPlan,
+  completeAutonomousModelContinuationState,
+  createAutonomousModelContinuationState,
+  validateAutonomousModelContinuationPlan,
+  validateAutonomousModelContinuationState,
   TransactionalJsonLLMRuntimeHealthSnapshotPersistence,
   LLMRuntime,
   LLMRuntimeHealthPersistenceCoordinator,
@@ -1273,6 +1279,8 @@ test("autonomous runtime performs bounded provider failover and journals the adm
   assert.equal(result.provider_invocations[0].execution_id, "autonomous-failover-1");
   assert.equal(result.provider_failover.fallback_count, 1);
   assert.equal(result.provider_failover.attempts.length, 2);
+  assert.equal(result.continuation_plan.steps.map((step) => step.model_id).join(","), "unstable/unstable-model,stable/stable-model");
+  assert.equal(result.provider_failover.continuation_plan_digest, result.continuation_plan.plan_digest);
   assert.doesNotMatch(JSON.stringify({ provider_invocations: result.provider_invocations, provider_failover: result.provider_failover }), /stable answer|\"busy\"|provider body|api[_ -]?key/i);
   assert.equal(calls.length, 2);
   assert.equal(calls[0], "https://unstable.test/v1/chat/completions");
@@ -1283,6 +1291,63 @@ test("autonomous runtime performs bounded provider failover and journals the adm
   assert.deepEqual(selectionEvents.filter((event) => event.phase === "model_selection_finished").map((event) => [event.status, event.selected_provider, event.failover]), [["selected", "unstable", false], ["selected", "stable", true]]);
   assert.equal((await journal.verifyIntegrity()).verified, true);
   await execution.complete();
+});
+
+test("model continuation plans are immutable, failure-scoped, and resumable without reselection", async () => {
+  const runtime = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => jsonResponse({ output_text: "ok" }) });
+  runtime.registerProvider(openaiCompatibleProvider("ladder", "https://ladder.test", { requiresCredential: false }));
+  const agent = new AutonomousRuntime(runtime);
+  const plan = {
+    task: "Compile a reviewable model ladder.",
+    candidates: [
+      { provider: "ladder", model: "primary", context_window_tokens: 8_000, max_output_tokens: 256, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1, reliability: 0.99 },
+      { provider: "ladder", model: "sibling", context_window_tokens: 8_000, max_output_tokens: 256, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 2, reliability: 0.9 },
+      { provider: "ladder", model: "last", context_window_tokens: 8_000, max_output_tokens: 256, quality: 0.7, latency_ms: 30, cost_per_million_tokens: 3, reliability: 0.8 },
+    ],
+    request: request("primary"),
+  };
+  const selection = await agent.select(plan);
+  const continuation = await compileAutonomousModelContinuationPlan(plan, selection, { maxFailovers: 2 });
+  assert.deepEqual(await validateAutonomousModelContinuationPlan(continuation), continuation);
+  assert.equal(continuation.steps.length, 3);
+  assert.deepEqual(continuation.steps.map((step) => step.model_id), ["ladder/primary", "ladder/sibling", "ladder/last"]);
+  const initialState = await createAutonomousModelContinuationState(continuation);
+  const afterTimeout = await advanceAutonomousModelContinuationState(continuation, initialState, { provider: "ladder", model: "primary", failureScope: "model", failureCode: "timeout", statusCode: null });
+  assert.deepEqual(await validateAutonomousModelContinuationState(continuation, afterTimeout), afterTimeout);
+  assert.equal(afterTimeout.next_step_index, 1, "a model timeout preserves a sibling on the same provider");
+  assert.deepEqual(afterTimeout.excluded_models, ["ladder/primary"]);
+  const completed = await completeAutonomousModelContinuationState(continuation, afterTimeout, { provider: "ladder", model: "sibling", statusCode: 200 });
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.attempts.length, 2);
+  await assert.rejects(advanceAutonomousModelContinuationState(continuation, { ...initialState, plan_digest: "0".repeat(64) }, { provider: "ladder", model: "primary", failureScope: "provider" }), /state digest mismatch|not bound/);
+  await assert.rejects(compileAutonomousModelContinuationPlan({ ...plan, candidates: [...plan.candidates, { ...plan.candidates[0] }] }, selection, { maxFailovers: 2 }), /duplicate model/);
+});
+
+test("autonomous failover follows the compiled ladder even when a selector would change its mind", async () => {
+  let selectorCalls = 0;
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async (url) => String(url).includes("ladder-unavailable") ? jsonResponse({ error: "busy" }, 503) : jsonResponse({ choices: [{ message: { role: "assistant", content: "ladder winner" }, finish_reason: "stop" }] }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("ladder-unavailable", "https://ladder-unavailable.test", { requiresCredential: false, maxAttempts: 1 }));
+  runtime.registerProvider(openaiCompatibleProvider("ladder-backup", "https://ladder-backup.test", { requiresCredential: false, maxAttempts: 1 }));
+  const agent = new AutonomousRuntime(runtime, {
+    selector: async (input) => {
+      selectorCalls += 1;
+      return { selected_model: { provider: selectorCalls === 1 ? "ladder-unavailable" : "ladder-backup", model: selectorCalls === 1 ? "primary" : "backup" }, ranking: input.candidates.map((candidate) => ({ provider: candidate.provider, model: candidate.model, score: candidate.provider === "ladder-unavailable" ? 100 : 1, eligible: true, reasons: [] })), strategy: "caller_selector", abstention_reason: null };
+    },
+  });
+  const result = await agent.invoke({
+    task: "Keep the initial decision's bounded fallback order.",
+    candidates: [
+      { provider: "ladder-unavailable", model: "primary", context_window_tokens: 8_000, max_output_tokens: 256, quality: 0.99, latency_ms: 10, cost_per_million_tokens: 1, reliability: 0.99 },
+      { provider: "ladder-backup", model: "backup", context_window_tokens: 8_000, max_output_tokens: 256, quality: 0.5, latency_ms: 100, cost_per_million_tokens: 5, reliability: 0.5 },
+    ],
+    request: request("primary"),
+  }, { maxProviderFailovers: 1 });
+  assert.equal(selectorCalls, 1);
+  assert.equal(result.response.text, "ladder winner");
+  assert.deepEqual(result.provider_invocations.map((receipt) => receipt.model), ["primary", "backup"]);
 });
 
 test("autonomous runtime isolates a model timeout and retries a healthy sibling on the same provider", async () => {

@@ -162,6 +162,16 @@ capability-gated, prompts and mission plans are bounded, and external effects re
 approval. `BrainEpisodicMemory` provides optional restart-safe, hash-chained metadata memory.
 Automatic task runs derive bounded digest-only task facets for related-lesson retrieval, never
 persisting task text; explicit evaluator rewards remain the only learning authority.
+Adaptive provider, native tool-loop, and mission-proposal calls compile a
+`bioprism-autonomous-model-continuation/0.1` plan from the first selection. It keeps the complete
+bounded eligible ladder in deterministic order, records candidate metadata digests, and separates
+model-scoped timeout recovery from provider-scoped failures. A provider outage may skip several
+sibling arms without spending multiple failover transitions. `BrainRunResult.continuation_plan`
+exposes the plan, failover receipts include its digest, and
+`create_model_continuation_state()`, `advance_model_continuation_state()`, and
+`complete_model_continuation_state()` provide a digest-fenced restart cursor. Health updates still
+inform later runs but cannot silently reorder the current run; task text, prompts, credentials,
+arguments, evaluator bodies, and provider responses remain transient.
 `AutonomousGoalLedger` adds the restart-safe objective layer above that memory: bounded attempts,
 criterion/evidence digests, blockers, optimistic revisions, and a hash-chained lifecycle work for
 every built-in domain without retaining goal text or provider payloads.

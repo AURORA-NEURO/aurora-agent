@@ -1257,14 +1257,20 @@ approval pause or successful model turn.
 
 `AutonomousRuntime.invoke()` performs bounded provider failover when a selected provider returns a
 retryable `ProviderRuntimeError`: transport, circuit, and provider HTTP failures remove that
-provider from the next ranking, while an isolated timeout removes only the timed-out model so a
-healthy sibling model on the same provider can be selected. Every retry is re-ranked against the
-remaining eligible arms and marked as a failover admission. The default
+provider from the compiled continuation ladder, while an isolated timeout removes only the timed-
+out model so a healthy sibling model on the same provider can be selected. The first selection
+compiles an immutable `continuation_plan` with the exact eligible order, per-candidate metadata
+digests, and failure scope. Later attempts consume that plan directly instead of silently
+re-running a selector after health changes. The default
 limit comes from `execution.policy.max_provider_failovers`; without an execution controller the
 default is zero, while callers can opt into a bounded standalone limit with
 `maxProviderFailovers`. Tool loops may fail over only before the first provider-issued tool call;
 after a tool request is observed, the runtime fails closed instead of replaying a potentially
-effectful loop.
+effectful loop. `createAutonomousModelContinuationState()`,
+`advanceAutonomousModelContinuationState()`, and
+`completeAutonomousModelContinuationState()` provide the content-addressed cursor for a worker
+that needs to persist and resume this metadata-only decision without reselecting. The plan and
+cursor contain no task text, prompts, credentials, arguments, or provider responses.
 
 `runAutonomousCrossDomainDecisionCycle()` composes the corresponding fan-out/fan-in path. It can
 semantically review an ambiguous task, requires a cross-domain route with at least two reviewed

@@ -54,6 +54,12 @@ from prism_sdk.brain import (
     BrainMissionResult,
     BrainToolLoopResult,
     build_brain_evaluation_input,
+    build_model_continuation_plan,
+    create_model_continuation_state,
+    validate_model_continuation_plan,
+    validate_model_continuation_state,
+    advance_model_continuation_state,
+    complete_model_continuation_state,
     MissionToolAuthorizer,
 )
 from prism_sdk import (
@@ -977,6 +983,85 @@ class LlmRuntimeTests(unittest.TestCase):
         self.assertEqual(attempt["provider_health_gate"], "provider_disabled")
         self.assertNotIn("openai-circuit-secret", json.dumps(result.to_dict()))
         self.assertNotIn("fallback-circuit-secret", json.dumps(result.to_dict()))
+        self.assertEqual(len(result.continuation_plan["plan_digest"]), 64)  # type: ignore[index]
+        self.assertEqual(
+            [step["model_id"] for step in result.continuation_plan["steps"]],  # type: ignore[index]
+            ["openai/primary", "openai/secondary", "fallback/backup"],
+        )
+
+    def test_model_continuation_plan_is_digest_bound_and_failure_scoped(self) -> None:
+        candidates = [
+            {
+                "provider": "ladder",
+                "model": "primary",
+                "context_window_tokens": 8_000,
+                "max_output_tokens": 256,
+                "quality": 0.99,
+                "latency_ms": 10,
+                "cost_per_million_tokens": 1,
+                "reliability": 0.99,
+                "enabled": True,
+            },
+            {
+                "provider": "ladder",
+                "model": "sibling",
+                "context_window_tokens": 8_000,
+                "max_output_tokens": 256,
+                "quality": 0.8,
+                "latency_ms": 20,
+                "cost_per_million_tokens": 2,
+                "reliability": 0.9,
+                "enabled": True,
+            },
+            {
+                "provider": "backup",
+                "model": "last",
+                "context_window_tokens": 8_000,
+                "max_output_tokens": 256,
+                "quality": 0.7,
+                "latency_ms": 30,
+                "cost_per_million_tokens": 3,
+                "reliability": 0.8,
+                "enabled": True,
+            },
+        ]
+        selection = {
+            "selected_model": {"provider": "ladder", "model": "primary"},
+            "decision_digest": "a" * 64,
+            "ranking": [
+                {"model_id": "ladder/primary", "eligible": True},
+                {"model_id": "ladder/sibling", "eligible": True},
+                {"model_id": "backup/last", "eligible": True},
+            ],
+        }
+        plan = build_model_continuation_plan(selection, candidates, max_failovers=1)
+        validate_model_continuation_plan(plan)
+        self.assertEqual([step["model_id"] for step in plan["steps"]], ["ladder/primary", "ladder/sibling", "backup/last"])
+        state = create_model_continuation_state(plan)
+        validate_model_continuation_state(plan, state)
+        after_timeout = advance_model_continuation_state(
+            plan,
+            state,
+            provider="ladder",
+            model="primary",
+            failure_scope="model",
+            failure_code="timeout",
+        )
+        validate_model_continuation_state(plan, after_timeout)
+        self.assertEqual(after_timeout["next_step_index"], 1)
+        self.assertEqual(after_timeout["excluded_models"], ["ladder/primary"])
+        completed = complete_model_continuation_state(
+            plan,
+            after_timeout,
+            provider="ladder",
+            model="sibling",
+            status_code=200,
+        )
+        self.assertEqual(completed["status"], "completed")
+        tampered = dict(plan)
+        tampered["steps"] = [dict(plan["steps"][0]), dict(plan["steps"][2]), dict(plan["steps"][1])]
+        with self.assertRaisesRegex(BrainRunError, "digest mismatch"):
+            validate_model_continuation_plan(tampered)
 
     def test_credential_session_groups_handles_and_revokes_on_expiry(self) -> None:
         store = CredentialStore()

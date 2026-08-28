@@ -6,6 +6,18 @@ import { AutonomousEffectReconciliationRequiredError } from "./autonomous-effect
 import type { AutonomousEffectBoundary } from "./autonomous-effects.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
+import {
+  advanceAutonomousModelContinuationState,
+  compileAutonomousModelContinuationPlan,
+  completeAutonomousModelContinuationState,
+  continuationSelectionDecision,
+  createAutonomousModelContinuationState,
+} from "./autonomous-continuation.js";
+import type {
+  AutonomousContinuationFailureScope,
+  AutonomousModelContinuationPlan,
+  AutonomousModelContinuationState,
+} from "./autonomous-continuation.js";
 
 /** Public schema for the cross-language, application-owned provider runtime. */
 export const LLM_RUNTIME_SCHEMA = "bioprism-typescript-llm-runtime/0.1" as const;
@@ -591,6 +603,10 @@ export interface AutonomousProviderFailoverProjection extends JsonObject {
   attempts: AutonomousProviderFailoverAttempt[];
   fallback_count: number;
   failover_digest: string;
+  /** Digest of the immutable fallback ladder used by this invocation. */
+  continuation_plan_digest?: string;
+  /** Bounded ladder metadata; never includes task, prompt, credentials, or response values. */
+  continuation_plan?: AutonomousModelContinuationPlan;
   retention: "metadata_only";
   secret_material: "never_returned";
 }
@@ -616,6 +632,7 @@ function boundedReceiptMetric(value: number): number {
 
 async function autonomousProviderInvocationProjection(
   samples: readonly AutonomousProviderInvocationSample[],
+  continuationPlan?: AutonomousModelContinuationPlan,
 ): Promise<{ providerInvocations: AutonomousProviderInvocationReceipt[]; providerFailover: AutonomousProviderFailoverProjection | null }> {
   const providerInvocations: AutonomousProviderInvocationReceipt[] = [];
   for (const sample of samples) {
@@ -684,7 +701,13 @@ async function autonomousProviderInvocationProjection(
       strategy: "deterministic_model_selector_with_provider_health_gating",
       attempts,
       fallback_count: fallbackCount,
-      failover_digest: await digestJson({ strategy: "deterministic_model_selector_with_provider_health_gating", attempts, fallback_count: fallbackCount }),
+      failover_digest: await digestJson({
+        strategy: "deterministic_model_selector_with_provider_health_gating",
+        attempts,
+        fallback_count: fallbackCount,
+        continuation_plan_digest: continuationPlan?.plan_digest ?? null,
+      }),
+      ...(continuationPlan ? { continuation_plan_digest: continuationPlan.plan_digest, continuation_plan: continuationPlan } : {}),
       retention: "metadata_only",
       secret_material: "never_returned",
     },
@@ -1019,6 +1042,8 @@ export interface AutonomousExecutionPlan {
 export interface AutonomousExecutionResult {
   selection: AutonomousSelectionDecision;
   response: ProviderResponse;
+  /** Exact bounded fallback ladder compiled from the first selection. */
+  continuation_plan: AutonomousModelContinuationPlan;
   /** Metadata-only receipt for every provider turn performed by this autonomous invocation. */
   provider_invocations: AutonomousProviderInvocationReceipt[];
   /** Present only when bounded provider/model failover was actually used. */
@@ -3375,6 +3400,30 @@ function modelFailoverAllowed(error: ProviderRuntimeError): boolean {
   return error.code === "timeout" && error.circuitOpen !== true;
 }
 
+async function emitContinuationSelectionTrace(
+  callback: AutonomousModelSelectionTraceEventCallback | undefined,
+  selection: AutonomousSelectionDecision,
+  plan: AutonomousModelContinuationPlan,
+  attempt: number,
+): Promise<void> {
+  if (!callback) return;
+  const selected = selection.selected_model;
+  const common = {
+    attempt,
+    failover: attempt > 1,
+    candidate_count: selection.ranking.length,
+    eligible_candidate_count: selection.ranking.filter((row) => row.eligible).length,
+    strategy: selection.strategy,
+    selected_provider: selected?.provider ?? null,
+    selected_model: selected?.model ?? null,
+    selection_digest: await digestJson(selection),
+    detail_digest: await digestJson({ continuation_plan_digest: plan.plan_digest, step_order: plan.steps.find((step) => step.provider === selected?.provider && step.model === selected?.model)?.order ?? null }),
+    failure_code: null,
+  } satisfies Omit<AutonomousModelSelectionTraceEvent, "phase" | "status">;
+  await callback({ ...common, phase: "model_selection_started", status: "running", selected_provider: null, selected_model: null, selection_digest: null });
+  await callback({ ...common, phase: "model_selection_finished", status: "selected" });
+}
+
 /**
  * Application-side composition for the autonomous brain boundary.
  *
@@ -3520,15 +3569,19 @@ export class AutonomousRuntime {
     } = {},
   ): Promise<AutonomousExecutionResult> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
-    const excludedProviders = new Set<string>();
-    const excludedModels = new Set<string>();
+    const initialSelection = await this.select(plan, { selectionEventCallback: options.selectionEventCallback, attempt: 1 });
+    if (!initialSelection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${initialSelection.abstention_reason ?? "no model"}`);
+    const continuationPlan = await compileAutonomousModelContinuationPlan(plan, initialSelection, { maxFailovers: maxProviderFailovers });
+    let continuationState: AutonomousModelContinuationState = await createAutonomousModelContinuationState(continuationPlan);
     const invocationSamples: AutonomousProviderInvocationSample[] = [];
     const executionId = options.execution?.state.execution_id ?? null;
-    let failovers = 0;
     while (true) {
-      const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels], selectionEventCallback: options.selectionEventCallback, attempt: failovers + 1 });
-      if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
-      const provider = selection.selected_model.provider;
+      const step = continuationPlan.steps[continuationState.next_step_index ?? -1];
+      if (!step) throw new ProviderRuntimeError("autonomous continuation has no next model");
+      const failovers = continuationState.failovers_used;
+      const selection = failovers === 0 ? initialSelection : continuationSelectionDecision(initialSelection, step);
+      if (failovers > 0) await emitContinuationSelectionTrace(options.selectionEventCallback, selection, continuationPlan, failovers + 1);
+      const provider = step.provider;
       const credential = options.credential ?? options.credentialFor?.(provider);
       const observer: ProviderInvocationObserver = {
         before: options.observer?.before,
@@ -3550,21 +3603,19 @@ export class AutonomousRuntime {
           }
         },
       };
-      const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === selection.selected_model!.model);
+      const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === step.model);
       const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
       const selectionDigest = await digestJson(selection);
       try {
-        const response = await this.llm.invoke(provider, { ...plan.request, model: selection.selected_model.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost });
-        const projection = await autonomousProviderInvocationProjection(invocationSamples);
-        return { selection, response, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover };
+        const response = await this.llm.invoke(provider, { ...plan.request, model: step.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost });
+        continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, statusCode: response.statusCode });
+        const projection = await autonomousProviderInvocationProjection(invocationSamples, continuationPlan);
+        return { selection, response, continuation_plan: continuationPlan, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover };
       } catch (error) {
         if (!(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
-        const modelId = `${provider}/${selection.selected_model.model}`;
-        if (modelFailoverAllowed(error)) excludedModels.add(modelId);
-        else excludedProviders.add(provider);
-        const anotherModelRemains = plan.candidates.some((candidate) => !excludedProviders.has(candidate.provider) && !excludedModels.has(`${candidate.provider}/${candidate.model}`));
-        if (!anotherModelRemains) throw error;
-        failovers += 1;
+        const failureScope: AutonomousContinuationFailureScope = modelFailoverAllowed(error) ? "model" : "provider";
+        continuationState = await advanceAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, failureScope, failureCode: error.code, statusCode: error.statusCode });
+        if (continuationState.status !== "ready") throw error;
       }
     }
   }
@@ -3588,18 +3639,22 @@ export class AutonomousRuntime {
       reserveCost?: AutonomousCostReservationCallback;
       toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
     },
-  ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult; provider_invocations: AutonomousProviderInvocationReceipt[]; provider_failover: AutonomousProviderFailoverProjection | null }> {
+  ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult; continuation_plan: AutonomousModelContinuationPlan; provider_invocations: AutonomousProviderInvocationReceipt[]; provider_failover: AutonomousProviderFailoverProjection | null }> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
-    const excludedProviders = new Set<string>();
-    const excludedModels = new Set<string>();
+    const initialSelection = await this.select(plan, { selectionEventCallback: options.selectionEventCallback, attempt: 1 });
+    if (!initialSelection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${initialSelection.abstention_reason ?? "no model"}`);
+    const continuationPlan = await compileAutonomousModelContinuationPlan(plan, initialSelection, { maxFailovers: maxProviderFailovers });
+    let continuationState: AutonomousModelContinuationState = await createAutonomousModelContinuationState(continuationPlan);
     const invocationSamples: AutonomousProviderInvocationSample[] = [];
     const executionId = options.execution?.state.execution_id ?? null;
-    let failovers = 0;
     let toolActivity = false;
     while (true) {
-      const selection = await this.select(plan, { excludedProviders: [...excludedProviders], excludedModels: [...excludedModels], selectionEventCallback: options.selectionEventCallback, attempt: failovers + 1 });
-      if (!selection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${selection.abstention_reason ?? "no model"}`);
-      const provider = selection.selected_model.provider;
+      const step = continuationPlan.steps[continuationState.next_step_index ?? -1];
+      if (!step) throw new ProviderRuntimeError("autonomous continuation has no next model");
+      const failovers = continuationState.failovers_used;
+      const selection = failovers === 0 ? initialSelection : continuationSelectionDecision(initialSelection, step);
+      if (failovers > 0) await emitContinuationSelectionTrace(options.selectionEventCallback, selection, continuationPlan, failovers + 1);
+      const provider = step.provider;
       const credential = options.credential ?? options.credentialFor?.(provider);
       const observer: ProviderInvocationObserver = {
         before: options.observer?.before,
@@ -3622,7 +3677,7 @@ export class AutonomousRuntime {
           }
         },
       };
-      const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === selection.selected_model!.model);
+      const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === step.model);
       const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
       const selectionDigest = await digestJson(selection);
       let invocationTurn = 0;
@@ -3631,7 +3686,7 @@ export class AutonomousRuntime {
         return options.authorizeAndExecute(calls);
       };
       try {
-        const loop = await this.llm.invokeToolLoop(provider, { ...plan.request, model: selection.selected_model.model }, {
+        const loop = await this.llm.invokeToolLoop(provider, { ...plan.request, model: step.model }, {
           credential,
           authorizeAndExecute,
           maxTurns: options.maxTurns,
@@ -3648,18 +3703,16 @@ export class AutonomousRuntime {
           costEstimator: (request) => estimatedProviderCostUnits(selectedCandidate, request),
           toolReadOnly: options.toolReadOnly,
         });
-        const projection = await autonomousProviderInvocationProjection(invocationSamples);
-        return { selection, loop, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover };
+        continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, statusCode: loop.finalResponse?.statusCode ?? null });
+        const projection = await autonomousProviderInvocationProjection(invocationSamples, continuationPlan);
+        return { selection, loop, continuation_plan: continuationPlan, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover };
       } catch (error) {
         // Replaying a loop after any provider-issued tool call could duplicate an effect. A
         // failover is therefore permitted only before the first tool request is observed.
         if (toolActivity || !(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) throw error;
-        const modelId = `${provider}/${selection.selected_model.model}`;
-        if (modelFailoverAllowed(error)) excludedModels.add(modelId);
-        else excludedProviders.add(provider);
-        const anotherModelRemains = plan.candidates.some((candidate) => !excludedProviders.has(candidate.provider) && !excludedModels.has(`${candidate.provider}/${candidate.model}`));
-        if (!anotherModelRemains) throw error;
-        failovers += 1;
+        const failureScope: AutonomousContinuationFailureScope = modelFailoverAllowed(error) ? "model" : "provider";
+        continuationState = await advanceAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, failureScope, failureCode: error.code, statusCode: error.statusCode });
+        if (continuationState.status !== "ready") throw error;
       }
     }
   }

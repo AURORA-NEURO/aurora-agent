@@ -173,6 +173,27 @@ export type {
 } from "./autonomous-execution-policy.js";
 export { parseSse } from "./sse.js";
 export {
+  AUTONOMOUS_MODEL_CONTINUATION_SCHEMA,
+  AUTONOMOUS_MODEL_CONTINUATION_STATE_SCHEMA,
+  MAX_AUTONOMOUS_MODEL_CONTINUATION_FAILOVERS,
+  MAX_AUTONOMOUS_MODEL_CONTINUATION_STEPS,
+  advanceAutonomousModelContinuationState,
+  compileAutonomousModelContinuationPlan,
+  completeAutonomousModelContinuationState,
+  continuationSelectionDecision,
+  createAutonomousModelContinuationState,
+  validateAutonomousModelContinuationPlan,
+  validateAutonomousModelContinuationState,
+} from "./autonomous-continuation.js";
+export type {
+  AutonomousContinuationFailureScope,
+  AutonomousContinuationStateStatus,
+  AutonomousModelContinuationAttempt,
+  AutonomousModelContinuationPlan,
+  AutonomousModelContinuationState,
+  AutonomousModelContinuationStep,
+} from "./autonomous-continuation.js";
+export {
   CREDENTIAL_ONBOARDING_SCHEMA,
   CREDENTIAL_PROVISIONING_SCHEMA,
   LLM_RUNTIME_SCHEMA,

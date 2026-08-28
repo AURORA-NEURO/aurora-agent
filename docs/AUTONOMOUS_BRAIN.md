@@ -162,6 +162,32 @@ review. Persisted evaluator quality remains separate from transport health and i
 a capped routing prior. No key, prompt, response, raw evaluator text, or hidden learner state is
 accepted by the selection policy contract.
 
+### Digest-bound model continuation
+
+Provider failover is compiled from the first completed selection into a bounded
+`bioprism-autonomous-model-continuation/0.1` artifact. The artifact retains the selected arm first,
+then the remaining eligible arms in their original deterministic ranking order, with a digest of
+each candidate's non-secret metadata and an explicit failure policy. It retains the complete
+bounded ladder rather than only `max_failovers + 1` rows: a provider-scoped outage can skip several
+models from that provider while consuming one failover transition. `maxProviderFailovers` in
+TypeScript and `max_provider_failovers` in Python limits transitions, not safe skips.
+
+An isolated timeout with a closed circuit excludes only the timed-out model; other retryable
+provider failures exclude the provider and all its sibling models. Non-retryable failures and
+tool activity remain terminal at the existing boundary. The runtime consumes the ladder directly
+after the first selection, so a provider-health update or caller selector cannot silently reorder
+the current run. TypeScript results expose `continuation_plan`; adaptive Python results expose the
+same projection on `BrainRunResult`, and failover receipts include its digest.
+
+The accompanying `bioprism-autonomous-model-continuation-state/0.1` cursor is independently
+content-addressed. `createAutonomousModelContinuationState`/`create_model_continuation_state` starts it,
+`advanceAutonomousModelContinuationState`/`advance_model_continuation_state` records a redacted
+failure and selects the next eligible step, and the completion helpers seal a successful terminal
+attempt. A restored cursor must match the original plan digest and its own state digest before it
+can advance; no cursor operation invokes a provider or rehydrates task text, prompts, credentials,
+arguments, or responses. This is a deterministic continuation/replay barrier, not distributed
+exactly-once delivery or a claim that a provider response is correct.
+
 ## Domain operating kits
 
 The SDK also exposes a digest-bound operating kit for every built-in domain. A kit composes the
@@ -5458,8 +5484,11 @@ provider/model labels, invocation kind, zero-based selection attempt and tool tu
 token counts, estimated and observed cost units, latency, status/failure metadata, selection and
 outcome digests, and an optional request-id digest. If a retryable failure causes a new selection,
 `provider_failover` contains the bounded attempt projection, fallback count, strategy label, and
-aggregate digest; it is `null` for a direct selection. Cross-domain high-level wrappers aggregate
-child and synthesis receipts while child results remain the authoritative per-domain records.
+aggregate digest; it is `null` for a direct selection. When failover is used, the projection also
+contains the digest-bound continuation ladder and final cursor digest. Cross-domain high-level
+wrappers aggregate child and synthesis receipts while child results remain the authoritative
+per-domain records. Python adaptive single-call, tool-loop, and mission paths use the same
+continuation contract before their existing approval/effect boundaries.
 
 This is transport and accounting evidence, not correctness evidence. Task text, prompts, response
 text, tool calls or arguments, credentials, authorization headers, and raw provider errors never

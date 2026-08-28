@@ -117,6 +117,10 @@ MAX_MODEL_SELECTION_AUDIT_RANKING = 64
 MAX_MODEL_SELECTION_AUDIT_INPUT_RANKING = 512
 MAX_MODEL_SELECTION_AUDIT_REASON_BYTES = 512
 MODEL_SELECTION_AUDIT_SCHEMA = "bioprism-brain-selection-audit/0.1"
+MODEL_CONTINUATION_SCHEMA = "bioprism-autonomous-model-continuation/0.1"
+MODEL_CONTINUATION_STATE_SCHEMA = "bioprism-autonomous-model-continuation-state/0.1"
+MAX_MODEL_CONTINUATION_FAILOVERS = 8
+MAX_MODEL_CONTINUATION_STEPS = MAX_MODEL_CONTINUATION_FAILOVERS + 1
 BRAIN_EVALUATOR_REPLAY_SCHEMA = "bioprism-brain-evaluator-replay/0.1"
 BRAIN_EVALUATOR_MESH_SCHEMA = "bioprism-python-autonomous-evaluator-mesh/0.1"
 AUTONOMOUS_EVALUATOR_MESH_SCHEMA = BRAIN_EVALUATOR_MESH_SCHEMA
@@ -1428,6 +1432,7 @@ class BrainRunResult:
     outcome_digest: str
     provider_failover: Mapping[str, Any] | None = None
     provider_invocations: tuple[Mapping[str, Any], ...] = ()
+    continuation_plan: Mapping[str, Any] | None = None
     # Optional structural feedback for the opt-in autonomous domain response contract.  The
     # provider response remains caller-owned; this field contains only value-only evaluation
     # metadata and is omitted from legacy projections when unused.
@@ -1465,6 +1470,7 @@ class BrainRunResult:
             "outcome_digest": self.outcome_digest,
             "provider_failover": None if self.provider_failover is None else dict(self.provider_failover),
             "provider_invocations": [dict(receipt) for receipt in self.provider_invocations],
+            "continuation_plan": None if self.continuation_plan is None else dict(self.continuation_plan),
             "credential_posture": "handle_only_not_serialized",
             "execution": "provider_call_only",
             "tool_execution": "not_started",
@@ -2087,6 +2093,371 @@ def _selection_attempt_metadata(audit: Mapping[str, Any]) -> dict[str, Any]:
         "eligible_count": eligibility.get("eligible_count") if isinstance(eligibility, Mapping) else None,
         "selected_exploration_bonus": exploration.get("selected_bonus") if isinstance(exploration, Mapping) else None,
     }
+
+
+def _continuation_identifier(value: Any, *, field: str, maximum: int) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > maximum
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise BrainRunError(f"{field} is outside its continuation bounds")
+    return value
+
+
+def _continuation_candidate_digest(candidate: Mapping[str, Any]) -> str:
+    return _json_digest(
+        {
+            "provider": candidate.get("provider"),
+            "model": candidate.get("model"),
+            "capabilities": sorted(candidate.get("capabilities", [])),
+            "context_window_tokens": candidate.get("context_window_tokens"),
+            "max_output_tokens": candidate.get("max_output_tokens"),
+            "quality": candidate.get("quality"),
+            "latency_ms": candidate.get("latency_ms"),
+            "cost_per_million_tokens": candidate.get("cost_per_million_tokens"),
+            "reliability": candidate.get("reliability"),
+            "requires_credential": candidate.get("requires_credential"),
+            "enabled": candidate.get("enabled", True),
+        }
+    )
+
+
+def build_model_continuation_plan(
+    selection: Mapping[str, Any],
+    model_candidates: Sequence[Mapping[str, Any]],
+    *,
+    max_failovers: int = 0,
+) -> dict[str, Any]:
+    """Compile a fixed, metadata-only model fallback ladder from one selection decision.
+
+    Adaptive execution may still update transport health after a failure, but it must not let
+    that update silently reorder the current run. The returned plan and its cursor are safe to
+    persist across a worker restart; task text, prompts, credentials, and provider responses are
+    deliberately excluded.
+    """
+
+    if not isinstance(selection, Mapping):
+        raise BrainRunError("model continuation selection must be a mapping")
+    if (
+        not isinstance(max_failovers, int)
+        or isinstance(max_failovers, bool)
+        or not 0 <= max_failovers <= MAX_MODEL_CONTINUATION_FAILOVERS
+    ):
+        raise BrainRunError(
+            f"model continuation max_failovers must be within [0, {MAX_MODEL_CONTINUATION_FAILOVERS}]"
+        )
+    selected_model = selection.get("selected_model")
+    if not isinstance(selected_model, Mapping):
+        raise BrainRunError("model continuation requires a selected model")
+    selected_provider = _continuation_identifier(
+        selected_model.get("provider"), field="selected provider", maximum=256
+    )
+    selected_name = _continuation_identifier(
+        selected_model.get("model"), field="selected model", maximum=512
+    )
+    selected_id = f"{selected_provider}/{selected_name}"
+    if not isinstance(model_candidates, Sequence) or isinstance(model_candidates, (str, bytes)):
+        raise BrainRunError("model continuation candidates must be a sequence")
+    candidates: dict[str, Mapping[str, Any]] = {}
+    for candidate in model_candidates:
+        if not isinstance(candidate, Mapping):
+            raise BrainRunError("model continuation candidates must contain mappings")
+        provider = _continuation_identifier(
+            candidate.get("provider"), field="continuation candidate provider", maximum=256
+        )
+        model = _continuation_identifier(
+            candidate.get("model"), field="continuation candidate model", maximum=512
+        )
+        arm_id = f"{provider}/{model}"
+        if arm_id in candidates:
+            raise BrainRunError(f"model continuation contains duplicate model {arm_id}")
+        candidates[arm_id] = candidate
+    if selected_id not in candidates:
+        raise BrainRunError("selected model is absent from model continuation candidates")
+
+    ranking = selection.get("ranking", [])
+    if not isinstance(ranking, Sequence) or isinstance(ranking, (str, bytes)):
+        raise BrainRunError("model continuation selection ranking must be a sequence")
+    eligible: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    selected_ranked = False
+    if len(ranking) == 0:
+        # Older caller-owned workspaces may return a selected_model without a ranking. Preserve
+        # compatibility while making the fallback order explicit and deterministic from the
+        # already-admitted candidate sequence.
+        ranking = [
+            {
+                "model_id": f"{candidate.get('provider')}/{candidate.get('model')}",
+                "eligible": candidate.get("enabled", True) is True,
+            }
+            for candidate in model_candidates
+            if isinstance(candidate, Mapping)
+        ]
+        # Some older workspace adapters return an authoritative selected_model but mark their
+        # catalogue row disabled because readiness was evaluated outside the adapter. Preserve
+        # that explicit selection as the first step; it is still bounded by the supplied model
+        # candidate identity and never grants a new provider or credential.
+        if not any(row.get("model_id") == selected_id and row.get("eligible") is True for row in ranking):
+            ranking.insert(0, {"model_id": selected_id, "eligible": True})
+    for ranking_index, row in enumerate(ranking):
+        if not isinstance(row, Mapping) or row.get("eligible") is not True:
+            continue
+        model_id = row.get("model_id")
+        if not isinstance(model_id, str) or "/" not in model_id:
+            provider = row.get("provider")
+            model = row.get("model")
+            if isinstance(provider, str) and isinstance(model, str):
+                model_id = f"{provider}/{model}"
+        if not isinstance(model_id, str) or model_id in seen or model_id not in candidates:
+            continue
+        seen.add(model_id)
+        eligible.append((model_id, ranking_index))
+        selected_ranked = selected_ranked or model_id == selected_id
+    if not selected_ranked:
+        raise BrainRunError("selected model is not eligible in the continuation ranking")
+
+    ordered_ids = [selected_id] + [model_id for model_id, _ in eligible]
+    ranking_indices = {model_id: index for model_id, index in eligible}
+    steps: list[dict[str, Any]] = []
+    for model_id in ordered_ids:
+        if model_id not in candidates or model_id in {step["model_id"] for step in steps}:
+            continue
+        # Retain the whole bounded ladder: a provider-scoped outage may skip several sibling
+        # arms while consuming only one failover transition.
+        if len(steps) >= MAX_MODEL_CONTINUATION_STEPS:
+            break
+        provider, model = model_id.split("/", 1)
+        steps.append(
+            {
+                "order": len(steps),
+                "provider": provider,
+                "model": model,
+                "model_id": model_id,
+                "candidate_digest": _continuation_candidate_digest(candidates[model_id]),
+                "ranking_index": ranking_indices[model_id],
+                "failure_policy": {
+                    "timeout_with_closed_circuit": "exclude_model",
+                    "retryable_provider_error": "exclude_provider",
+                },
+            }
+        )
+    if not steps or steps[0]["model_id"] != selected_id:
+        raise BrainRunError("model continuation could not place the selected model first")
+    body = {
+        "schema": MODEL_CONTINUATION_SCHEMA,
+        "selection_digest": _json_digest(selection),
+        "strategy": "fixed_selection_snapshot",
+        "max_failovers": max_failovers,
+        "steps": steps,
+        "omitted_eligible_candidates": max(0, len(eligible) - len(steps)),
+        "retention": "selection_metadata_only_no_task_prompt_provider_payloads",
+        "secret_material": "never_returned",
+    }
+    return {**body, "plan_digest": _json_digest(body)}
+
+
+def _seal_model_continuation_state(body: Mapping[str, Any]) -> dict[str, Any]:
+    result = dict(body)
+    result["state_digest"] = _json_digest(body)
+    return result
+
+
+def create_model_continuation_state(plan: Mapping[str, Any]) -> dict[str, Any]:
+    validate_model_continuation_plan(plan)
+    return _seal_model_continuation_state(
+        {
+            "schema": MODEL_CONTINUATION_STATE_SCHEMA,
+            "plan_digest": plan["plan_digest"],
+            "next_step_index": 0,
+            "failovers_used": 0,
+            "excluded_providers": [],
+            "excluded_models": [],
+            "attempts": [],
+            "status": "ready",
+            "retention": "selection_metadata_only_no_task_prompt_provider_payloads",
+            "secret_material": "never_returned",
+        }
+    )
+
+
+def validate_model_continuation_plan(plan: Mapping[str, Any]) -> None:
+    if not isinstance(plan, Mapping) or plan.get("schema") != MODEL_CONTINUATION_SCHEMA:
+        raise BrainRunError("model continuation plan has an invalid schema")
+    plan_digest = plan.get("plan_digest")
+    if not _valid_digest(plan_digest):
+        raise BrainRunError("model continuation plan digest is malformed")
+    body = {key: value for key, value in plan.items() if key != "plan_digest"}
+    if _json_digest(body) != plan_digest:
+        raise BrainRunError("model continuation plan digest mismatch")
+    steps = plan.get("steps")
+    if not isinstance(steps, list) or not 0 < len(steps) <= MAX_MODEL_CONTINUATION_STEPS:
+        raise BrainRunError("model continuation plan steps are outside their bounds")
+    if plan.get("strategy") != "fixed_selection_snapshot":
+        raise BrainRunError("model continuation plan strategy is invalid")
+    if not _valid_digest(plan.get("selection_digest")):
+        raise BrainRunError("model continuation selection digest is malformed")
+    if (
+        not isinstance(plan.get("max_failovers"), int)
+        or isinstance(plan.get("max_failovers"), bool)
+        or not 0 <= plan["max_failovers"] <= MAX_MODEL_CONTINUATION_FAILOVERS
+    ):
+        raise BrainRunError("model continuation plan failover budget is invalid")
+    if (
+        not isinstance(plan.get("omitted_eligible_candidates"), int)
+        or isinstance(plan.get("omitted_eligible_candidates"), bool)
+        or plan["omitted_eligible_candidates"] < 0
+    ):
+        raise BrainRunError("model continuation omitted candidate count is invalid")
+    for index, step in enumerate(steps):
+        if not isinstance(step, Mapping) or step.get("order") != index:
+            raise BrainRunError("model continuation plan step ordering is invalid")
+        _continuation_identifier(step.get("provider"), field="continuation step provider", maximum=256)
+        _continuation_identifier(step.get("model"), field="continuation step model", maximum=512)
+        if step.get("model_id") != f"{step['provider']}/{step['model']}" or not _valid_digest(step.get("candidate_digest")):
+            raise BrainRunError("model continuation plan step identity is invalid")
+
+
+def _validate_model_continuation_state(
+    plan: Mapping[str, Any], state: Mapping[str, Any]
+) -> None:
+    validate_model_continuation_plan(plan)
+    if (
+        not isinstance(state, Mapping)
+        or state.get("schema") != MODEL_CONTINUATION_STATE_SCHEMA
+        or state.get("plan_digest") != plan.get("plan_digest")
+    ):
+        raise BrainRunError("model continuation state is not bound to the supplied plan")
+    state_digest = state.get("state_digest")
+    if not _valid_digest(state_digest):
+        raise BrainRunError("model continuation state digest is malformed")
+    body = {key: value for key, value in state.items() if key != "state_digest"}
+    if _json_digest(body) != state_digest:
+        raise BrainRunError("model continuation state digest mismatch")
+    failovers = state.get("failovers_used")
+    if not isinstance(failovers, int) or isinstance(failovers, bool) or not 0 <= failovers <= plan["max_failovers"]:
+        raise BrainRunError("model continuation state failover count is invalid")
+    if not isinstance(state.get("attempts"), list) or len(state["attempts"]) > MAX_MODEL_CONTINUATION_STEPS:
+        raise BrainRunError("model continuation state attempts are outside their bounds")
+    if state.get("status") not in {"ready", "completed", "exhausted"}:
+        raise BrainRunError("model continuation state status is invalid")
+    next_index = state.get("next_step_index")
+    if next_index is not None and (
+        not isinstance(next_index, int)
+        or isinstance(next_index, bool)
+        or not 0 <= next_index < len(plan["steps"])
+    ):
+        raise BrainRunError("model continuation state next step is invalid")
+    if not isinstance(state.get("excluded_providers"), list) or not isinstance(state.get("excluded_models"), list):
+        raise BrainRunError("model continuation state exclusions are invalid")
+
+
+def validate_model_continuation_state(
+    plan: Mapping[str, Any], state: Mapping[str, Any]
+) -> None:
+    """Validate a restored continuation cursor before accepting worker progress."""
+
+    _validate_model_continuation_state(plan, state)
+
+
+def advance_model_continuation_state(
+    plan: Mapping[str, Any],
+    state: Mapping[str, Any],
+    *,
+    provider: str,
+    model: str,
+    failure_scope: str,
+    failure_code: str | None = None,
+    status_code: int | None = None,
+) -> dict[str, Any]:
+    _validate_model_continuation_state(plan, state)
+    if state.get("status") != "ready" or not isinstance(state.get("next_step_index"), int):
+        raise BrainRunError("model continuation is not ready for another failure")
+    if state["failovers_used"] >= plan["max_failovers"]:
+        raise BrainRunError("model continuation failover budget is exhausted")
+    if failure_scope not in {"model", "provider"}:
+        raise BrainRunError("model continuation failure scope is invalid")
+    current = plan["steps"][state["next_step_index"]]
+    if current["provider"] != provider or current["model"] != model:
+        raise BrainRunError("model continuation failure does not match the current step")
+    excluded_providers = set(state.get("excluded_providers", []))
+    excluded_models = set(state.get("excluded_models", []))
+    if failure_scope == "provider":
+        excluded_providers.add(provider)
+    else:
+        excluded_models.add(current["model_id"])
+    if failure_code is not None:
+        _continuation_identifier(failure_code, field="continuation failure code", maximum=128)
+    attempts = [*state["attempts"], {
+        "order": current["order"],
+        "provider": provider,
+        "model": model,
+        "outcome": "failure",
+        "failure_scope": failure_scope,
+        "failure_code": failure_code,
+        "status_code": status_code,
+    }]
+    next_index = next(
+        (
+            index
+            for index, step in enumerate(plan["steps"])
+            if index > current["order"]
+            and step["provider"] not in excluded_providers
+            and step["model_id"] not in excluded_models
+        ),
+        None,
+    )
+    return _seal_model_continuation_state(
+        {
+            "schema": MODEL_CONTINUATION_STATE_SCHEMA,
+            "plan_digest": plan["plan_digest"],
+            "next_step_index": next_index,
+            "failovers_used": state["failovers_used"] + 1,
+            "excluded_providers": sorted(excluded_providers),
+            "excluded_models": sorted(excluded_models),
+            "attempts": attempts,
+            "status": "exhausted" if next_index is None else "ready",
+            "retention": "selection_metadata_only_no_task_prompt_provider_payloads",
+            "secret_material": "never_returned",
+        }
+    )
+
+
+def complete_model_continuation_state(
+    plan: Mapping[str, Any],
+    state: Mapping[str, Any],
+    *,
+    provider: str,
+    model: str,
+    status_code: int | None = None,
+) -> dict[str, Any]:
+    _validate_model_continuation_state(plan, state)
+    if state.get("status") != "ready" or not isinstance(state.get("next_step_index"), int):
+        raise BrainRunError("model continuation is not ready for completion")
+    current = plan["steps"][state["next_step_index"]]
+    if current["provider"] != provider or current["model"] != model:
+        raise BrainRunError("model continuation success does not match the current step")
+    body = {key: value for key, value in state.items() if key != "state_digest"}
+    body.update(
+        {
+            "next_step_index": None,
+            "attempts": [
+                *state["attempts"],
+                {
+                    "order": current["order"],
+                    "provider": provider,
+                    "model": model,
+                    "outcome": "success",
+                    "failure_scope": None,
+                    "failure_code": None,
+                    "status_code": status_code,
+                },
+            ],
+            "status": "completed",
+        }
+    )
+    return _seal_model_continuation_state(body)
 
 
 def _emit_model_selection_trace(
@@ -3736,21 +4107,22 @@ class AutonomousBrain:
             else contextual_observations
         )
         attempt_selection = dict(selection)
-        failed_ids: set[str] = set()
         failed_providers: set[str] = set()
         failover_attempts: list[dict[str, Any]] = []
         invocation_receipts: list[Mapping[str, Any]] = []
+        continuation_plan: dict[str, Any] | None = None
+        continuation_state: dict[str, Any] | None = None
         for attempt in range(max_provider_failovers + 1):
-            if attempt:
+            if continuation_plan is not None and continuation_state is not None:
+                next_index = continuation_state.get("next_step_index")
+                if not isinstance(next_index, int):
+                    raise BrainRunError("adaptive model continuation has no next step")
+                step = continuation_plan["steps"][next_index]
                 attempt_selection["models"] = [
                     {
                         **dict(candidate),
-                        "enabled": False
-                        if (
-                            f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
-                            or candidate.get("provider") in failed_providers
-                        )
-                        else candidate.get("enabled", True),
+                        "enabled": candidate.get("provider") == step["provider"]
+                        and candidate.get("model") == step["model"],
                     }
                     for candidate in selection.get("models", [])
                     if isinstance(candidate, Mapping)
@@ -3770,6 +4142,13 @@ class AutonomousBrain:
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
                 raise BrainRunError("adaptive selection returned malformed provider metadata")
+            if continuation_plan is None:
+                continuation_plan = build_model_continuation_plan(
+                    preview,
+                    [candidate for candidate in selection.get("models", []) if isinstance(candidate, Mapping)],
+                    max_failovers=max_provider_failovers,
+                )
+                continuation_state = create_model_continuation_state(continuation_plan)
             selected_id = f"{provider}/{model}"
             policy_observer = None
             if execution_controller is not None:
@@ -3806,8 +4185,16 @@ class AutonomousBrain:
                 )
                 if policy_observer is not None:
                     result = replace(result, provider_invocations=policy_observer.evidence())
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive model continuation was not initialized")
+                continuation_state = complete_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                )
                 if not failover_attempts:
-                    return result
+                    return replace(result, continuation_plan=continuation_plan)
                 invocation_receipts.extend(result.provider_invocations)
                 failover_attempts.append(
                     {
@@ -3825,14 +4212,17 @@ class AutonomousBrain:
                         "strategy": "deterministic_model_selector_with_provider_health_gating",
                         "attempts": list(failover_attempts),
                         "fallback_count": len(failover_attempts) - 1,
+                        "continuation_plan_digest": continuation_plan["plan_digest"],
+                        "continuation_plan": dict(continuation_plan),
+                        "continuation_state_digest": continuation_state["state_digest"],
                         "retention": "metadata_only",
                     },
                     provider_invocations=tuple(invocation_receipts),
+                    continuation_plan=continuation_plan,
                 )
             except ProviderError as error:
                 if policy_observer is not None:
                     invocation_receipts.extend(policy_observer.evidence())
-                failed_ids.add(selected_id)
                 health_after_failure = _refresh_failover_provider_health(
                     self.runtime,
                     attempt_selection,
@@ -3854,6 +4244,23 @@ class AutonomousBrain:
                     }
                 )
                 if attempt >= max_provider_failovers:
+                    raise
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive model continuation was not initialized")
+                continuation_state = advance_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                    failure_scope=(
+                        "model"
+                        if error.status_code == 408 and not error.circuit_open
+                        else "provider"
+                    ),
+                    failure_code="circuit_open" if error.circuit_open else "provider_error",
+                    status_code=error.status_code,
+                )
+                if continuation_state["status"] != "ready":
                     raise
         raise BrainRunError("adaptive provider failover exhausted")
 
@@ -3959,21 +4366,22 @@ class AutonomousBrain:
             else contextual_observations
         )
         attempt_selection = dict(selection)
-        failed_ids: set[str] = set()
         failed_providers: set[str] = set()
         failover_attempts: list[dict[str, Any]] = []
         invocation_receipts: list[Mapping[str, Any]] = []
+        continuation_plan: dict[str, Any] | None = None
+        continuation_state: dict[str, Any] | None = None
         for attempt in range(max_provider_failovers + 1):
-            if attempt:
+            if continuation_plan is not None and continuation_state is not None:
+                next_index = continuation_state.get("next_step_index")
+                if not isinstance(next_index, int):
+                    raise BrainRunError("adaptive tool-loop continuation has no next step")
+                step = continuation_plan["steps"][next_index]
                 attempt_selection["models"] = [
                     {
                         **dict(candidate),
-                        "enabled": False
-                        if (
-                            f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
-                            or candidate.get("provider") in failed_providers
-                        )
-                        else candidate.get("enabled", True),
+                        "enabled": candidate.get("provider") == step["provider"]
+                        and candidate.get("model") == step["model"],
                     }
                     for candidate in selection.get("models", [])
                     if isinstance(candidate, Mapping)
@@ -3993,6 +4401,13 @@ class AutonomousBrain:
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
                 raise BrainRunError("adaptive tool-loop selection returned malformed provider metadata")
+            if continuation_plan is None:
+                continuation_plan = build_model_continuation_plan(
+                    preview,
+                    [candidate for candidate in selection.get("models", []) if isinstance(candidate, Mapping)],
+                    max_failovers=max_provider_failovers,
+                )
+                continuation_state = create_model_continuation_state(continuation_plan)
             selected_id = f"{provider}/{model}"
             attempt_state: dict[str, Any] = {}
             attempt_options = dict(options)
@@ -4030,8 +4445,19 @@ class AutonomousBrain:
                             provider_invocations=policy_observer.evidence(),
                         ),
                     )
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive tool-loop continuation was not initialized")
+                continuation_state = complete_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                )
                 if not failover_attempts:
-                    return result
+                    return replace(
+                        result,
+                        brain_run=replace(result.brain_run, continuation_plan=continuation_plan),
+                    )
                 invocation_receipts.extend(result.brain_run.provider_invocations)
                 failover_attempts.append(
                     {
@@ -4051,9 +4477,13 @@ class AutonomousBrain:
                             "strategy": "deterministic_tool_loop_selector_before_side_effects",
                             "attempts": list(failover_attempts),
                             "fallback_count": len(failover_attempts) - 1,
+                            "continuation_plan_digest": continuation_plan["plan_digest"],
+                            "continuation_plan": dict(continuation_plan),
+                            "continuation_state_digest": continuation_state["state_digest"],
                             "retention": "metadata_only",
                         },
                         provider_invocations=tuple(invocation_receipts),
+                        continuation_plan=continuation_plan,
                     ),
                 )
             except ProviderError as error:
@@ -4061,7 +4491,6 @@ class AutonomousBrain:
                     raise
                 if policy_observer is not None:
                     invocation_receipts.extend(policy_observer.evidence())
-                failed_ids.add(selected_id)
                 health_after_failure = _refresh_failover_provider_health(
                     self.runtime,
                     attempt_selection,
@@ -4083,6 +4512,23 @@ class AutonomousBrain:
                     }
                 )
                 if attempt >= max_provider_failovers:
+                    raise
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive tool-loop continuation was not initialized")
+                continuation_state = advance_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                    failure_scope=(
+                        "model"
+                        if error.status_code == 408 and not error.circuit_open
+                        else "provider"
+                    ),
+                    failure_code="circuit_open" if error.circuit_open else "provider_error",
+                    status_code=error.status_code,
+                )
+                if continuation_state["status"] != "ready":
                     raise
         raise BrainRunError("adaptive tool-loop provider failover exhausted")
 
@@ -4178,21 +4624,22 @@ class AutonomousBrain:
             else contextual_observations
         )
         attempt_selection = dict(selection)
-        failed_ids: set[str] = set()
         failed_providers: set[str] = set()
         failover_attempts: list[dict[str, Any]] = []
         invocation_receipts: list[Mapping[str, Any]] = []
+        continuation_plan: dict[str, Any] | None = None
+        continuation_state: dict[str, Any] | None = None
         for attempt in range(max_provider_failovers + 1):
-            if attempt:
+            if continuation_plan is not None and continuation_state is not None:
+                next_index = continuation_state.get("next_step_index")
+                if not isinstance(next_index, int):
+                    raise BrainRunError("adaptive mission continuation has no next step")
+                step = continuation_plan["steps"][next_index]
                 attempt_selection["models"] = [
                     {
                         **dict(candidate),
-                        "enabled": False
-                        if (
-                            f"{candidate.get('provider')}/{candidate.get('model')}" in failed_ids
-                            or candidate.get("provider") in failed_providers
-                        )
-                        else candidate.get("enabled", True),
+                        "enabled": candidate.get("provider") == step["provider"]
+                        and candidate.get("model") == step["model"],
                     }
                     for candidate in selection.get("models", [])
                     if isinstance(candidate, Mapping)
@@ -4212,6 +4659,13 @@ class AutonomousBrain:
             model = selected.get("model")
             if not isinstance(provider, str) or not isinstance(model, str):
                 raise BrainRunError("adaptive mission selection returned malformed provider metadata")
+            if continuation_plan is None:
+                continuation_plan = build_model_continuation_plan(
+                    preview,
+                    [candidate for candidate in selection.get("models", []) if isinstance(candidate, Mapping)],
+                    max_failovers=max_provider_failovers,
+                )
+                continuation_state = create_model_continuation_state(continuation_plan)
             selected_id = f"{provider}/{model}"
             attempt_state: dict[str, Any] = {}
             policy_observer = None
@@ -4266,8 +4720,19 @@ class AutonomousBrain:
                             provider_invocations=policy_observer.evidence(),
                         ),
                     )
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive mission continuation was not initialized")
+                continuation_state = complete_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                )
                 if not failover_attempts:
-                    return result
+                    return replace(
+                        result,
+                        brain_run=replace(result.brain_run, continuation_plan=continuation_plan),
+                    )
                 invocation_receipts.extend(result.brain_run.provider_invocations)
                 failover_attempts.append(
                     {
@@ -4287,9 +4752,13 @@ class AutonomousBrain:
                             "strategy": "deterministic_mission_selector_before_dispatch",
                             "attempts": list(failover_attempts),
                             "fallback_count": len(failover_attempts) - 1,
+                            "continuation_plan_digest": continuation_plan["plan_digest"],
+                            "continuation_plan": dict(continuation_plan),
+                            "continuation_state_digest": continuation_state["state_digest"],
                             "retention": "metadata_only",
                         },
                         provider_invocations=tuple(invocation_receipts),
+                        continuation_plan=continuation_plan,
                     ),
                 )
             except ProviderError as error:
@@ -4297,7 +4766,6 @@ class AutonomousBrain:
                     raise
                 if policy_observer is not None:
                     invocation_receipts.extend(policy_observer.evidence())
-                failed_ids.add(selected_id)
                 health_after_failure = _refresh_failover_provider_health(
                     self.runtime,
                     attempt_selection,
@@ -4319,6 +4787,23 @@ class AutonomousBrain:
                     }
                 )
                 if attempt >= max_provider_failovers:
+                    raise
+                if continuation_plan is None or continuation_state is None:
+                    raise BrainRunError("adaptive mission continuation was not initialized")
+                continuation_state = advance_model_continuation_state(
+                    continuation_plan,
+                    continuation_state,
+                    provider=provider,
+                    model=model,
+                    failure_scope=(
+                        "model"
+                        if error.status_code == 408 and not error.circuit_open
+                        else "provider"
+                    ),
+                    failure_code="circuit_open" if error.circuit_open else "provider_error",
+                    status_code=error.status_code,
+                )
+                if continuation_state["status"] != "ready":
                     raise
         raise BrainRunError("adaptive mission provider failover exhausted")
 
@@ -7157,6 +7642,8 @@ class AutonomousBrain:
         response: ProviderResponse | None,
         *,
         provider_invocations: Sequence[Mapping[str, Any]] = (),
+        continuation_plan: Mapping[str, Any] | None = None,
+        provider_failover: Mapping[str, Any] | None = None,
     ) -> BrainRunResult:
         digest_input = {
             "status": status,
@@ -7184,7 +7671,9 @@ class AutonomousBrain:
             plan=plan,
             response=response,
             outcome_digest=hashlib.sha256(encoded).hexdigest(),
+            provider_failover=None if provider_failover is None else dict(provider_failover),
             provider_invocations=tuple(dict(receipt) for receipt in provider_invocations),
+            continuation_plan=None if continuation_plan is None else dict(continuation_plan),
         )
 
 
