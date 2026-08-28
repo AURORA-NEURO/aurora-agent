@@ -126,6 +126,25 @@ test("joint execution policy refuses impossible work and rejects forged evaluato
   assert.throws(() => validateAutonomousJointExecutionPolicyState({ ...state, generation: 1 }), /digest/);
 });
 
+test("joint execution policy accepts negative evaluator credit for failure learning", () => {
+  const policy = new AutonomousJointExecutionPolicy();
+  const decision = policy.select({ requested_domains: ["coding"] }, [candidate("negative-arm", "coding")]);
+  const settlement = policy.settle(decision, {
+    settlement_id: "negative-settlement",
+    arm_id: "negative-arm",
+    decision_digest: decision.decision_digest,
+    outcome_digest: digest("d"),
+    reward: -1,
+    passed: false,
+    evaluator_id: "domain-evaluator",
+    evaluator_version: "2026.08",
+  });
+  assert.equal(settlement.reward, -1);
+  const state = validateAutonomousJointExecutionPolicyState(policy.snapshot());
+  assert.equal(state.arms[0].reward_sum, -1);
+  assert.equal(state.arms[0].last_reward, -1);
+});
+
 test("brain facade composes route admission with joint execution policy before dispatch", async () => {
   const facade = new AutonomousBrainFacade({
     agent: {

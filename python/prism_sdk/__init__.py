@@ -820,6 +820,8 @@ from .autonomous_execution_policy import (
     AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_SETTLEMENTS,
     AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_ITEMS,
     AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_BYTES,
+    AUTONOMOUS_JOINT_EXECUTION_POLICY_MIN_REWARD,
+    AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_REWARD,
     AutonomousJointExecutionPolicyCandidate,
     AutonomousJointExecutionPolicyContext,
     AutonomousJointExecutionPolicyArmState,

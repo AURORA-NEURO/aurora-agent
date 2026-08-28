@@ -26,6 +26,11 @@ policy does not create those arms and does not execute them.
    and pass state. Only then does `settle` update the arm posterior. Reusing a settlement ID with
    identical credit is idempotent; conflicting reuse is rejected.
 
+Evaluator rewards are bounded to `[-1, 1]`, so a reviewer can express both positive evidence and
+explicit negative evidence. Negative credit is accumulated in the value-only arm aggregate and is
+accepted by snapshot/decision validation; this lets later selection down-rank a repeatedly poor
+provider or route without treating transport failure as an automatic reward.
+
 ## State and safety
 
 The persisted state contains only arm counts, bounded reward aggregates, outcome digests, and

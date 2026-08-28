@@ -133,6 +133,26 @@ def test_joint_execution_policy_refuses_impossible_work_and_rejects_forgery() ->
         validate_autonomous_execution_policy_state(forged)
 
 
+def test_joint_execution_policy_accepts_negative_evaluator_credit_for_failure_learning() -> None:
+    policy = AutonomousExecutionPolicy()
+    decision = policy.select({"requested_domains": ["coding"]}, [_candidate("negative-arm", "coding")])
+    settlement = policy.settle(
+        decision,
+        settlement_id="negative-settlement",
+        arm_id="negative-arm",
+        decision_digest=decision.decision_digest,
+        outcome_digest=_digest("d"),
+        reward=-1,
+        passed=False,
+        evaluator_id="domain-evaluator",
+        evaluator_version="2026.08",
+    )
+    assert settlement.reward == -1
+    state = validate_autonomous_execution_policy_state(policy.snapshot())
+    assert state.arms[0].reward_sum == -1
+    assert state.arms[0].last_reward == -1
+
+
 def test_brain_composes_route_admission_with_joint_policy_without_provider_dispatch() -> None:
     brain = AutonomousBrain(object(), LLMRuntime())
     result = brain.select_execution_policy(

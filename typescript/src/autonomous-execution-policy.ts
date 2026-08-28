@@ -20,6 +20,8 @@ export const AUTONOMOUS_EXECUTION_POLICY_MAX_ARMS = 512;
 export const AUTONOMOUS_EXECUTION_POLICY_MAX_SETTLEMENTS = 4_096;
 export const AUTONOMOUS_EXECUTION_POLICY_MAX_ITEMS = 32;
 export const AUTONOMOUS_EXECUTION_POLICY_MAX_BYTES = 8_000_000;
+export const AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD = -1;
+export const AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD = 1;
 
 const DOMAINS = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"] as const;
 const DIGEST = /^[0-9a-f]{64}$/;
@@ -281,8 +283,8 @@ function state(value: AutonomousExecutionPolicyState): AutonomousExecutionPolicy
     const armId = identifier("state arm_id", raw.arm_id);
     const pulls = integer("state arm pulls", raw.pulls, 0, 2_147_483_647);
     const failures = integer("state arm failures", raw.failures, 0, pulls);
-    const rewardSum = finite("state arm reward_sum", raw.reward_sum, 0, pulls);
-    const lastReward = raw.last_reward === null ? null : finite("state arm last_reward", raw.last_reward, 0, 1);
+    const rewardSum = finite("state arm reward_sum", raw.reward_sum, AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD * pulls, AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD * pulls);
+    const lastReward = raw.last_reward === null ? null : finite("state arm last_reward", raw.last_reward, AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD, AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD);
     const lastOutcome = digest("state arm last_outcome_digest", raw.last_outcome_digest ?? null, true);
     const lastGeneration = integer("state arm last_generation", raw.last_generation, 0, generation);
     return { arm_id: armId, pulls, failures, reward_sum: rewardSum, last_reward: lastReward, last_outcome_digest: lastOutcome, last_generation: lastGeneration } as AutonomousExecutionPolicyArmState;
@@ -291,7 +293,7 @@ function state(value: AutonomousExecutionPolicyState): AutonomousExecutionPolicy
   if (!Array.isArray(value.settlements) || value.settlements.length > AUTONOMOUS_EXECUTION_POLICY_MAX_SETTLEMENTS) fail("state settlements exceed capacity");
   const settlements = value.settlements.map((raw) => {
     if (!isObject(raw)) fail("state settlement is malformed");
-    return { settlement_id: identifier("state settlement_id", raw.settlement_id), arm_id: identifier("state settlement arm_id", raw.arm_id), outcome_digest: digest("state settlement outcome_digest", raw.outcome_digest)! , reward: finite("state settlement reward", raw.reward, 0, 1), passed: bool("state settlement passed", raw.passed), evaluator_id: identifier("state settlement evaluator_id", raw.evaluator_id, 128), evaluator_version: identifier("state settlement evaluator_version", raw.evaluator_version, 128) } as AutonomousExecutionPolicySettlementRecord;
+    return { settlement_id: identifier("state settlement_id", raw.settlement_id), arm_id: identifier("state settlement arm_id", raw.arm_id), outcome_digest: digest("state settlement outcome_digest", raw.outcome_digest)! , reward: finite("state settlement reward", raw.reward, AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD, AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD), passed: bool("state settlement passed", raw.passed), evaluator_id: identifier("state settlement evaluator_id", raw.evaluator_id, 128), evaluator_version: identifier("state settlement evaluator_version", raw.evaluator_version, 128) } as AutonomousExecutionPolicySettlementRecord;
   });
   if (new Set(settlements.map((item) => item.settlement_id)).size !== settlements.length) fail("state contains duplicate settlements");
   const normalized = { schema: AUTONOMOUS_EXECUTION_POLICY_STATE_SCHEMA, generation, previous_state_digest: previousStateDigest, arms: arms.sort((a, b) => a.arm_id.localeCompare(b.arm_id)), settlements, retention: value.retention, secret_material: value.secret_material, state_digest: value.state_digest } as AutonomousExecutionPolicyState;
@@ -327,7 +329,7 @@ function validateDecision(value: AutonomousExecutionPolicyDecision): AutonomousE
     if (row.exploitation !== null) finite("decision ranking exploitation", row.exploitation, -2, 2);
     if (row.exploration_bonus !== null) finite("decision ranking exploration_bonus", row.exploration_bonus, 0, 2);
     if (row.confidence !== null) finite("decision ranking confidence", row.confidence, 0, 1);
-    if (row.mean_reward !== null) finite("decision ranking mean_reward", row.mean_reward, 0, 1);
+    if (row.mean_reward !== null) finite("decision ranking mean_reward", row.mean_reward, AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD, AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD);
     finite("decision ranking preferred_capability_match", row.preferred_capability_match, 0, 1);
     items("decision ranking reasons", row.reasons);
     items("decision ranking review_reasons", row.review_reasons);
@@ -423,7 +425,7 @@ export class AutonomousExecutionPolicy {
     const outcomeDigest = digest("settlement outcome_digest", input.outcome_digest)!;
     const decisionDigest = digest("settlement decision_digest", input.decision_digest)!;
     if (decisionDigest !== checked.decision_digest) fail("settlement decision_digest does not match the decision");
-    const reward = finite("settlement reward", input.reward, 0, 1);
+    const reward = finite("settlement reward", input.reward, AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD, AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD);
     const passed = bool("settlement passed", input.passed);
     const evaluatorId = identifier("settlement evaluator_id", input.evaluator_id, 128);
     const evaluatorVersion = identifier("settlement evaluator_version", input.evaluator_version, 128);
@@ -470,6 +472,8 @@ export const AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_ARMS = AUTONOMOUS_EXECUTION_P
 export const AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_SETTLEMENTS = AUTONOMOUS_EXECUTION_POLICY_MAX_SETTLEMENTS;
 export const AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_ITEMS = AUTONOMOUS_EXECUTION_POLICY_MAX_ITEMS;
 export const AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_BYTES = AUTONOMOUS_EXECUTION_POLICY_MAX_BYTES;
+export const AUTONOMOUS_JOINT_EXECUTION_POLICY_MIN_REWARD = AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD;
+export const AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_REWARD = AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD;
 export { AutonomousExecutionPolicy as AutonomousJointExecutionPolicy };
 export function selectAutonomousJointExecutionPolicy(contextValue: AutonomousExecutionPolicyContextInput, candidates: readonly AutonomousExecutionPolicyCandidateInput[], options: { state?: AutonomousExecutionPolicyState | JsonObject; exploration?: number } = {}): AutonomousExecutionPolicyDecision {
   return selectAutonomousExecutionPolicy(contextValue, candidates, options);

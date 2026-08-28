@@ -28,6 +28,8 @@ AUTONOMOUS_EXECUTION_POLICY_MAX_ARMS = 512
 AUTONOMOUS_EXECUTION_POLICY_MAX_SETTLEMENTS = 4096
 AUTONOMOUS_EXECUTION_POLICY_MAX_ITEMS = 32
 AUTONOMOUS_EXECUTION_POLICY_MAX_BYTES = 8_000_000
+AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD = -1.0
+AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD = 1.0
 _RETENTION = "value_only_policy_metadata;task_prompt_response_tool_and_credential_values_not_retained"
 _STATE_RETENTION = "value_only_policy_state;task_prompt_response_tool_and_credential_values_not_retained"
 _SECRET_MATERIAL = "never_returned"
@@ -273,8 +275,8 @@ class AutonomousExecutionPolicyState:
             arm_id = _identifier("state arm_id", raw.get("arm_id"))
             pulls = _integer("state arm pulls", raw.get("pulls"), 0, 2_147_483_647)
             failures = _integer("state arm failures", raw.get("failures"), 0, pulls)
-            reward_sum = _finite("state arm reward_sum", raw.get("reward_sum"), 0, pulls)
-            last_reward = None if raw.get("last_reward") is None else _finite("state arm last_reward", raw.get("last_reward"), 0, 1)
+            reward_sum = _finite("state arm reward_sum", raw.get("reward_sum"), AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD * pulls, AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD * pulls)
+            last_reward = None if raw.get("last_reward") is None else _finite("state arm last_reward", raw.get("last_reward"), AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD, AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD)
             last_outcome = _digest("state arm last_outcome_digest", raw.get("last_outcome_digest"), allow_none=True)
             last_generation = _integer("state arm last_generation", raw.get("last_generation"), 0, generation)
             arms.append(AutonomousExecutionPolicyArmState(arm_id, pulls, failures, reward_sum, last_reward, last_outcome, last_generation))
@@ -284,7 +286,7 @@ class AutonomousExecutionPolicyState:
         for raw in raw_settlements:
             if not isinstance(raw, Mapping):
                 _fail("state settlement is malformed")
-            settlements.append(AutonomousExecutionPolicySettlementRecord(_identifier("state settlement_id", raw.get("settlement_id")), _identifier("state settlement arm_id", raw.get("arm_id")), _digest("state settlement outcome_digest", raw.get("outcome_digest")) or "", _finite("state settlement reward", raw.get("reward"), 0, 1), _boolean("state settlement passed", raw.get("passed")), _identifier("state settlement evaluator_id", raw.get("evaluator_id"), 128), _identifier("state settlement evaluator_version", raw.get("evaluator_version"), 128)))
+            settlements.append(AutonomousExecutionPolicySettlementRecord(_identifier("state settlement_id", raw.get("settlement_id")), _identifier("state settlement arm_id", raw.get("arm_id")), _digest("state settlement outcome_digest", raw.get("outcome_digest")) or "", _finite("state settlement reward", raw.get("reward"), AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD, AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD), _boolean("state settlement passed", raw.get("passed")), _identifier("state settlement evaluator_id", raw.get("evaluator_id"), 128), _identifier("state settlement evaluator_version", raw.get("evaluator_version"), 128)))
         if len({item.settlement_id for item in settlements}) != len(settlements):
             _fail("state contains duplicate settlements")
         result = cls(generation, previous_state_digest, tuple(sorted(arms, key=lambda item: item.arm_id)), tuple(settlements))
@@ -362,7 +364,7 @@ class AutonomousExecutionPolicyDecision:
             if domain not in AUTONOMOUS_EXECUTION_POLICY_DOMAINS or path not in AUTONOMOUS_EXECUTION_POLICY_PATHS:
                 _fail("decision ranking domain or path is invalid")
             arm_id = _identifier("decision ranking arm_id", raw.get("arm_id"))
-            rankings.append(AutonomousExecutionPolicyRanking(arm_id, domain, path, _digest("decision ranking candidate_digest", raw.get("candidate_digest")) or "", _boolean("decision ranking eligible", raw.get("eligible")), None if raw.get("score") is None else _finite("decision ranking score", raw.get("score"), -2, 2), None if raw.get("exploitation") is None else _finite("decision ranking exploitation", raw.get("exploitation"), -2, 2), None if raw.get("exploration_bonus") is None else _finite("decision ranking exploration_bonus", raw.get("exploration_bonus"), 0, 2), None if raw.get("confidence") is None else _finite("decision ranking confidence", raw.get("confidence"), 0, 1), None if raw.get("mean_reward") is None else _finite("decision ranking mean_reward", raw.get("mean_reward"), 0, 1), _finite("decision ranking preferred_capability_match", raw.get("preferred_capability_match"), 0, 1), _items("decision ranking reasons", raw.get("reasons", ())), _items("decision ranking review_reasons", raw.get("review_reasons", ()))))
+            rankings.append(AutonomousExecutionPolicyRanking(arm_id, domain, path, _digest("decision ranking candidate_digest", raw.get("candidate_digest")) or "", _boolean("decision ranking eligible", raw.get("eligible")), None if raw.get("score") is None else _finite("decision ranking score", raw.get("score"), -2, 2), None if raw.get("exploitation") is None else _finite("decision ranking exploitation", raw.get("exploitation"), -2, 2), None if raw.get("exploration_bonus") is None else _finite("decision ranking exploration_bonus", raw.get("exploration_bonus"), 0, 2), None if raw.get("confidence") is None else _finite("decision ranking confidence", raw.get("confidence"), 0, 1), None if raw.get("mean_reward") is None else _finite("decision ranking mean_reward", raw.get("mean_reward"), AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD, AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD), _finite("decision ranking preferred_capability_match", raw.get("preferred_capability_match"), 0, 1), _items("decision ranking reasons", raw.get("reasons", ())), _items("decision ranking review_reasons", raw.get("review_reasons", ()))))
         if len({row.arm_id for row in rankings}) != len(rankings):
             _fail("decision rankings contain duplicate arm IDs")
         result = cls(context, _integer("decision policy_generation", value.get("policy_generation"), 0, 2_147_483_647), _integer("decision total_pulls", value.get("total_pulls"), 0, 2_147_483_647), value.get("posture"), None if value.get("selected_arm_id") is None else _identifier("decision selected_arm_id", value.get("selected_arm_id")), selected, tuple(rankings), _items("decision review_reasons", value.get("review_reasons", ())), _items("decision refusal_reasons", value.get("refusal_reasons", ())))
@@ -489,7 +491,7 @@ class AutonomousExecutionPolicy:
         outcome_digest = _digest("settlement outcome_digest", outcome_digest) or ""
         if _digest("settlement decision_digest", decision_digest) != checked.decision_digest:
             _fail("settlement decision_digest does not match the decision")
-        reward = _finite("settlement reward", reward, 0, 1)
+        reward = _finite("settlement reward", reward, AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD, AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD)
         passed = _boolean("settlement passed", passed)
         evaluator_id = _identifier("settlement evaluator_id", evaluator_id, 128)
         evaluator_version = _identifier("settlement evaluator_version", evaluator_version, 128)
@@ -541,6 +543,8 @@ AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_ARMS = AUTONOMOUS_EXECUTION_POLICY_MAX_ARM
 AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_SETTLEMENTS = AUTONOMOUS_EXECUTION_POLICY_MAX_SETTLEMENTS
 AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_ITEMS = AUTONOMOUS_EXECUTION_POLICY_MAX_ITEMS
 AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_BYTES = AUTONOMOUS_EXECUTION_POLICY_MAX_BYTES
+AUTONOMOUS_JOINT_EXECUTION_POLICY_MIN_REWARD = AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD
+AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_REWARD = AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD
 AutonomousJointExecutionPolicyCandidate = AutonomousExecutionPolicyCandidate
 AutonomousJointExecutionPolicyContext = AutonomousExecutionPolicyContext
 AutonomousJointExecutionPolicyArmState = AutonomousExecutionPolicyArmState
@@ -567,6 +571,8 @@ __all__ = [
     "AUTONOMOUS_EXECUTION_POLICY_MAX_SETTLEMENTS",
     "AUTONOMOUS_EXECUTION_POLICY_MAX_ITEMS",
     "AUTONOMOUS_EXECUTION_POLICY_MAX_BYTES",
+    "AUTONOMOUS_EXECUTION_POLICY_MIN_REWARD",
+    "AUTONOMOUS_EXECUTION_POLICY_MAX_REWARD",
     "AutonomousExecutionPolicyCandidate",
     "AutonomousExecutionPolicyContext",
     "AutonomousExecutionPolicyArmState",
@@ -590,6 +596,8 @@ __all__ = [
     "AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_SETTLEMENTS",
     "AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_ITEMS",
     "AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_BYTES",
+    "AUTONOMOUS_JOINT_EXECUTION_POLICY_MIN_REWARD",
+    "AUTONOMOUS_JOINT_EXECUTION_POLICY_MAX_REWARD",
     "AutonomousJointExecutionPolicyCandidate",
     "AutonomousJointExecutionPolicyContext",
     "AutonomousJointExecutionPolicyArmState",
