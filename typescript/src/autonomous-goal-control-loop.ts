@@ -507,15 +507,29 @@ export class AutonomousGoalControlLoop {
     run_id?: string;
     resume_snapshot?: AutonomousGoalControlLoopCheckpoint | null;
     checkpoint?: (snapshot: AutonomousGoalControlLoopCheckpoint) => unknown | Promise<unknown>;
+    expected_preview_digest?: string;
   } = {}): Promise<AutonomousGoalControlLoopResult> {
     if (options.schedule_options !== undefined && !isObject(options.schedule_options)) fail("schedule_options must be an object");
     if (options.options_factory !== undefined && typeof options.options_factory !== "function") fail("options_factory must be callable or undefined");
     if (options.run_id !== undefined && typeof options.run_id !== "string") fail("run_id must be a string or undefined");
     if (options.resume_snapshot !== undefined && options.resume_snapshot !== null && !isObject(options.resume_snapshot)) fail("resume_snapshot must be an object or null");
     if (options.checkpoint !== undefined && typeof options.checkpoint !== "function") fail("checkpoint must be callable or undefined");
+    if (options.expected_preview_digest !== undefined) digest("expected_preview_digest", options.expected_preview_digest);
     const maxCycles = integer("max_cycles", options.max_cycles ?? AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES, 1, AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES);
     const maxTotalRuns = integer("max_total_runs", options.max_total_runs ?? AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS, 1, AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS);
     const baseOptions = options.schedule_options ? { ...options.schedule_options } : {};
+    if (options.expected_preview_digest !== undefined) {
+      if (options.options_factory !== undefined) fail("expected_preview_digest cannot be combined with options_factory");
+      if (options.resume_snapshot !== undefined && options.resume_snapshot !== null) fail("expected_preview_digest cannot be combined with resume_snapshot");
+      const previewOptions = { ...baseOptions };
+      const requestedSelected = integer("schedule_options.max_selected", previewOptions.max_selected ?? 1, 1, 128);
+      const effectiveSelected = Math.min(requestedSelected, maxTotalRuns);
+      previewOptions.max_selected = effectiveSelected;
+      const requestedConcurrent = integer("schedule_options.max_concurrent", previewOptions.max_concurrent ?? effectiveSelected, 1, 128);
+      previewOptions.max_concurrent = Math.min(requestedConcurrent, effectiveSelected);
+      const currentPreview = this.preview({ schedule_options: previewOptions });
+      if (currentPreview.preview_digest !== options.expected_preview_digest) fail("expected_preview_digest does not match the current admission preview");
+    }
     const cycles: AutonomousGoalControlLoopCycle[] = [];
     const history: JsonObject[] = [];
     let previous: AutonomousGoalControlLoopCycleJSON | null = null;

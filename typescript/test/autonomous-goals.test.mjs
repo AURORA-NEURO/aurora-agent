@@ -135,6 +135,35 @@ test("goal control loop preview reports terminal and retry-policy-blocked states
   assert.equal(blocked.reason_counts.retry_budget_exhausted, 1);
 });
 
+test("goal control loop requires an unchanged preview before dispatch", async () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: 2, clock: () => 250 });
+  ledger.create({ goal_id: "preview-bound-a", task_digest: goalTaskDigest("private preview bound a"), domain: "coding", now_ns: 0 });
+  const calls = { resolve: 0, execute: 0 };
+  const loop = new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({
+      ledger,
+      resolver: (goal) => {
+        calls.resolve += 1;
+        return { task: `private preview bound ${goal.goal_id.at(-1)}` };
+      },
+      executor: () => { calls.execute += 1; return { status: "completed" }; },
+    }),
+  });
+  const schedule_options = { now_ns: 250, max_selected: 1, max_concurrent: 1 };
+  const preview = loop.preview({ schedule_options });
+  ledger.create({ goal_id: "preview-bound-b", task_digest: goalTaskDigest("private preview bound b"), domain: "science", now_ns: 0 });
+  await assert.rejects(() => loop.run({ schedule_options, max_total_runs: 1, expected_preview_digest: preview.preview_digest }), /expected_preview_digest/);
+  assert.deepEqual(calls, { resolve: 0, execute: 0 });
+
+  const result = await loop.run({
+    schedule_options,
+    max_total_runs: 1,
+    expected_preview_digest: loop.preview({ schedule_options }).preview_digest,
+  });
+  assert.equal(result.stop_reason, "run_budget_exhausted");
+  assert.deepEqual(calls, { resolve: 1, execute: 1 });
+});
+
 test("goal scheduler enforces cycles, budgets, retry policy, and stale claims", () => {
   const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: 8, clock: () => 20 });
   ledger.create({ goal_id: "base", task_digest: goalTaskDigest("base task"), domain: "coding", now_ns: 0 });

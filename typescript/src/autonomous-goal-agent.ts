@@ -84,6 +84,7 @@ export interface AutonomousGoalAgentLoopRunOptions {
   run_id?: string;
   resume_snapshot?: AutonomousGoalControlLoopCheckpoint | null;
   checkpoint?: (snapshot: AutonomousGoalControlLoopCheckpoint) => unknown | Promise<unknown>;
+  expected_preview_digest?: string;
 }
 
 export interface AutonomousGoalAgentTraceOptions extends Omit<AutonomousGoalAgentLoopRunOptions, "run_id"> {
@@ -400,6 +401,7 @@ export class AutonomousGoalAgentRuntime {
 
   run(options: AutonomousGoalAgentLoopRunOptions = {}): Promise<AutonomousGoalControlLoopResult> {
     if (this.recovery === undefined) return this.loop.run(options);
+    if (options.expected_preview_digest !== undefined) fail("expected_preview_digest cannot be combined with recovery-owned resume");
     if (options.checkpoint !== undefined) fail("checkpoint is owned by the recovery coordinator");
     return this.recovery.resume(this.loop, {
       ...options,

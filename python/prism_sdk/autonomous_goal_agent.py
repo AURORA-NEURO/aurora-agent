@@ -453,8 +453,11 @@ class AutonomousGoalAgentRuntime:
         run_id: str | None = None,
         resume_snapshot: Mapping[str, Any] | None = None,
         checkpoint: GoalLoopCheckpoint | None = None,
+        expected_preview_digest: str | None = None,
     ) -> AutonomousGoalControlLoopResult:
         if self.recovery is not None:
+            if expected_preview_digest is not None:
+                _fail("expected_preview_digest cannot be combined with recovery-owned resume")
             if checkpoint is not None:
                 _fail("checkpoint is owned by the recovery coordinator")
             if resume_snapshot is not None:
@@ -468,6 +471,7 @@ class AutonomousGoalAgentRuntime:
                     "max_total_runs": max_total_runs,
                     "run_id": run_id,
                     "checkpoint": self.recovery.checkpoint,
+                    "expected_preview_digest": expected_preview_digest,
                 },
             )
         return self.loop.run(
@@ -478,6 +482,7 @@ class AutonomousGoalAgentRuntime:
             run_id=run_id,
             resume_snapshot=resume_snapshot,
             checkpoint=checkpoint,
+            expected_preview_digest=expected_preview_digest,
         )
 
     def preview(self, *, schedule_options: Mapping[str, Any] | None = None) -> AutonomousGoalControlLoopPreview:
@@ -497,6 +502,7 @@ class AutonomousGoalAgentRuntime:
         max_total_runs: int = 8_192,
         resume_snapshot: Mapping[str, Any] | None = None,
         checkpoint: GoalLoopCheckpoint | None = None,
+        expected_preview_digest: str | None = None,
     ) -> AutonomousGoalAgentTracedRunResult:
         if not all(callable(getattr(trace_store, name, None)) for name in ("append", "events")):
             _fail("run_with_trace requires a trace store")
@@ -547,6 +553,7 @@ class AutonomousGoalAgentRuntime:
                 run_id=run_id,
                 resume_snapshot=resume_snapshot,
                 checkpoint=checkpoint,
+                expected_preview_digest=expected_preview_digest,
             )
             session.record(
                 phase="learning_prepared",

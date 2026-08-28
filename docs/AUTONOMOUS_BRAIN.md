@@ -13133,3 +13133,12 @@ tool arguments, evidence, evaluator prose, and live results remain absent. The p
 explanation and not an authorization: a later `run()` still repeats scheduling and optimistic
 claim validation against the current ledger revision, so a concurrent writer or policy change
 cannot turn a stale preview into execution authority.
+
+Deployments that need an explicit operator-confirmation fence can pass the returned
+`preview_digest` back as `expected_preview_digest` to `run()`. The loop recomputes the preview
+from the current ledger and the effective first-cycle selection/concurrency budgets before any
+task resolver or claim is reached. A newly created goal, lifecycle transition, dependency
+change, policy change, learner-state change, or schedule change produces a different digest and
+the call fails closed. This guard is intentionally limited to a fixed schedule policy: dynamic
+`options_factory` policies and recovery-owned resume snapshots cannot be combined with it because
+their effective decision is not fully represented by the static preview.

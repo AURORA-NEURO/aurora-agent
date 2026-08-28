@@ -17104,6 +17104,7 @@ class AutonomousAgent:
         options_factory: Callable[[Any], Mapping[str, Any]] | None = None,
         max_cycles: int = 128,
         max_total_runs: int = 8_192,
+        expected_preview_digest: str | None = None,
     ) -> Any:
         """Run bounded long-horizon goals through the facade-backed autonomous control loop."""
 
@@ -17122,6 +17123,7 @@ class AutonomousAgent:
             options_factory=options_factory,
             max_cycles=max_cycles,
             max_total_runs=max_total_runs,
+            expected_preview_digest=expected_preview_digest,
         )
 
     def preview_goal_control_loop(

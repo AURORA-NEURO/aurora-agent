@@ -532,6 +532,7 @@ class AutonomousGoalControlLoop:
         run_id: str | None = None,
         resume_snapshot: Mapping[str, Any] | None = None,
         checkpoint: GoalLoopCheckpoint | None = None,
+        expected_preview_digest: str | None = None,
     ) -> AutonomousGoalControlLoopResult:
         if schedule_options is not None and not isinstance(schedule_options, Mapping):
             _fail("schedule_options must be a mapping or None")
@@ -543,9 +544,25 @@ class AutonomousGoalControlLoop:
             _fail("resume_snapshot must be a mapping or None")
         if checkpoint is not None and not callable(checkpoint):
             _fail("checkpoint must be callable or None")
+        if expected_preview_digest is not None:
+            _digest(expected_preview_digest, name="expected_preview_digest")
         max_cycles = _integer(max_cycles, name="max_cycles", minimum=1, maximum=MAX_GOAL_CONTROL_LOOP_CYCLES)
         max_total_runs = _integer(max_total_runs, name="max_total_runs", minimum=1, maximum=MAX_GOAL_CONTROL_LOOP_RUNS)
         base_options = {} if schedule_options is None else dict(schedule_options)
+        if expected_preview_digest is not None:
+            if options_factory is not None:
+                _fail("expected_preview_digest cannot be combined with options_factory")
+            if resume_snapshot is not None:
+                _fail("expected_preview_digest cannot be combined with resume_snapshot")
+            preview_options = dict(base_options)
+            requested_selected = _integer(preview_options.get("max_selected", 1), name="schedule_options.max_selected", minimum=1, maximum=128)
+            effective_selected = min(requested_selected, max_total_runs)
+            preview_options["max_selected"] = effective_selected
+            requested_concurrent = _integer(preview_options.get("max_concurrent", effective_selected), name="schedule_options.max_concurrent", minimum=1, maximum=128)
+            preview_options["max_concurrent"] = min(requested_concurrent, effective_selected)
+            current_preview = self.preview(schedule_options=preview_options)
+            if current_preview.preview_digest != expected_preview_digest:
+                _fail("expected_preview_digest does not match the current admission preview")
         cycles: list[AutonomousGoalControlLoopCycle] = []
         history: list[dict[str, Any]] = []
         previous: dict[str, Any] | None = None

@@ -163,6 +163,42 @@ def test_goal_control_loop_preview_reports_terminal_and_policy_blocked_states() 
     assert blocked.reason_counts["retry_budget_exhausted"] == 1
 
 
+def test_goal_control_loop_requires_an_unchanged_preview_before_dispatch() -> None:
+    ledger = AutonomousGoalLedger(clock=lambda: 250, max_goals=2)
+    ledger.create(goal_id="preview-bound-a", task_digest=_digest("private preview bound a"), domain="coding", now_ns=0)
+    calls = {"resolve": 0, "execute": 0}
+
+    def resolve(goal, _row):
+        calls["resolve"] += 1
+        return {"task": f"private preview bound {goal.goal_id[-1]}"}
+
+    def execute(_request):
+        calls["execute"] += 1
+        return {"status": "completed"}
+
+    loop = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(
+            ledger,
+            resolver=resolve,
+            executor=execute,
+        )
+    )
+    schedule_options = {"now_ns": 250, "max_selected": 1, "max_concurrent": 1}
+    preview = loop.preview(schedule_options=schedule_options)
+    ledger.create(goal_id="preview-bound-b", task_digest=_digest("private preview bound b"), domain="science", now_ns=0)
+    with pytest.raises(AutonomousGoalError, match="expected_preview_digest"):
+        loop.run(schedule_options=schedule_options, max_total_runs=1, expected_preview_digest=preview.preview_digest)
+    assert calls == {"resolve": 0, "execute": 0}
+
+    result = loop.run(
+        schedule_options=schedule_options,
+        max_total_runs=1,
+        expected_preview_digest=loop.preview(schedule_options=schedule_options).preview_digest,
+    )
+    assert result.stop_reason == "run_budget_exhausted"
+    assert calls == {"resolve": 1, "execute": 1}
+
+
 def test_goal_scheduler_enforces_budgets_cycles_retries_and_stale_claims(tmp_path: Path) -> None:
     with AutonomousGoalLedger(str(tmp_path / "scheduler-claim.sqlite3"), clock=lambda: 20, max_goals=8) as ledger:
         ledger.create(goal_id="base", task_digest=_digest("base task"), domain="coding", now_ns=0)
