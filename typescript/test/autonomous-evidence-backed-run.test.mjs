@@ -6,6 +6,7 @@ import {
   AutonomousAgent,
   AutonomousBrainFacade,
   AutonomousEvidenceAdapterRegistry,
+  InMemoryAutonomousEvidenceBackedCheckpointStore,
   AutonomousEvidenceReadinessPolicy,
   CredentialStore,
   LLMRuntime,
@@ -137,6 +138,32 @@ test("evidence-backed execution composes approved acquisition, transient evidenc
     assert.equal(result.toJSON().secret_material, "never_returned");
     assert.doesNotMatch(JSON.stringify(result.toJSON()), /transient-evidence-claim/);
     assert.match(result.run.response.text, /reviewed evidence/);
+  }
+  assert.equal(calls.evidence, expectedEvidenceCalls);
+  assert.equal(calls.provider, AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
+test("brain facade exposes reviewed evidence execution across every built-in domain", async () => {
+  const { agent, registry, calls } = await setup();
+  const brain = new AutonomousBrainFacade({ agent });
+  let expectedEvidenceCalls = 0;
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const plan = await agent.evidencePlan([domain]);
+    expectedEvidenceCalls += plan.requirements.length;
+    const result = await brain.runWithReviewedEvidence(`Facade evidence review for ${domain}.`, {
+      registry,
+      ...evidenceOptions(plan),
+      promptBuilder: ({ values }) => [{
+        id: "facade-transient-evidence",
+        content: JSON.stringify({ claim: Object.values(values)[0]?.claim }),
+        required: true,
+        priority: 970,
+      }],
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.evidence?.status, "completed", domain);
+    assert.equal(result.run?.status, "completed", domain);
+    assert.doesNotMatch(JSON.stringify(result.toJSON()), /transient-evidence-claim/);
   }
   assert.equal(calls.evidence, expectedEvidenceCalls);
   assert.equal(calls.provider, AUTONOMOUS_DOMAIN_NAMES.length);
@@ -318,6 +345,78 @@ test("launch admission gates evidence acquisition before source dispatch across 
   assert.equal(catalogueFixture.calls.provider, 0);
 });
 
+test("brain facade launch admission gates evidence before source work and preserves resumable checkpoints", async () => {
+  const { agent, registry, calls } = await setup();
+  const brain = new AutonomousBrainFacade({ agent });
+  const admission = await launchAdmissionFor(agent);
+  const plan = await agent.evidencePlan(["coding"]);
+  const held = await brain.runWithReviewedEvidenceWithLaunchAdmission(
+    "Launch-admitted facade evidence review.",
+    admission,
+    { registry, ...evidenceOptions(plan, { approveProviderCall: false }) },
+  );
+  assert.equal(held.status, "approval_required");
+  assert.equal(held.evidence?.status, "completed");
+  assert.equal(held.run?.status, "approval_required");
+  assert.equal(calls.provider, 0);
+
+  const sourceCallsBeforeRefusal = calls.evidence;
+  await assert.rejects(
+    brain.runWithReviewedEvidenceWithLaunchAdmission(
+      "Reject provider-assisted routing after launch admission.",
+      admission,
+      {
+        registry,
+        ...evidenceOptions(plan),
+        run: { ...evidenceOptions(plan).run, semanticRouting: true },
+      },
+    ),
+    /provider-free routing/,
+  );
+  assert.equal(calls.evidence, sourceCallsBeforeRefusal);
+
+  const checkpoints = [];
+  const resumable = await brain.runWithReviewedEvidenceResumable(
+    "Restart-safe facade evidence review.",
+    {
+      registry,
+      ...evidenceOptions(plan),
+      jobId: "facade-evidence-resume",
+      checkpointSink: (checkpoint) => checkpoints.push(checkpoint),
+    },
+  );
+  assert.equal(resumable.status, "completed");
+  assert.ok(checkpoints.length >= 2);
+  assert.equal(checkpoints.at(-1).status, "completed");
+  assert.doesNotMatch(JSON.stringify(resumable.toJSON()), /transient-evidence-claim/);
+
+  const controller = brain.createEvidenceBackedController(
+    "facade-evidence-controller",
+    new InMemoryAutonomousEvidenceBackedCheckpointStore(),
+  );
+  assert.equal(controller.projection().status, "empty");
+  const controlled = await controller.run("Controller-owned facade evidence review.", { registry, ...evidenceOptions(plan) });
+  assert.equal(controlled.run.status, "completed");
+  assert.equal(controlled.controller.status, "completed");
+  assert.equal(controlled.controller.secret_material, "never_returned");
+
+  const heldResumable = await assert.rejects(
+    brain.runWithReviewedEvidenceResumableWithLaunchAdmission(
+      "Reject resumable provider-assisted routing before dispatch.",
+      admission,
+      {
+        registry,
+        ...evidenceOptions(plan),
+        jobId: "facade-evidence-held-resume",
+        checkpointSink: () => undefined,
+        run: { ...evidenceOptions(plan).run, semanticRouting: true },
+      },
+    ),
+    /provider-free routing/,
+  );
+  assert.equal(heldResumable, undefined);
+});
+
 async function catalogueSetup() {
   const profiles = await builtinAutonomousDomainProfiles();
   const sourceProfiles = builtinAutonomousDomainEvidenceSourceProfiles();
@@ -360,6 +459,34 @@ async function catalogueSetup() {
   }
   return { agent, catalogue, calls };
 }
+
+test("brain facade exposes catalogue evidence execution across every built-in domain", async () => {
+  const { agent, catalogue, calls } = await catalogueSetup();
+  const brain = new AutonomousBrainFacade({ agent });
+  const sourceProfiles = builtinAutonomousDomainEvidenceSourceProfiles();
+  let expectedEvidenceCalls = 0;
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const profile = sourceProfiles.find((candidate) => candidate.domain === domain);
+    expectedEvidenceCalls += (await agent.evidencePlan([domain])).requirements.length;
+    const result = await brain.runWithDomainEvidenceCatalogue(`Facade catalogue review for ${domain}.`, {
+      catalogue,
+      domains: [domain],
+      prepare: { profileId: profile.profile_id, quorum: 1 },
+      execute: { approveSourceDispatch: true },
+      run: {
+        domain,
+        candidates: [{ ...model(), provider: "catalogue-provider", model: "catalogue-model" }],
+        approveProviderCall: true,
+      },
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.prepared.every((item) => item.result?.toJSON().status === "consensus"), true, domain);
+    assert.equal(result.run?.status, "completed", domain);
+    assert.doesNotMatch(JSON.stringify(result.toJSON()), /catalogue-transient-evidence/);
+  }
+  assert.equal(calls.evidence, expectedEvidenceCalls);
+  assert.equal(calls.provider, AUTONOMOUS_DOMAIN_NAMES.length);
+});
 
 test("catalogue-backed brain composes normalizers, reconciliation, model selection, and prompting for every domain", async () => {
   const { agent, catalogue, calls } = await catalogueSetup();

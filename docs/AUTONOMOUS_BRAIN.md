@@ -30,6 +30,32 @@ flowchart LR
     BU --> MS
 ```
 
+## Evidence-first application boundary
+
+The application-facing TypeScript `AutonomousBrainFacade` exposes the complete evidence-first
+lifecycle instead of forcing callers to drop down to `AutonomousAgent`. `runWithReviewedEvidence`
+executes typed source adapters after explicit source approval, projects only the caller-selected
+transient values into the provider prompt, and keeps evidence acceptance separate from provider
+approval. `runWithDomainEvidenceCatalogue` provides the same boundary for a digest-bound source
+catalogue with per-requirement normalizer and reconciliation metadata. Both paths support domain,
+cross-domain, and automatic provider handoffs while preserving the reviewed evidence scope.
+
+The launch-admitted variants authorize the complete declared domain set before source dispatch and
+reject provider-assisted semantic routing at the admission boundary. This means an admission
+record cannot be used to smuggle a new provider-selected route into an already-reviewed source
+operation. Provider calls, source adapters, prompt value projection, external effects, and
+credentials remain caller-owned authorities; a successful source run is never treated as provider
+or task-level success.
+
+For workers that can be interrupted, `runWithReviewedEvidenceResumable` and
+`runWithReviewedEvidenceResumableWithLaunchAdmission` compose the evidence-backed checkpoint
+protocol. Checkpoints contain task/request/policy and source/provider digests only. A
+`provider_pending` checkpoint requires an explicit provider resume decision or a caller-supplied
+rehydrator whose result matches the stored digest, and `createEvidenceBackedController` adds
+serialized operations plus optional compare-and-swap persistence for a stable job identity. The
+serialized projections never contain evidence values, prompts, provider responses, credentials,
+or source payloads.
+
 ## Domain execution policies
 
 Every built-in domain now has a versioned, provider-free execution policy in both SDKs. The

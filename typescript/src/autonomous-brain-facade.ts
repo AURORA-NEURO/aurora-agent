@@ -15,6 +15,8 @@ import {
   type AutonomousDomainName,
   type AutonomousAutoRunOptions,
   type AutonomousAutoRunResult,
+  type AutonomousEvidenceBackedRunOptions,
+  type AutonomousEvidenceBackedRunResult,
   type AutonomousPromptChunk,
   type AutonomousRouteProposal,
   type AutonomousRunOptions,
@@ -44,6 +46,17 @@ import {
   type AutonomousConnectorMissionRunOptions as ConnectorMissionRunOptions,
   type AutonomousConnectorPlannedMissionRun as ConnectorPlannedMissionRun,
 } from "./autonomous-connector-mission.js";
+import {
+  AutonomousEvidenceBackedController,
+  runAutonomousEvidenceBackedResumable,
+  type AutonomousEvidenceBackedCheckpointStore,
+  type AutonomousEvidenceBackedResumableExecutionOptions,
+  type AutonomousEvidenceBackedResumableRun,
+} from "./autonomous-evidence-backed-resumable.js";
+import type {
+  AutonomousDomainEvidenceBrainRunOptions,
+  AutonomousDomainEvidenceBrainRunResult,
+} from "./autonomous-domain-evidence-brain.js";
 import {
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousCrossDomainReplanCycle,
@@ -470,6 +483,24 @@ export type AutonomousBrainConnectorMissionExecution = Awaited<ReturnType<typeof
 
 /** Two-phase connector mission result with a safe metadata-only JSON projection. */
 export type AutonomousBrainPlannedConnectorMission = ConnectorPlannedMissionRun;
+
+/** Reviewed adapter execution controls exposed by the application-facing brain facade. */
+export type AutonomousBrainEvidenceBackedRunOptions = AutonomousEvidenceBackedRunOptions;
+
+/** Evidence-backed execution result; raw evidence and provider values remain caller-owned. */
+export type AutonomousBrainEvidenceBackedRunResult = AutonomousEvidenceBackedRunResult;
+
+/** Source-catalogue execution controls exposed by the application-facing brain facade. */
+export type AutonomousBrainDomainEvidenceBrainRunOptions = AutonomousDomainEvidenceBrainRunOptions;
+
+/** Catalogue-backed execution result with a metadata-only serialized projection. */
+export type AutonomousBrainDomainEvidenceBrainRunResult = AutonomousDomainEvidenceBrainRunResult;
+
+/** Restart-safe evidence execution controls with caller-owned checkpoint persistence. */
+export type AutonomousBrainEvidenceBackedResumableExecutionOptions = AutonomousEvidenceBackedResumableExecutionOptions;
+
+/** Restart-safe evidence result; provider dispatch after a pending checkpoint remains explicit. */
+export type AutonomousBrainEvidenceBackedResumableRun = AutonomousEvidenceBackedResumableRun;
 
 /** Options for executing one caller-approved, digest-bound model-selection preview. */
 export interface AutonomousBrainApprovedSelectionOptions {
@@ -1629,6 +1660,84 @@ export class AutonomousBrainFacade {
     const validated = validateMissionForBrain(mission);
     if (options?.execution?.execute?.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted connector execution requires provider-free routing; admit semantic mission routing separately");
     return runAutonomousConnectorMissionWithProviderPlanningAndLaunchAdmission(this.agent, validated, admission, options);
+  }
+
+  /**
+   * Execute reviewed evidence acquisition before entering the ordinary provider boundary.
+   * Source dispatch, evidence acceptance, provider approval, and prompt value projection remain
+   * independent decisions; the facade only composes them and does not persist transient values.
+   */
+  async runWithReviewedEvidence(
+    task: string,
+    options: AutonomousBrainEvidenceBackedRunOptions,
+  ): Promise<AutonomousBrainEvidenceBackedRunResult> {
+    if (typeof this.agent.runWithReviewedEvidence !== "function") throw new ArgumentError("autonomous brain agent does not expose reviewed evidence execution");
+    return this.agent.runWithReviewedEvidence(task, options);
+  }
+
+  /**
+   * Execute the digest-bound source catalogue before provider invocation. Catalogue normalizers,
+   * source reconciliation, provider selection, and caller-owned prompt projection stay visible
+   * through the typed result while its JSON image remains metadata-only.
+   */
+  async runWithDomainEvidenceCatalogue(
+    task: string,
+    options: AutonomousBrainDomainEvidenceBrainRunOptions,
+  ): Promise<AutonomousBrainDomainEvidenceBrainRunResult> {
+    if (typeof this.agent.runWithDomainEvidenceCatalogue !== "function") throw new ArgumentError("autonomous brain agent does not expose domain evidence catalogue execution");
+    return this.agent.runWithDomainEvidenceCatalogue(task, options);
+  }
+
+  /** Run reviewed evidence only after a provider-free launch admission covers its full scope. */
+  async runWithReviewedEvidenceWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainEvidenceBackedRunOptions,
+  ): Promise<AutonomousBrainEvidenceBackedRunResult> {
+    const domains = options?.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    this.rejectLaunchAdmittedSemanticRouting(options?.run?.semanticRouting, "launch-admitted evidence execution requires provider-free routing; admit semantic routing separately before enabling it");
+    authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWithReviewedEvidence(task, options);
+  }
+
+  /** Run catalogue-backed evidence only after a provider-free launch admission covers its scope. */
+  async runWithDomainEvidenceCatalogueWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainDomainEvidenceBrainRunOptions,
+  ): Promise<AutonomousBrainDomainEvidenceBrainRunResult> {
+    const domains = options?.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    this.rejectLaunchAdmittedSemanticRouting(options?.run?.semanticRouting, "launch-admitted catalogue evidence execution requires provider-free routing; admit semantic routing separately before enabling it");
+    authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWithDomainEvidenceCatalogue(task, options);
+  }
+
+  /**
+   * Execute reviewed evidence through the restart-safe checkpoint protocol. A provider result is
+   * never replayed implicitly: recovery requires a caller rehydrator or an explicit resume flag.
+   */
+  async runWithReviewedEvidenceResumable(
+    task: string,
+    options: AutonomousBrainEvidenceBackedResumableExecutionOptions,
+  ): Promise<AutonomousBrainEvidenceBackedResumableRun> {
+    return runAutonomousEvidenceBackedResumable(this.agent, task, options);
+  }
+
+  /** Restart-safe reviewed evidence execution with launch admission rechecked before recovery. */
+  async runWithReviewedEvidenceResumableWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainEvidenceBackedResumableExecutionOptions,
+  ): Promise<AutonomousBrainEvidenceBackedResumableRun> {
+    const domains = options?.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    this.rejectLaunchAdmittedSemanticRouting(options?.run?.semanticRouting, "launch-admitted resumable evidence execution requires provider-free routing; admit semantic routing separately before enabling it");
+    authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWithReviewedEvidenceResumable(task, options);
+  }
+
+  /** Create a serialized, CAS-capable evidence controller for a caller-owned job. */
+  createEvidenceBackedController(jobId: string, persistence: AutonomousEvidenceBackedCheckpointStore): AutonomousEvidenceBackedController {
+    return new AutonomousEvidenceBackedController(this.agent, jobId, persistence);
   }
 
   /**

@@ -12,6 +12,14 @@ provider-planned, and launch-admitted provider-planned connector mission lifecyc
 planner call, independent connector approval, metadata-only planned projections, semantic-route
 refusal on launch-admitted execution, and launch holds before planner or connector dispatch.
 
+The high-level TypeScript facade now also exposes reviewed adapter evidence, digest-bound domain
+evidence catalogues, provider-free launch admission for both source paths, and restart-safe
+evidence execution through caller-owned checkpoint stores and serialized controllers. Tests cover
+all twelve domains through both facade evidence paths, source/provider approval separation,
+provider-assisted routing refusal before source dispatch, metadata-only result projections,
+checkpoint emission, and controller completion. Provider resume, source truth, credentials,
+durable storage, and external-effect reconciliation remain explicit deployment authorities.
+
 Provider-assisted planning now has a symmetric failure contract across Python and TypeScript.
 Single-domain, ordered-step, cross-domain, automatic, and direct plan-and-run entrypoints convert
 credential-boundary and operational provider failures into metadata-only `provider_failed`
