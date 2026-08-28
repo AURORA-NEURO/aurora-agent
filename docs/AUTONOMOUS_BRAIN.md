@@ -84,6 +84,14 @@ provisioning, inventory refresh, or provider resolution. Traces contain lifecycl
 selection/provider metadata, digests, and bounded failures only; task text, prompts, responses,
 evidence, tool arguments, and credentials remain outside serialized output.
 
+Persisted `AutonomousBrainPlan` values have an equivalent replay boundary. The
+`executePlanned*WithLaunchAdmission` methods canonicalize and revalidate the plan, recompute its
+provider-free route/blueprint identity against the current catalogue, and authorize the exact
+selected domains before dispatch. The provisioned forms add the same check before opening a
+credential session, and the traced forms preserve the replay lifecycle without serializing the
+plan's transient task or provider values. A held admission, route mutation, task mismatch, or
+current-contract drift therefore fails before credential resolution or provider invocation.
+
 ## Evidence-first application boundary
 
 The application-facing TypeScript `AutonomousBrainFacade` exposes the complete evidence-first

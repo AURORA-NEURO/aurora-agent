@@ -42,6 +42,7 @@ import type {
   AutonomousBrainExecuteOptions,
   AutonomousBrainExecution,
   AutonomousBrainFacade,
+  AutonomousBrainPlan,
   AutonomousBrainRequest,
   AutonomousBrainTraceOptions,
   AutonomousBrainTracedAdaptiveCycleExecution,
@@ -704,6 +705,164 @@ export class ProviderSetup {
     });
   }
 
+  /** Replay a persisted direct plan through protected provisioning. */
+  async runBrainPlannedWithProvisionedCredentials(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainExecution>> {
+    this.assertBrainFacade(brain, "execute");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["run"]);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainExecuteOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const run = brainOptions.run === undefined ? { credentialFor } : { ...brainOptions.run, credentialFor };
+      return brain.executePlanned(plan, input, { ...brainOptions, run } as AutonomousBrainExecuteOptions);
+    });
+  }
+
+  /** Replay a persisted direct plan with protected provisioning and a metadata-only trace. */
+  async runBrainPlannedWithProvisionedCredentialsWithTrace(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedExecution>> {
+    this.assertBrainFacade(brain, "execute");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["run"]);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainTraceOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const run = brainOptions.run === undefined ? { credentialFor } : { ...brainOptions.run, credentialFor };
+      return brain.executePlannedWithTrace(plan, input, { ...brainOptions, run } as AutonomousBrainTraceOptions);
+    });
+  }
+
+  /** Replay a persisted direct plan only after its exact route passes launch admission. */
+  async runBrainPlannedWithProvisionedCredentialsWithLaunchAdmission(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainExecution>> {
+    this.assertBrainFacade(brain, "execute");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["run"]);
+    if (options.semanticRouting !== undefined && options.semanticRouting !== false) throw new CredentialError("launch-admitted planned execution requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    if (options.run?.semanticRouting !== undefined && options.run.semanticRouting !== false) throw new CredentialError("launch-admitted planned execution requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await brain.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainExecuteOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const run = brainOptions.run === undefined ? { credentialFor } : { ...brainOptions.run, credentialFor };
+      return brain.executePlannedWithLaunchAdmission(plan, input, admission, { ...brainOptions, run } as AutonomousBrainExecuteOptions);
+    });
+  }
+
+  /** Replay a persisted direct plan with launch admission, provisioning, and a metadata trace. */
+  async runBrainPlannedWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedExecution>> {
+    this.assertBrainFacade(brain, "execute");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["run"]);
+    if (options.semanticRouting !== undefined && options.semanticRouting !== false) throw new CredentialError("launch-admitted traced planned execution requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    if (options.run?.semanticRouting !== undefined && options.run.semanticRouting !== false) throw new CredentialError("launch-admitted traced planned execution requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await brain.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainTraceOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const run = brainOptions.run === undefined ? { credentialFor } : { ...brainOptions.run, credentialFor };
+      return brain.executePlannedWithLaunchAdmissionAndTrace(plan, input, admission, { ...brainOptions, run } as AutonomousBrainTraceOptions);
+    });
+  }
+
+  /** Replay a persisted cycle plan through protected provisioning. */
+  async runBrainPlannedCycleWithProvisionedCredentials(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainCycleOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainCycleExecution>> {
+    this.assertBrainFacade(brain, "executeCycle");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["cycle"]);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainCycleOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const cycle = brainOptions.cycle === undefined ? { credentialFor } : { ...brainOptions.cycle, credentialFor };
+      return brain.executePlannedCycle(plan, input, { ...brainOptions, cycle } as AutonomousBrainCycleOptions);
+    });
+  }
+
+  /** Replay a persisted cycle plan with protected provisioning and a metadata-only trace. */
+  async runBrainPlannedCycleWithProvisionedCredentialsWithTrace(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedCycleExecution>> {
+    this.assertBrainFacade(brain, "executeCycle");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["cycle"]);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainCycleTraceOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const cycle = brainOptions.cycle === undefined ? { credentialFor } : { ...brainOptions.cycle, credentialFor };
+      return brain.executePlannedCycleWithTrace(plan, input, { ...brainOptions, cycle } as AutonomousBrainCycleTraceOptions);
+    });
+  }
+
+  /** Replay a persisted cycle plan only after its exact route passes launch admission. */
+  async runBrainPlannedCycleWithProvisionedCredentialsWithLaunchAdmission(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainCycleOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainCycleExecution>> {
+    this.assertBrainFacade(brain, "executeCycle");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["cycle"]);
+    if (options.semanticRouting?.enabled === true) throw new CredentialError("launch-admitted planned cycle requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await brain.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainCycleOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const cycle = brainOptions.cycle === undefined ? { credentialFor } : { ...brainOptions.cycle, credentialFor };
+      return brain.executePlannedCycleWithLaunchAdmission(plan, input, admission, { ...brainOptions, cycle } as AutonomousBrainCycleOptions);
+    });
+  }
+
+  /** Replay a persisted cycle plan with launch admission, provisioning, and a metadata trace. */
+  async runBrainPlannedCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedCycleExecution>> {
+    this.assertBrainFacade(brain, "executeCycle");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["cycle"]);
+    if (options.semanticRouting?.enabled === true) throw new CredentialError("launch-admitted traced planned cycle requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await brain.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainCycleTraceOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const cycle = brainOptions.cycle === undefined ? { credentialFor } : { ...brainOptions.cycle, credentialFor };
+      return brain.executePlannedCycleWithLaunchAdmissionAndTrace(plan, input, admission, { ...brainOptions, cycle } as AutonomousBrainCycleTraceOptions);
+    });
+  }
+
   /** Execute the automatic facade route, optional provider planning, and invocation in one session. */
   async runBrainAutoWithProvisionedCredentials(
     brain: AutonomousBrainFacade,
@@ -913,6 +1072,84 @@ export class ProviderSetup {
       const credentialFor = this.credentialResolver(brain.agent, session);
       const adaptive = { ...brainOptions.adaptive, credentialFor };
       return brain.executeAdaptiveCycleWithLaunchAdmissionAndTrace(input, admission, { ...brainOptions, adaptive } as AutonomousBrainAdaptiveCycleTraceOptions);
+    });
+  }
+
+  /** Replay a persisted adaptive plan through protected provisioning. */
+  async runBrainPlannedAdaptiveCycleWithProvisionedCredentials(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainAdaptiveCycleOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAdaptiveCycleExecution>> {
+    this.assertBrainFacade(brain, "executeAdaptiveCycle");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["adaptive"]);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainAdaptiveCycleOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const adaptive = { ...brainOptions.adaptive, credentialFor };
+      return brain.executePlannedAdaptiveCycle(plan, input, { ...brainOptions, adaptive } as AutonomousBrainAdaptiveCycleOptions);
+    });
+  }
+
+  /** Replay a persisted adaptive plan with protected provisioning and a metadata-only trace. */
+  async runBrainPlannedAdaptiveCycleWithProvisionedCredentialsWithTrace(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainAdaptiveCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedAdaptiveCycleExecution>> {
+    this.assertBrainFacade(brain, "executeAdaptiveCycle");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["adaptive"]);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainAdaptiveCycleTraceOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const adaptive = { ...brainOptions.adaptive, credentialFor };
+      return brain.executePlannedAdaptiveCycleWithTrace(plan, input, { ...brainOptions, adaptive } as AutonomousBrainAdaptiveCycleTraceOptions);
+    });
+  }
+
+  /** Replay a persisted adaptive plan only after its exact route passes launch admission. */
+  async runBrainPlannedAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmission(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainAdaptiveCycleOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAdaptiveCycleExecution>> {
+    this.assertBrainFacade(brain, "executeAdaptiveCycle");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["adaptive"]);
+    if (options.semanticRouting?.enabled === true) throw new CredentialError("launch-admitted planned adaptive cycle requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await brain.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainAdaptiveCycleOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const adaptive = { ...brainOptions.adaptive, credentialFor };
+      return brain.executePlannedAdaptiveCycleWithLaunchAdmission(plan, input, admission, { ...brainOptions, adaptive } as AutonomousBrainAdaptiveCycleOptions);
+    });
+  }
+
+  /** Replay a persisted adaptive plan with launch admission, provisioning, and a metadata trace. */
+  async runBrainPlannedAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    brain: AutonomousBrainFacade,
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainAdaptiveCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedAdaptiveCycleExecution>> {
+    this.assertBrainFacade(brain, "executeAdaptiveCycle");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, ["adaptive"]);
+    if (options.semanticRouting?.enabled === true) throw new CredentialError("launch-admitted traced planned adaptive cycle requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await brain.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainAdaptiveCycleTraceOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      const adaptive = { ...brainOptions.adaptive, credentialFor };
+      return brain.executePlannedAdaptiveCycleWithLaunchAdmissionAndTrace(plan, input, admission, { ...brainOptions, adaptive } as AutonomousBrainAdaptiveCycleTraceOptions);
     });
   }
 

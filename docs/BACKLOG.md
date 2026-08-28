@@ -10,6 +10,9 @@ and traced provisioned variants for every core execution mode. The traced path k
 credential resolver transient, emits only metadata/digests, and checks launch admission before
 opening a session. Offline all-domain coverage verifies session closure, trace integrity,
 redaction, and direct/automatic/cycle/adaptive admission composition.
+Persisted direct, cycle, and adaptive plan replay now has the same canonical revalidation and
+launch-admission boundary, including protected provisioned and traced forms; tampered route
+identity, task drift, held admission, and current-contract drift fail before session opening.
 Secret-manager integration, encryption, tenant authorization, and production UI remain deployment
 responsibilities.
 

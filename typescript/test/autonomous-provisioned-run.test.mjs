@@ -6,6 +6,7 @@ import {
   AUTONOMOUS_PROVISIONED_RUN_SCHEMA,
   AutonomousAgent,
   AutonomousBrainFacade,
+  AutonomousBrainPlan,
   CredentialError,
   CredentialStore,
   InMemoryAutonomousRunTraceStore,
@@ -274,6 +275,105 @@ test("provisioned brain tracing covers every domain and keeps launch admission b
   assert.equal(adaptive.result.trace.status, "completed");
   assert.equal(store.verifyIntegrity().verified, true);
   assert.equal(runtime.credentials.status("offline").active_handles, 0);
+});
+
+test("provisioned persisted-plan replay revalidates route identity before credential provisioning", async () => {
+  const capabilities = await broadCapabilities();
+  const runtime = localRuntime("offline");
+  const setup = new ProviderSetup(runtime);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(candidate("offline", capabilities));
+  const brain = new AutonomousBrainFacade({ agent });
+  const admission = await approvedLaunchAdmission(brain);
+  const store = new InMemoryAutonomousRunTraceStore();
+  const request = { task: "replay an admitted coding plan", domain: "coding" };
+  const plan = await brain.plan(request);
+
+  const direct = await brain.executePlannedWithProvisionedCredentialsWithLaunchAdmissionAndTrace(plan, request, admission, {
+    credentialProviders: ["offline"],
+    approveProviderCall: true,
+    traceStore: store,
+    runId: "provisioned-planned-direct",
+  });
+  assert.equal(direct.result.execution.status, "completed");
+  assert.equal(direct.result.trace.status, "completed");
+
+  const plainDirect = await brain.executePlannedWithProvisionedCredentialsWithLaunchAdmission(plan, request, admission, {
+    credentialProviders: ["offline"],
+    approveProviderCall: true,
+  });
+  assert.equal(plainDirect.result.status, "completed");
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const domainRequest = { task: `replay a bounded ${domain} plan`, domain };
+    const domainPlan = await brain.plan(domainRequest);
+    const domainRun = await brain.executePlannedWithProvisionedCredentialsWithLaunchAdmission(domainPlan, domainRequest, admission, {
+      credentialProviders: ["offline"],
+      approveProviderCall: true,
+    });
+    assert.equal(domainRun.result.status, "completed", domain);
+  }
+
+  const cycleRequest = { task: "replay an admitted science cycle", domain: "science" };
+  const cyclePlan = await brain.plan(cycleRequest);
+  const cycle = await brain.executePlannedCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(cyclePlan, cycleRequest, admission, {
+    credentialProviders: ["offline"],
+    approveProviderCall: true,
+    traceStore: store,
+    runId: "provisioned-planned-cycle",
+  });
+  assert.equal(cycle.result.execution.status, "completed");
+  assert.equal(cycle.result.trace.status, "completed");
+
+  const adaptiveRequest = { task: "replay an admitted evaluation cycle", domain: "evaluation" };
+  const adaptivePlan = await brain.plan(adaptiveRequest);
+  const adaptive = await brain.executePlannedAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(adaptivePlan, adaptiveRequest, admission, {
+    credentialProviders: ["offline"],
+    approveProviderCall: true,
+    traceStore: store,
+    runId: "provisioned-planned-adaptive",
+    adaptive: {
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: "provisioned-planned-evaluator", evaluator_version: "1", reward: 0.8, passed: true, replan_requested: false }),
+    },
+  });
+  assert.equal(adaptive.result.execution.status, "completed");
+  assert.equal(adaptive.result.trace.status, "completed");
+
+  const tampered = AutonomousBrainPlan.fromJSON(plan.toJSON());
+  tampered.route.selected_domains = ["browser"];
+  await assert.rejects(
+    () => brain.executePlannedWithProvisionedCredentialsWithLaunchAdmissionAndTrace(tampered, request, admission, {
+      credentialProviders: ["offline"],
+      approveProviderCall: true,
+      traceStore: store,
+      runId: "provisioned-planned-tampered",
+    }),
+    /plan digest is invalid|does not match/,
+  );
+  const held = brain.admitLaunchPreflight(await brain.launchPreflight({
+    availableToolNames: (await builtinAutonomousDomainProfiles()).flatMap((profile) => profile.tool_profile.bindings.map((binding) => binding.name)),
+    availableEvidence: (await builtinAutonomousDomainProfiles()).flatMap((profile) => profile.workflow.stages.flatMap((stage) => stage.evidence_outputs.map((label) => `${profile.domain}:${stage.id}:${label}`))),
+    deploymentCapabilities: {
+      persistence: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      queue: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      approval_authority: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      external_auth: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+      telemetry: { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true },
+    },
+  }), { decision: "hold", reason: "planned replay review pending" });
+  await assert.rejects(
+    () => brain.executePlannedWithProvisionedCredentialsWithLaunchAdmissionAndTrace(plan, request, held, {
+      credentialProviders: ["offline"],
+      approveProviderCall: true,
+      traceStore: store,
+      runId: "provisioned-planned-held",
+    }),
+    /not approved/,
+  );
+  assert.equal(runtime.credentials.status("offline").active_handles, 0);
+  assert.equal(store.events({ run_id: "provisioned-planned-held" }).length, 0);
+  assert.equal(store.verifyIntegrity().verified, true);
 });
 
 test("provisioned brain facade rejects nested credential injection before opening a session", async () => {

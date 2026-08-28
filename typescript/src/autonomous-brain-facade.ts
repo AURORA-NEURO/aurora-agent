@@ -1859,6 +1859,120 @@ export class AutonomousBrainFacade {
     return this.providerSetup.runBrainAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(this, input, admission, options);
   }
 
+  /** Replay a persisted direct plan through the protected provider session boundary. */
+  executePlannedWithProvisionedCredentials(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainExecution>> {
+    return this.providerSetup.runBrainPlannedWithProvisionedCredentials(this, plan, input, options);
+  }
+
+  /** Replay a persisted direct plan through protected provisioning and a redacted trace. */
+  executePlannedWithProvisionedCredentialsWithTrace(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedExecution>> {
+    return this.providerSetup.runBrainPlannedWithProvisionedCredentialsWithTrace(this, plan, input, options);
+  }
+
+  /** Replay a persisted direct plan after launch admission, protected provisioning, and trace. */
+  executePlannedWithProvisionedCredentialsWithLaunchAdmission(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainExecution>> {
+    return this.providerSetup.runBrainPlannedWithProvisionedCredentialsWithLaunchAdmission(this, plan, input, admission, options);
+  }
+
+  /** Replay a persisted direct plan after launch admission with protected provisioning and trace. */
+  executePlannedWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedExecution>> {
+    return this.providerSetup.runBrainPlannedWithProvisionedCredentialsWithLaunchAdmissionAndTrace(this, plan, input, admission, options);
+  }
+
+  /** Replay a persisted closed-loop plan through the protected provider session boundary. */
+  executePlannedCycleWithProvisionedCredentials(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainCycleOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainCycleExecution>> {
+    return this.providerSetup.runBrainPlannedCycleWithProvisionedCredentials(this, plan, input, options);
+  }
+
+  /** Replay a persisted closed-loop plan through protected provisioning and a redacted trace. */
+  executePlannedCycleWithProvisionedCredentialsWithTrace(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedCycleExecution>> {
+    return this.providerSetup.runBrainPlannedCycleWithProvisionedCredentialsWithTrace(this, plan, input, options);
+  }
+
+  /** Replay a persisted closed-loop plan after launch admission and protected provisioning. */
+  executePlannedCycleWithProvisionedCredentialsWithLaunchAdmission(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainCycleOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainCycleExecution>> {
+    return this.providerSetup.runBrainPlannedCycleWithProvisionedCredentialsWithLaunchAdmission(this, plan, input, admission, options);
+  }
+
+  /** Replay a persisted closed-loop plan after launch admission with protected provisioning and trace. */
+  executePlannedCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedCycleExecution>> {
+    return this.providerSetup.runBrainPlannedCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(this, plan, input, admission, options);
+  }
+
+  /** Replay a persisted adaptive plan through the protected provider session boundary. */
+  executePlannedAdaptiveCycleWithProvisionedCredentials(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainAdaptiveCycleOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAdaptiveCycleExecution>> {
+    return this.providerSetup.runBrainPlannedAdaptiveCycleWithProvisionedCredentials(this, plan, input, options);
+  }
+
+  /** Replay a persisted adaptive plan through protected provisioning and a redacted trace. */
+  executePlannedAdaptiveCycleWithProvisionedCredentialsWithTrace(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainAdaptiveCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedAdaptiveCycleExecution>> {
+    return this.providerSetup.runBrainPlannedAdaptiveCycleWithProvisionedCredentialsWithTrace(this, plan, input, options);
+  }
+
+  /** Replay a persisted adaptive plan after launch admission and protected provisioning. */
+  executePlannedAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmission(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainAdaptiveCycleOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAdaptiveCycleExecution>> {
+    return this.providerSetup.runBrainPlannedAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmission(this, plan, input, admission, options);
+  }
+
+  /** Replay a persisted adaptive plan after launch admission with protected provisioning and trace. */
+  executePlannedAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainAdaptiveCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedAdaptiveCycleExecution>> {
+    return this.providerSetup.runBrainPlannedAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(this, plan, input, admission, options);
+  }
+
   /**
    * Create the long-horizon goal runtime bound to this facade's exact agent instance.
    *
@@ -2750,24 +2864,67 @@ export class AutonomousBrainFacade {
     return this.executePreparedWithTrace(prepared, options);
   }
 
+  /**
+   * Revalidate a persisted plan and authorize its exact current route before credentials or
+   * provider work are opened. The route is recomputed provider-free so a stale plan cannot use
+   * an old domain set to pass admission after the catalogue or workflow contracts change.
+   */
+  async authorizePlannedLaunchAdmission(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+  ): Promise<AutonomousLaunchAdmissionReport> {
+    const reviewedPlan = this.revalidateBrainPlan(plan, "autonomous brain planned launch admission requires a typed plan");
+    const request = validateRequest(input);
+    assertBrainPlanTask(reviewedPlan, request, "autonomous brain planned launch admission does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, reviewedPlan.route, reviewedPlan.semantic_route);
+    if (prepared.plan.plan_digest !== reviewedPlan.plan_digest) throw new ArgumentError("autonomous brain planned launch admission does not match current metadata");
+    return authorizeAutonomousLaunchDomains(admission, reviewedPlan.selected_domains);
+  }
+
   /** Recompile and verify a persisted metadata-only plan before supplying transient task values. */
   async executePlanned(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainExecuteOptions = {}): Promise<AutonomousBrainExecution> {
-    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlanned requires a typed plan");
+    const reviewedPlan = this.revalidateBrainPlan(plan, "autonomous brain executePlanned requires a typed plan");
     const request = validateRequest(input);
-    assertBrainPlanTask(plan, request, "autonomous brain plan does not match the transient request");
-    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
-    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain plan does not match the transient request");
+    assertBrainPlanTask(reviewedPlan, request, "autonomous brain plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, reviewedPlan.route, reviewedPlan.semantic_route);
+    if (prepared.plan.plan_digest !== reviewedPlan.plan_digest) throw new ArgumentError("autonomous brain plan does not match the transient request");
     return this.executePrepared(prepared, options);
+  }
+
+  /** Replay a reviewed plan only after its exact route passes provider-free launch admission. */
+  async executePlannedWithLaunchAdmission(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainExecuteOptions = {},
+  ): Promise<AutonomousBrainExecution> {
+    if (options.semanticRouting === true || (isObject(options.semanticRouting) && options.semanticRouting.enabled === true) || options.run?.semanticRouting === true || (isObject(options.run?.semanticRouting) && options.run.semanticRouting.enabled === true)) throw new ArgumentError("launch-admitted planned execution requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await this.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.executePlanned(plan, input, options);
   }
 
   /** Rehydrate a reviewed plan, then execute it through the same full traced facade boundary. */
   async executePlannedWithTrace(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainTraceOptions): Promise<AutonomousBrainTracedExecution> {
-    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedWithTrace requires a typed plan");
+    const reviewedPlan = this.revalidateBrainPlan(plan, "autonomous brain executePlannedWithTrace requires a typed plan");
     const request = validateRequest(input);
-    assertBrainPlanTask(plan, request, "autonomous brain traced plan does not match the transient request");
-    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
-    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain traced plan does not match the transient request");
+    assertBrainPlanTask(reviewedPlan, request, "autonomous brain traced plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, reviewedPlan.route, reviewedPlan.semantic_route);
+    if (prepared.plan.plan_digest !== reviewedPlan.plan_digest) throw new ArgumentError("autonomous brain traced plan does not match the transient request");
     return this.executePreparedWithTrace(prepared, options);
+  }
+
+  /** Traced plan replay with provider-free launch admission before any provider boundary. */
+  async executePlannedWithLaunchAdmissionAndTrace(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainTraceOptions,
+  ): Promise<AutonomousBrainTracedExecution> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executePlannedWithLaunchAdmissionAndTrace options must be an object");
+    if (options.semanticRouting === true || (isObject(options.semanticRouting) && options.semanticRouting.enabled === true) || options.run?.semanticRouting === true || (isObject(options.run?.semanticRouting) && options.run.semanticRouting.enabled === true)) throw new ArgumentError("launch-admitted traced planned execution requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await this.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.executePlannedWithTrace(plan, input, options);
   }
 
   /** Execute the closed-loop route -> invoke -> evaluate -> learn cycle behind the same plan boundary. */
@@ -2790,12 +2947,24 @@ export class AutonomousBrainFacade {
 
   /** Rehydrate a persisted brain plan, then run the closed-loop evaluator/learning cycle. */
   async executePlannedCycle(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainCycleOptions = {}): Promise<AutonomousBrainCycleExecution> {
-    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedCycle requires a typed plan");
+    const reviewedPlan = this.revalidateBrainPlan(plan, "autonomous brain executePlannedCycle requires a typed plan");
     const request = validateRequest(input);
-    assertBrainPlanTask(plan, request, "autonomous brain cycle plan does not match the transient request");
-    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
-    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain cycle plan does not match the transient request");
+    assertBrainPlanTask(reviewedPlan, request, "autonomous brain cycle plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, reviewedPlan.route, reviewedPlan.semantic_route);
+    if (prepared.plan.plan_digest !== reviewedPlan.plan_digest) throw new ArgumentError("autonomous brain cycle plan does not match the transient request");
     return this.executeCyclePrepared(prepared, options);
+  }
+
+  /** Replay a reviewed closed-loop plan only after provider-free launch admission. */
+  async executePlannedCycleWithLaunchAdmission(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainCycleOptions = {},
+  ): Promise<AutonomousBrainCycleExecution> {
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted planned cycle requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await this.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.executePlannedCycle(plan, input, options);
   }
 
   /** Execute a closed-loop cycle while tracing planning, connectors, provider turns, evaluation, and learning. */
@@ -2822,12 +2991,25 @@ export class AutonomousBrainFacade {
 
   /** Rehydrate a reviewed plan, then execute its closed-loop cycle through the trace boundary. */
   async executePlannedCycleWithTrace(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainCycleTraceOptions): Promise<AutonomousBrainTracedCycleExecution> {
-    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedCycleWithTrace requires a typed plan");
+    const reviewedPlan = this.revalidateBrainPlan(plan, "autonomous brain executePlannedCycleWithTrace requires a typed plan");
     const request = validateRequest(input);
-    assertBrainPlanTask(plan, request, "autonomous brain traced cycle plan does not match the transient request");
-    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
-    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain traced cycle plan does not match the transient request");
+    assertBrainPlanTask(reviewedPlan, request, "autonomous brain traced cycle plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, reviewedPlan.route, reviewedPlan.semantic_route);
+    if (prepared.plan.plan_digest !== reviewedPlan.plan_digest) throw new ArgumentError("autonomous brain traced cycle plan does not match the transient request");
     return this.executeCyclePreparedWithTrace(prepared, options);
+  }
+
+  /** Traced closed-loop plan replay with provider-free launch admission before dispatch. */
+  async executePlannedCycleWithLaunchAdmissionAndTrace(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainCycleTraceOptions,
+  ): Promise<AutonomousBrainTracedCycleExecution> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executePlannedCycleWithLaunchAdmissionAndTrace options must be an object");
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted traced planned cycle requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await this.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.executePlannedCycleWithTrace(plan, input, options);
   }
 
   /**
@@ -2854,12 +3036,24 @@ export class AutonomousBrainFacade {
 
   /** Rehydrate a persisted metadata-only plan, then run the bounded adaptive loop. */
   async executePlannedAdaptiveCycle(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleOptions): Promise<AutonomousBrainAdaptiveCycleExecution> {
-    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedAdaptiveCycle requires a typed plan");
+    const reviewedPlan = this.revalidateBrainPlan(plan, "autonomous brain executePlannedAdaptiveCycle requires a typed plan");
     const request = validateRequest(input);
-    assertBrainPlanTask(plan, request, "autonomous brain adaptive cycle plan does not match the transient request");
-    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
-    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain adaptive cycle plan does not match the transient request");
+    assertBrainPlanTask(reviewedPlan, request, "autonomous brain adaptive cycle plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, reviewedPlan.route, reviewedPlan.semantic_route);
+    if (prepared.plan.plan_digest !== reviewedPlan.plan_digest) throw new ArgumentError("autonomous brain adaptive cycle plan does not match the transient request");
     return this.executeAdaptiveCyclePrepared(prepared, options);
+  }
+
+  /** Replay a reviewed adaptive plan only after provider-free launch admission. */
+  async executePlannedAdaptiveCycleWithLaunchAdmission(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAdaptiveCycleOptions,
+  ): Promise<AutonomousBrainAdaptiveCycleExecution> {
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted planned adaptive cycle requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await this.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.executePlannedAdaptiveCycle(plan, input, options);
   }
 
   /** Execute an evaluator-guided loop while tracing every bounded attempt and learning transition. */
@@ -2886,12 +3080,25 @@ export class AutonomousBrainFacade {
 
   /** Rehydrate a reviewed plan, then execute its evaluator-guided loop through the trace boundary. */
   async executePlannedAdaptiveCycleWithTrace(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainAdaptiveCycleTraceOptions): Promise<AutonomousBrainTracedAdaptiveCycleExecution> {
-    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedAdaptiveCycleWithTrace requires a typed plan");
+    const reviewedPlan = this.revalidateBrainPlan(plan, "autonomous brain executePlannedAdaptiveCycleWithTrace requires a typed plan");
     const request = validateRequest(input);
-    assertBrainPlanTask(plan, request, "autonomous brain traced adaptive cycle plan does not match the transient request");
-    const prepared = await this.prepare(request, undefined, undefined, undefined, plan.route, plan.semantic_route);
-    if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("autonomous brain traced adaptive cycle plan does not match the transient request");
+    assertBrainPlanTask(reviewedPlan, request, "autonomous brain traced adaptive cycle plan does not match the transient request");
+    const prepared = await this.prepare(request, undefined, undefined, undefined, reviewedPlan.route, reviewedPlan.semantic_route);
+    if (prepared.plan.plan_digest !== reviewedPlan.plan_digest) throw new ArgumentError("autonomous brain traced adaptive cycle plan does not match the transient request");
     return this.executeAdaptiveCyclePreparedWithTrace(prepared, options);
+  }
+
+  /** Traced adaptive plan replay with provider-free launch admission before dispatch. */
+  async executePlannedAdaptiveCycleWithLaunchAdmissionAndTrace(
+    plan: AutonomousBrainPlan,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAdaptiveCycleTraceOptions,
+  ): Promise<AutonomousBrainTracedAdaptiveCycleExecution> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executePlannedAdaptiveCycleWithLaunchAdmissionAndTrace options must be an object");
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted traced planned adaptive cycle requires provider-free routing; reuse the persisted route or admit semantic routing separately");
+    await this.authorizePlannedLaunchAdmission(plan, input, admission);
+    return this.executePlannedAdaptiveCycleWithTrace(plan, input, options);
   }
 
   /** Return the redacted provider/model/tool posture needed to render onboarding UI. */
@@ -3775,6 +3982,12 @@ export class AutonomousBrainFacade {
 
   private rejectLaunchAdmittedSemanticRouting(value: unknown, message: string): void {
     if (value === true || (isObject(value) && value.enabled === true)) throw new ArgumentError(message);
+  }
+
+  /** Rehydrate a plan through its canonical projection so caller mutations cannot widen replay. */
+  private revalidateBrainPlan(plan: AutonomousBrainPlan, message: string): AutonomousBrainPlan {
+    if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError(message);
+    return AutonomousBrainPlan.fromJSON(plan.toJSON());
   }
 
   private async authorizeBatchLaunchAdmission(
