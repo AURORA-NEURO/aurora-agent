@@ -112,6 +112,84 @@ test("brain facade exposes protected provider onboarding without retaining user 
   assert.throws(() => setup.collectUserCredential(session, "groq", "another-fixture-secret"), /closed or expired/);
 });
 
+test("brain facade owns provisioned direct, cycle, and adaptive execution wrappers", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const provisioning = { credentialProviders: ["offline"], approveProviderCall: true };
+
+  const direct = await brain.executeWithProvisionedCredentials(
+    { task: "produce a bounded coding review", domain: "coding" },
+    provisioning,
+  );
+  assert.equal(direct.status, "completed");
+  assert.equal(direct.result.run?.status, "completed");
+  assert.equal(direct.result.run?.response.provider, "offline");
+  assert.equal(direct.toJSON().result_metadata.serialized, false);
+
+  const cycle = await brain.executeCycleWithProvisionedCredentials(
+    { task: "close a bounded science review", domain: "science" },
+    provisioning,
+  );
+  assert.ok(["completed", "children_completed"].includes(cycle.status));
+  assert.ok(cycle.result.cycle);
+
+  const adaptive = await brain.executeAdaptiveCycleWithProvisionedCredentials(
+    { task: "close a bounded evaluation review", domain: "evaluation" },
+    {
+      ...provisioning,
+      adaptive: {
+        maxReplans: 0,
+        evaluate: () => ({
+          evaluator_id: "facade-provisioned-evaluator",
+          evaluator_version: "1",
+          reward: 0.8,
+          passed: true,
+          replan_requested: false,
+        }),
+      },
+    },
+  );
+  assert.equal(adaptive.status, "completed");
+  assert.equal(adaptive.result.adaptive.attempts.length, 1);
+  assert.equal(runtime.credentials.status("offline").active_handles, 0);
+  assert.doesNotMatch(JSON.stringify(direct.toJSON()), /offline:offline-model/);
+
+  const heldAdmission = brain.admitLaunchPreflight(await brain.launchPreflight(), { decision: "hold" });
+  await assert.rejects(
+    () => brain.executeWithProvisionedCredentialsWithLaunchAdmission(
+      { task: "held direct run", domain: "coding" },
+      heldAdmission,
+      provisioning,
+    ),
+    /not approved/,
+  );
+  await assert.rejects(
+    () => brain.executeCycleWithProvisionedCredentialsWithLaunchAdmission(
+      { task: "held cycle run", domain: "science" },
+      heldAdmission,
+      provisioning,
+    ),
+    /not approved/,
+  );
+  await assert.rejects(
+    () => brain.executeAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmission(
+      { task: "held adaptive run", domain: "evaluation" },
+      heldAdmission,
+      {
+        ...provisioning,
+        adaptive: {
+          maxReplans: 0,
+          evaluate: () => ({ evaluator_id: "unused", evaluator_version: "1", reward: 0, passed: false, replan_requested: false }),
+        },
+      },
+    ),
+    /not approved/,
+  );
+  assert.equal(runtime.credentials.status("offline").active_handles, 0);
+});
+
 test("brain facade creates request-free plans for every built-in domain and executes a bounded batch", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

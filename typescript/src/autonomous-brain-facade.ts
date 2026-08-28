@@ -1,6 +1,12 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
-import { ProviderSetup } from "./provider-setup.js";
+import {
+  ProviderSetup,
+  type AutonomousProvisionedBrainAdaptiveCycleOptions,
+  type AutonomousProvisionedBrainCycleOptions,
+  type AutonomousProvisionedBrainExecuteOptions,
+  type AutonomousProvisionedRun,
+} from "./provider-setup.js";
 import {
   AutonomousGoalAgentRuntime,
   type AutonomousGoalAgentLoopRunOptions,
@@ -1702,6 +1708,65 @@ export class AutonomousBrainFacade {
   get providerSetup(): ProviderSetup {
     this.provider_setup ??= new ProviderSetup(this.agent.llm);
     return this.provider_setup;
+  }
+
+  /**
+   * Execute the complete facade boundary with deployment-managed credentials.
+   *
+   * The setup process opens a fresh session, provisions the requested providers from its
+   * configured sources, optionally refreshes the model inventory, injects only transient opaque
+   * handles into the nested provider policy, and revokes the session in a finally block. The
+   * returned result keeps the live execution caller-owned; its `toJSON()` projection is safe for
+   * durable job state and never contains provider output, task text, prompts, or credential data.
+   */
+  executeWithProvisionedCredentials(
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainExecution>> {
+    return this.providerSetup.runBrainWithProvisionedCredentials(this, input, options);
+  }
+
+  /** Provision and execute the facade only after a caller-owned launch admission covers the route. */
+  executeWithProvisionedCredentialsWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainExecution>> {
+    return this.providerSetup.runBrainWithProvisionedCredentialsWithLaunchAdmission(this, input, admission, options);
+  }
+
+  /** Execute the closed-loop evaluator and online-learning cycle inside one credential session. */
+  executeCycleWithProvisionedCredentials(
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainCycleOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainCycleExecution>> {
+    return this.providerSetup.runBrainCycleWithProvisionedCredentials(this, input, options);
+  }
+
+  /** Run the closed-loop cycle only after a caller-owned launch admission covers the route. */
+  executeCycleWithProvisionedCredentialsWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainCycleOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainCycleExecution>> {
+    return this.providerSetup.runBrainCycleWithProvisionedCredentialsWithLaunchAdmission(this, input, admission, options);
+  }
+
+  /** Execute bounded evaluator-guided replanning with deployment-managed credentials. */
+  executeAdaptiveCycleWithProvisionedCredentials(
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainAdaptiveCycleOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAdaptiveCycleExecution>> {
+    return this.providerSetup.runBrainAdaptiveCycleWithProvisionedCredentials(this, input, options);
+  }
+
+  /** Run bounded adaptive replanning only after a caller-owned launch admission covers the route. */
+  executeAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainAdaptiveCycleOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAdaptiveCycleExecution>> {
+    return this.providerSetup.runBrainAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmission(this, input, admission, options);
   }
 
   /**

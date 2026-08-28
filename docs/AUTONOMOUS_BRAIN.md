@@ -63,6 +63,15 @@ next actions; it performs no discovery or provider call. A custom inline transpo
 credentialless for offline fixtures, while the normal built-in provider presets remain
 credential-required until a session collects or provisions a user credential.
 
+For applications that want the facade to own the entire request-scoped lifecycle, use
+`brain.executeWithProvisionedCredentials(request, options)`. The corresponding
+`executeCycleWithProvisionedCredentials()` and
+`executeAdaptiveCycleWithProvisionedCredentials()` methods cover evaluator settlement, online
+learning, and bounded replanning with the same session boundary. Their launch-admitted variants
+check the caller's frozen domain admission before resolving a credential or refreshing inventory.
+This keeps the common application path to one call while retaining `brain.providerSetup` for
+multi-step onboarding screens and `ProviderSetup` for explicit worker orchestration.
+
 ## Evidence-first application boundary
 
 The application-facing TypeScript `AutonomousBrainFacade` exposes the complete evidence-first
