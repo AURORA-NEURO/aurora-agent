@@ -40,6 +40,16 @@ counter updates safe. The same metadata-only fields and serialized transition co
 validated by the TypeScript execution controller, preserving cross-SDK replay and failure
 semantics.
 
+`AutonomousAgent.run_cross_domain(..., max_parallelism=...)` can use that shared controller for
+bounded specialist fan-out. The value is capped at eight; child futures are submitted and
+collected in accepted order, so completion timing cannot reorder `child_results` or the transient
+inputs passed to synthesis. Synthesis waits for all children, including failed or refused ones,
+before applying the existing `allow_partial` and response-review gates. The result projection
+reports the requested ceiling without retaining tasks, prompts, provider values, credentials, or
+tool data. This direct path is intentionally separate from evaluator-driven cross-domain learning
+and replanning: those APIs keep sequential delayed-credit settlement so concurrent completion
+cannot change bandit updates or trajectory identity.
+
 The artifact registry is available through typed `ArtifactRegistrationRequest`,
 `ArtifactQueryRequest`, `ArtifactGetRequest`, `ArtifactRegistrationReport`, `ArtifactQueryReport`,
 `ArtifactGetReport`, `ArtifactLineageReport`, `ArtifactDomainEvidenceLineageRequest`,

@@ -4510,6 +4510,18 @@ one explicit evaluator update per completed stage and resumes from the latest le
 the caller supplies an override. This keeps single-task, staged, and cross-domain execution on
 the same authorization, BYOK, model-selection, and learning boundaries.
 
+Direct Python cross-domain execution also accepts an opt-in bounded `max_parallelism` (one through
+the SDK ceiling of eight). When it is greater than one, independent specialist provider calls are
+submitted in accepted child order and the returned `child_results`, output projection, and
+synthesis input are collected in that same order even if workers finish at different times. The
+synthesis call is a strict fan-in barrier: it cannot start until every submitted child future has
+settled, including refusal or failure. All workers share the one execution controller, so provider
+calls, failovers, tool intents, steps, and cost remain aggregate-budgeted and linearizable. The
+parallel path does not run evaluator credit, bandit settlement, or replanning concurrently; those
+ordered delayed-credit APIs remain sequential so completion timing cannot change learning state.
+`AutonomousCrossDomainResult.to_dict()` exposes the requested ceiling as control-plane metadata
+only; it grants no provider, credential, tool, source, or external-effect authority.
+
 For applications that want the evaluator to drive a bounded recovery loop, use the explicit
 `run_workflow_cycle()` entry point. It is intentionally separate from `run_workflow_learning()`:
 ordinary learning reports `replan_requested` and never silently replays a provider call, while a

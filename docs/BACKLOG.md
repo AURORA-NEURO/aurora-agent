@@ -2120,3 +2120,12 @@ reasons for risk, approval, allow-list, read-only, or learning gates. The ceilin
 direct, automatic, and cross-domain plans in both SDKs without becoming authorization. Remaining
 deployment work is to bind this adapter to encrypted tenant-scoped storage and operational
 retention policies.
+
+The Python direct cross-domain runtime now closes its bounded fan-out gap. `max_parallelism` can
+overlap independent specialist provider calls up to the shared eight-worker ceiling while keeping
+accepted child order deterministic, waiting for every child before synthesis, and charging one
+linearizable execution controller for aggregate provider/tool/failover/step/cost budgets. The
+result exposes the ceiling as metadata only. Evaluator credit, bandit updates, and replanning stay
+ordered because their delayed-credit semantics depend on deterministic settlement. Remaining
+deployment work is still caller-owned worker placement, durable result rehydration, and external
+provider/effect reconciliation.

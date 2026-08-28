@@ -5576,6 +5576,9 @@ class AutonomousCrossDomainResult:
     # Digest-only structural admission for specialist/synthesis responses. Provider payloads
     # remain on the caller-owned child/synthesis result objects and never enter this projection.
     response_assessment: AutonomousCrossDomainResponseAssessment | None = None
+    # The child fan-out ceiling is retained as control-plane metadata. It never grants provider,
+    # tool, credential, or effect authority and does not change the accepted child order.
+    max_parallelism: int = 1
 
     def __post_init__(self) -> None:
         if not isinstance(self.blueprint, AutonomousCrossDomainBlueprint):
@@ -5596,6 +5599,12 @@ class AutonomousCrossDomainResult:
                 raise BrainRunError("cross-domain response_assessment is unsupported")
             if self.response_assessment.context_digest != self.blueprint.task_digest:
                 raise BrainRunError("cross-domain response_assessment is not bound to the blueprint task")
+        if (
+            not isinstance(self.max_parallelism, int)
+            or isinstance(self.max_parallelism, bool)
+            or not 1 <= self.max_parallelism <= MAX_AUTONOMOUS_AGENT_PARALLELISM
+        ):
+            raise BrainRunError("cross-domain max_parallelism is outside its bound")
         if self.plan_refinement_digest is not None:
             _route_digest(self.plan_refinement_digest, "cross-domain result plan_refinement_digest")
         order = self.execution_child_ids or self.blueprint.child_ids[: len(self.child_results)]
@@ -5620,6 +5629,7 @@ class AutonomousCrossDomainResult:
             "plan_refinement_digest": self.plan_refinement_digest,
             "execution_child_ids": list(self.execution_child_ids),
             "response_assessment": None if self.response_assessment is None else self.response_assessment.to_dict(),
+            "max_parallelism": self.max_parallelism,
             "execution": "completed" if receipt.next_action == "complete" else "partial_or_blocked",
             "execution_receipt": receipt.to_dict(),
             "retention": "provider_responses_returned_to_caller; learning_memory_not_implicit",
@@ -14139,6 +14149,7 @@ class AutonomousTaskOrchestrator:
         domain_policy_effects_approved: bool | None = None,
         synthesize: bool = True,
         allow_partial: bool = False,
+        max_parallelism: int = 1,
         bandit_state: Mapping[str, Any] | None = None,
         accepted_plan_refinement: AutonomousCrossDomainPlanRefinementResult | None = None,
         response_alignments: Sequence[Mapping[str, Any]] = (),
@@ -14152,11 +14163,13 @@ class AutonomousTaskOrchestrator:
     ) -> AutonomousCrossDomainResult:
         """Execute bounded domain specialists, then optionally synthesize their outputs.
 
-        Children run sequentially in accepted priority order (or declaration order when no
-        refinement is accepted), so approval, provider health, and failure boundaries are
-        observable. A child failure or pending approval prevents synthesis unless
-        ``allow_partial`` is explicitly enabled. This method never invents a child permission or
-        silently persists provider output into learning memory.
+        Children run in accepted priority order (or declaration order when no refinement is
+        accepted) and results are returned in that same order. ``max_parallelism`` optionally
+        overlaps independent specialist provider calls; synthesis still waits for every child
+        future, and the shared execution controller remains the authority for aggregate steps,
+        provider calls, failovers, tools, and cost. A child failure or pending approval prevents
+        synthesis unless ``allow_partial`` is explicitly enabled. This method never invents a
+        child permission or silently persists provider output into learning memory.
         """
 
         normalized_content_parts = (
@@ -14171,6 +14184,15 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("synthesize and allow_partial must be booleans")
         if not isinstance(require_response_alignment, bool):
             raise BrainRunError("require_response_alignment must be a boolean")
+        if (
+            not isinstance(max_parallelism, int)
+            or isinstance(max_parallelism, bool)
+            or not 1 <= max_parallelism <= MAX_AUTONOMOUS_AGENT_PARALLELISM
+        ):
+            raise BrainRunError(
+                "cross-domain max_parallelism must be between 1 and "
+                f"{MAX_AUTONOMOUS_AGENT_PARALLELISM}"
+            )
         response_alignments = _mapping_sequence(
             "cross-domain response_alignments",
             response_alignments,
@@ -14221,8 +14243,10 @@ class AutonomousTaskOrchestrator:
         execution_child_ids = tuple(
             sorted(blueprint.child_ids, key=lambda child_id: plan_priority.get(child_id, len(plan_priority)))
         )
-        child_results: list[BrainRunResult | BrainToolLoopResult | BrainMissionResult] = []
-        for child_id in execution_child_ids:
+
+        def execute_child(
+            child_id: str,
+        ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
             child = child_by_id[child_id]
             child_context = dict(child.spec.context)
             if execution_plan_context is not None:
@@ -14314,7 +14338,21 @@ class AutonomousTaskOrchestrator:
             )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("cross-domain child returned an unsupported result")
-            child_results.append(result)
+            return result
+
+        if max_parallelism == 1 or len(execution_child_ids) == 1:
+            child_results = [execute_child(child_id) for child_id in execution_child_ids]
+        else:
+            # Submit in accepted order and collect in that order. Worker completion can vary, but
+            # the public result and synthesis input remain deterministic. No evaluator or
+            # learning update runs in this concurrent path; those APIs intentionally preserve
+            # ordered delayed-credit semantics.
+            with ThreadPoolExecutor(
+                max_workers=min(max_parallelism, len(execution_child_ids)),
+                thread_name_prefix="aurora-cross-domain",
+            ) as pool:
+                futures = [pool.submit(execute_child, child_id) for child_id in execution_child_ids]
+                child_results = [future.result() for future in futures]
 
         complete = [result.status.startswith("completed") for result in child_results]
         response_assessment = None
@@ -14346,6 +14384,7 @@ class AutonomousTaskOrchestrator:
                 plan_refinement_digest,
                 execution_child_ids,
                 response_assessment,
+                max_parallelism=max_parallelism,
             )
         if synthesize and response_assessment is not None and not response_assessment.ready_to_synthesize:
             return AutonomousCrossDomainResult(
@@ -14356,6 +14395,7 @@ class AutonomousTaskOrchestrator:
                 plan_refinement_digest,
                 execution_child_ids,
                 response_assessment,
+                max_parallelism=max_parallelism,
             )
         if not synthesize:
             return AutonomousCrossDomainResult(
@@ -14366,6 +14406,7 @@ class AutonomousTaskOrchestrator:
                 plan_refinement_digest,
                 execution_child_ids,
                 response_assessment,
+                max_parallelism=max_parallelism,
             )
         child_outputs = [
             {
@@ -14494,6 +14535,7 @@ class AutonomousTaskOrchestrator:
             plan_refinement_digest,
             execution_child_ids,
             response_assessment,
+            max_parallelism=max_parallelism,
         )
 
     def run_cross_domain_learning(

@@ -3407,6 +3407,73 @@ def test_run_cross_domain_fans_out_then_synthesizes_with_approval_boundary():
         server.server_close()
 
 
+def test_cross_domain_opt_in_parallelism_preserves_order_and_waits_for_children():
+    runtime = LLMRuntime()
+    barrier = threading.Barrier(2)
+    activity_lock = threading.Lock()
+    active = 0
+    max_active = 0
+    invocation_count = 0
+
+    def handler(_request: ProviderRequest) -> Mapping[str, object]:
+        nonlocal active, max_active, invocation_count
+        with activity_lock:
+            invocation_count += 1
+            child_invocation = invocation_count <= 2
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            if child_invocation:
+                try:
+                    barrier.wait(timeout=2.0)
+                except threading.BrokenBarrierError as error:
+                    raise AssertionError("cross-domain child provider calls did not overlap") from error
+            return {"output_text": "bounded parallel answer"}
+        finally:
+            with activity_lock:
+                active -= 1
+
+    runtime.register_in_memory_provider("openai", handler)
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+    )
+    result = agent.run_cross_domain(
+        task="Run two independent bounded specialist reviews before synthesis.",
+        subtasks=[
+            {"id": "first-review", "task": "Review the first bounded input.", "domain": "coding"},
+            {"id": "second-review", "task": "Review the second bounded input.", "domain": "data"},
+        ],
+        credentials={},
+        approve_provider_call=True,
+        max_parallelism=2,
+    )
+
+    assert result.status == "completed"
+    assert result.execution_child_ids == ("first-review", "second-review")
+    assert [child.status for child in result.child_results] == [
+        "completed_provider_call",
+        "completed_provider_call",
+    ]
+    assert result.synthesis_result is not None
+    assert result.synthesis_result.status == "completed_provider_call"
+    assert result.max_parallelism == 2
+    assert max_active >= 2
+    assert invocation_count == 3
+    assert result.to_dict()["max_parallelism"] == 2
+
+    with pytest.raises(BrainRunError, match="max_parallelism"):
+        agent.run_cross_domain(
+            task="Reject an invalid specialist parallelism ceiling.",
+            subtasks=[
+                {"id": "invalid-review", "task": "Review one input.", "domain": "coding"},
+            ],
+            credentials={},
+            max_parallelism=0,
+        )
+
+
 def test_cross_domain_learning_updates_state_between_children_and_synthesis(tmp_path: Path):
     runtime, store, server, thread = _runtime()
     workspace = _Workspace()
