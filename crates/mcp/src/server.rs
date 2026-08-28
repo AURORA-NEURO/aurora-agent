@@ -275,6 +275,10 @@ use bioprism_ids::{
 use bioprism_ids::{IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION, IDS_PROTOCOL_SIMULATION_FEATURE_ID};
 use bioprism_ids::{IDS_QUALITY_CONTROL_CONTRACT_VERSION, IDS_QUALITY_CONTROL_FEATURE_ID};
 use bioprism_ids::{
+    IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+    IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+};
+use bioprism_ids::{
     IDS_STATISTICAL_CAUSAL_ML_CONTRACT_VERSION, IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID,
 };
 use bioprism_influence::{InfluenceAnalyzer, Perturbation};
@@ -1871,6 +1875,9 @@ impl Server {
             }
             "ids_statistical_causal_ml_research_copilot" => {
                 self.ids_statistical_causal_ml_research_copilot(&arguments)
+            }
+            "ids_retrieval_synthesis_assurance_harness" => {
+                self.ids_retrieval_synthesis_assurance_harness(&arguments)
             }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
@@ -25080,6 +25087,30 @@ impl Server {
         }))
     }
 
+    fn ids_retrieval_synthesis_assurance_harness(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt =
+            crate::research_contracts::operate_ids_retrieval_synthesis_assurance_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+            "contract_version": IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "typed evidence, source, and peer states are deterministically partitioned with stable ordering",
+                "staleness, relevance, comparability, provenance, replay, policy, approval, federation, budget, and negative evidence remain explicit",
+                "only digest-bound permitted summaries can be acknowledged and the route never performs network retrieval or exports raw evidence"
+            ],
+            "limitations": [
+                "the route verifies caller-supplied retrieval manifests and does not fetch or independently validate source content",
+                "a qualified synthesis assurance is not evidence truth, causal validity, publication approval, or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -41591,6 +41622,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized AnalysisCopilotRequest7 containing study identity, model portfolio version, typed analysis candidates, thresholds, budget, policy, approval, locality, and replay declarations." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "ids_retrieval_synthesis_assurance_harness",
+            "description": "Verify a federated continual preclinical retrieval corpus and synthesis closure. The assurance harness checks evidence state, source closure, relevance, freshness, comparability, peer quorum, replay, provenance, policy, federation, budget, and locality while preserving omissions and negative evidence without fetching or exporting raw sources.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ScopedRetrievalQuery6 containing typed evidence candidates, aggregate peer summaries, query terms, thresholds, policy, approval, federation, locality, budget, and replay declarations." }
                 },
                 "required": ["request"]
             }

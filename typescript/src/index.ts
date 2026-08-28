@@ -4433,3 +4433,13 @@ export {
   validateIdsQualifiedAnalysisResult10,
 } from "./research-contracts.js";
 export type { IdsQualifiedAnalysisResult10 } from "./research-contracts.js";
+
+export {
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_INPUT_SCHEMA,
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_OUTPUT_SCHEMA,
+  idsRetrievalSynthesisAssuranceDigest,
+  validateIdsEvidenceSynthesis11,
+} from "./research-contracts.js";
+export type { IdsEvidenceSynthesis11 } from "./research-contracts.js";

@@ -7795,3 +7795,17 @@ __all__ += [
     "compile_ids_statistical_causal_ml",
     "idsStatisticalCausalMlDigest",
 ]
+
+from .ids_retrieval_synthesis_assurance_harness import (
+    EvidenceSynthesis11 as IdsEvidenceSynthesis11,
+    retrieval_synthesis_assurance_manifest as ids_retrieval_synthesis_assurance_manifest,
+    assure_retrieval_synthesis as assure_ids_retrieval_synthesis,
+    idsRetrievalSynthesisAssuranceDigest,
+)
+
+__all__ += [
+    "IdsEvidenceSynthesis11",
+    "ids_retrieval_synthesis_assurance_manifest",
+    "assure_ids_retrieval_synthesis",
+    "idsRetrievalSynthesisAssuranceDigest",
+]

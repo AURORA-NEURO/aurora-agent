@@ -299,6 +299,10 @@ pub use research_contracts::{
     operate_ids_quality_control_json, validate_ids_quality_control_json, IDS_QUALITY_CONTROL_TOOL,
 };
 pub use research_contracts::{
+    operate_ids_retrieval_synthesis_assurance_json,
+    validate_ids_retrieval_synthesis_assurance_json, IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_TOOL,
+};
+pub use research_contracts::{
     operate_ids_statistical_causal_ml_json, validate_ids_statistical_causal_ml_json,
     IDS_STATISTICAL_CAUSAL_ML_TOOL,
 };

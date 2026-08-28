@@ -22,6 +22,7 @@ pub mod mechanism_exploration_assurance;
 pub mod multimodal_ingestion_research_copilot;
 pub mod protocol_simulation_workbench;
 pub mod quality_control_assurance;
+pub mod retrieval_synthesis_assurance_harness;
 pub mod statistical_causal_ml_research_copilot;
 pub mod throughput_evidence_surveillance_contract_model;
 
@@ -110,6 +111,13 @@ pub use quality_control_assurance::{
     QualityControlReport8, QualityControlReport8Artifact, QualityEvidenceState,
     QualityObservation4, CONTRACT_VERSION as IDS_QUALITY_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as IDS_QUALITY_CONTROL_FEATURE_ID,
+};
+pub use retrieval_synthesis_assurance_harness::{
+    assure_retrieval_synthesis, retrieval_synthesis_assurance_manifest, EvidenceSynthesis11,
+    EvidenceSynthesis11Artifact, RetrievalEvidence7, RetrievalEvidenceState, RetrievalPeer6,
+    RetrievalSynthesisAssuranceError, ScopedRetrievalQuery6,
+    CONTRACT_VERSION as IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
 };
 pub use statistical_causal_ml_research_copilot::{
     compile_statistical_causal_ml, statistical_causal_ml_manifest, AnalysisCandidate8,

@@ -449,6 +449,10 @@ use bioprism_ids::{
     IDS_QUALITY_CONTROL_FEATURE_ID,
 };
 use bioprism_ids::{
+    assure_retrieval_synthesis, EvidenceSynthesis11, RetrievalSynthesisAssuranceError,
+    ScopedRetrievalQuery6, IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+};
+use bioprism_ids::{
     compile_computational_execution, ComputationalExecutionReport9, ComputationalExecutionRequest6,
     IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
 };
@@ -3845,6 +3849,37 @@ pub fn validate_ids_statistical_causal_ml_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID {
         return Err("ids statistical-causal-ML feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_TOOL: &str =
+    "ids_retrieval_synthesis_assurance_harness";
+
+pub fn operate_ids_retrieval_synthesis_assurance_json(value: &Value) -> Result<Value, String> {
+    let request: ScopedRetrievalQuery6 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid ids retrieval-synthesis assurance request: {error}")
+            })?;
+    let receipt = assure_retrieval_synthesis(&request).map_err(
+        |error: RetrievalSynthesisAssuranceError| {
+            format!("ids retrieval-synthesis assurance failed: {error}")
+        },
+    )?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize ids retrieval-synthesis assurance receipt: {error}")
+    })
+}
+
+pub fn validate_ids_retrieval_synthesis_assurance_json(
+    value: &Value,
+) -> Result<EvidenceSynthesis11, String> {
+    let receipt: EvidenceSynthesis11 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids retrieval-synthesis assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID {
+        return Err("ids retrieval-synthesis assurance feature id mismatch".into());
     }
     Ok(receipt)
 }
