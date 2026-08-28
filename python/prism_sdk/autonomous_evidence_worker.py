@@ -982,6 +982,7 @@ class SQLiteAutonomousEvidenceWorkQueuePersistence:
         try:
             self._connection = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
             self._connection.row_factory = sqlite3.Row
+            self._connection.execute("PRAGMA journal_mode=WAL")
             self._connection.execute("PRAGMA synchronous=FULL")
             self._connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
             self._connection.execute(
@@ -1059,6 +1060,57 @@ class SQLiteAutonomousEvidenceWorkQueuePersistence:
                 except sqlite3.Error:
                     pass
                 raise ArgumentError("could not write autonomous evidence work SQLite persistence") from error
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, snapshot: Mapping[str, Any]) -> bool:
+        """Atomically replace the queue snapshot only when its digest is still expected.
+
+        Queue coordinators keep the digest returned by ``restore`` or their last successful
+        flush.  ``BEGIN IMMEDIATE`` serializes the read/decision/write sequence across
+        processes, so a stale coordinator cannot silently erase a newer claim, lease, or
+        reconciliation transition.  ``None`` is the create-if-empty fence.
+        """
+
+        expected = _digest(
+            "evidence work expected snapshot digest",
+            expected_snapshot_digest,
+            allow_none=True,
+        )
+        normalized, _ = _validated_snapshot(snapshot, self.max_items)
+        encoded = canonical_json(normalized)
+        digest = str(normalized["snapshot_digest"])
+        now = _now_ms(None)
+        with self._lock:
+            try:
+                self._connection.execute("BEGIN IMMEDIATE")
+                row = self._connection.execute(
+                    "SELECT snapshot_digest FROM autonomous_evidence_work_queue_snapshots WHERE singleton = 1"
+                ).fetchone()
+                observed = None if row is None else str(row["snapshot_digest"])
+                if observed != expected:
+                    self._connection.execute("ROLLBACK")
+                    return False
+                self._connection.execute(
+                    """
+                    INSERT INTO autonomous_evidence_work_queue_snapshots
+                        (singleton, persistence_schema, schema, snapshot_json, snapshot_digest, updated_at)
+                    VALUES (1, ?, ?, ?, ?, ?)
+                    ON CONFLICT(singleton) DO UPDATE SET
+                        persistence_schema = excluded.persistence_schema,
+                        schema = excluded.schema,
+                        snapshot_json = excluded.snapshot_json,
+                        snapshot_digest = excluded.snapshot_digest,
+                        updated_at = excluded.updated_at
+                    """,
+                    (AUTONOMOUS_EVIDENCE_WORK_QUEUE_SQLITE_SCHEMA, AUTONOMOUS_EVIDENCE_WORK_QUEUE_SCHEMA, encoded, digest, now),
+                )
+                self._connection.execute("COMMIT")
+                return True
+            except sqlite3.Error as error:
+                try:
+                    self._connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise ArgumentError("could not compare-and-swap autonomous evidence work SQLite persistence") from error
 
 
 @dataclass(frozen=True, slots=True)

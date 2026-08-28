@@ -60,6 +60,15 @@ and journal-chain validators run. SQLite provides local durability and process f
 does not provide tenant isolation, encryption, distributed leases, protected-value storage, or
 external provider/effect reconciliation.
 
+The evidence worker has the same local durability posture through
+`SQLiteAutonomousEvidenceWorkQueuePersistence(path)`. Its queue snapshot adapter uses WAL,
+full-synchronous transactions, bounded busy waits, and an atomic digest fence for
+`AutonomousEvidenceWorkQueuePersistenceCoordinator.flush()`. A `None` expected digest means
+create-if-empty; once a snapshot exists, a stale coordinator receives a compare-and-swap refusal
+instead of overwriting a newer lease or reconciliation transition. This protects metadata
+coordination between local processes but does not replace distributed consensus, tenant isolation,
+encryption, or source/evaluator authority.
+
 For event-level multi-process coordination, pass `SQLiteAutonomousExecutionJournal(path)` as the
 `journal` when constructing `AutonomousExecutionController` or `AutonomousAgent`. It allocates
 sequence numbers and hash-chain predecessors under the same SQLite write transaction as the

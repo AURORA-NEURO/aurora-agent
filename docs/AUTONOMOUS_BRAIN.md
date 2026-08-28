@@ -8399,9 +8399,12 @@ TypeScript exposes the same boundary through `InMemoryAutonomousEvidenceWorkQueu
 rehydrator returns `{ plan, runtime, request, execute }`; `execute` remains the caller-owned
 runtime configuration. Python also ships `SQLiteAutonomousEvidenceWorkQueuePersistence` for a
 transactional single-database deployment; call the coordinator's `flush()` after each durable queue
-transition and `restore()` during process startup. Both SDKs intentionally keep the queue contract
-separate from distributed consensus. TypeScript applications can attach an IndexedDB, transactional,
-or service-backed adapter to `read()`/`write()`, while Python applications can use SQLite or an
+transition and `restore()` during process startup. The SQLite adapter supports an atomic
+`writeIfUnchanged(expectedSnapshotDigest, snapshot)` equivalent, so two restarted coordinators
+cannot silently replace a newer lease, retry, or reconciliation snapshot; a stale flush returns a
+typed compare-and-swap conflict. Both SDKs intentionally keep the queue contract separate from
+distributed consensus. TypeScript applications can attach an IndexedDB, transactional, or
+service-backed adapter to `read()`/`write()`, while Python applications can use SQLite or an
 equivalent adapter, preserving the same snapshot schema, fencing rules, and metadata-only retention
 contract.
 

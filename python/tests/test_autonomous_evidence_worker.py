@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -339,3 +340,29 @@ def test_text_persistence_is_canonical_plan_safe_and_stale_writer_fenced():
     persistence.write(InMemoryAutonomousEvidenceWorkQueue().snapshot())
     with pytest.raises(ArgumentError, match="compare-and-swap conflict"):
         restarted_coordinator.flush()
+
+
+def test_sqlite_persistence_fences_competing_restarted_coordinators(tmp_path):
+    plan = _single_domain_plan("science")
+    requirement = plan.requirements[0]
+    first = InMemoryAutonomousEvidenceWorkQueue()
+    second = InMemoryAutonomousEvidenceWorkQueue()
+    first.enqueue(work_id="sqlite-cas-first", plan=plan, request=_request(requirement, 0), now=9_000)
+    second.enqueue(work_id="sqlite-cas-second", plan=plan, request=_request(requirement, 1), now=9_001)
+    path = tmp_path / "evidence-work-cas.sqlite3"
+    with SQLiteAutonomousEvidenceWorkQueuePersistence(path) as writer_a, SQLiteAutonomousEvidenceWorkQueuePersistence(path) as writer_b:
+        snapshots = (first.snapshot(), second.snapshot())
+
+        def attempt(index: int) -> bool:
+            writer = writer_a if index == 0 else writer_b
+            return writer.write_if_unchanged(None, snapshots[index])
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(attempt, (0, 1)))
+
+        assert sorted(outcomes) == [False, True]
+        stored = writer_a.read()
+        assert stored is not None
+        assert stored["snapshot_digest"] in {snapshots[0]["snapshot_digest"], snapshots[1]["snapshot_digest"]}
+        assert writer_a.write_if_unchanged(None, snapshots[0]) is False
+        assert writer_b.write_if_unchanged(stored["snapshot_digest"], snapshots[0]) is True

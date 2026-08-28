@@ -2138,6 +2138,13 @@ or external provider/effect truth; those remain deployment integrations. The Typ
 continues to consume the portable text-store contract so cross-SDK snapshot semantics remain
 unchanged.
 
+The Python evidence work queue now closes the equivalent stale-writer gap in its SQLite adapter.
+`SQLiteAutonomousEvidenceWorkQueuePersistence` uses WAL/full-sync transactions, bounded busy waits,
+and an atomic digest compare-and-swap operation exposed to the queue persistence coordinator. A
+competing restart can therefore win or receive an explicit conflict; it cannot silently erase a
+newer lease, retry, or reconciliation state. This remains local process fencing, not distributed
+consensus, and does not persist source values, prompts, credentials, or evaluator payloads.
+
 The same Python backend now supports `SQLiteAutonomousExecutionJournal`, which transactionally
 allocates event sequences and hash-chain predecessors for direct multi-process appenders while
 preserving the JSONL journal interface and portable snapshot format. This closes metadata-history
