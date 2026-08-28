@@ -4192,6 +4192,7 @@ class LLMRuntime:
         estimated_cost_units: float = 0.0,
         effect_boundary: Any | None = None,
         effect_execution: Any | None = None,
+        effect_id_observer: Callable[[str], None] | None = None,
     ) -> Iterator[ProviderStreamEvent]:
         """Open a provider stream with a metadata-only crash-safe dispatch boundary.
 
@@ -4244,6 +4245,15 @@ class LLMRuntime:
                 "idempotency_key_present": request.idempotency_key is not None,
             },
         }
+        if effect_id_observer is not None:
+            if not callable(effect_id_observer):
+                raise ProviderError("effect_id_observer must be callable")
+            try:
+                effect_id_observer(selected_boundary.effect_id(effect_request))
+            except Exception:
+                # Effect identity is diagnostic metadata. A faulty observer must never alter
+                # provider dispatch or turn a valid stream into a caller-visible failure.
+                pass
         summary: dict[str, Any] = {
             "provider": provider,
             "model": request.model,

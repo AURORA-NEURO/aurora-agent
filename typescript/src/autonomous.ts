@@ -9196,6 +9196,7 @@ export class AutonomousAgent {
           provider_invocations: [],
           provider_failover: null,
           inner_completions: [],
+          effect_ids: [],
           error_code: null,
           error_class: null,
           retention: "metadata_only_no_stream_payloads_or_credentials",
@@ -9274,6 +9275,7 @@ export class AutonomousAgent {
       if (completionSettled) return;
       completionSettled = true;
       const providerFailover = [...innerCompletions].reverse().find((item) => item.provider_failover !== null)?.provider_failover ?? null;
+      const effectIds = [...new Set(innerCompletions.flatMap((item) => "effect_ids" in item && Array.isArray(item.effect_ids) ? item.effect_ids : []))];
       completionResolver?.({
         schema: AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA,
         status,
@@ -9286,6 +9288,7 @@ export class AutonomousAgent {
         provider_invocations: [...providerInvocations],
         provider_failover: providerFailover,
         inner_completions: [...innerCompletions],
+        effect_ids: effectIds,
         error_code: error instanceof ProviderRuntimeError ? error.code : null,
         error_class: error instanceof Error ? error.constructor.name : error === null ? null : "UnknownError",
         retention: "metadata_only_no_stream_payloads_or_credentials",
@@ -9500,6 +9503,7 @@ export class AutonomousAgent {
           provider_invocations: [],
           provider_failover: null,
           inner_completions: [],
+          effect_ids: [],
           error_code: null,
           error_class: null,
           retention: "metadata_only_no_stream_payloads_or_credentials",
@@ -9660,6 +9664,7 @@ export class AutonomousAgent {
             provider_invocations: innerCompletion.provider_invocations,
             provider_failover: innerCompletion.provider_failover,
             inner_completions: [innerCompletion],
+            effect_ids: [...innerCompletion.effect_ids],
             error_code: innerCompletion.error_code,
             error_class: innerCompletion.error_class,
             retention: "metadata_only_no_stream_payloads_or_credentials",

@@ -144,6 +144,7 @@ class AutonomousAgentStreamCompletion:
     stage_records: tuple[Mapping[str, Any], ...] = ()
     error_code: str | None = None
     error_class: str | None = None
+    effect_ids: tuple[str, ...] = ()
     schema: str = AUTONOMOUS_AGENT_STREAM_COMPLETION_SCHEMA
     retention: str = "metadata_only_no_stream_payloads_or_credentials"
     secret_material: str = "never_returned"
@@ -176,6 +177,10 @@ class AutonomousAgentStreamCompletion:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ProviderError(f"autonomous agent stream {label} must be non-negative")
+        if not isinstance(self.effect_ids, tuple) or len(self.effect_ids) > 32:
+            raise ProviderError("autonomous agent stream effect_ids must be a bounded tuple")
+        for effect_id in self.effect_ids:
+            _bounded_digest(effect_id, "autonomous agent stream effect_id")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -192,6 +197,7 @@ class AutonomousAgentStreamCompletion:
             "stage_records": [dict(item) for item in self.stage_records],
             "error_code": self.error_code,
             "error_class": self.error_class,
+            "effect_ids": list(self.effect_ids),
             "retention": self.retention,
             "secret_material": self.secret_material,
         }
@@ -278,6 +284,7 @@ class AutonomousAgentStreamHandle:
         provider_invocations: tuple[Mapping[str, Any], ...] = ()
         provider_failover: Mapping[str, Any] | None = None
         inner_completions: tuple[Mapping[str, Any], ...] = ()
+        effect_ids: tuple[str, ...] = ()
         if isinstance(inner_completion, AutonomousStreamCompletion):
             inner_dict = inner_completion.to_dict()
             inner_completions = (inner_dict,)
@@ -285,6 +292,7 @@ class AutonomousAgentStreamHandle:
             provider_failover = (
                 None if inner_completion.provider_failover is None else dict(inner_completion.provider_failover)
             )
+            effect_ids = tuple(inner_completion.effect_ids)
         error_code = getattr(error, "code", None) if error is not None else None
         if not isinstance(error_code, str):
             error_code = None
@@ -304,6 +312,7 @@ class AutonomousAgentStreamHandle:
             error_class=(type(error).__name__ if error is not None else (
                 inner_completion.error_class if isinstance(inner_completion, AutonomousStreamCompletion) else None
             )),
+            effect_ids=effect_ids,
         )
 
     def _finish_from_inner(self) -> None:
@@ -553,6 +562,7 @@ class AutonomousCrossDomainStreamHandle:
                 event_count=0,
                 text_delta_bytes=0,
                 stage_count=0,
+                effect_ids=(),
             )
         completion_dict = completion.to_dict()
         with self._completion_lock:
@@ -803,6 +813,12 @@ class AutonomousCrossDomainStreamHandle:
                 for invocation in completion.get("provider_invocations", ())
                 if isinstance(invocation, Mapping)
             )
+            effect_id_values: list[str] = []
+            for completion in ordered_inner_completions:
+                for effect_id in completion.get("effect_ids", ()):
+                    if isinstance(effect_id, str) and effect_id not in effect_id_values:
+                        effect_id_values.append(effect_id)
+            ordered_effect_ids = tuple(effect_id_values)
             safe_status = status if status in {
                 "approval_required",
                 "route_review_required",
@@ -839,6 +855,7 @@ class AutonomousCrossDomainStreamHandle:
                 stage_records=tuple(dict(item) for item in ordered_stage_records),
                 error_code=(getattr(error, "code", None) if error is not None else None),
                 error_class=(type(error).__name__ if error is not None else None),
+                effect_ids=ordered_effect_ids,
             )
         self._stop.set()
         self._wake_consumer()

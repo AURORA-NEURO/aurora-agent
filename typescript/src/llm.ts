@@ -741,6 +741,8 @@ export interface ProviderInvocationOptions {
   observer?: ProviderInvocationObserver;
   /** Optional metadata-only crash-safe boundary for the actual provider dispatch. */
   effectBoundary?: AutonomousEffectBoundary;
+  /** Observe the exact metadata-only effect identity used for a live provider dispatch. */
+  effectIdObserver?: (effectId: string) => void;
   invocationKind?: string;
   execution?: AutonomousExecutionController;
   executionAttempt?: number;
@@ -1084,6 +1086,8 @@ export interface AutonomousStreamCompletion extends JsonObject {
   provider_failover: AutonomousProviderFailoverProjection | null;
   error_code: ProviderErrorCode | null;
   error_class: string | null;
+  /** Effect identities for provider attempts; payloads and credentials are never retained. */
+  effect_ids: string[];
   retention: "metadata_only_no_stream_payloads_or_credentials";
   secret_material: "never_returned";
 }
@@ -1110,6 +1114,7 @@ export interface AutonomousStreamInvocationOptions {
   maxProviderFailovers?: number;
   reserveCost?: AutonomousCostReservationCallback;
   effectBoundary?: AutonomousEffectBoundary;
+  effectIdObserver?: (effectId: string) => void;
 }
 
 export type AutonomousModelSelector = (request: AutonomousSelectionRequest) => AutonomousSelectionDecision | Promise<AutonomousSelectionDecision>;
@@ -2831,8 +2836,7 @@ export class LLMRuntime {
       if (event.requestId) summary.request_id_digest = await digestJson(event.requestId);
     };
     const project = (base: JsonObject): JsonObject => ({ ...summary, event_count: base.event_count, completed: true });
-    const stream = selectedBoundary.executeStream(
-      {
+    const effectRequest = {
         execution_id: executionId,
         tool: `provider.${provider}.stream`,
         call_id: callId,
@@ -2846,7 +2850,14 @@ export class LLMRuntime {
           tool_count: request.tools?.length ?? 0,
           idempotency_key_present: request.idempotencyKey !== undefined,
         },
-      },
+    };
+    try {
+      options.effectIdObserver?.(await selectedBoundary.effectId(effectRequest));
+    } catch {
+      // Effect identity is diagnostic metadata. A faulty observer must never alter dispatch.
+    }
+    const stream = selectedBoundary.executeStream(
+      effectRequest,
       async (context) => this.invokeStreamUnbounded(provider, request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }, options),
       { execution: options.execution, summaryProjector: project, observe, definiteFailure: providerEffectFailureIsDefinite },
     );
@@ -3767,6 +3778,7 @@ export class AutonomousRuntime {
     let sawEvent = false;
     let finalized = false;
     let consumed = false;
+    const effectIds: string[] = [];
     const runtime = this.llm;
 
     const finish = (status: AutonomousStreamCompletion["status"], error: unknown = null): void => {
@@ -3783,6 +3795,7 @@ export class AutonomousRuntime {
           done_seen: doneSeen,
           provider_invocations: projection.providerInvocations,
           provider_failover: projection.providerFailover,
+          effect_ids: [...effectIds],
           error_code: errorCode,
           error_class: errorClass,
           retention: "metadata_only_no_stream_payloads_or_credentials",
@@ -3799,6 +3812,7 @@ export class AutonomousRuntime {
           done_seen: doneSeen,
           provider_invocations: [],
           provider_failover: null,
+          effect_ids: [...effectIds],
           error_code: errorCode,
           error_class: errorClass,
           retention: "metadata_only_no_stream_payloads_or_credentials",
@@ -3861,6 +3875,10 @@ export class AutonomousRuntime {
                 selectionDigest,
                 estimatedCostUnits,
                 reserveCost: options.reserveCost,
+                effectIdObserver: (effectId) => {
+                  if (!effectIds.includes(effectId)) effectIds.push(effectId);
+                  options.effectIdObserver?.(effectId);
+                },
               })) {
                 sawEvent = true;
                 eventCount += 1;

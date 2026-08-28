@@ -68,7 +68,11 @@ const completion = await handle.completion;
 The stream does not buffer output. `ProviderStreamEvent` is the only live payload surface and is
 discarded by the runtime after the caller consumes it. `AutonomousStreamCompletion` contains only
 event count, UTF-8 delta byte count, `done` observation, provider invocation receipts, bounded
-failover metadata, safe error code/class, and retention markers.
+failover metadata, safe error code/class, metadata-only `effect_ids` for live provider dispatches,
+and retention markers. An effect ID is not a replay token: it lets a restart worker look up the
+exact ledger record and call the configured provider resolver. A completed or uncertain live
+stream is never replayed by the stream API; after reconciliation the caller must deliberately
+open a new stream if a fresh response is needed.
 
 Python's runtime is synchronous and accepts the ranked arm order produced by the caller's already
 approved brain selection:
@@ -181,6 +185,14 @@ provider's remaining arms according to the compiled policy; no unbounded retry l
 The runtime's existing provider quota, execution controller, cost reservation, effect boundary,
 observer, and caller abort signal remain attached to each attempted arm.
 
+When an `AutonomousEffectBoundary` is configured, the completion receipt exposes one effect ID
+per attempted provider arm. The boundary persists dispatch metadata before entering provider
+transport and retains only a bounded summary after normal exhaustion. If a consumer closes after
+dispatch, the corresponding record is conservatively `uncertain`; callers can inspect
+`completion.effect_ids`, load the record from their journal, and run the provider-specific
+resolver. Prompt messages, streamed deltas, tool arguments, credentials, and provider payloads
+never enter that reconciliation projection.
+
 ## Context and domain coverage
 
 The optional context budget is applied to the exact request that will be dispatched. System and
@@ -204,6 +216,7 @@ Both SDKs include in-memory provider fixtures that exercise:
 - explicit abandonment and single-consumer enforcement;
 - bounded cross-domain fan-in backpressure with a deliberately paused consumer;
 - completion redaction checks; and
+- effect-identity exposure and uncertain-record lookup after partial consumption; and
 - all twelve autonomous domains through the same provider-neutral event shape.
 
 The Python cross-domain façade additionally covers lazy approval, bounded concurrent child fan-out,

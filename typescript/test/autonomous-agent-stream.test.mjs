@@ -7,7 +7,9 @@ import {
   ArgumentError,
   AutonomousAgent,
   AutonomousBrainFacade,
+  AutonomousEffectBoundary,
   LLMRuntime,
+  InMemoryAutonomousEffectJournal,
   routeAutonomousEvidenceScope,
 } from "../dist/index.js";
 
@@ -81,6 +83,28 @@ test("AutonomousAgent stream preflight refuses without provider approval and nev
   assert.deepEqual(events, []);
   assert.equal(completion.status, "approval_required");
   assert.equal(completion.event_count, 0);
+});
+
+test("AutonomousAgent exposes live provider effect identities in its completion receipt", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const boundary = new AutonomousEffectBoundary({ journal });
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); }, effectBoundary: boundary });
+  runtime.registerInMemoryProvider("stream-agent-offline", () => "unused", {
+    stream: (input) => [event(input, 0, "high-level recovery receipt", true)],
+  });
+  const value = new AutonomousAgent(runtime, { effectBoundary: boundary });
+  value.registerModel(model);
+  const handle = await value.runStream("stream a receipt with a recoverable dispatch identity", {
+    domain: "coding",
+    approveProviderCall: true,
+  });
+  for await (const _item of handle.events) { /* consume */ }
+  const completion = await handle.completion;
+  assert.equal(completion.status, "completed");
+  assert.equal(completion.effect_ids.length, 1);
+  const record = await journal.get(completion.effect_ids[0]);
+  assert.equal(record.status, "completed");
+  assert.equal(JSON.stringify(completion).includes("high-level recovery receipt"), false);
 });
 
 test("cross-domain stream multiplexes bounded specialists before synthesis", async () => {

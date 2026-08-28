@@ -31,6 +31,7 @@ from prism_sdk import (
     AutonomousCrossDomainCheckpoint,
     AutonomousCrossDomainResult,
     AutonomousCrossDomainReplanResult,
+    AutonomousEffectBoundary,
     InMemoryAutonomousDecisionCycleStateStore,
     AutonomousDecisionCyclePersistenceCoordinator,
     TransactionalJsonAutonomousDecisionCycleSnapshotPersistence,
@@ -66,6 +67,7 @@ from prism_sdk import (
     CredentialError,
     LLMRuntime,
     InMemoryAutonomousCapabilityJournalStore,
+    InMemoryAutonomousEffectJournal,
     InMemoryAutonomousRunTraceStore,
     AutonomousCapabilityJournalPersistenceCoordinator,
     TransactionalJsonAutonomousCapabilityJournalSnapshotPersistence,
@@ -3082,6 +3084,41 @@ def test_agent_run_stream_preflights_lazily_invokes_and_redacts_completion():
     assert "stream a reviewed coding answer" in calls[0].messages[-1]["content"]
     with pytest.raises(ProviderError, match="single-consumer"):
         _ = live.events
+
+
+def test_agent_run_stream_propagates_effect_identity_to_high_level_completion():
+    journal = InMemoryAutonomousEffectJournal()
+    boundary = AutonomousEffectBoundary(journal=journal)
+    runtime = LLMRuntime(effect_boundary=boundary)
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda _request: "unused",
+        stream_handler=lambda request: [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.done",
+                text_delta="high-level recovery receipt",
+                done=True,
+            )
+        ],
+    )
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    live = agent.run_stream(
+        task="stream a receipt with a recoverable dispatch identity",
+        domain="coding",
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+    )
+    list(live.events)
+    completion = live.completion
+    assert completion is not None and completion.status == "completed"
+    assert len(completion.effect_ids) == 1
+    record = journal.get(completion.effect_ids[0])
+    assert record is not None and record.status == "completed"
+    assert "high-level recovery receipt" not in json.dumps(completion.to_dict())
 
 
 def test_agent_run_auto_stream_keeps_provider_free_routing_and_allows_only_one_domain():

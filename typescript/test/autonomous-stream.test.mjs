@@ -5,7 +5,9 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AUTONOMOUS_STREAM_COMPLETION_SCHEMA,
   ArgumentError,
+  AutonomousEffectBoundary,
   AutonomousRuntime,
+  InMemoryAutonomousEffectJournal,
   LLMRuntime,
   ProviderRuntimeError,
 } from "../dist/index.js";
@@ -167,6 +169,34 @@ test("autonomous streaming never replays a partial provider stream", async () =>
   assert.equal(completion.event_count, 1);
   assert.equal(completion.done_seen, false);
   assert.equal(completion.provider_failover, null);
+});
+
+test("autonomous stream completion exposes the effect identity needed for reconciliation", async () => {
+  const journal = new InMemoryAutonomousEffectJournal();
+  const boundary = new AutonomousEffectBoundary({ journal });
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); }, effectBoundary: boundary });
+  runtime.registerInMemoryProvider("stream-recovery", () => "unused", {
+    stream: function* (input) {
+      yield streamEvent("stream-recovery", input.model, 0, "transient");
+      throw new ProviderRuntimeError("connection lost after first delta", { retryable: true, statusCode: 503 });
+    },
+  });
+  const agent = new AutonomousRuntime(runtime);
+  const handle = await agent.invokeStream({
+    task: "expose the recovery identity without retaining output",
+    domain: "operations",
+    candidates: [candidate("stream-recovery", "recovery-model")],
+    request: request("recovery-model"),
+  });
+  const iterator = handle.events[Symbol.asyncIterator]();
+  assert.equal((await iterator.next()).value.textDelta, "transient");
+  await iterator.return();
+  const completion = await handle.completion;
+  assert.equal(completion.status, "abandoned");
+  assert.equal(completion.effect_ids.length, 1);
+  const record = await journal.get(completion.effect_ids[0]);
+  assert.equal(record.status, "uncertain");
+  assert.equal(JSON.stringify(completion).includes("transient"), false);
 });
 
 test("autonomous stream abandonment is explicit and all built-in domains can use the contract", async () => {

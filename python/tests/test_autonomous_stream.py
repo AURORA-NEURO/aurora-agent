@@ -6,7 +6,9 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_STREAM_COMPLETION_SCHEMA,
+    AutonomousEffectBoundary,
     AutonomousStreamRuntime,
+    InMemoryAutonomousEffectJournal,
     LLMRuntime,
     ProviderError,
     ProviderRequest,
@@ -117,6 +119,34 @@ def test_autonomous_stream_fails_over_only_before_first_event() -> None:
     assert completion.provider_failover is not None
     assert completion.provider_failover["fallback_count"] == 1
     assert [row["outcome"] for row in completion.provider_invocations] == ["failure", "success"]
+
+
+def test_autonomous_stream_completion_exposes_reconciliation_effect_identity() -> None:
+    journal = InMemoryAutonomousEffectJournal()
+    boundary = AutonomousEffectBoundary(journal=journal)
+
+    def partial_stream(request: ProviderRequest):
+        yield _event("stream-recovery", request.model, 0, "transient", done=False)
+        raise ProviderError("connection lost after first delta", retryable=True, status_code=503)
+
+    runtime = LLMRuntime(effect_boundary=boundary)
+    runtime.register_in_memory_provider("stream-recovery", lambda _request: "unused", stream_handler=partial_stream)
+    handle = AutonomousStreamRuntime(runtime).open(
+        _request("recovery-model"),
+        provider="stream-recovery",
+        model="recovery-model",
+    )
+    iterator = handle.events
+    assert next(iterator).text_delta == "transient"
+    iterator.close()
+
+    completion = handle.completion
+    assert completion is not None
+    assert completion.status == "abandoned"
+    assert len(completion.effect_ids) == 1
+    record = journal.get(completion.effect_ids[0])
+    assert record is not None and record.status == "uncertain"
+    assert "transient" not in json.dumps(completion.to_dict())
 
 
 def test_autonomous_stream_refuses_partial_replay_and_marks_abandonment() -> None:

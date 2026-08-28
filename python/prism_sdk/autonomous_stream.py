@@ -114,9 +114,19 @@ class AutonomousStreamCompletion:
     provider_failover: Mapping[str, Any] | None
     error_code: str | None
     error_class: str | None
+    effect_ids: tuple[str, ...] = ()
     schema: str = AUTONOMOUS_STREAM_COMPLETION_SCHEMA
     retention: str = "metadata_only_no_stream_payloads_or_credentials"
     secret_material: str = "never_returned"
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.effect_ids, tuple) or len(self.effect_ids) > 32:
+            raise ProviderError("autonomous stream effect_ids must be a bounded tuple")
+        for effect_id in self.effect_ids:
+            if not isinstance(effect_id, str) or len(effect_id) != 64 or any(
+                character not in "0123456789abcdef" for character in effect_id
+            ):
+                raise ProviderError("autonomous stream effect_ids must be lowercase SHA-256 digests")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -129,6 +139,7 @@ class AutonomousStreamCompletion:
             "provider_failover": None if self.provider_failover is None else dict(self.provider_failover),
             "error_code": self.error_code,
             "error_class": self.error_class,
+            "effect_ids": list(self.effect_ids),
             "retention": self.retention,
             "secret_material": self.secret_material,
         }
@@ -159,6 +170,7 @@ class AutonomousStreamHandle:
         "_text_delta_bytes",
         "_done_seen",
         "_attempts",
+        "_effect_ids",
     )
 
     def __init__(
@@ -203,6 +215,7 @@ class AutonomousStreamHandle:
         self._text_delta_bytes = 0
         self._done_seen = False
         self._attempts: list[dict[str, Any]] = []
+        self._effect_ids: list[str] = []
 
     @property
     def completion(self) -> AutonomousStreamCompletion | None:
@@ -263,6 +276,7 @@ class AutonomousStreamHandle:
             provider_failover=failover,
             error_code=error_code,
             error_class=error_class,
+            effect_ids=tuple(self._effect_ids),
         )
 
     def _iterate(self) -> Iterator[ProviderStreamEvent]:
@@ -280,6 +294,7 @@ class AutonomousStreamHandle:
                     "text_delta_bytes": 0,
                     "done_seen": False,
                     "error_code": None,
+                    "effect_id": None,
                     "request_id_present": False,
                     "estimated_input_tokens": self._estimated_input_tokens,
                     "estimated_output_tokens": self._request.max_output_tokens,
@@ -295,6 +310,10 @@ class AutonomousStreamHandle:
                         self._credential_for(arm.provider) if self._credential_for is not None else None
                     )
                 started = time.perf_counter()
+                def observe_effect(effect_id: str) -> None:
+                    if effect_id not in self._effect_ids:
+                        self._effect_ids.append(effect_id)
+                    attempt["effect_id"] = effect_id
                 try:
                     for event in self._runtime.invoke_stream(
                         arm.provider,
@@ -304,6 +323,7 @@ class AutonomousStreamHandle:
                         invocation_kind=self._invocation_kind,
                         effect_boundary=self._effect_boundary,
                         effect_execution=self._effect_execution,
+                        effect_id_observer=observe_effect,
                         provider_quota=self._provider_quota,
                         estimated_cost_units=attempt["estimated_cost_units"],
                     ):
