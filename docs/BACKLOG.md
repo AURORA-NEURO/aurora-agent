@@ -20,6 +20,12 @@ provider-assisted routing refusal before source dispatch, metadata-only result p
 checkpoint emission, and controller completion. Provider resume, source truth, credentials,
 durable storage, and external-effect reconciliation remain explicit deployment authorities.
 
+The TypeScript brain facade now traces reviewed adapter and domain-catalogue evidence lifecycles
+through the existing hash-chained run-trace contract. Traced variants cover plan compilation,
+selection, provider invocation, evidence/reconciliation settlement, conservative terminal status,
+launch-admission refusal, and all-domain reviewed adapter execution while keeping raw source
+values, prompt chunks, provider output, and credentials out of trace events and projections.
+
 Provider-assisted planning now has a symmetric failure contract across Python and TypeScript.
 Single-domain, ordered-step, cross-domain, automatic, and direct plan-and-run entrypoints convert
 credential-boundary and operational provider failures into metadata-only `provider_failed`

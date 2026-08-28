@@ -9,6 +9,7 @@ import {
   InMemoryAutonomousEvidenceBackedCheckpointStore,
   AutonomousEvidenceReadinessPolicy,
   CredentialStore,
+  InMemoryAutonomousRunTraceStore,
   LLMRuntime,
   builtinAutonomousDomainEvidenceSourceProfiles,
   createBuiltinAutonomousDomainEvidenceSourceCatalogue,
@@ -167,6 +168,44 @@ test("brain facade exposes reviewed evidence execution across every built-in dom
   }
   assert.equal(calls.evidence, expectedEvidenceCalls);
   assert.equal(calls.provider, AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
+test("brain facade traces reviewed evidence across every built-in domain without retaining values", async () => {
+  const { agent, registry, calls } = await setup();
+  const brain = new AutonomousBrainFacade({ agent });
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+  let expectedEvidenceCalls = 0;
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const plan = await agent.evidencePlan([domain]);
+    expectedEvidenceCalls += plan.requirements.length;
+    const traced = await brain.runWithReviewedEvidenceWithTrace(`Traced facade evidence review for ${domain}.`, {
+      registry,
+      ...evidenceOptions(plan),
+      traceStore,
+      runId: `facade-evidence-trace-${domain}`,
+      promptBuilder: ({ values }) => [{
+        id: "trace-transient-evidence",
+        content: JSON.stringify({ claim: Object.values(values)[0]?.claim }),
+        required: true,
+        priority: 970,
+      }],
+    });
+    assert.equal(traced.result.status, "completed", domain);
+    assert.equal(traced.trace.status, "completed", domain);
+    assert.equal(traced.trace.domains.includes(domain), true, domain);
+    assert.equal(traced.trace.provider_invocations, 1, domain);
+    assert.ok(traced.trace.plan_digest, domain);
+    assert.ok(traced.trace.selection_digests.length >= 1, domain);
+    assert.doesNotMatch(JSON.stringify(traced), /transient-evidence-claim/);
+    const phases = traceStore.events({ run_id: `facade-evidence-trace-${domain}` }).map((event) => event.phase);
+    assert.ok(phases.includes("plan_compiled"), domain);
+    assert.ok(phases.includes("model_selection_finished"), domain);
+    assert.ok(phases.includes("provider_invocation_finished"), domain);
+    assert.ok(phases.includes("evaluation_settled"), domain);
+  }
+  assert.equal(calls.evidence, expectedEvidenceCalls);
+  assert.equal(calls.provider, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(traceStore.verifyIntegrity().verified, true);
 });
 
 test("evidence-backed execution keeps source approval and provider approval independent", async () => {
@@ -417,6 +456,31 @@ test("brain facade launch admission gates evidence before source work and preser
   assert.equal(heldResumable, undefined);
 });
 
+test("brain facade traced launch admission preserves evidence review and blocks provider dispatch", async () => {
+  const { agent, registry, calls } = await setup();
+  const brain = new AutonomousBrainFacade({ agent });
+  const admission = await launchAdmissionFor(agent);
+  const plan = await agent.evidencePlan(["coding"]);
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+  const traced = await brain.runWithReviewedEvidenceWithLaunchAdmissionAndTrace(
+    "Launch-admitted traced evidence review.",
+    admission,
+    {
+      registry,
+      ...evidenceOptions(plan, { approveProviderCall: false }),
+      traceStore,
+      runId: "facade-evidence-launch-trace",
+    },
+  );
+  assert.equal(traced.result.status, "approval_required");
+  assert.equal(traced.trace.status, "paused");
+  assert.equal(traced.trace.provider_invocations, 0);
+  assert.equal(calls.provider, 0);
+  assert.doesNotMatch(JSON.stringify(traced), /transient-evidence-claim/);
+  assert.ok(traceStore.events({ run_id: "facade-evidence-launch-trace" }).some((event) => event.phase === "plan_compiled"));
+  assert.equal(traceStore.verifyIntegrity().verified, true);
+});
+
 async function catalogueSetup() {
   const profiles = await builtinAutonomousDomainProfiles();
   const sourceProfiles = builtinAutonomousDomainEvidenceSourceProfiles();
@@ -486,6 +550,34 @@ test("brain facade exposes catalogue evidence execution across every built-in do
   }
   assert.equal(calls.evidence, expectedEvidenceCalls);
   assert.equal(calls.provider, AUTONOMOUS_DOMAIN_NAMES.length);
+});
+
+test("brain facade traces catalogue evidence with a metadata-only reconciliation lifecycle", async () => {
+  const { agent, catalogue, calls } = await catalogueSetup();
+  const brain = new AutonomousBrainFacade({ agent });
+  const profile = builtinAutonomousDomainEvidenceSourceProfiles().find((candidate) => candidate.domain === "science");
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+  const traced = await brain.runWithDomainEvidenceCatalogueWithTrace("Traced facade catalogue science review.", {
+    catalogue,
+    domains: ["science"],
+    prepare: { profileId: profile.profile_id, quorum: 1 },
+    execute: { approveSourceDispatch: true },
+    traceStore,
+    runId: "facade-catalogue-trace-science",
+    run: {
+      domain: "science",
+      candidates: [{ ...model(), provider: "catalogue-provider", model: "catalogue-model" }],
+      approveProviderCall: true,
+    },
+  });
+  assert.equal(traced.result.status, "completed");
+  assert.equal(traced.trace.status, "completed");
+  assert.equal(traced.trace.domains.includes("science"), true);
+  assert.equal(traced.trace.provider_invocations, 1);
+  assert.doesNotMatch(JSON.stringify(traced), /catalogue-transient-evidence/);
+  assert.ok(traceStore.events({ run_id: "facade-catalogue-trace-science" }).some((event) => event.phase === "evaluation_settled"));
+  assert.equal(traceStore.verifyIntegrity().verified, true);
+  assert.equal(calls.provider, 1);
 });
 
 test("catalogue-backed brain composes normalizers, reconciliation, model selection, and prompting for every domain", async () => {

@@ -502,6 +502,34 @@ export type AutonomousBrainEvidenceBackedResumableExecutionOptions = AutonomousE
 /** Restart-safe evidence result; provider dispatch after a pending checkpoint remains explicit. */
 export type AutonomousBrainEvidenceBackedResumableRun = AutonomousEvidenceBackedResumableRun;
 
+/** Evidence-backed facade controls plus one caller-owned hash-chained metadata trace. */
+export interface AutonomousBrainEvidenceBackedTraceOptions extends AutonomousBrainEvidenceBackedRunOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+/** Catalogue-backed facade controls plus one caller-owned hash-chained metadata trace. */
+export interface AutonomousBrainDomainEvidenceBrainTraceOptions extends AutonomousBrainDomainEvidenceBrainRunOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+/** Live evidence-backed result paired with a serialized-safe execution trace. */
+export interface AutonomousBrainTracedEvidenceBackedRunResult {
+  result: AutonomousBrainEvidenceBackedRunResult;
+  trace: AutonomousRunTraceSummary;
+  retention: "result_values_caller_owned;trace_metadata_only_no_evidence_prompts_responses_or_credentials";
+  secret_material: "never_returned";
+}
+
+/** Live catalogue-backed result paired with a serialized-safe execution trace. */
+export interface AutonomousBrainTracedDomainEvidenceBrainRunResult {
+  result: AutonomousBrainDomainEvidenceBrainRunResult;
+  trace: AutonomousRunTraceSummary;
+  retention: "result_values_caller_owned;trace_metadata_only_no_evidence_prompts_responses_or_credentials";
+  secret_material: "never_returned";
+}
+
 /** Options for executing one caller-approved, digest-bound model-selection preview. */
 export interface AutonomousBrainApprovedSelectionOptions {
   run?: Omit<AutonomousApprovedModelSelectionOptions, "domain">;
@@ -1082,6 +1110,43 @@ function composeSelectionCallbacks(...callbacks: readonly (AutonomousModelSelect
   return async (event) => {
     for (const callback of active) await callback(event);
   };
+}
+
+function evidenceTraceDomains(domains: readonly AutonomousDomainName[] | undefined, runMode: unknown): AutonomousDomainName[] {
+  const result = [...(domains ?? AUTONOMOUS_DOMAIN_NAMES)];
+  if (runMode === "cross_domain" && !result.includes("cross_domain")) result.push("cross_domain");
+  return result;
+}
+
+function tracedEvidenceRunOptions(run: AutonomousAutoRunOptions | undefined, trace: AutonomousRunTraceSession): AutonomousAutoRunOptions {
+  return {
+    ...(run ?? {}),
+    observer: composeBrainObservers(run?.observer, trace.providerObserver()),
+    selectionEventCallback: trace.selectionEventCallback(run?.selectionEventCallback),
+  };
+}
+
+type EvidenceTraceResult = AutonomousBrainEvidenceBackedRunResult | AutonomousBrainDomainEvidenceBrainRunResult;
+
+function evidenceTraceMetadataRun(result: EvidenceTraceResult): AutonomousRunResult | null {
+  const automaticResult = result.automatic?.result;
+  return result.run
+    ?? result.cross_domain_run?.synthesis
+    ?? (automaticResult?.schema === "bioprism-typescript-autonomous-run/0.1" ? automaticResult : automaticResult?.synthesis ?? null);
+}
+
+function evidenceTraceRouteDigest(result: EvidenceTraceResult): string | null {
+  return result.automatic?.route.route_digest
+    ?? result.cross_domain_run?.route.route_digest
+    ?? result.run?.route.route_digest
+    ?? null;
+}
+
+function evidenceTraceStatus(status: string): ReturnType<typeof autonomousRunTraceStatus> {
+  if (status === "evidence_review_required" || status === "evidence_blocked") return "paused";
+  if (status === "evidence_incomplete") return "partial";
+  if (status === "evidence_failed") return "failed";
+  return autonomousRunTraceStatus(status);
 }
 
 function missionTraceStatus(status: string): ReturnType<typeof autonomousRunTraceStatus> {
@@ -1688,6 +1753,175 @@ export class AutonomousBrainFacade {
     return this.agent.runWithDomainEvidenceCatalogue(task, options);
   }
 
+  /**
+   * Attach one hash-chained, metadata-only trace to reviewed adapter evidence execution. The
+   * trace covers plan readiness, provider selection/invocation, evidence settlement, and the
+   * terminal state; the direct result remains the caller-owned transient value surface.
+   */
+  async runWithReviewedEvidenceWithTrace(
+    task: string,
+    options: AutonomousBrainEvidenceBackedTraceOptions,
+  ): Promise<AutonomousBrainTracedEvidenceBackedRunResult> {
+    const taskDigest = digestJsonSync({ task });
+    const trace = new AutonomousRunTraceSession(options.traceStore, {
+      run_id: options.runId,
+      task_digest: taskDigest,
+      domains: evidenceTraceDomains(options.domains, options.runMode),
+    });
+    await trace.started();
+    let planRecorded = false;
+    try {
+      const {
+        traceStore: _traceStore,
+        runId: _runId,
+        beforeProviderRun: callerBeforeProviderRun,
+        ...runOptions
+      } = options;
+      const result = await this.runWithReviewedEvidence(task, {
+        ...runOptions,
+        beforeProviderRun: async (preflight) => {
+          planRecorded = true;
+          await trace.record({
+            phase: "plan_compiled",
+            status: "running",
+            plan_digest: preflight.executionPlan.plan_digest,
+            detail_digest: digestJsonSync({
+              evidence_status: preflight.evidence.status,
+              evidence_result_digest: preflight.evidence.result_digest,
+              prompt_projection_digest: digestJsonSync(preflight.promptContext),
+            }),
+          });
+          await callerBeforeProviderRun?.(preflight);
+        },
+        run: tracedEvidenceRunOptions(runOptions.run, trace),
+      });
+      if (!planRecorded) {
+        await trace.record({
+          phase: "plan_compiled",
+          status: "running",
+          plan_digest: result.execution_plan.plan_digest,
+          detail_digest: digestJsonSync({
+            evidence_status: result.evidence?.status ?? null,
+            evidence_result_digest: result.evidence?.result_digest ?? null,
+            run_status: result.run?.status ?? null,
+            cross_domain_run_status: result.cross_domain_run?.status ?? null,
+            automatic_status: result.automatic?.status ?? null,
+          }),
+        });
+      }
+      await trace.record({
+        phase: "evaluation_settled",
+        status: "running",
+        plan_digest: result.execution_plan.plan_digest,
+        detail_digest: digestJsonSync({
+          evidence_status: result.evidence?.status ?? null,
+          result_status: result.status,
+          prompt_projection_present: result.prompt_context.length > 0,
+        }),
+      });
+      const metadataRun = evidenceTraceMetadataRun(result);
+      await trace.complete({
+        status: evidenceTraceStatus(result.status),
+        domains: evidenceTraceDomains(options.domains, options.runMode),
+        route_digest: evidenceTraceRouteDigest(result),
+        plan_digest: result.execution_plan.plan_digest,
+        selection_digest: metadataRun?.selection ? digestJsonSync(metadataRun.selection) : null,
+        detail_digest: digestJsonSync({ status: result.status, evidence_status: result.evidence?.status ?? null }),
+      });
+      return {
+        result,
+        trace: await trace.summary(),
+        retention: "result_values_caller_owned;trace_metadata_only_no_evidence_prompts_responses_or_credentials",
+        secret_material: "never_returned",
+      };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Attach a metadata-only trace to digest-bound catalogue evidence execution. */
+  async runWithDomainEvidenceCatalogueWithTrace(
+    task: string,
+    options: AutonomousBrainDomainEvidenceBrainTraceOptions,
+  ): Promise<AutonomousBrainTracedDomainEvidenceBrainRunResult> {
+    const taskDigest = digestJsonSync({ task });
+    const trace = new AutonomousRunTraceSession(options.traceStore, {
+      run_id: options.runId,
+      task_digest: taskDigest,
+      domains: evidenceTraceDomains(options.domains, options.runMode),
+    });
+    await trace.started();
+    let planRecorded = false;
+    try {
+      const {
+        traceStore: _traceStore,
+        runId: _runId,
+        beforeProviderRun: callerBeforeProviderRun,
+        ...runOptions
+      } = options;
+      const result = await this.runWithDomainEvidenceCatalogue(task, {
+        ...runOptions,
+        beforeProviderRun: async (preflight) => {
+          planRecorded = true;
+          await trace.record({
+            phase: "plan_compiled",
+            status: "running",
+            plan_digest: preflight.plan.plan_digest,
+            detail_digest: digestJsonSync({
+              prepared_requirements: preflight.prepared.length,
+              prompt_projection_digest: digestJsonSync(preflight.prompt_context),
+            }),
+          });
+          await callerBeforeProviderRun?.(preflight);
+        },
+        run: tracedEvidenceRunOptions(runOptions.run, trace),
+      });
+      if (!planRecorded) {
+        await trace.record({
+          phase: "plan_compiled",
+          status: "running",
+          plan_digest: result.plan.plan_digest,
+          detail_digest: digestJsonSync({
+            prepared_requirements: result.prepared.length,
+            reconciled_requirements: result.prepared.filter((item) => item.result !== null).length,
+            result_status: result.status,
+          }),
+        });
+      }
+      await trace.record({
+        phase: "evaluation_settled",
+        status: "running",
+        plan_digest: result.plan.plan_digest,
+        detail_digest: digestJsonSync({
+          result_status: result.status,
+          reconciliation_statuses: result.prepared.map((item) => item.result?.toJSON().status ?? null),
+          prompt_projection_present: result.prompt_context.length > 0,
+        }),
+      });
+      const metadataRun = evidenceTraceMetadataRun(result);
+      await trace.complete({
+        status: evidenceTraceStatus(result.status),
+        domains: evidenceTraceDomains(options.domains, options.runMode),
+        route_digest: evidenceTraceRouteDigest(result),
+        plan_digest: result.plan.plan_digest,
+        selection_digest: metadataRun?.selection ? digestJsonSync(metadataRun.selection) : null,
+        detail_digest: digestJsonSync({ status: result.status, prepared_requirements: result.prepared.length }),
+      });
+      return {
+        result,
+        trace: await trace.summary(),
+        retention: "result_values_caller_owned;trace_metadata_only_no_evidence_prompts_responses_or_credentials",
+        secret_material: "never_returned",
+      };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
   /** Run reviewed evidence only after a provider-free launch admission covers its full scope. */
   async runWithReviewedEvidenceWithLaunchAdmission(
     task: string,
@@ -1710,6 +1944,30 @@ export class AutonomousBrainFacade {
     this.rejectLaunchAdmittedSemanticRouting(options?.run?.semanticRouting, "launch-admitted catalogue evidence execution requires provider-free routing; admit semantic routing separately before enabling it");
     authorizeAutonomousLaunchDomains(admission, domains);
     return this.runWithDomainEvidenceCatalogue(task, options);
+  }
+
+  /** Launch-admitted reviewed evidence trace; provider-assisted routing is refused before sources. */
+  async runWithReviewedEvidenceWithLaunchAdmissionAndTrace(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainEvidenceBackedTraceOptions,
+  ): Promise<AutonomousBrainTracedEvidenceBackedRunResult> {
+    const domains = options?.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    this.rejectLaunchAdmittedSemanticRouting(options?.run?.semanticRouting, "launch-admitted traced evidence execution requires provider-free routing; admit semantic routing separately before enabling it");
+    authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWithReviewedEvidenceWithTrace(task, options);
+  }
+
+  /** Launch-admitted catalogue evidence trace with the same independent source/provider gates. */
+  async runWithDomainEvidenceCatalogueWithLaunchAdmissionAndTrace(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainDomainEvidenceBrainTraceOptions,
+  ): Promise<AutonomousBrainTracedDomainEvidenceBrainRunResult> {
+    const domains = options?.domains ?? AUTONOMOUS_DOMAIN_NAMES;
+    this.rejectLaunchAdmittedSemanticRouting(options?.run?.semanticRouting, "launch-admitted traced catalogue evidence execution requires provider-free routing; admit semantic routing separately before enabling it");
+    authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWithDomainEvidenceCatalogueWithTrace(task, options);
   }
 
   /**

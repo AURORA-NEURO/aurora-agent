@@ -56,6 +56,14 @@ serialized operations plus optional compare-and-swap persistence for a stable jo
 serialized projections never contain evidence values, prompts, provider responses, credentials,
 or source payloads.
 
+`runWithReviewedEvidenceWithTrace` and
+`runWithDomainEvidenceCatalogueWithTrace` add the same lifecycle visibility without changing
+execution authority. Their trace records plan compilation, model-selection events, provider
+invocation receipts, evidence/reconciliation settlement metadata, and conservative terminal
+status. Launch-admitted trace variants reject semantic rerouting before source dispatch. The
+returned live result still belongs to the caller, while the trace summary and every trace event
+are safe for append-only telemetry, operator queries, and caller-owned persistence.
+
 ## Domain execution policies
 
 Every built-in domain now has a versioned, provider-free execution policy in both SDKs. The
