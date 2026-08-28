@@ -3112,6 +3112,63 @@ def test_agent_settles_provider_planning_quality_into_bandit_and_model_health(tm
     assert "Original task" not in json.dumps(first["plan_refinement"])
 
 
+def test_agent_settles_ordered_step_planning_quality_with_protected_contract(tmp_path: Path):
+    health_ledger = ProviderHealthLedger(tmp_path / "ordered-planning-quality-health.jsonl")
+    agent = AutonomousAgent(_Workspace(), LLMRuntime(), health_ledger=health_ledger)
+    context = {
+        "domain": "coding",
+        "capability": "planning",
+        "risk_class": "planning_review",
+        "task_family": "ordered_step_plan",
+    }
+    plan = AutonomousOrderedStepPlanRefinementResult(
+        status="completed",
+        task_digest="a" * 64,
+        base_plan_digest="b" * 64,
+        protected_contract_digest="c" * 64,
+        priority_step_ids=("inspect", "verify"),
+        focus_step_ids=("verify",),
+        review_required=False,
+        confidence=0.92,
+        selected_model={"provider": "openai", "model": "test-model"},
+        selection_digest="d" * 64,
+        planner_prompt_digest="e" * 64,
+        planner_plan_digest="f" * 64,
+        outcome_digest="1" * 64,
+        planner_context=context,
+        planner_context_digest=_planner_context_digest(context),
+    )
+    settlement = agent.settle_planning_quality(
+        plan,
+        domain="coding",
+        evaluator_id="ordered-planner-reviewer",
+        evaluator_version="1",
+        reward=0.9,
+        passed=True,
+        evidence_digest="2" * 64,
+        bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+    )
+    assert settlement["status"] == "settled"
+    assert settlement["next_state"]["generation"] == 1
+    assert settlement["planner_context"]["task_family"] == "ordered_step_plan"
+    assert settlement["plan_refinement"]["priority_step_ids"] == ["inspect", "verify"]
+    assert settlement["model_quality"]["status"] == "recorded"
+    assert health_ledger.model_health_snapshot()["openai/test-model"]["quality_observations"] == 1
+
+    different_graph = agent.settle_planning_quality(
+        replace(plan, protected_contract_digest="7" * 64),
+        domain="coding",
+        evaluator_id="ordered-planner-reviewer",
+        evaluator_version="1",
+        reward=0.9,
+        passed=True,
+        evidence_digest="2" * 64,
+        bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+    )
+    assert different_graph["model_quality"]["outcome_digest"] != settlement["model_quality"]["outcome_digest"]
+    assert health_ledger.model_health_snapshot()["openai/test-model"]["quality_observations"] == 2
+
+
 def test_agent_planning_quality_credits_embedded_context_and_rejects_context_tampering():
     workspace = _Workspace()
     agent = AutonomousAgent(workspace, LLMRuntime())

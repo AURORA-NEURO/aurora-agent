@@ -22501,7 +22501,9 @@ class AutonomousAgent:
 
     def settle_planning_quality(
         self,
-        plan: AutonomousPlanRefinementResult | AutonomousCrossDomainPlanRefinementResult,
+        plan: AutonomousPlanRefinementResult
+        | AutonomousCrossDomainPlanRefinementResult
+        | AutonomousOrderedStepPlanRefinementResult,
         *,
         domain: str,
         evaluator_id: str,
@@ -22521,12 +22523,19 @@ class AutonomousAgent:
 
         Planning has no provider episode of its own, so this method creates a metadata-only
         planning identity and submits it through the same Rust bandit outcome boundary used by
-        executions. The plan proposal is projected by digest and stage/child ids only. Model
+        executions. The plan proposal is projected by digest and stage/child/step ids only. Model
         transport health is never incremented; the optional health ledger receives an evaluator
         quality observation keyed by the planning outcome digest.
         """
 
-        if not isinstance(plan, (AutonomousPlanRefinementResult, AutonomousCrossDomainPlanRefinementResult)):
+        if not isinstance(
+            plan,
+            (
+                AutonomousPlanRefinementResult,
+                AutonomousCrossDomainPlanRefinementResult,
+                AutonomousOrderedStepPlanRefinementResult,
+            ),
+        ):
             raise BrainRunError("planning quality requires a plan refinement result")
         if plan.status != "completed":
             return {
@@ -22599,12 +22608,19 @@ class AutonomousAgent:
                 plan.planner_context_digest,
                 "planning quality planner_context",
             )
-        planning_outcome_digest = _json_digest({
+        planning_identity = {
             "kind": "planning_quality",
             "plan_outcome_digest": plan.outcome_digest,
             "selection_digest": plan.selection_digest,
             "planner_plan_digest": plan.planner_plan_digest,
-        })
+            "base_plan_digest": plan.base_plan_digest,
+        }
+        if isinstance(plan, AutonomousOrderedStepPlanRefinementResult):
+            # Ordered-step proposals protect a caller-owned graph contract. Include that
+            # identity in the learning key so two equally successful orderings for different
+            # graphs cannot replay each other's credit.
+            planning_identity["protected_contract_digest"] = plan.protected_contract_digest
+        planning_outcome_digest = _json_digest(planning_identity)
         current_state = self.learning_state() if bandit_state is None else dict(bandit_state)
         normalized_state = _ensure_bandit_arm(
             current_state,

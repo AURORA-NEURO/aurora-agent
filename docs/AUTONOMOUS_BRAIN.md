@@ -4448,9 +4448,12 @@ and evaluator packet returns the same bandit state and health receipt; a changed
 same planning digest is refused. A valid plan proposal still proves only plan structure—it does
 not authorize tools, effects, provider calls, or task correctness.
 
-The Python `AutonomousPlanRefinementResult` and
-`AutonomousCrossDomainPlanRefinementResult` now carry the same two fields. Python settlement
-validates the embedded digest before calling `brain_outcome_record` or the provider-health ledger;
+The Python `AutonomousPlanRefinementResult`,
+`AutonomousCrossDomainPlanRefinementResult`, and
+`AutonomousOrderedStepPlanRefinementResult` now carry the same two fields. Ordered-step settlement
+also binds the caller-protected graph-contract digest into its planning outcome identity, preventing
+credit for one mission or scheduler graph from replaying onto another. Python settlement validates
+the embedded digest before calling `brain_outcome_record` or the provider-health ledger;
 the caller's `domain`, capability, risk, and task-family arguments are used only for legacy
 proposals that predate the binding. This keeps Python and TypeScript replays on the same
 fail-closed planner identity contract.

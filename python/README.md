@@ -895,6 +895,11 @@ The provider may reorder existing IDs and choose a focus subset, but cannot add 
 dependencies, authorize tools, or create effects; caller acceptance and mission preflight remain
 separate gates. Provider, credential, malformed-response, abstention, and policy outcomes stay
 explicit and safe to persist, while step objectives and provider messages remain transient.
+Completed ordered-step proposals can be passed to `AutonomousAgent.settle_planning_quality()`
+with the same evaluator and contextual-bandit contract as workflow and cross-domain proposals.
+The protected graph-contract digest is included in the planning learning identity, so evaluator
+credit cannot replay across two different caller-owned graphs; transport success alone still earns
+no reward.
 The provider-evidence registry helpers extend the same retention contract to provider-observed CI
 artifacts, logs, and attestations. They re-audit before import, preserve failed/unknown runs, expose
 digest-ordered provider/run/plan queries and exact lookup, and carry separate record-family digests
