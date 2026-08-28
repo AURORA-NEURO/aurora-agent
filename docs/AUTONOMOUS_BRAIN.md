@@ -3872,6 +3872,18 @@ reapplied without replaying the provider and review-only proposals cannot silent
 accepted. The same path is tested across all built-in domains, including cross-domain mission
 graphs.
 
+Python exposes the equivalent `agent.plan_ordered_steps_with_provider(...)` façade. It accepts
+the task, a bounded list of `{id, domain, capability, objective, depends_on, required}` step
+contracts, opaque caller-owned credential handles, and the registered model catalogue. Python
+derives a digest of the graph, validates identifiers and dependency closure before any provider
+contact, selects a model with the same contextual planning identity (`ordered_step_plan`), and
+returns `AutonomousOrderedStepPlanRefinementResult`. Its `priority_step_ids` and
+`focus_step_ids` are metadata-only proposals; malformed, abstaining, dependency-invalid,
+policy-held, approval-pending, credential, and transport outcomes remain explicit statuses. The
+result serializes only step IDs, digests, model metadata, policy/failure projections, and replay
+identity. Step objectives are transient planner input and are never copied into the result, and
+the method never dispatches a tool, mission effect, credential, or external write.
+
 For service workers, `InMemoryAutonomousMissionReplanRemoteJobQueue` and
 `AutonomousMissionReplanRemoteWorker` provide a claim/lease/requeue boundary around the same
 cycle. A remote job contains only the root mission identity, protected-contract digest, planner

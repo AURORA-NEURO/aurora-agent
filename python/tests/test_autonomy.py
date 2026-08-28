@@ -25,6 +25,7 @@ from prism_sdk import (
     AutonomousPlanHoldoutCase,
     AutonomousPlanHoldoutEvaluator,
     AutonomousPlanRefinementResult,
+    AutonomousOrderedStepPlanRefinementResult,
     AutonomousToolOutcomeEvaluator,
     AutonomousCrossDomainPlanRefinementResult,
     AutonomousCrossDomainCheckpoint,
@@ -137,6 +138,28 @@ class _ProviderHandler(BaseHTTPRequestHandler):
                         "focus_child_ids": ["route-data"] if route_children else ["data-review"],
                         "review_required": False,
                         "confidence": 0.82,
+                        "abstain": False,
+                    }
+                ),
+                "usage": {"total_tokens": 10},
+            }
+            payload = json.dumps(response).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+        if "Propose a bounded ordering and focus refinement for the reviewed step graph" in request_text:
+            response = {
+                "id": "autonomy-ordered-step-plan-refinement",
+                "model": "test-model",
+                "output_text": json.dumps(
+                    {
+                        "priority_order": ["inspect", "verify"],
+                        "focus_step_ids": ["verify"],
+                        "review_required": False,
+                        "confidence": 0.88,
                         "abstain": False,
                     }
                 ),
@@ -2083,6 +2106,90 @@ def test_provider_plan_refinement_is_dependency_closed_and_approval_gated():
         server.server_close()
 
 
+def test_provider_ordered_step_plan_refinement_is_graph_closed_and_redacted():
+    runtime, store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        with agent.onboarding.start_session(session_id="ordered-step-plan-session") as session:
+            session.register_value("openai", "ordered-step-plan-secret")
+            steps = [
+                {
+                    "id": "inspect",
+                    "domain": "coding",
+                    "capability": "debugging",
+                    "objective": "Inspect the repository and identify the bounded change.",
+                },
+                {
+                    "id": "verify",
+                    "domain": "coding",
+                    "capability": "testing",
+                    "objective": "Verify the change with local evidence.",
+                    "depends_on": ["inspect"],
+                },
+            ]
+            waiting = agent.plan_ordered_steps_with_provider(
+                task="Order the reviewed implementation steps.",
+                steps=steps,
+                credentials=session,
+                model_candidates=_model(),
+            )
+            assert isinstance(waiting, AutonomousOrderedStepPlanRefinementResult)
+            assert waiting.status == "approval_required"
+            assert waiting.priority_step_ids == ()
+            refined = agent.plan_ordered_steps_with_provider(
+                task="Order the reviewed implementation steps.",
+                steps=steps,
+                credentials=session,
+                model_candidates=_model(),
+                approve_provider_call=True,
+            )
+            assert refined.status == "completed"
+            assert refined.priority_step_ids == ("inspect", "verify")
+            assert refined.focus_step_ids == ("verify",)
+            assert refined.review_required is False
+            assert refined.planner_context == {
+                "domain": "coding",
+                "capability": "planning",
+                "risk_class": agent.orchestrator.registry.resolve("coding").risk_class,
+                "task_family": "ordered_step_plan",
+            }
+            public = json.dumps(refined.to_dict())
+            assert "ordered-step-plan-secret" not in public
+            assert "Order the reviewed implementation steps." not in public
+            assert refined.to_dict()["authorization"].startswith("plan_proposal_only")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def test_provider_ordered_step_plan_rejects_non_closed_graph_before_provider_contact():
+    runtime, _store, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        with pytest.raises(BrainRunError, match="dependencies are not closed"):
+            agent.plan_ordered_steps_with_provider(
+                task="Reject a malformed graph.",
+                steps=[
+                    {
+                        "id": "verify",
+                        "domain": "coding",
+                        "capability": "testing",
+                        "objective": "Verify only after a known prerequisite.",
+                        "depends_on": ["missing"],
+                    }
+                ],
+                credentials={},
+                model_candidates=_model(),
+                approve_provider_call=True,
+            )
+        assert not hasattr(server, "request_body")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_provider_cross_domain_plan_refinement_reorders_only_existing_children():
     runtime, _, server, thread = _runtime()
     workspace = _Workspace()
@@ -2275,6 +2382,30 @@ def test_provider_planning_preserves_credential_failures_for_all_planning_entryp
         )
         assert cross.status == "provider_failed"
         assert cross.failure == expected_failure
+
+        ordered = agent.plan_ordered_steps_with_provider(
+            task="Order the implementation checks.",
+            steps=[
+                {
+                    "id": "inspect",
+                    "domain": "coding",
+                    "capability": "debugging",
+                    "objective": "Inspect the repository.",
+                },
+                {
+                    "id": "verify",
+                    "domain": "coding",
+                    "capability": "testing",
+                    "objective": "Verify the result.",
+                    "depends_on": ["inspect"],
+                },
+            ],
+            model_candidates=_model(),
+            credentials={},
+            approve_provider_call=True,
+        )
+        assert ordered.status == "provider_failed"
+        assert ordered.failure == expected_failure
 
         assert getattr(server, "request_count", 0) == 0
 

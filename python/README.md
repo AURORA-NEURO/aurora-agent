@@ -887,6 +887,14 @@ keeps authoring/notebook sessions, stale digests, capability holes, release post
 CI planning in one evidence-bearing response; it does not pretend to execute a hosted UI or GitHub
 runner. The registry helpers retain structurally valid workbench reports behind bounded digest
 queries and restart-safe checkpoints; they never execute or re-evaluate the retained report.
+The high-level agent also exposes `plan_ordered_steps_with_provider()` for mission and scheduler
+graphs that are not represented by an `AutonomousWorkflow`. It validates a bounded graph before
+provider contact, derives a stable task/plan identity, selects through the contextual model and
+credential gates, and returns only a digest-bound `AutonomousOrderedStepPlanRefinementResult`.
+The provider may reorder existing IDs and choose a focus subset, but cannot add steps, alter
+dependencies, authorize tools, or create effects; caller acceptance and mission preflight remain
+separate gates. Provider, credential, malformed-response, abstention, and policy outcomes stay
+explicit and safe to persist, while step objectives and provider messages remain transient.
 The provider-evidence registry helpers extend the same retention contract to provider-observed CI
 artifacts, logs, and attestations. They re-audit before import, preserve failed/unknown runs, expose
 digest-ordered provider/run/plan queries and exact lookup, and carry separate record-family digests
