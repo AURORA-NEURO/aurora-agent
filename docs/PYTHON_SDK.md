@@ -40,6 +40,45 @@ counter updates safe. The same metadata-only fields and serialized transition co
 validated by the TypeScript execution controller, preserving cross-SDK replay and failure
 semantics.
 
+### Shared provider/model quota admission
+
+`ProviderQuotaController` is the Python runtime's process-local capacity gate. Attach one to the
+shared `LLMRuntime` so direct calls, streams, collected streams, native tool-loop turns, provider
+failover, and every autonomous domain consume the same provider/model ceiling:
+
+```python
+from prism_sdk import LLMRuntime, ProviderQuotaController
+
+quota = ProviderQuotaController()
+quota.set_policy({
+    "provider": "openai",
+    "model": "gpt-5",
+    "windowMs": 60_000,
+    "maxRequests": 30,
+    "maxInputTokens": 250_000,
+    "maxOutputTokens": 80_000,
+    "maxConcurrent": 4,
+})
+runtime = LLMRuntime(provider_quota=quota)
+```
+
+Policies may be provider-wide or exact-model and can bound requests, input/output/total tokens,
+estimated cost units, and in-flight concurrency. The runtime reserves before the provider transport
+starts, releases pre-dispatch approval/credential refusals, and settles one charged request after
+transport begins. A provider response can replace estimates with bounded usage; a live stream that
+does not expose final usage uses its requested output ceiling. `ProviderQuotaError` is retryable and
+contains only stable policy identity, refusal dimensions, observed counters, concurrency, and a
+next-window hint. It never contains prompts, responses, headers, tool arguments, credentials, or
+effect values.
+
+`quota.snapshot()` and `JsonProviderQuotaPersistence` retain only canonical policy/counter metadata
+and verify a SHA-256 digest on restore. `TransactionalJsonProviderQuotaPersistence` supports a
+caller-owned compare-and-swap store. Active reservations are not restored because the external
+provider outcome is unknowable after a process restart. The controller uses epoch milliseconds for
+the cross-language fixed-window schema and is thread-safe within one Python process; distributed
+quota authority, tenant isolation, encryption, billing truth, and provider-side rate limits remain
+deployment responsibilities.
+
 `AutonomousAgent.run_cross_domain(..., max_parallelism=...)` can use that shared controller for
 bounded specialist fan-out. The value is capped at eight; child futures are submitted and
 collected in accepted order, so completion timing cannot reorder `child_results` or the transient

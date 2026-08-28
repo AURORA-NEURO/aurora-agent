@@ -6,6 +6,7 @@ import { AutonomousEffectReconciliationRequiredError } from "./autonomous-effect
 import type { AutonomousEffectBoundary } from "./autonomous-effects.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { JsonObject, JsonValue } from "./types.js";
+import { ProviderQuotaController, type ProviderQuotaReservation } from "./provider-quota.js";
 import {
   advanceAutonomousModelContinuationState,
   compileAutonomousModelContinuationPlan,
@@ -743,6 +744,8 @@ export interface ProviderInvocationOptions {
   selectionDigest?: string | null;
   estimatedCostUnits?: number;
   reserveCost?: AutonomousCostReservationCallback;
+  /** Optional process-local provider/model quota; the runtime quota is used by default. */
+  providerQuota?: ProviderQuotaController;
 }
 
 /**
@@ -2358,6 +2361,7 @@ function parseSseFrame(frame: string): { event: string; data: string } | null {
 export class LLMRuntime {
   readonly credentials: CredentialStore;
   readonly onboarding: ProviderOnboarding;
+  readonly providerQuota?: ProviderQuotaController;
   private readonly providers = new Map<string, NormalizedProviderConfig>();
   private readonly circuits = new Map<string, CircuitState>();
   private readonly providerHealthState = new Map<string, HealthState>();
@@ -2370,12 +2374,14 @@ export class LLMRuntime {
   private readonly clock: () => number;
   private effectBoundaryValue?: AutonomousEffectBoundary;
 
-  constructor(options: { credentials?: CredentialStore; fetch?: FetchImplementation; clock?: () => number; effectBoundary?: AutonomousEffectBoundary } = {}) {
+  constructor(options: { credentials?: CredentialStore; fetch?: FetchImplementation; clock?: () => number; effectBoundary?: AutonomousEffectBoundary; providerQuota?: ProviderQuotaController } = {}) {
     this.credentials = options.credentials ?? new CredentialStore();
     const implementation = options.fetch ?? globalThis.fetch;
     if (typeof implementation !== "function") throw new ProviderRuntimeError("a fetch implementation is required");
     this.fetchImplementation = implementation;
     this.clock = options.clock ?? (() => Date.now());
+    if (options.providerQuota !== undefined && !(options.providerQuota instanceof ProviderQuotaController)) throw new ProviderRuntimeError("providerQuota must be a ProviderQuotaController");
+    this.providerQuota = options.providerQuota;
     this.effectBoundaryValue = options.effectBoundary;
     if (this.effectBoundaryValue !== undefined && (typeof this.effectBoundaryValue.execute !== "function" || typeof this.effectBoundaryValue.executeStream !== "function")) throw new ProviderRuntimeError("effectBoundary must expose execute and executeStream methods");
     this.onboarding = new ProviderOnboarding(this);
@@ -2621,11 +2627,14 @@ export class LLMRuntime {
     validateRequest(request);
     validateStructuredOutputSupport(config, request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_call");
+    const quota = options.providerQuota ?? this.providerQuota;
+    const quotaReservation = quota?.reserve({ provider, model: request.model, inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
     const releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
     try {
       await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
       await options.observer?.before?.(metadata);
     } catch (error) {
+      quotaReservation?.release();
       releaseCost?.();
       throw error;
     }
@@ -2641,6 +2650,7 @@ export class LLMRuntime {
       const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
       let response: ProviderResponse;
       if (!selectedBoundary) {
+        quotaReservation?.markDispatched();
         response = await this.request(config, request, options.credential, options.signal, false);
       } else {
         const requestDigest = await digestJson({
@@ -2674,13 +2684,17 @@ export class LLMRuntime {
               idempotency_key_present: request.idempotencyKey !== undefined,
             },
           },
-          async (context) => this.request(config, request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }, options.credential, options.signal, false),
+          async (context) => {
+            quotaReservation?.markDispatched();
+            return this.request(config, request.idempotencyKey ? request : { ...request, idempotencyKey: context.idempotency_key }, options.credential, options.signal, false);
+          },
           { execution: options.execution, resultProjector: providerEffectProjection, cacheResult: false, definiteFailure: providerEffectFailureIsDefinite },
         );
       }
       const latencyMs = Math.max(0, nowMs() - started);
       this.record(provider, request.model, true, latencyMs, response.statusCode, response);
       await recordOutcome({ success: true, status: "completed", latencyMs, inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, statusCode: response.statusCode });
+      quotaReservation?.settle({ inputTokens: response.usage.input_tokens ?? metadata.inputTokens, outputTokens: response.usage.output_tokens ?? 0, costUnits: options.estimatedCostUnits ?? 0 });
       return response;
     } catch (unknownError) {
       if (unknownError instanceof AutonomousEffectReconciliationRequiredError) {
@@ -2704,6 +2718,10 @@ export class LLMRuntime {
         requestId: error instanceof ProviderRuntimeError ? error.requestId ?? null : null,
         retryable: error instanceof ProviderRuntimeError ? error.retryable : false,
       });
+      if (quotaReservation) {
+        if (quotaReservation.isDispatched) quotaReservation.settle();
+        else quotaReservation.release();
+      }
       throw error;
     }
   }
@@ -2785,11 +2803,14 @@ export class LLMRuntime {
     validateRequest(request);
     validateStructuredOutputSupport(config, request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_stream");
+    const quota = options.providerQuota ?? this.providerQuota;
+    const quotaReservation = quota?.reserve({ provider, model: request.model, inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
     const releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
     try {
       await options.execution?.admitProviderCall({ provider, model: request.model, invocationKind: metadata.kind, attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits, costUnits: options.estimatedCostUnits, failover: options.executionFailover });
       await options.observer?.before?.(metadata);
     } catch (error) {
+      quotaReservation?.release();
       releaseCost?.();
       throw error;
     }
@@ -2802,6 +2823,7 @@ export class LLMRuntime {
         if (circuit.openedUntil !== null && circuit.openedUntil > this.clock()) throw new ProviderRuntimeError("provider circuit is open; invocation is temporarily refused", { circuitOpen: true, code: "circuit_open" });
         if (circuit.openedUntil !== null) { circuit.openedUntil = null; circuit.consecutiveFailures = 0; }
         try {
+          quotaReservation?.markDispatched();
           for await (const event of streamLocalTransport(config, request)) yield event;
           circuit.consecutiveFailures = 0;
           circuit.openedUntil = null;
@@ -2817,6 +2839,7 @@ export class LLMRuntime {
           throw normalized;
         }
       }
+      quotaReservation?.markDispatched();
       const response = await this.fetchWithRetries(config, request, options.credential, options.signal, true);
       if (isProviderResponseValue(response)) throw new ProviderRuntimeError("provider stream returned a non-stream response");
       if (response.status >= 400) throw providerHttpError(response.status, response.headers);
@@ -2900,6 +2923,8 @@ export class LLMRuntime {
       if (outcome) {
         await options.observer?.after?.(metadata, outcome);
         await recordExecutionProviderOutcome(options.execution, metadata, outcome, { attempt: options.executionAttempt, turn: options.executionTurn, selectionDigest: options.selectionDigest, estimatedCostUnits: options.estimatedCostUnits });
+        if (quotaReservation?.isDispatched) quotaReservation.settle({ inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
+        else quotaReservation?.release();
       }
     }
   }

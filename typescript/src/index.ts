@@ -14,6 +14,39 @@ export {
 } from "./errors.js";
 export type { ProviderErrorCode, ProviderFailureClass } from "./errors.js";
 export {
+  PROVIDER_QUOTA_SCHEMA,
+  PROVIDER_QUOTA_SNAPSHOT_SCHEMA,
+  PROVIDER_QUOTA_RETENTION,
+  PROVIDER_QUOTA_SECRET_MATERIAL,
+  MAX_PROVIDER_QUOTA_POLICIES,
+  MAX_PROVIDER_QUOTA_BUCKETS,
+  MAX_PROVIDER_QUOTA_SNAPSHOT_BYTES,
+  MAX_PROVIDER_QUOTA_WINDOW_MS,
+  MAX_PROVIDER_QUOTA_METRIC,
+  MAX_PROVIDER_QUOTA_COST_UNITS,
+  MAX_PROVIDER_QUOTA_TIMESTAMP,
+  ProviderQuotaController,
+  ProviderQuotaReservation,
+  ProviderQuotaExceededError,
+  JsonProviderQuotaPersistence,
+  TransactionalJsonProviderQuotaPersistence,
+  validateProviderQuotaSnapshot,
+} from "./provider-quota.js";
+export type {
+  ProviderQuotaPolicyInput,
+  ProviderQuotaPolicy,
+  ProviderQuotaReservationInput,
+  ProviderQuotaSettlementInput,
+  ProviderQuotaSettlement,
+  ProviderQuotaStatus,
+  ProviderQuotaSnapshotBucket,
+  ProviderQuotaSnapshot,
+  ProviderQuotaSnapshotTextStore,
+  ProviderQuotaTransactionalSnapshotTextStore,
+  ProviderQuotaPersistence,
+  ProviderQuotaTransactionalPersistence,
+} from "./provider-quota.js";
+export {
   AUTONOMOUS_SELECTION_LAB_CASE_SCHEMA,
   AUTONOMOUS_SELECTION_LAB_REPORT_SCHEMA,
   MAX_AUTONOMOUS_SELECTION_LAB_CASES,

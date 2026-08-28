@@ -197,11 +197,21 @@ class ProviderError(RuntimeError):
         retryable: bool = False,
         status_code: int | None = None,
         circuit_open: bool = False,
+        code: str = "provider_error",
+        provider: str | None = None,
+        operation: str | None = None,
+        request_id: str | None = None,
+        retry_after_ms: int | None = None,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code
         self.circuit_open = circuit_open
+        self.code = code
+        self.provider = provider
+        self.operation = operation
+        self.request_id = request_id
+        self.retry_after_ms = retry_after_ms
 
 
 @dataclass(frozen=True, slots=True)
@@ -3414,6 +3424,7 @@ class LLMRuntime:
         sleeper: Callable[[float], None] = time.sleep,
         observation_callback: Callable[[Mapping[str, Any]], None] | None = None,
         effect_boundary: Any | None = None,
+        provider_quota: Any | None = None,
     ) -> None:
         self.credentials = credentials or CredentialStore()
         self._providers: dict[str, ProviderConfig] = {}
@@ -3429,6 +3440,9 @@ class LLMRuntime:
         self._observation_lock = threading.RLock()
         self._observation_callbacks: list[Callable[[Mapping[str, Any]], None]] = []
         self._effect_boundary: Any | None = None
+        if provider_quota is not None and not callable(getattr(provider_quota, "reserve", None)):
+            raise ProviderError("provider_quota must expose a callable reserve method")
+        self._provider_quota = provider_quota
         if effect_boundary is not None:
             self.bind_effect_boundary(effect_boundary)
         if observation_callback is not None:
@@ -3439,6 +3453,12 @@ class LLMRuntime:
         """Return the optional caller-owned crash-safe provider effect boundary."""
 
         return self._effect_boundary
+
+    @property
+    def provider_quota(self) -> Any | None:
+        """Return the optional process-local provider/model quota controller."""
+
+        return self._provider_quota
 
     def bind_effect_boundary(self, effect_boundary: Any | None) -> None:
         """Bind one effect boundary to provider dispatch without importing the effect module.
@@ -4052,6 +4072,8 @@ class LLMRuntime:
         invocation_kind: str = "provider_call",
         effect_boundary: Any | None = None,
         effect_execution: Any | None = None,
+        provider_quota: Any | None = None,
+        estimated_cost_units: float = 0.0,
     ) -> ProviderResponse:
         config = self._providers.get(provider)
         if config is None:
@@ -4064,11 +4086,30 @@ class LLMRuntime:
                 raise CredentialError("credential provider does not match invocation provider")
             secret = self.credentials._resolve(credential)
         metadata = self._invocation_metadata(provider, request, invocation_kind)
-        self._notify_invocation_before(invocation_observer, metadata)
+        quota = self._provider_quota if provider_quota is None else provider_quota
+        quota_reservation = None
+        if quota is not None:
+            if not callable(getattr(quota, "reserve", None)):
+                raise ProviderError("provider_quota must expose a callable reserve method")
+            quota_reservation = quota.reserve({
+                "provider": provider,
+                "model": request.model,
+                "input_tokens": metadata.input_tokens,
+                "output_tokens": request.max_output_tokens,
+                "cost_units": estimated_cost_units,
+            })
+        try:
+            self._notify_invocation_before(invocation_observer, metadata)
+        except BaseException:
+            if quota_reservation is not None:
+                quota_reservation.release()
+            raise
         started = time.perf_counter()
         try:
             selected_boundary = effect_boundary if effect_boundary is not None else self._effect_boundary
             if selected_boundary is None:
+                if quota_reservation is not None:
+                    quota_reservation.mark_dispatched()
                 response = self._post(config, self._body(config, request), self._provider_headers(config, secret, request), request)
             else:
                 request_digest = content_digest({
@@ -4106,6 +4147,8 @@ class LLMRuntime:
 
                 def dispatch(context: Any) -> ProviderResponse:
                     dispatched_request = request if request.idempotency_key is not None else replace(request, idempotency_key=context.idempotency_key)
+                    if quota_reservation is not None:
+                        quota_reservation.mark_dispatched()
                     return self._post(config, self._body(config, dispatched_request), self._provider_headers(config, secret, dispatched_request), dispatched_request)
 
                 response = selected_boundary.execute(
@@ -4117,9 +4160,24 @@ class LLMRuntime:
                     definite_failure=_provider_effect_failure_is_definite,
                 )
         except BaseException as error:
-            self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+            try:
+                self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+            finally:
+                if quota_reservation is not None:
+                    if quota_reservation.is_dispatched:
+                        quota_reservation.settle()
+                    else:
+                        quota_reservation.release()
             raise
-        self._notify_invocation_after(invocation_observer, metadata, response, None, started)
+        try:
+            self._notify_invocation_after(invocation_observer, metadata, response, None, started)
+        finally:
+            if quota_reservation is not None:
+                quota_reservation.settle({
+                    "input_tokens": response.usage.get("input_tokens", metadata.input_tokens),
+                    "output_tokens": response.usage.get("output_tokens", request.max_output_tokens),
+                    "cost_units": estimated_cost_units,
+                })
         return response
 
     def invoke_stream(
@@ -4130,6 +4188,8 @@ class LLMRuntime:
         credential: CredentialHandle | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         invocation_kind: str = "provider_stream",
+        provider_quota: Any | None = None,
+        estimated_cost_units: float = 0.0,
         effect_boundary: Any | None = None,
         effect_execution: Any | None = None,
     ) -> Iterator[ProviderStreamEvent]:
@@ -4148,6 +4208,8 @@ class LLMRuntime:
                 credential=credential,
                 invocation_observer=invocation_observer,
                 invocation_kind=invocation_kind,
+                provider_quota=provider_quota,
+                estimated_cost_units=estimated_cost_units,
             )
         if not callable(getattr(selected_boundary, "execute_stream", None)):
             raise ProviderError("effect_boundary must expose execute_stream for live provider streams")
@@ -4215,6 +4277,8 @@ class LLMRuntime:
                 credential=credential,
                 invocation_observer=invocation_observer,
                 invocation_kind=invocation_kind,
+                provider_quota=provider_quota,
+                estimated_cost_units=estimated_cost_units,
             )
 
         return selected_boundary.execute_stream(
@@ -4234,6 +4298,8 @@ class LLMRuntime:
         credential: CredentialHandle | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         invocation_kind: str = "provider_stream",
+        provider_quota: Any | None = None,
+        estimated_cost_units: float = 0.0,
     ) -> Iterator[ProviderStreamEvent]:
         """Open one bounded SSE provider invocation.
 
@@ -4268,19 +4334,53 @@ class LLMRuntime:
         if request.idempotency_key is not None:
             headers["Idempotency-Key"] = request.idempotency_key
         metadata = self._invocation_metadata(provider, request, invocation_kind)
-        stream = self._stream(config, body, headers, request)
-        if invocation_observer is None:
-            return stream
+        quota = self._provider_quota if provider_quota is None else provider_quota
+        quota_reservation = None
+        if quota is not None:
+            if not callable(getattr(quota, "reserve", None)):
+                raise ProviderError("provider_quota must expose a callable reserve method")
+            quota_reservation = quota.reserve({
+                "provider": provider,
+                "model": request.model,
+                "input_tokens": metadata.input_tokens,
+                "output_tokens": request.max_output_tokens,
+                "cost_units": estimated_cost_units,
+            })
+        try:
+            stream = self._stream(config, body, headers, request)
+        except BaseException:
+            if quota_reservation is not None:
+                quota_reservation.release()
+            raise
 
         def observed_stream() -> Iterator[ProviderStreamEvent]:
-            self._notify_invocation_before(invocation_observer, metadata)
+            try:
+                self._notify_invocation_before(invocation_observer, metadata)
+            except BaseException:
+                if quota_reservation is not None:
+                    quota_reservation.release()
+                raise
             started = time.perf_counter()
             try:
+                if quota_reservation is not None:
+                    quota_reservation.mark_dispatched()
                 yield from stream
             except BaseException as error:
-                self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+                try:
+                    self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+                finally:
+                    if quota_reservation is not None:
+                        quota_reservation.settle()
                 raise
-            self._notify_invocation_after(invocation_observer, metadata, None, None, started)
+            try:
+                self._notify_invocation_after(invocation_observer, metadata, None, None, started)
+            finally:
+                if quota_reservation is not None:
+                    quota_reservation.settle({
+                        "input_tokens": metadata.input_tokens,
+                        "output_tokens": request.max_output_tokens,
+                        "cost_units": estimated_cost_units,
+                    })
 
         return observed_stream()
 
@@ -4294,6 +4394,8 @@ class LLMRuntime:
         invocation_kind: str = "provider_stream",
         effect_boundary: Any | None = None,
         effect_execution: Any | None = None,
+        provider_quota: Any | None = None,
+        estimated_cost_units: float = 0.0,
     ) -> ProviderResponse:
         """Collect a stream into the same bounded response contract as ``invoke``."""
 
@@ -4312,7 +4414,13 @@ class LLMRuntime:
             terminal_type: str | None = None
             # collect_stream owns the response-level effect boundary below; avoid nesting a
             # second stream boundary around the same provider dispatch.
-            for event in self._invoke_stream_unbounded(provider, dispatched_request, credential=credential):
+            for event in self._invoke_stream_unbounded(
+                provider,
+                dispatched_request,
+                credential=credential,
+                provider_quota=provider_quota,
+                estimated_cost_units=estimated_cost_units,
+            ):
                 event_count += 1
                 if event_count > MAX_STREAM_EVENTS:
                     raise ProviderError("provider stream exceeded max event count")
@@ -4418,6 +4526,8 @@ class LLMRuntime:
         initial_response: ProviderResponse | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         invocation_kind: str = "tool_loop_turn",
+        provider_quota: Any | None = None,
+        estimated_cost_units: float = 0.0,
     ) -> ProviderToolLoopResult:
         """Run bounded native tool continuation with a caller-owned authorization callback.
 
@@ -4451,6 +4561,8 @@ class LLMRuntime:
                         credential=credential,
                         invocation_observer=invocation_observer,
                         invocation_kind=invocation_kind,
+                        provider_quota=provider_quota,
+                        estimated_cost_units=estimated_cost_units,
                     )
                     if stream
                     else self.invoke(
@@ -4459,6 +4571,8 @@ class LLMRuntime:
                         credential=credential,
                         invocation_observer=invocation_observer,
                         invocation_kind=invocation_kind,
+                        provider_quota=provider_quota,
+                        estimated_cost_units=estimated_cost_units,
                     )
                 )
             responses.append(response)

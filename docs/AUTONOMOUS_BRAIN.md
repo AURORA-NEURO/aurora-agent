@@ -102,6 +102,54 @@ credential session, and the traced forms preserve the replay lifecycle without s
 plan's transient task or provider values. A held admission, route mutation, task mismatch, or
 current-contract drift therefore fails before credential resolution or provider invocation.
 
+## Provider/model quota admission at the transport boundary
+
+Both SDK runtimes expose an optional process-local `ProviderQuotaController`. Attach one to the
+shared `LLMRuntime` to enforce hard capacity ceilings across provider calls, model arms, failover,
+streams, tool-loop turns, and all twelve autonomous domains. A policy can be provider-wide
+(`model: null`) or exact to one `provider/model` arm, with independent fixed-window limits for
+requests, input tokens, output tokens, total tokens, estimated cost units, and concurrency. When
+both a provider-wide and exact-model policy exist, both must admit the request.
+
+The lifecycle is explicit:
+
+```text
+metadata estimate -> reserve -> approval/credential checks -> mark dispatched
+                  -> provider transport -> settle usage, or release if never dispatched
+```
+
+Pre-dispatch approval, execution-policy, or credential failures release their reservations. Once
+transport begins, the request is charged exactly once even if the provider fails, so retry and
+failover loops cannot escape the shared ceiling. Successful responses replace estimates with
+bounded provider usage when available. A live stream without final usage settles against its
+requested output ceiling, which is deliberately conservative. Quota refusal is a retryable typed
+`ProviderQuotaExceededError` (TypeScript) or `ProviderQuotaError` (Python) carrying only policy
+identity, refusal dimensions, observed counters, concurrency, and a bounded next-window hint.
+
+```typescript
+import { LLMRuntime, ProviderQuotaController } from "@aurora-neuro/prism-sdk";
+
+const quota = new ProviderQuotaController();
+quota.setPolicy({ provider: "openai", model: "gpt-5", windowMs: 60_000, maxRequests: 30, maxConcurrent: 4 });
+const runtime = new LLMRuntime({ providerQuota: quota });
+```
+
+```python
+from prism_sdk import LLMRuntime, ProviderQuotaController
+
+quota = ProviderQuotaController()
+quota.set_policy({"provider": "openai", "model": "gpt-5", "windowMs": 60_000, "maxRequests": 30, "maxConcurrent": 4})
+runtime = LLMRuntime(provider_quota=quota)
+```
+
+`snapshot()` and the JSON persistence adapters retain policy metadata and settled counters only;
+they never receive prompts, response text, headers, tool arguments, credentials, or effect values.
+Snapshots are bounded, canonical, SHA-256 digest-checked, reject unknown fields and duplicate
+identities, and can use caller-owned compare-and-swap fencing. Active reservations are not restored
+after restart because an in-flight external outcome is unknown. This controller is intentionally
+not a billing ledger, provider-side rate-limit authority, distributed quota consensus, tenant
+isolation, encrypted secret store, or external-effect reconciler; those remain deployment-owned.
+
 ## Evidence-first application boundary
 
 The application-facing TypeScript `AutonomousBrainFacade` exposes the complete evidence-first

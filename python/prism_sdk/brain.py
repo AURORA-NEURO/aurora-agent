@@ -2927,6 +2927,14 @@ def _provider_health_evidence(provider: str, health: Mapping[str, Any]) -> dict[
     return _routing_health_evidence(provider, health)
 
 
+def _provider_failure_code(error: ProviderError) -> str:
+    """Preserve stable transport categories in adaptive metadata without exposing messages."""
+
+    if getattr(error, "code", None) == "quota_exceeded":
+        return "quota_exceeded"
+    return "circuit_open" if error.circuit_open else "provider_error"
+
+
 def _refresh_failover_provider_health(
     runtime: LLMRuntime,
     attempt_selection: dict[str, Any],
@@ -4621,7 +4629,7 @@ class AutonomousBrain:
                         "model": model,
                         "arm_id": selected_id,
                         "status": "provider_refused",
-                        "reason": "circuit_open" if error.circuit_open else "provider_error",
+                        "reason": _provider_failure_code(error),
                         "status_code": error.status_code,
                         **health_after_failure,
                         **_selection_attempt_metadata(attempt_audit),
@@ -4641,7 +4649,7 @@ class AutonomousBrain:
                         if error.status_code == 408 and not error.circuit_open
                         else "provider"
                     ),
-                    failure_code="circuit_open" if error.circuit_open else "provider_error",
+                    failure_code=_provider_failure_code(error),
                     status_code=error.status_code,
                 )
                 if continuation_state["status"] != "ready":
@@ -4889,7 +4897,7 @@ class AutonomousBrain:
                         "model": model,
                         "arm_id": selected_id,
                         "status": "provider_refused",
-                        "reason": "circuit_open" if error.circuit_open else "provider_error",
+                        "reason": _provider_failure_code(error),
                         "status_code": error.status_code,
                         **health_after_failure,
                         **_selection_attempt_metadata(attempt_audit),
@@ -4909,7 +4917,7 @@ class AutonomousBrain:
                         if error.status_code == 408 and not error.circuit_open
                         else "provider"
                     ),
-                    failure_code="circuit_open" if error.circuit_open else "provider_error",
+                    failure_code=_provider_failure_code(error),
                     status_code=error.status_code,
                 )
                 if continuation_state["status"] != "ready":
@@ -5164,7 +5172,7 @@ class AutonomousBrain:
                         "model": model,
                         "arm_id": selected_id,
                         "status": "provider_refused",
-                        "reason": "circuit_open" if error.circuit_open else "provider_error",
+                        "reason": _provider_failure_code(error),
                         "status_code": error.status_code,
                         **health_after_failure,
                         **_selection_attempt_metadata(attempt_audit),
@@ -5184,7 +5192,7 @@ class AutonomousBrain:
                         if error.status_code == 408 and not error.circuit_open
                         else "provider"
                     ),
-                    failure_code="circuit_open" if error.circuit_open else "provider_error",
+                    failure_code=_provider_failure_code(error),
                     status_code=error.status_code,
                 )
                 if continuation_state["status"] != "ready":

@@ -84,6 +84,45 @@ responses, tool arguments, or authorization headers. A restart must re-register 
 resolve fresh handles, which makes rotation and revocation explicit. The runtime refuses a
 missing, expired, revoked, or provider-mismatched handle before network dispatch.
 
+### Shared provider/model quota admission
+
+Attach a `ProviderQuotaController` to the shared `LLMRuntime` when the application needs a hard
+capacity ceiling across autonomous domains, model arms, failover, streams, and tool-loop turns:
+
+```typescript
+import { LLMRuntime, ProviderQuotaController } from "@aurora-neuro/prism-sdk";
+
+const quota = new ProviderQuotaController();
+quota.setPolicy({
+  provider: "openai",
+  model: "gpt-5",
+  windowMs: 60_000,
+  maxRequests: 30,
+  maxInputTokens: 250_000,
+  maxOutputTokens: 80_000,
+  maxConcurrent: 4,
+});
+const runtime = new LLMRuntime({ providerQuota: quota });
+```
+
+The controller is fixed-window and metadata-only. Provider-wide policies use `model: null`; when
+both provider-wide and exact-model policies exist, both reservations must pass. Runtime admission
+reserves the request estimate before the provider/effect closure, releases it when approval or
+credential checks stop before transport, and marks the request charged once dispatch begins. A
+successful response settles against bounded provider usage; a stream without final usage settles
+against its requested output ceiling. `ProviderQuotaExceededError` has stable `code:
+"quota_exceeded"`, policy/dimension metadata, and a bounded `retryAfterMs` hint without exposing
+prompts, response bodies, headers, tool arguments, credentials, or effect values.
+
+`quota.status(provider, model)` exposes used/reserved counters and the next window. `snapshot()`
+and `JsonProviderQuotaPersistence` preserve only policy metadata and settled counters. The
+canonical SHA-256 snapshot rejects unknown fields, digest tampering, duplicate identities, policy
+overflow, and non-canonical JSON. `TransactionalJsonProviderQuotaPersistence` adds caller-owned
+compare-and-swap fencing. Active reservations are not restored after restart because their external
+outcome is unknown. This controller is process-local; multi-process limits, tenant isolation,
+encryption, provider billing truth, and provider-side rate-limit authority remain deployment
+responsibilities.
+
 The provider setup layer also supports bounded live model discovery. After a protected credential
 has been attached to a short-lived session, `await setup.discoverModels(session, provider)` calls
 the provider's model catalog endpoint and returns only redacted ids, capacity metadata, active

@@ -1,5 +1,17 @@
 # Remaining backlog
 
+The provider runtime now has a shared, cross-language `ProviderQuotaController` seam. It admits
+every `LLMRuntime.invoke`, live stream, collected stream, and native tool-loop turn against
+provider-wide and provider/model fixed-window policies before transport, reserves concurrency,
+releases pre-dispatch refusals, and settles one request after dispatch using provider usage when it
+is available. TypeScript and Python expose the same metadata-only schema, retryable
+`quota_exceeded` failure, canonical digest-checked JSON persistence, and optional compare-and-swap
+adapter. Because the controller is attached to the shared runtime, all twelve autonomous domains
+and cross-domain fan-out consume the same ceiling without duplicating policy code. The controller
+is process-local and does not claim billing truth, tenant isolation, distributed quota consensus,
+provider-side rate-limit authority, encryption, or credential management; those remain deployment
+responsibilities.
+
 The shared `bioprism-brain` planner now emits deterministic, dependency-closed execution waves
 alongside its serial topological order. `max_parallelism`, critical-path cost, estimated rounds,
 and peak width are bounded and digest-bound in the Rust/MCP contract; duplicate dependencies and
