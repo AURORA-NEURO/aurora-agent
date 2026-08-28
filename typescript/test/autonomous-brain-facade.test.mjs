@@ -68,6 +68,23 @@ function localRuntime(onRequest = () => {}) {
   return runtime;
 }
 
+async function approvedLaunchAdmission(brain) {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const ready = { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true };
+  const preflight = await brain.launchPreflight({
+    availableToolNames: profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => binding.name)),
+    availableEvidence: profiles.flatMap((profile) => profile.workflow.stages.flatMap((stage) => stage.evidence_outputs.map((label) => `${profile.domain}:${stage.id}:${label}`))),
+    deploymentCapabilities: {
+      persistence: ready,
+      queue: ready,
+      approval_authority: ready,
+      external_auth: ready,
+      telemetry: ready,
+    },
+  });
+  return brain.admitLaunchPreflight(preflight, { decision: "approve", authorizationDigest: "c".repeat(64) });
+}
+
 function semanticRuntime(payloads, onRequest = () => {}) {
   let calls = 0;
   const runtime = new LLMRuntime({ fetch: async () => { throw new Error("semantic HTTP must not be reached"); } });
@@ -789,6 +806,56 @@ test("brain facade binds weighted selection policy and observations into approva
     /observations changed|re-review required/,
   );
   assert.equal(runtime.providerStatus("offline").attempts, 0);
+});
+
+test("brain facade traces approved model-arm execution across every built-in domain", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const store = new InMemoryAutonomousRunTraceStore();
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const task = tasks[domain];
+    const preview = await brain.modelSelectionPreview({ task, domain });
+    const traced = await brain.executeApprovedSelectionWithTrace({ task, domain }, preview, {
+      traceStore: store,
+      runId: `approved-selection-trace-${domain}`,
+    });
+    assert.equal(traced.execution.status, "completed", domain);
+    assert.equal(traced.execution.run?.selection.selected_model?.provider, "offline", domain);
+    assert.equal(traced.trace.status, "completed", domain);
+    assert.equal(traced.trace.provider_invocations, 1, domain);
+    assert.equal(traced.trace.selection_digests.length > 0, true, domain);
+    assert.ok(store.events({ run_id: `approved-selection-trace-${domain}` }).some((event) => event.phase === "model_selection_started"), domain);
+    assert.doesNotMatch(JSON.stringify(traced.trace), new RegExp(task.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), domain);
+  }
+
+  const preview = await brain.modelSelectionPreview({ task: tasks.coding, domain: "coding" });
+  const admission = await approvedLaunchAdmission(brain);
+  const admitted = await brain.executeApprovedSelectionWithLaunchAdmissionAndTrace(
+    { task: tasks.coding, domain: "coding" },
+    preview,
+    admission,
+    { traceStore: store, runId: "approved-selection-launch-trace" },
+  );
+  assert.equal(admitted.execution.status, "completed");
+  assert.equal(admitted.trace.status, "completed");
+
+  const held = brain.admitLaunchPreflight(await brain.launchPreflight(), { decision: "hold", reason: "selection review pending" });
+  const attempts = runtime.providerStatus("offline").attempts;
+  await assert.rejects(
+    () => brain.executeApprovedSelectionWithLaunchAdmissionAndTrace(
+      { task: tasks.coding, domain: "coding" },
+      preview,
+      held,
+      { traceStore: store, runId: "approved-selection-held" },
+    ),
+    /not approved/,
+  );
+  assert.equal(runtime.providerStatus("offline").attempts, attempts);
+  assert.equal(store.events({ run_id: "approved-selection-held" }).length, 0);
+  assert.equal(store.verifyIntegrity().verified, true);
 });
 
 test("brain facade closed-loop execution accepts every built-in domain through one provider-neutral entry point", async () => {

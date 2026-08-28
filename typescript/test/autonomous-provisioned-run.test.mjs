@@ -277,6 +277,55 @@ test("provisioned brain tracing covers every domain and keeps launch admission b
   assert.equal(runtime.credentials.status("offline").active_handles, 0);
 });
 
+test("provisioned approved model selection closes sessions across every domain and traces admitted arms", async () => {
+  const capabilities = await broadCapabilities();
+  const runtime = localRuntime("offline");
+  const setup = new ProviderSetup(runtime);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(candidate("offline", capabilities));
+  const brain = new AutonomousBrainFacade({ agent });
+  const store = new InMemoryAutonomousRunTraceStore();
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const request = { task: `select an exact bounded ${domain} model arm`, domain };
+    const preview = await brain.modelSelectionPreview(request);
+    const run = await brain.executeApprovedSelectionWithProvisionedCredentials(request, preview, {
+      credentialProviders: ["offline"],
+    });
+    assert.equal(run.status, "completed", domain);
+    assert.equal(run.result.status, "completed", domain);
+    assert.equal(run.result.run?.selection.selected_model?.provider, "offline", domain);
+    assert.equal(run.result.run?.response.provider, "offline", domain);
+  }
+
+  const request = { task: "trace an admitted exact coding model arm", domain: "coding" };
+  const preview = await brain.modelSelectionPreview(request);
+  const admission = await approvedLaunchAdmission(brain);
+  const traced = await brain.executeApprovedSelectionWithProvisionedCredentialsWithLaunchAdmissionAndTrace(request, preview, admission, {
+    credentialProviders: ["offline"],
+    traceStore: store,
+    runId: "provisioned-approved-selection-admitted",
+  });
+  assert.equal(traced.status, "completed");
+  assert.equal(traced.result.execution.status, "completed");
+  assert.equal(traced.result.trace.status, "completed");
+  assert.equal(traced.result.trace.provider_invocations, 1);
+  assert.ok(store.events({ run_id: "provisioned-approved-selection-admitted" }).some((event) => event.phase === "model_selection_finished"));
+  assert.doesNotMatch(JSON.stringify(traced.toJSON()), /trace an admitted exact coding model arm/);
+
+  const held = brain.admitLaunchPreflight(await brain.launchPreflight(), { decision: "hold", reason: "approved model arm pending" });
+  const attempts = runtime.providerStatus("offline").attempts;
+  await assert.rejects(
+    () => brain.executeApprovedSelectionWithProvisionedCredentialsWithLaunchAdmission(request, preview, held, {
+      credentialProviders: ["offline"],
+    }),
+    /not approved/,
+  );
+  assert.equal(runtime.providerStatus("offline").attempts, attempts);
+  assert.equal(runtime.credentials.status("offline").active_handles, 0);
+  assert.equal(store.verifyIntegrity().verified, true);
+});
+
 test("provisioned persisted-plan replay revalidates route identity before credential provisioning", async () => {
   const capabilities = await broadCapabilities();
   const runtime = localRuntime("offline");

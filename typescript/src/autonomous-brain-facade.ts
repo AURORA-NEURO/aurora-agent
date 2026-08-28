@@ -4,6 +4,8 @@ import {
   ProviderSetup,
   type AutonomousProvisionedBrainAdaptiveCycleOptions,
   type AutonomousProvisionedBrainAdaptiveCycleTraceOptions,
+  type AutonomousProvisionedBrainApprovedSelectionOptions,
+  type AutonomousProvisionedBrainApprovedSelectionTraceOptions,
   type AutonomousProvisionedBrainAutoExecuteOptions,
   type AutonomousProvisionedBrainAutoTraceOptions,
   type AutonomousProvisionedBrainCycleOptions,
@@ -580,6 +582,18 @@ export interface AutonomousBrainTracedEvidenceBackedResumableRun {
 /** Options for executing one caller-approved, digest-bound model-selection preview. */
 export interface AutonomousBrainApprovedSelectionOptions {
   run?: Omit<AutonomousApprovedModelSelectionOptions, "domain">;
+}
+
+/** Caller-owned metadata trace controls for one digest-bound approved model arm. */
+export interface AutonomousBrainApprovedSelectionTraceOptions extends AutonomousBrainApprovedSelectionOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+/** Approved model-arm execution paired with a digest-only lifecycle trace. */
+export interface AutonomousBrainTracedApprovedSelection {
+  execution: AutonomousBrainExecution;
+  trace: AutonomousRunTraceSummary;
 }
 
 type AutonomousBrainCycleBoundKeys = "domain" | "routeOverride" | "capability" | "context" | "hints" | "allowCrossDomain" | "semanticRouting";
@@ -1755,6 +1769,44 @@ export class AutonomousBrainFacade {
     options: AutonomousProvisionedBrainTraceOptions,
   ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedExecution>> {
     return this.providerSetup.runBrainWithProvisionedCredentialsWithLaunchAdmissionAndTrace(this, input, admission, options);
+  }
+
+  /** Execute a caller-approved model-selection arm through a protected credential session. */
+  executeApprovedSelectionWithProvisionedCredentials(
+    input: AutonomousBrainRequest,
+    preview: AutonomousModelSelectionPreview,
+    options: AutonomousProvisionedBrainApprovedSelectionOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainExecution>> {
+    return this.providerSetup.runBrainApprovedSelectionWithProvisionedCredentials(this, input, preview, options);
+  }
+
+  /** Execute an approved model-selection arm with protected provisioning and a metadata trace. */
+  executeApprovedSelectionWithProvisionedCredentialsWithTrace(
+    input: AutonomousBrainRequest,
+    preview: AutonomousModelSelectionPreview,
+    options: AutonomousProvisionedBrainApprovedSelectionTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedApprovedSelection>> {
+    return this.providerSetup.runBrainApprovedSelectionWithProvisionedCredentialsWithTrace(this, input, preview, options);
+  }
+
+  /** Execute an approved model-selection arm only after a caller-owned launch admission. */
+  executeApprovedSelectionWithProvisionedCredentialsWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    preview: AutonomousModelSelectionPreview,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainApprovedSelectionOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainExecution>> {
+    return this.providerSetup.runBrainApprovedSelectionWithProvisionedCredentialsWithLaunchAdmission(this, input, preview, admission, options);
+  }
+
+  /** Execute an approved model-selection arm after launch admission with a metadata trace. */
+  executeApprovedSelectionWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    input: AutonomousBrainRequest,
+    preview: AutonomousModelSelectionPreview,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainApprovedSelectionTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedApprovedSelection>> {
+    return this.providerSetup.runBrainApprovedSelectionWithProvisionedCredentialsWithLaunchAdmissionAndTrace(this, input, preview, admission, options);
   }
 
   /** Execute automatic route/planning/invocation through one deployment-managed session. */
@@ -3211,23 +3263,7 @@ export class AutonomousBrainFacade {
     if (request.connector !== undefined) throw new ArgumentError("approved model selection does not accept connector dispatch inputs");
     const prepared = await this.prepare(request);
     if (prepared.plan.status !== "ready" || prepared.route.cross_domain) throw new ProviderRuntimeError("approved model selection requires a ready single-domain plan");
-    const runOptions = {
-      ...(options.run ?? {}),
-      domain: request.domain,
-      capability: options.run?.capability ?? request.capability,
-      context: options.run?.context ?? request.context,
-    } as AutonomousApprovedModelSelectionOptions;
-    const run = await this.agent.runApprovedModelSelection(request.task, preview, runOptions);
-    return {
-      schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
-      status: run.status,
-      plan: prepared.plan.toJSON(),
-      run,
-      connector: null,
-      error: null,
-      retention: "plan_metadata_only;run_and_connector_values_transient_to_caller",
-      secret_material: "never_returned",
-    };
+    return this.executeApprovedSelectionPrepared(prepared, preview, options);
   }
 
   /**
@@ -3247,23 +3283,39 @@ export class AutonomousBrainFacade {
     const prepared = await this.prepare(request);
     if (prepared.plan.status !== "ready" || prepared.route.cross_domain) throw new ProviderRuntimeError("approved model selection requires a ready single-domain plan");
     authorizeAutonomousLaunchDomains(admission, [request.domain]);
-    const runOptions = {
-      ...(options.run ?? {}),
-      domain: request.domain,
-      capability: options.run?.capability ?? request.capability,
-      context: options.run?.context ?? request.context,
-    } as AutonomousApprovedModelSelectionOptions;
-    const run = await this.agent.runApprovedModelSelection(request.task, preview, runOptions);
-    return {
-      schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
-      status: run.status,
-      plan: prepared.plan.toJSON(),
-      run,
-      connector: null,
-      error: null,
-      retention: "plan_metadata_only;run_and_connector_values_transient_to_caller",
-      secret_material: "never_returned",
-    };
+    return this.executeApprovedSelectionPrepared(prepared, preview, options);
+  }
+
+  /** Execute one reviewed model arm while recording selection and provider metadata only. */
+  async executeApprovedSelectionWithTrace(
+    input: AutonomousBrainRequest,
+    preview: AutonomousModelSelectionPreview,
+    options: AutonomousBrainApprovedSelectionTraceOptions,
+  ): Promise<AutonomousBrainTracedApprovedSelection> {
+    const request = validateRequest(input);
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain approved selection trace options must be an object");
+    if (request.domain === undefined) throw new ArgumentError("approved model selection requires an explicit domain");
+    if (request.connector !== undefined) throw new ArgumentError("approved model selection does not accept connector dispatch inputs");
+    const prepared = await this.prepare(request);
+    if (prepared.plan.status !== "ready" || prepared.route.cross_domain) throw new ProviderRuntimeError("approved model selection requires a ready single-domain plan");
+    return this.executeApprovedSelectionPreparedWithTrace(prepared, preview, options);
+  }
+
+  /** Execute one reviewed model arm after launch admission, with a digest-only lifecycle trace. */
+  async executeApprovedSelectionWithLaunchAdmissionAndTrace(
+    input: AutonomousBrainRequest,
+    preview: AutonomousModelSelectionPreview,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainApprovedSelectionTraceOptions,
+  ): Promise<AutonomousBrainTracedApprovedSelection> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain approved selection trace options must be an object");
+    const request = validateRequest(input);
+    if (request.domain === undefined) throw new ArgumentError("approved model selection requires an explicit domain");
+    if (request.connector !== undefined) throw new ArgumentError("approved model selection does not accept connector dispatch inputs");
+    const prepared = await this.prepare(request);
+    if (prepared.plan.status !== "ready" || prepared.route.cross_domain) throw new ProviderRuntimeError("approved model selection requires a ready single-domain plan");
+    authorizeAutonomousLaunchDomains(admission, [request.domain]);
+    return this.executeApprovedSelectionPreparedWithTrace(prepared, preview, options);
   }
 
   /** Recompute keyless readiness and activation metadata without dispatching a provider or tool. */
@@ -4185,6 +4237,70 @@ export class AutonomousBrainFacade {
       await trace.complete({
         status: autonomousRunTraceStatus(execution.status),
         domains: [...new Set(initialDomains)] as AutonomousDomainName[],
+        route_digest: prepared.route.route_digest,
+        plan_digest: prepared.plan.plan_digest,
+        selection_digest: selection === null ? null : digestJsonSync(selection as JsonObject),
+      });
+      return { execution, trace: await trace.summary() };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async executeApprovedSelectionPrepared(
+    prepared: PreparedBrainRequest,
+    preview: AutonomousModelSelectionPreview,
+    options: AutonomousBrainApprovedSelectionOptions,
+    trace?: AutonomousRunTraceSession,
+  ): Promise<AutonomousBrainExecution> {
+    const { request, plan } = prepared;
+    const runOptions = {
+      ...(options.run ?? {}),
+      domain: request.domain!,
+      capability: options.run?.capability ?? request.capability,
+      context: options.run?.context ?? request.context,
+      observer: composeBrainObservers(options.run?.observer, trace?.providerObserver()),
+      selectionEventCallback: trace === undefined
+        ? options.run?.selectionEventCallback
+        : trace.selectionEventCallback(options.run?.selectionEventCallback),
+    } as AutonomousApprovedModelSelectionOptions;
+    const run = await this.agent.runApprovedModelSelection(request.task, preview, runOptions);
+    return {
+      schema: AUTONOMOUS_BRAIN_FACADE_SCHEMA,
+      status: run.status,
+      plan: plan.toJSON(),
+      run,
+      connector: null,
+      error: null,
+      retention: "plan_metadata_only;run_and_connector_values_transient_to_caller",
+      secret_material: "never_returned",
+    };
+  }
+
+  private async executeApprovedSelectionPreparedWithTrace(
+    prepared: PreparedBrainRequest,
+    preview: AutonomousModelSelectionPreview,
+    options: AutonomousBrainApprovedSelectionTraceOptions,
+  ): Promise<AutonomousBrainTracedApprovedSelection> {
+    const initialDomains = this.traceDomains(prepared);
+    const trace = this.createTrace(prepared, options.traceStore, options.runId);
+    await trace.started();
+    try {
+      await trace.record({
+        phase: "plan_compiled",
+        status: "running",
+        domains: initialDomains,
+        route_digest: prepared.route.route_digest,
+        plan_digest: prepared.plan.plan_digest,
+      });
+      const execution = await this.executeApprovedSelectionPrepared(prepared, preview, options, trace);
+      const run = execution.run;
+      const selection = isObject(run) && isObject(run.selection) ? run.selection : null;
+      await trace.complete({
+        status: autonomousRunTraceStatus(execution.status),
+        domains: initialDomains,
         route_digest: prepared.route.route_digest,
         plan_digest: prepared.plan.plan_digest,
         selection_digest: selection === null ? null : digestJsonSync(selection as JsonObject),

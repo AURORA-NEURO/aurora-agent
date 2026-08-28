@@ -84,6 +84,16 @@ provisioning, inventory refresh, or provider resolution. Traces contain lifecycl
 selection/provider metadata, digests, and bounded failures only; task text, prompts, responses,
 evidence, tool arguments, and credentials remain outside serialized output.
 
+Approved model selection has the same observability and credential boundary. After
+`modelSelectionPreview()` returns a selected, digest-bound arm, applications can call
+`executeApprovedSelectionWithTrace()` or the corresponding
+`executeApprovedSelectionWithLaunchAdmissionAndTrace()` method. The trace records the exact
+selection attempt, provider invocation, final status, and selection digest without retaining the
+preview task, prompt, response, or credential material. The provisioned facade variants
+(`executeApprovedSelectionWithProvisionedCredentials*`) perform admission before opening a
+credential session, inject the opaque resolver only for the transient invocation, and revoke the
+session on success, refusal, stale-preview failure, or trace failure.
+
 Persisted `AutonomousBrainPlan` values have an equivalent replay boundary. The
 `executePlanned*WithLaunchAdmission` methods canonicalize and revalidate the plan, recompute its
 provider-free route/blueprint identity against the current catalogue, and authorize the exact
@@ -2303,6 +2313,12 @@ execution method again at the final dispatch boundary. Consequently a held or do
 admission causes zero source resolution, zero inventory discovery, and zero provider attempts;
 provider approval, effect approval, evidence acceptance, evaluator settlement, and credential
 authority remain separate gates.
+
+The approved-selection wrapper applies the same ordering to the model-arm workflow: it requires
+an explicit built-in domain, checks the frozen admission before provisioning, and rechecks it at
+the final invocation boundary. A stale preview still fails closed after the session is opened
+because preview identity must be recomputed against the current catalogue and health state; no
+provider invocation occurs, and the session is always revoked.
 
 The same setup boundary now wraps the application-facing TypeScript brain facade through
 `setup.runBrainWithProvisionedCredentials(brain, request, options)`,
