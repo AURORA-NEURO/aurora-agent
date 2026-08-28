@@ -5334,6 +5334,15 @@ execution_persistence.flush()
 persistence.close()
 ```
 
+When multiple workers append directly to one execution history, use
+`SQLiteAutonomousExecutionJournal("state/execution-journal.sqlite3")` as the journal passed to
+`AutonomousExecutionController` or `AutonomousAgent`. It allocates the next sequence and
+predecessor inside the same immediate transaction as the event insert, so concurrent appenders
+cannot create a forked hash chain. Reads, portable snapshots, restores, capacity accounting, and
+canonical-event verification use the same journal API as JSONL. This protects metadata ordering;
+it does not by itself merge stale in-memory controller counters, grant a worker lease, or authorize
+replaying a provider/effect after an ambiguous dispatch.
+
 The TypeScript execution boundary now provides the same portable contract through
 `TransactionalJsonAutonomousExecutionSnapshotPersistence`. It validates the complete event
 chain before reading or writing, serializes overlapping restore/flush calls, and carries the

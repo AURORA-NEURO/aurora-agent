@@ -19,6 +19,7 @@ from prism_sdk import (
     AutonomyPersistenceError,
     AutonomyPolicyError,
     ProviderToolCall,
+    SQLiteAutonomousExecutionJournal,
     SQLiteAutonomousExecutionSnapshotPersistence,
 )
 
@@ -367,6 +368,84 @@ def test_sqlite_execution_snapshot_persistence_reopens_and_fences_concurrent_wri
         finally:
             connection.close()
         SQLiteAutonomousExecutionSnapshotPersistence(database)
+
+
+def test_sqlite_execution_journal_serializes_hash_chain_across_workers(tmp_path) -> None:
+    database = tmp_path / "execution-journal.sqlite3"
+    policy = AutonomousExecutionPolicy(max_steps=64, max_provider_calls=64)
+    journal = SQLiteAutonomousExecutionJournal(database, max_events=64)
+    controller = AutonomousExecutionController(
+        execution_id="sqlite-journal-execution",
+        domain="operations",
+        capability="observability",
+        risk_class="read_only",
+        policy=policy,
+        journal=journal,
+    )
+    controller.checkpoint(status="paused", reason="sqlite_journal_initial")
+    state = controller.state.to_dict()
+    journal.close()
+
+    writers = [SQLiteAutonomousExecutionJournal(database, max_events=64) for _ in range(4)]
+    try:
+        def append_checkpoint(index: int) -> dict[str, object]:
+            return writers[index % len(writers)].append(
+                {
+                    "execution_id": "sqlite-journal-execution",
+                    "kind": "checkpoint",
+                    "domain": "operations",
+                    "capability": "observability",
+                    "risk_class": "read_only",
+                    "status": "paused",
+                    "policy_digest": policy.digest,
+                    "state": state,
+                    "reason": f"sqlite_worker_{index}",
+                }
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as workers_pool:
+            receipts = list(workers_pool.map(append_checkpoint, range(32)))
+        assert sorted(receipt["sequence"] for receipt in receipts) == list(range(3, 35))
+        rows = writers[0].events(execution_id="sqlite-journal-execution", limit=64)
+        assert len(rows) == 34
+        assert [row["sequence"] for row in rows] == list(range(1, 35))
+        assert writers[0].verify_integrity()["verified"] is True
+        assert writers[0].snapshot()["head_digest"] == rows[-1]["event_digest"]
+    finally:
+        for writer in writers:
+            writer.close()
+
+    with SQLiteAutonomousExecutionJournal(database, max_events=64) as reopened:
+        resumed = AutonomousExecutionController(
+            execution_id="sqlite-journal-execution",
+            domain="operations",
+            capability="observability",
+            risk_class="read_only",
+            policy=policy,
+            journal=reopened,
+            resume=True,
+        )
+        assert resumed.state.status == "resumed"
+        resumed.complete()
+        final_state = reopened.state("sqlite-journal-execution")
+        assert final_state is not None
+        assert final_state.status == "completed"
+
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE autonomy_execution_journal_events SET event_digest = ? WHERE sequence = 1",
+            ("a" * 64,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    corrupted = SQLiteAutonomousExecutionJournal(database, max_events=64)
+    try:
+        with pytest.raises(AutonomyPersistenceError, match="event digest"):
+            corrupted.verify_integrity()
+    finally:
+        corrupted.close()
 
 
 def test_runtime_session_enforces_policy_and_journals_read_only_outcomes(tmp_path) -> None:

@@ -2137,3 +2137,10 @@ metadata-only state safely. It does not claim distributed leases, encryption, te
 or external provider/effect truth; those remain deployment integrations. The TypeScript runtime
 continues to consume the portable text-store contract so cross-SDK snapshot semantics remain
 unchanged.
+
+The same Python backend now supports `SQLiteAutonomousExecutionJournal`, which transactionally
+allocates event sequences and hash-chain predecessors for direct multi-process appenders while
+preserving the JSONL journal interface and portable snapshot format. This closes metadata-history
+forking, not task-lease or policy-counter coordination: deployment-owned leases must still fence
+duplicate rehydrated work, and ambiguous provider/effect outcomes still require external
+reconciliation.

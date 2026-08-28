@@ -60,6 +60,14 @@ and journal-chain validators run. SQLite provides local durability and process f
 does not provide tenant isolation, encryption, distributed leases, protected-value storage, or
 external provider/effect reconciliation.
 
+For event-level multi-process coordination, pass `SQLiteAutonomousExecutionJournal(path)` as the
+`journal` when constructing `AutonomousExecutionController` or `AutonomousAgent`. It allocates
+sequence numbers and hash-chain predecessors under the same SQLite write transaction as the
+event, so concurrent workers cannot fork one metadata history. This is stronger than conditional
+snapshot flushes when workers share the journal directly, but policy counters still belong to the
+controller instance and deployment-owned leases must prevent two workers from executing the same
+rehydrated task concurrently.
+
 ```python
 from prism_sdk import (
     AutonomousExecutionJournal,

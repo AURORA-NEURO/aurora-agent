@@ -24,7 +24,7 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
 import uuid
 
 from .authoring import canonical_bytes, content_digest
@@ -37,6 +37,7 @@ AUTONOMY_EVENT_SCHEMA = "bioprism-python-autonomous-execution-event/0.1"
 AUTONOMY_JOURNAL_SCHEMA = "bioprism-python-autonomous-execution-journal/0.1"
 AUTONOMY_EXECUTION_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-execution-snapshot/0.1"
 SQLITE_AUTONOMY_EXECUTION_SCHEMA = "bioprism-python-autonomous-execution-sqlite/0.1"
+SQLITE_AUTONOMY_EXECUTION_JOURNAL_SCHEMA = "bioprism-python-autonomous-execution-journal-sqlite/0.1"
 AUTONOMY_EVENT_KINDS = (
     "started",
     "resumed",
@@ -805,6 +806,261 @@ def validate_autonomous_execution_snapshot(value: Mapping[str, Any]) -> dict[str
     return _normalize_execution_snapshot(value)
 
 
+class SQLiteAutonomousExecutionJournal(AutonomousExecutionJournal):
+    """Transactional SQLite implementation of the metadata-only execution journal.
+
+    The public journal contract is preserved, but append, restore, and integrity reads operate on
+    a SQLite event table instead of a JSONL file.  ``BEGIN IMMEDIATE`` makes sequence allocation,
+    predecessor selection, capacity checks, and insertion one atomic operation across processes.
+    The controller still owns policy decisions; this journal only makes their metadata durable and
+    hash-chained.
+    """
+
+    _META_TABLE = "autonomy_execution_journal_meta"
+    _EVENT_TABLE = "autonomy_execution_journal_events"
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        max_events: int = MAX_AUTONOMY_JOURNAL_EVENTS,
+        max_bytes: int = MAX_AUTONOMY_JOURNAL_BYTES,
+        clock: Callable[[], float] = time.time,
+        timeout: float = 5.0,
+    ) -> None:
+        super().__init__(path, max_events=max_events, max_bytes=max_bytes, clock=clock)
+        if "\x00" in str(path):
+            raise AutonomyPersistenceError("SQLite execution journal path must be non-empty")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(float(timeout)) or not 0.1 <= float(timeout) <= 60.0:
+            raise AutonomyPersistenceError("SQLite execution journal timeout is outside its bound")
+        self.timeout = float(timeout)
+        self._connection: sqlite3.Connection | None = None
+        self._sqlite_lock = threading.RLock()
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            connection = sqlite3.connect(
+                str(self.path),
+                isolation_level=None,
+                check_same_thread=False,
+                timeout=self.timeout,
+            )
+            connection.row_factory = sqlite3.Row
+            self._connection = connection
+            self._configure_sqlite()
+        except AutonomyPersistenceError:
+            self.close()
+            raise
+        except (OSError, sqlite3.Error) as error:
+            self.close()
+            raise AutonomyPersistenceError("SQLite execution journal could not be opened") from error
+
+    def _configure_sqlite(self) -> None:
+        connection = self._require_sqlite_connection()
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=FULL")
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(f"PRAGMA busy_timeout = {int(self.timeout * 1000)}")
+        connection.execute(
+            f"CREATE TABLE IF NOT EXISTS {self._META_TABLE} ("
+            "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        connection.execute(
+            f"CREATE TABLE IF NOT EXISTS {self._EVENT_TABLE} ("
+            "sequence INTEGER PRIMARY KEY, event_digest TEXT NOT NULL, "
+            "previous_digest TEXT NOT NULL, created_ns INTEGER NOT NULL, "
+            "event_json TEXT NOT NULL, envelope_bytes INTEGER NOT NULL)"
+        )
+        existing = connection.execute(
+            f"SELECT value FROM {self._META_TABLE} WHERE key = 'schema'"
+        ).fetchone()
+        if existing is None:
+            connection.execute(
+                f"INSERT INTO {self._META_TABLE}(key, value) VALUES('schema', ?)",
+                (SQLITE_AUTONOMY_EXECUTION_JOURNAL_SCHEMA,),
+            )
+        elif existing["value"] != SQLITE_AUTONOMY_EXECUTION_JOURNAL_SCHEMA:
+            raise AutonomyPersistenceError("SQLite execution journal has an incompatible schema")
+
+    def _require_sqlite_connection(self) -> sqlite3.Connection:
+        connection = self._connection
+        if connection is None:
+            raise AutonomyPersistenceError("SQLite execution journal is closed")
+        return connection
+
+    @contextmanager
+    def _sqlite_transaction(self) -> Iterator[sqlite3.Connection]:
+        with self._sqlite_lock:
+            connection = self._require_sqlite_connection()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.execute("COMMIT")
+            except Exception as error:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                if isinstance(error, sqlite3.Error):
+                    raise AutonomyPersistenceError("SQLite execution journal transaction failed") from error
+                raise
+
+    @staticmethod
+    def _decode_sqlite_event(row: sqlite3.Row, expected_sequence: int, previous_digest: str) -> dict[str, Any]:
+        sequence = row["sequence"]
+        if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence != expected_sequence:
+            raise AutonomyPersistenceError("SQLite execution journal sequence is invalid")
+        stored_previous = row["previous_digest"]
+        if stored_previous != previous_digest:
+            raise AutonomyPersistenceError("SQLite execution journal predecessor is invalid")
+        created_ns = row["created_ns"]
+        if not isinstance(created_ns, int) or isinstance(created_ns, bool) or created_ns < 0:
+            raise AutonomyPersistenceError("SQLite execution journal timestamp is invalid")
+        event_digest = row["event_digest"]
+        _digest("SQLite execution journal event_digest", event_digest)
+        event_text = row["event_json"]
+        if not isinstance(event_text, str):
+            raise AutonomyPersistenceError("SQLite execution journal event is malformed")
+        try:
+            raw_event = json.loads(event_text)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise AutonomyPersistenceError("SQLite execution journal event is invalid") from error
+        event = AutonomousExecutionJournal._normalize_event(raw_event)
+        if event_text != canonical_bytes(event).decode("utf-8"):
+            raise AutonomyPersistenceError("SQLite execution journal event is not canonical")
+        descriptor = {
+            "schema": AUTONOMY_EVENT_SCHEMA,
+            "sequence": sequence,
+            "event": event,
+            "previous_digest": previous_digest,
+            "created_ns": created_ns,
+        }
+        if content_digest(descriptor) != event_digest:
+            raise AutonomyPersistenceError("SQLite execution journal event digest is invalid")
+        envelope = {**descriptor, "event_digest": event_digest}
+        envelope_bytes = row["envelope_bytes"]
+        if not isinstance(envelope_bytes, int) or isinstance(envelope_bytes, bool) or envelope_bytes != len(canonical_bytes(envelope)) + 1:
+            raise AutonomyPersistenceError("SQLite execution journal envelope size is invalid")
+        return envelope
+
+    def _read_rows_locked(self) -> list[dict[str, Any]]:
+        connection = self._require_sqlite_connection()
+        try:
+            rows = connection.execute(
+                f"SELECT sequence, event_digest, previous_digest, created_ns, event_json, envelope_bytes "
+                f"FROM {self._EVENT_TABLE} ORDER BY sequence ASC"
+            ).fetchall()
+        except sqlite3.Error as error:
+            raise AutonomyPersistenceError("SQLite execution journal could not be read") from error
+        if len(rows) > self.max_events:
+            raise AutonomyPersistenceError("SQLite execution journal exceeds max_events")
+        normalized: list[dict[str, Any]] = []
+        previous_digest = ""
+        total_bytes = 0
+        for expected_sequence, row in enumerate(rows, start=1):
+            envelope = self._decode_sqlite_event(row, expected_sequence, previous_digest)
+            total_bytes += int(row["envelope_bytes"])
+            if total_bytes > self.max_bytes:
+                raise AutonomyPersistenceError("SQLite execution journal exceeds max_bytes")
+            normalized.append(envelope)
+            previous_digest = envelope["event_digest"]
+        return normalized
+
+    def append(self, event: Mapping[str, Any]) -> dict[str, Any]:
+        normalized = self._normalize_event(event)
+        event_json = canonical_bytes(normalized).decode("utf-8")
+        with self._sqlite_transaction() as connection:
+            try:
+                latest = connection.execute(
+                    f"SELECT sequence, event_digest FROM {self._EVENT_TABLE} ORDER BY sequence DESC LIMIT 1"
+                ).fetchone()
+                sequence = 1 if latest is None else int(latest["sequence"]) + 1
+                if sequence > self.max_events:
+                    raise AutonomyPersistenceError("execution journal event capacity is exhausted")
+                previous_digest = "" if latest is None else latest["event_digest"]
+                created_ns = _now_ns(self._clock)
+                descriptor = {
+                    "schema": AUTONOMY_EVENT_SCHEMA,
+                    "sequence": sequence,
+                    "event": normalized,
+                    "previous_digest": previous_digest,
+                    "created_ns": created_ns,
+                }
+                envelope = {**descriptor, "event_digest": content_digest(descriptor)}
+                envelope_bytes = len(canonical_bytes(envelope)) + 1
+                current = connection.execute(
+                    f"SELECT COALESCE(SUM(envelope_bytes), 0) AS bytes FROM {self._EVENT_TABLE}"
+                ).fetchone()
+                if int(current["bytes"]) + envelope_bytes > self.max_bytes:
+                    raise AutonomyPersistenceError("execution journal byte capacity is exhausted")
+                connection.execute(
+                    f"INSERT INTO {self._EVENT_TABLE} "
+                    "(sequence, event_digest, previous_digest, created_ns, event_json, envelope_bytes) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (sequence, envelope["event_digest"], previous_digest, created_ns, event_json, envelope_bytes),
+                )
+            except sqlite3.Error as error:
+                raise AutonomyPersistenceError("SQLite execution journal event could not be appended") from error
+        return {
+            "schema": AUTONOMY_EVENT_SCHEMA,
+            "sequence": envelope["sequence"],
+            "event_digest": envelope["event_digest"],
+            "head_digest": envelope["event_digest"],
+            "execution_id": normalized["execution_id"],
+            "kind": normalized["kind"],
+            "retention": "metadata_only_hash_chained",
+        }
+
+    def restore(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _normalize_execution_snapshot(
+            snapshot,
+            max_events=self.max_events,
+            max_bytes=self.max_bytes,
+        )
+        rows: list[tuple[int, str, str, int, str, int]] = []
+        for row in normalized["rows"]:
+            envelope = dict(row)
+            event_json = canonical_bytes(envelope["event"]).decode("utf-8")
+            envelope_bytes = len(canonical_bytes(envelope)) + 1
+            rows.append(
+                (
+                    envelope["sequence"],
+                    envelope["event_digest"],
+                    envelope["previous_digest"],
+                    envelope["created_ns"],
+                    event_json,
+                    envelope_bytes,
+                )
+            )
+        with self._sqlite_transaction() as connection:
+            try:
+                connection.execute(f"DELETE FROM {self._EVENT_TABLE}")
+                for row in rows:
+                    connection.execute(
+                        f"INSERT INTO {self._EVENT_TABLE} "
+                        "(sequence, event_digest, previous_digest, created_ns, event_json, envelope_bytes) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        row,
+                    )
+            except sqlite3.Error as error:
+                raise AutonomyPersistenceError("SQLite execution journal snapshot could not be restored") from error
+
+    def close(self) -> None:
+        with self._sqlite_lock:
+            connection, self._connection = self._connection, None
+            if connection is not None:
+                try:
+                    connection.close()
+                except sqlite3.Error as error:
+                    raise AutonomyPersistenceError("SQLite execution journal could not be closed") from error
+
+    def __enter__(self) -> "SQLiteAutonomousExecutionJournal":
+        self._require_sqlite_connection()
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+
 class JsonAutonomousExecutionSnapshotPersistence:
     """Canonical JSON persistence over any caller-owned text store."""
 
@@ -1571,11 +1827,13 @@ __all__ = [
     "AUTONOMY_JOURNAL_SCHEMA",
     "AUTONOMY_POLICY_SCHEMA",
     "AUTONOMY_STATE_SCHEMA",
+    "SQLITE_AUTONOMY_EXECUTION_JOURNAL_SCHEMA",
     "SQLITE_AUTONOMY_EXECUTION_SCHEMA",
     "MAX_AUTONOMY_PROVIDER_FAILOVERS",
     "MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES",
     "AutonomousExecutionController",
     "AutonomousExecutionJournal",
+    "SQLiteAutonomousExecutionJournal",
     "AutonomousExecutionPersistenceCoordinator",
     "AutonomousExecutionPolicy",
     "AutonomousExecutionSnapshotTextStore",
