@@ -17,6 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
+from pathlib import Path
+import sqlite3
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
@@ -33,6 +35,7 @@ AUTONOMOUS_EFFECT_SCHEMA = "bioprism-python-autonomous-effect/0.1"
 AUTONOMOUS_EFFECT_EVENT_SCHEMA = "bioprism-python-autonomous-effect-event/0.1"
 AUTONOMOUS_EFFECT_JOURNAL_SCHEMA = "bioprism-python-autonomous-effect-journal/0.1"
 AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-effect-snapshot/0.1"
+AUTONOMOUS_EFFECT_SQLITE_SCHEMA = "bioprism-python-autonomous-effect-sqlite/0.1"
 AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA = "bioprism-python-provider-effect-reconciliation/0.1"
 AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA = "bioprism-python-provider-effect-reconciliation-admission/0.1"
 AUTONOMOUS_EFFECT_STATUSES = (
@@ -506,6 +509,260 @@ class InMemoryAutonomousEffectJournal:
         with self._lock:
             self._rows = list(normalized.rows)
             self._total_bytes = total
+
+
+class SQLiteAutonomousEffectJournal(InMemoryAutonomousEffectJournal):
+    """WAL-backed, process-safe effect journal for local durable workers.
+
+    The journal stores the same metadata-only rows as the in-memory implementation. Every
+    append allocates its sequence and hash-chain predecessor inside one ``BEGIN IMMEDIATE``
+    transaction, so independent worker processes cannot fork the effect history. This persists
+    dispatch and reconciliation markers across restart; it does not provide a distributed lease
+    or exactly-once delivery to the external system.
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        max_events: int = MAX_AUTONOMOUS_EFFECT_EVENTS,
+        max_bytes: int = MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES,
+        clock: Callable[[], float] | None = None,
+        busy_timeout_ms: int = 5_000,
+    ) -> None:
+        super().__init__(max_events=max_events, max_bytes=max_bytes, clock=clock)
+        if not isinstance(path, (str, Path)) or not str(path):
+            raise AutonomousEffectError("effect SQLite path must be non-empty")
+        if isinstance(busy_timeout_ms, bool) or not isinstance(busy_timeout_ms, int) or not 1 <= busy_timeout_ms <= 120_000:
+            raise AutonomousEffectError("effect SQLite busy_timeout_ms is outside its bounds")
+        self.path = str(path)
+        self.busy_timeout_ms = busy_timeout_ms
+        self._sqlite_lock = self._lock
+        if self.path != ":memory:":
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=FULL")
+            connection.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS autonomous_effect_journal_metadata (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    persistence_schema TEXT NOT NULL,
+                    event_schema TEXT NOT NULL,
+                    journal_schema TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS autonomous_effect_journal_events (
+                    sequence INTEGER PRIMARY KEY,
+                    effect_id TEXT NOT NULL,
+                    event_json TEXT NOT NULL,
+                    previous_digest TEXT NOT NULL,
+                    event_digest TEXT NOT NULL UNIQUE,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS autonomous_effect_journal_effect_idx
+                    ON autonomous_effect_journal_events(effect_id, sequence DESC);
+                """
+            )
+            metadata = connection.execute(
+                "SELECT persistence_schema, event_schema, journal_schema FROM autonomous_effect_journal_metadata WHERE singleton = 1"
+            ).fetchone()
+            if metadata is None:
+                connection.execute(
+                    "INSERT INTO autonomous_effect_journal_metadata (singleton, persistence_schema, event_schema, journal_schema) VALUES (1, ?, ?, ?)",
+                    (AUTONOMOUS_EFFECT_SQLITE_SCHEMA, AUTONOMOUS_EFFECT_EVENT_SCHEMA, AUTONOMOUS_EFFECT_JOURNAL_SCHEMA),
+                )
+            elif (
+                metadata["persistence_schema"] != AUTONOMOUS_EFFECT_SQLITE_SCHEMA
+                or metadata["event_schema"] != AUTONOMOUS_EFFECT_EVENT_SCHEMA
+                or metadata["journal_schema"] != AUTONOMOUS_EFFECT_JOURNAL_SCHEMA
+            ):
+                raise AutonomousEffectError("effect SQLite journal schema is unsupported")
+            self._connection = connection
+        except AutonomousEffectError:
+            if connection is not None:
+                connection.close()
+            raise
+        except sqlite3.Error as error:
+            if connection is not None:
+                connection.close()
+            raise AutonomousEffectError("could not initialize effect SQLite journal") from error
+
+    def close(self) -> None:
+        with self._sqlite_lock:
+            self._connection.close()
+
+    def __enter__(self) -> "SQLiteAutonomousEffectJournal":
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        self.close()
+
+    def append(self, event: Mapping[str, Any] | AutonomousEffectEvent) -> AutonomousEffectJournalReceipt:
+        normalized = _event_from_value(event)
+        with self._sqlite_lock:
+            try:
+                self._connection.execute("BEGIN IMMEDIATE")
+                rows = self._read_rows_locked()
+                if len(rows) >= self.max_events:
+                    raise AutonomousEffectError("effect journal event capacity is exhausted")
+                observed = self.clock()
+                if isinstance(observed, bool) or not isinstance(observed, (int, float)) or not math.isfinite(float(observed)) or observed < 0:
+                    raise AutonomousEffectError("effect journal clock returned an invalid timestamp")
+                sequence = len(rows) + 1
+                previous = rows[-1].event_digest if rows else ""
+                descriptor = {
+                    "schema": AUTONOMOUS_EFFECT_EVENT_SCHEMA,
+                    "sequence": sequence,
+                    "event": normalized.to_dict(),
+                    "previous_digest": previous,
+                    "created_at": int(observed),
+                }
+                digest = content_digest(descriptor)
+                row = AutonomousEffectJournalRow(
+                    AUTONOMOUS_EFFECT_EVENT_SCHEMA,
+                    sequence,
+                    normalized,
+                    previous,
+                    int(observed),
+                    digest,
+                )
+                current_bytes = sum(len(canonical_json(item.to_dict()).encode("utf-8")) for item in rows)
+                if current_bytes + len(canonical_json(row.to_dict()).encode("utf-8")) > self.max_bytes:
+                    raise AutonomousEffectError("effect journal byte capacity is exhausted")
+                self._connection.execute(
+                    "INSERT INTO autonomous_effect_journal_events (sequence, effect_id, event_json, previous_digest, event_digest, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (sequence, normalized.effect_id, canonical_json(normalized.to_dict()), previous, digest, int(observed)),
+                )
+                self._connection.execute("COMMIT")
+                return AutonomousEffectJournalReceipt(AUTONOMOUS_EFFECT_JOURNAL_SCHEMA, sequence, digest, digest, normalized.effect_id, normalized.status)
+            except Exception as error:
+                try:
+                    self._connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                if isinstance(error, AutonomousEffectError):
+                    raise
+                raise AutonomousEffectError("could not append effect SQLite journal event") from error
+
+    def get(self, effect_id: str) -> AutonomousEffectRecord | None:
+        effect_id = _identifier("effect_id", effect_id, 128)
+        with self._sqlite_lock:
+            rows = self._read_rows_locked()
+        for row in reversed(rows):
+            if row.event.effect_id == effect_id:
+                return _record_from_row(row)
+        return None
+
+    def events(self, *, effect_id: str | None = None, after_sequence: int = 0, limit: int = 256) -> tuple[AutonomousEffectJournalRow, ...]:
+        if effect_id is not None:
+            effect_id = _identifier("effect_id", effect_id, 128)
+        _integer("effect journal after_sequence", after_sequence, self.max_events)
+        _integer("effect journal limit", limit, self.max_events)
+        if limit < 1:
+            raise AutonomousEffectError("effect journal limit must be positive")
+        with self._sqlite_lock:
+            rows = self._read_rows_locked()
+        return tuple(row for row in rows if row.sequence > after_sequence and (effect_id is None or row.event.effect_id == effect_id))[:limit]
+
+    def snapshot(self) -> AutonomousEffectJournalSnapshot:
+        with self._sqlite_lock:
+            rows = self._read_rows_locked()
+        if len(rows) > self.max_events:
+            raise AutonomousEffectError("effect journal restore exceeds max_events")
+        total = sum(len(canonical_json(row.to_dict()).encode("utf-8")) for row in rows)
+        if total > self.max_bytes:
+            raise AutonomousEffectError("effect journal restore exceeds max_bytes")
+        head = rows[-1].event_digest if rows else ""
+        descriptor = {
+            "schema": AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA,
+            "rows": [row.to_dict() for row in rows],
+            "head_digest": head,
+            "retention": EFFECT_SNAPSHOT_RETENTION,
+            "secret_material": "never_returned",
+        }
+        snapshot = AutonomousEffectJournalSnapshot(
+            AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA,
+            tuple(rows),
+            head,
+            EFFECT_SNAPSHOT_RETENTION,
+            "never_returned",
+            content_digest(descriptor),
+        )
+        validate_autonomous_effect_journal_snapshot(snapshot)
+        return snapshot
+
+    def restore(self, snapshot: Mapping[str, Any] | AutonomousEffectJournalSnapshot) -> None:
+        normalized = validate_autonomous_effect_journal_snapshot(snapshot)
+        if len(normalized.rows) > self.max_events:
+            raise AutonomousEffectError("effect journal restore exceeds max_events")
+        total = sum(len(canonical_json(row.to_dict()).encode("utf-8")) for row in normalized.rows)
+        if total > self.max_bytes:
+            raise AutonomousEffectError("effect journal restore exceeds max_bytes")
+        with self._sqlite_lock:
+            try:
+                self._connection.execute("BEGIN IMMEDIATE")
+                self._connection.execute("DELETE FROM autonomous_effect_journal_events")
+                self._connection.executemany(
+                    "INSERT INTO autonomous_effect_journal_events (sequence, effect_id, event_json, previous_digest, event_digest, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            row.sequence,
+                            row.event.effect_id,
+                            canonical_json(row.event.to_dict()),
+                            row.previous_digest,
+                            row.event_digest,
+                            row.created_at,
+                        )
+                        for row in normalized.rows
+                    ],
+                )
+                self._connection.execute("COMMIT")
+            except Exception as error:
+                try:
+                    self._connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                if isinstance(error, AutonomousEffectError):
+                    raise
+                raise AutonomousEffectError("could not restore effect SQLite journal") from error
+
+    def _read_rows_locked(self) -> tuple[AutonomousEffectJournalRow, ...]:
+        try:
+            raw_rows = self._connection.execute(
+                "SELECT sequence, effect_id, event_json, previous_digest, event_digest, created_at FROM autonomous_effect_journal_events ORDER BY sequence ASC"
+            ).fetchall()
+        except sqlite3.Error as error:
+            raise AutonomousEffectError("could not read effect SQLite journal") from error
+        rows: list[AutonomousEffectJournalRow] = []
+        previous = ""
+        for expected_sequence, raw in enumerate(raw_rows, start=1):
+            try:
+                event = json.loads(str(raw["event_json"]))
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise AutonomousEffectError("effect SQLite journal event JSON is invalid") from error
+            if not isinstance(event, Mapping) or canonical_json(event) != str(raw["event_json"]):
+                raise AutonomousEffectError("effect SQLite journal event JSON is not canonical")
+            row = _row_from_raw(
+                {
+                    "schema": AUTONOMOUS_EFFECT_EVENT_SCHEMA,
+                    "sequence": raw["sequence"],
+                    "event": event,
+                    "previous_digest": raw["previous_digest"],
+                    "created_at": raw["created_at"],
+                    "event_digest": raw["event_digest"],
+                },
+                expected_sequence,
+                previous,
+            )
+            if row.event.effect_id != raw["effect_id"]:
+                raise AutonomousEffectError("effect SQLite journal index is inconsistent")
+            rows.append(row)
+            previous = row.event_digest
+        return tuple(rows)
 
 
 class InMemoryAutonomousEffectSnapshotTextStore:
@@ -1398,5 +1655,5 @@ class AutonomousProviderEffectReconciliationCoordinator:
 
 
 __all__ = [
-    "AUTONOMOUS_EFFECT_SCHEMA", "AUTONOMOUS_EFFECT_EVENT_SCHEMA", "AUTONOMOUS_EFFECT_JOURNAL_SCHEMA", "AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA", "AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA", "AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA", "AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA", "AUTONOMOUS_EFFECT_STATUSES", "MAX_AUTONOMOUS_EFFECT_EVENTS", "MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES", "MAX_AUTONOMOUS_EFFECT_EVENT_BYTES", "MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES", "MAX_AUTONOMOUS_EFFECT_REASON_BYTES", "EFFECT_RETENTION", "EFFECT_SNAPSHOT_RETENTION", "AutonomousEffectError", "AutonomousEffectPolicyError", "AutonomousEffectReconciliationRequiredError", "AutonomousEffectExecutionError", "AutonomousEffectRequest", "AutonomousEffectExecutionContext", "AutonomousEffectRecord", "AutonomousEffectEvent", "AutonomousEffectJournalRow", "AutonomousEffectJournalReceipt", "AutonomousEffectJournalSnapshot", "AutonomousEffectJournal", "AutonomousEffectSnapshotJournal", "AutonomousEffectSnapshotPersistence", "AutonomousEffectTransactionalSnapshotPersistence", "AutonomousEffectResolution", "AutonomousEffectResolver", "AutonomousProviderEffectProtectedRehydrationContext", "AutonomousProviderEffectProtectedReceiptResolver", "AutonomousProtectedProviderEffectResolver", "AutonomousProviderEffectResolver", "AutonomousProviderEffectReconciliationWorker", "AutonomousProviderEffectReconciliationCoordinator", "InMemoryAutonomousEffectJournal", "InMemoryAutonomousEffectSnapshotTextStore", "JsonAutonomousEffectSnapshotPersistence", "TransactionalJsonAutonomousEffectSnapshotPersistence", "AutonomousEffectPersistenceCoordinator", "AutonomousEffectBoundary", "validate_autonomous_effect_journal_snapshot",
+    "AUTONOMOUS_EFFECT_SCHEMA", "AUTONOMOUS_EFFECT_EVENT_SCHEMA", "AUTONOMOUS_EFFECT_JOURNAL_SCHEMA", "AUTONOMOUS_EFFECT_SNAPSHOT_SCHEMA", "AUTONOMOUS_EFFECT_SQLITE_SCHEMA", "AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA", "AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA", "AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_ADMISSION_SCHEMA", "AUTONOMOUS_EFFECT_STATUSES", "MAX_AUTONOMOUS_EFFECT_EVENTS", "MAX_AUTONOMOUS_EFFECT_JOURNAL_BYTES", "MAX_AUTONOMOUS_EFFECT_EVENT_BYTES", "MAX_AUTONOMOUS_EFFECT_ARGUMENT_BYTES", "MAX_AUTONOMOUS_EFFECT_REASON_BYTES", "EFFECT_RETENTION", "EFFECT_SNAPSHOT_RETENTION", "AutonomousEffectError", "AutonomousEffectPolicyError", "AutonomousEffectReconciliationRequiredError", "AutonomousEffectExecutionError", "AutonomousEffectRequest", "AutonomousEffectExecutionContext", "AutonomousEffectRecord", "AutonomousEffectEvent", "AutonomousEffectJournalRow", "AutonomousEffectJournalReceipt", "AutonomousEffectJournalSnapshot", "AutonomousEffectJournal", "AutonomousEffectSnapshotJournal", "AutonomousEffectSnapshotPersistence", "AutonomousEffectTransactionalSnapshotPersistence", "AutonomousEffectResolution", "AutonomousEffectResolver", "AutonomousProviderEffectProtectedRehydrationContext", "AutonomousProviderEffectProtectedReceiptResolver", "AutonomousProtectedProviderEffectResolver", "AutonomousProviderEffectResolver", "AutonomousProviderEffectReconciliationWorker", "AutonomousProviderEffectReconciliationCoordinator", "InMemoryAutonomousEffectJournal", "SQLiteAutonomousEffectJournal", "InMemoryAutonomousEffectSnapshotTextStore", "JsonAutonomousEffectSnapshotPersistence", "TransactionalJsonAutonomousEffectSnapshotPersistence", "AutonomousEffectPersistenceCoordinator", "AutonomousEffectBoundary", "validate_autonomous_effect_journal_snapshot",
 ]

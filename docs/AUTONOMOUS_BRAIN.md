@@ -5435,6 +5435,15 @@ available for every built-in domain profile, including cross-domain specialist a
 but a durable job must still persist the effect ledger and result resolver in the embedding
 application.
 
+Python also ships `SQLiteAutonomousEffectJournal` for a local durable effect ledger. It uses WAL,
+full-synchronous commits, bounded busy waits, and one `BEGIN IMMEDIATE` transaction to allocate
+each sequence and hash-chain predecessor. Reopening the file verifies canonical event JSON, the
+effect index, contiguous sequence numbers, every event digest, and the complete predecessor chain
+before a worker can inspect pending effects. This makes dispatch/reconciliation markers restart
+safe and prevents concurrent appenders from forking metadata history; it does not turn an external
+provider into an exactly-once system, provide distributed effect leases, or resolve uncertain
+provider state automatically.
+
 Python applications can use `TransactionalJsonAutonomousEffectSnapshotPersistence` and
 TypeScript applications can use the same-named adapter for the boundary. Both validate every event
 and chain digest before a restore or write, serialize

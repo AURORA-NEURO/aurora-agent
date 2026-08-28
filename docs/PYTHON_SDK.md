@@ -77,6 +77,14 @@ snapshot flushes when workers share the journal directly, but policy counters st
 controller instance and deployment-owned leases must prevent two workers from executing the same
 rehydrated task concurrently.
 
+For the external-effect boundary, `SQLiteAutonomousEffectJournal(path)` provides the corresponding
+restart-safe event ledger. It persists only effect identities, argument/idempotency digests,
+dispatch attempts, lifecycle statuses, and bounded reconciliation metadata; it never stores the
+arguments, outputs, prompts, credentials, or provider envelopes. Concurrent appenders share one
+SQLite hash chain, and reopening verifies the complete chain before pending effects are inspected.
+The caller must still provide distributed lease ownership, an idempotency-aware external system,
+and the resolver that establishes whether an uncertain effect actually happened.
+
 ```python
 from prism_sdk import (
     AutonomousExecutionJournal,

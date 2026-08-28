@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
+import sqlite3
 
 import pytest
 
@@ -25,6 +27,7 @@ from prism_sdk import (
     AutonomousExecutionJournal,
     AutonomousExecutionPolicy,
     InMemoryAutonomousEffectJournal,
+    SQLiteAutonomousEffectJournal,
     InMemoryAutonomousEffectSnapshotTextStore,
     ProviderToolCall,
     TransactionalJsonAutonomousEffectSnapshotPersistence,
@@ -295,6 +298,76 @@ def test_effect_snapshot_persistence_is_canonical_and_cas_fenced() -> None:
     text.value = "{not-json"
     with pytest.raises(Exception, match="invalid"):
         persistence.read()
+
+
+def test_sqlite_effect_journal_preserves_chain_across_restart_and_concurrent_appenders(tmp_path) -> None:
+    path = tmp_path / "effects.sqlite3"
+    writers = [SQLiteAutonomousEffectJournal(path, clock=lambda: 42) for _ in range(4)]
+    events = [
+        {
+            "schema": "bioprism-python-autonomous-effect-event/0.1",
+            "effect_id": f"sqlite-effect-{index}",
+            "execution_id": "sqlite-execution",
+            "tool": "external_write",
+            "call_id": f"sqlite-call-{index}",
+            "risk_class": "external_effect",
+            "arguments_digest": "a" * 64,
+            "idempotency_key_digest": "b" * 64,
+            "status": "prepared",
+            "dispatch_attempt": 1,
+            "reason": None,
+            "retention": "metadata_only_no_arguments_outputs_credentials_or_provider_material",
+        }
+        for index in range(32)
+    ]
+
+    def append(index: int):
+        return writers[index % len(writers)].append(events[index])
+
+    try:
+        with ThreadPoolExecutor(max_workers=len(writers)) as pool:
+            receipts = list(pool.map(append, range(len(events))))
+        assert sorted(receipt.sequence for receipt in receipts) == list(range(1, len(events) + 1))
+        assert len({receipt.event_digest for receipt in receipts}) == len(events)
+        snapshot = writers[0].snapshot()
+        assert snapshot.head_digest == receipts[max(range(len(receipts)), key=lambda index: receipts[index].sequence)].head_digest
+        assert writers[0].verify_integrity()["verified"] is True
+    finally:
+        for writer in writers:
+            writer.close()
+
+    with SQLiteAutonomousEffectJournal(path) as reopened:
+        assert reopened.get("sqlite-effect-17").status == "prepared"  # type: ignore[union-attr]
+        assert len(reopened.events(limit=64)) == len(events)
+        assert reopened.snapshot().snapshot_digest == snapshot.snapshot_digest
+
+
+def test_sqlite_effect_journal_rejects_tampered_event_storage(tmp_path) -> None:
+    path = tmp_path / "tampered-effects.sqlite3"
+    with SQLiteAutonomousEffectJournal(path, clock=lambda: 7) as journal:
+        journal.append(
+            {
+                "schema": "bioprism-python-autonomous-effect-event/0.1",
+                "effect_id": "tampered-effect",
+                "execution_id": None,
+                "tool": "external_write",
+                "call_id": "tampered-call",
+                "risk_class": "external_effect",
+                "arguments_digest": "c" * 64,
+                "idempotency_key_digest": "d" * 64,
+                "status": "dispatched",
+                "dispatch_attempt": 1,
+                "retention": "metadata_only_no_arguments_outputs_credentials_or_provider_material",
+            }
+        )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE autonomous_effect_journal_events SET event_digest = ? WHERE sequence = 1",
+            ("e" * 64,),
+        )
+    with SQLiteAutonomousEffectJournal(path) as reopened:
+        with pytest.raises(Exception, match="digest"):
+            reopened.verify_integrity()
 
 
 def test_effect_boundary_is_shared_by_every_builtin_domain() -> None:

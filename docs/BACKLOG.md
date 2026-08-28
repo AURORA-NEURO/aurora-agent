@@ -1990,6 +1990,13 @@ built-in domains are covered by tamper and replay tests. Remaining deployment wo
 provider status authority, encrypted receipt storage, identity/authorization issuance, rotation,
 and operator policy for genuinely uncertain external effects.
 
+Python now also provides `SQLiteAutonomousEffectJournal` as a local durable event ledger for that
+boundary. WAL/full-sync transactions allocate contiguous sequences and hash-chain predecessors
+atomically across processes, while strict reopen validation detects non-canonical event JSON,
+index drift, digest tampering, and chain forks before dispatch recovery. The adapter persists no
+effect arguments, results, prompts, credentials, or provider envelopes; distributed leases,
+idempotent external APIs, and status reconciliation remain deployment-owned.
+
 Generic provider-neutral evidence adapter orchestration is now at parity across the SDKs. Python
 exposes `AutonomousEvidenceAdapterRegistry`, digest-bound deterministic/weighted selection plans,
 metadata-only health observations with hash-chained JSON/CAS restart persistence, an adaptive
