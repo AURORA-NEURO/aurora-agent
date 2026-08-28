@@ -1422,6 +1422,135 @@ def _ensure_bandit_arm(
 
 
 @dataclass(frozen=True, slots=True)
+class BrainPlanSchedule:
+    """Validated scheduling metadata returned by the provider-neutral brain planner.
+
+    The planner remains non-executing.  This value is a small, safe projection containing only
+    step identities, dependency waves, and cost estimates, so a Python executor can apply its
+    own approval, capacity, lease, retry, and reconciliation policy without reimplementing graph
+    validation.  ``from_plan`` intentionally validates the modern fields only when a caller has
+    received them; older persisted planner projections remain usable by the surrounding runtime.
+    """
+
+    ordered_step_ids: tuple[str, ...]
+    execution_waves: tuple[tuple[str, ...], ...]
+    critical_path_cost: int
+    max_parallelism: int
+    estimated_parallel_rounds: int
+    peak_parallelism: int
+
+    @classmethod
+    def from_plan(cls, plan: Mapping[str, Any]) -> "BrainPlanSchedule":
+        if not isinstance(plan, Mapping):
+            raise BrainRunError("brain plan schedule requires a mapping")
+        if plan.get("schema") != "bioprism-brain-plan/0.1":
+            raise BrainRunError("brain plan schedule has an unsupported schema")
+        if plan.get("execution") != "not_started":
+            raise BrainRunError("brain plan schedule requires a not_started plan")
+
+        raw_steps = plan.get("steps")
+        if not isinstance(raw_steps, Sequence) or isinstance(raw_steps, (str, bytes)) or not raw_steps:
+            raise BrainRunError("brain plan schedule steps must be a non-empty sequence")
+        step_ids: list[str] = []
+        step_by_id: dict[str, Mapping[str, Any]] = {}
+        for step in raw_steps:
+            if not isinstance(step, Mapping) or not isinstance(step.get("id"), str) or not step["id"].strip():
+                raise BrainRunError("brain plan schedule steps must contain non-empty ids")
+            step_id = step["id"]
+            if step_id in step_by_id:
+                raise BrainRunError("brain plan schedule contains duplicate step ids")
+            step_ids.append(step_id)
+            step_by_id[step_id] = step
+
+        ordered = plan.get("ordered_step_ids")
+        if not isinstance(ordered, Sequence) or isinstance(ordered, (str, bytes)) or tuple(ordered) != tuple(step_ids):
+            raise BrainRunError("brain plan schedule ordered_step_ids do not match steps")
+
+        raw_waves = plan.get("execution_waves")
+        if not isinstance(raw_waves, Sequence) or isinstance(raw_waves, (str, bytes)) or not raw_waves:
+            raise BrainRunError("brain plan schedule execution_waves must be non-empty")
+        waves: list[tuple[str, ...]] = []
+        flattened: list[str] = []
+        wave_by_id: dict[str, int] = {}
+        for wave_index, raw_wave in enumerate(raw_waves):
+            if not isinstance(raw_wave, Sequence) or isinstance(raw_wave, (str, bytes)) or not raw_wave:
+                raise BrainRunError("brain plan schedule waves must contain non-empty sequences")
+            wave: list[str] = []
+            for step_id in raw_wave:
+                if not isinstance(step_id, str) or step_id not in step_by_id or step_id in wave_by_id:
+                    raise BrainRunError("brain plan schedule waves contain an unknown or repeated step")
+                wave.append(step_id)
+                flattened.append(step_id)
+                wave_by_id[step_id] = wave_index
+            waves.append(tuple(wave))
+        if tuple(flattened) != tuple(step_ids):
+            raise BrainRunError("brain plan schedule waves do not preserve the ordered plan")
+
+        max_parallelism = plan.get("max_parallelism")
+        if not isinstance(max_parallelism, int) or isinstance(max_parallelism, bool) or not 1 <= max_parallelism <= 64:
+            raise BrainRunError("brain plan schedule max_parallelism must be between 1 and 64")
+        if any(len(wave) > max_parallelism for wave in waves):
+            raise BrainRunError("brain plan schedule exceeds max_parallelism")
+        for step_id, step in step_by_id.items():
+            dependencies = step.get("depends_on", ())
+            if not isinstance(dependencies, Sequence) or isinstance(dependencies, (str, bytes)):
+                raise BrainRunError("brain plan schedule dependencies must be sequences")
+            if any(not isinstance(dependency, str) for dependency in dependencies):
+                raise BrainRunError("brain plan schedule dependencies must contain strings")
+            if len(set(dependencies)) != len(dependencies):
+                raise BrainRunError("brain plan schedule contains duplicate dependencies")
+            for dependency in dependencies:
+                if dependency not in wave_by_id or wave_by_id[dependency] >= wave_by_id[step_id]:
+                    raise BrainRunError("brain plan schedule dependency waves are not closed")
+
+        costs: dict[str, int] = {}
+        for step_id in step_ids:
+            cost = step_by_id[step_id].get("estimated_cost", 0)
+            if not isinstance(cost, int) or isinstance(cost, bool) or cost < 0:
+                raise BrainRunError("brain plan schedule estimated costs must be non-negative integers")
+            dependencies = step_by_id[step_id].get("depends_on", ())
+            costs[step_id] = cost + max((costs[dependency] for dependency in dependencies), default=0)
+        estimated_cost = plan.get("estimated_cost")
+        if not isinstance(estimated_cost, int) or isinstance(estimated_cost, bool) or estimated_cost < 0:
+            raise BrainRunError("brain plan schedule estimated_cost must be a non-negative integer")
+        if estimated_cost != sum(step_by_id[step_id].get("estimated_cost", 0) for step_id in step_ids):
+            raise BrainRunError("brain plan schedule estimated_cost does not match steps")
+        critical_path_cost = plan.get("critical_path_cost")
+        if not isinstance(critical_path_cost, int) or isinstance(critical_path_cost, bool) or critical_path_cost != max(costs.values(), default=0):
+            raise BrainRunError("brain plan schedule critical_path_cost does not match dependencies")
+        estimated_rounds = plan.get("estimated_parallel_rounds")
+        if not isinstance(estimated_rounds, int) or isinstance(estimated_rounds, bool) or estimated_rounds != len(waves):
+            raise BrainRunError("brain plan schedule estimated_parallel_rounds does not match waves")
+        peak_parallelism = plan.get("peak_parallelism")
+        if not isinstance(peak_parallelism, int) or isinstance(peak_parallelism, bool) or peak_parallelism != max(map(len, waves), default=0):
+            raise BrainRunError("brain plan schedule peak_parallelism does not match waves")
+        return cls(
+            ordered_step_ids=tuple(step_ids),
+            execution_waves=tuple(waves),
+            critical_path_cost=critical_path_cost,
+            max_parallelism=max_parallelism,
+            estimated_parallel_rounds=estimated_rounds,
+            peak_parallelism=peak_parallelism,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ordered_step_ids": list(self.ordered_step_ids),
+            "execution_waves": [list(wave) for wave in self.execution_waves],
+            "critical_path_cost": self.critical_path_cost,
+            "max_parallelism": self.max_parallelism,
+            "estimated_parallel_rounds": self.estimated_parallel_rounds,
+            "peak_parallelism": self.peak_parallelism,
+        }
+
+
+def validate_brain_plan_schedule(plan: Mapping[str, Any]) -> BrainPlanSchedule:
+    """Validate and return caller-safe execution scheduling metadata from a brain plan."""
+
+    return BrainPlanSchedule.from_plan(plan)
+
+
+@dataclass(frozen=True, slots=True)
 class BrainRunResult:
     run_id: str
     status: str
@@ -6886,6 +7015,15 @@ class AutonomousBrain:
         planned = plan_report.get("plan")
         if not isinstance(planned, Mapping):
             raise BrainRunError("brain plan reported success without a plan")
+        schedule_fields = {
+            "execution_waves",
+            "critical_path_cost",
+            "max_parallelism",
+            "estimated_parallel_rounds",
+            "peak_parallelism",
+        }
+        if schedule_fields.intersection(planned):
+            validate_brain_plan_schedule(planned)
         if planned.get("requires_approval", False) and not approve_provider_call:
             return self._result(resolved_run_id, "approval_required", selection, prompt_report, plan_report, None)
         if not approve_provider_call and any(

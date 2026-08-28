@@ -1,5 +1,13 @@
 # Remaining backlog
 
+The shared `bioprism-brain` planner now emits deterministic, dependency-closed execution waves
+alongside its serial topological order. `max_parallelism`, critical-path cost, estimated rounds,
+and peak width are bounded and digest-bound in the Rust/MCP contract; duplicate dependencies and
+invalid parallelism fail closed. TypeScript's all-domain workflow compiler exposes the same wave
+metadata, while caller-owned executors remain responsible for approval, leases, provider quotas,
+idempotency, checkpoints, and effect reconciliation. This is a scheduling contract, not a claim
+that the planning kernel itself dispatches work or provides distributed exactly-once delivery.
+
 Both TypeScript high-level brain workers now support bounded parallel draining with explicit
 `maxParallelism` and `continueOnNonTerminal` controls. The conservative serial default remains
 unchanged; opted-in claims preserve per-job approval, lease heartbeat, protected credential,

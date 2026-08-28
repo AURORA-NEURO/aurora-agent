@@ -36704,7 +36704,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "brain_plan",
-            "description": "Validate and topologically order a bounded autonomous plan against an explicit tool allow-list and cost budget. The plan is always not_started; provider calls, external writes, irreversible effects, and approvals remain outside this planning tool.",
+            "description": "Validate and topologically order a bounded autonomous plan against an explicit tool allow-list and cost budget. Returns deterministic dependency-closed execution waves, critical-path cost, and bounded parallelism metadata for caller-owned scheduling. The plan is always not_started; provider calls, external writes, irreversible effects, and approvals remain outside this planning tool.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -36712,7 +36712,8 @@ pub fn tool_definitions() -> Vec<Value> {
                     "steps": { "type": "array", "minItems": 1, "maxItems": 256 },
                     "allowed_tools": { "type": "array", "maxItems": 256, "items": { "type": "string" } },
                     "max_cost": { "type": "integer", "minimum": 0 },
-                    "require_approval_for_effects": { "type": "boolean" }
+                    "require_approval_for_effects": { "type": "boolean" },
+                    "max_parallelism": { "type": "integer", "minimum": 1, "maximum": 64, "default": 4, "description": "Maximum steps a caller may schedule in one dependency wave; defaults to 4." }
                 },
                 "required": ["objective", "steps", "allowed_tools", "max_cost"]
             }

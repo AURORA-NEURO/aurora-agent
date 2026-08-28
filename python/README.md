@@ -771,6 +771,14 @@ offloads a synchronous `AutonomousBrain` runner to a worker thread (or awaits a 
 runner), so async HTTP/MCP hosts retain responsive event loops without creating a second lifecycle
 implementation.
 
+Modern `brain_plan` responses also carry deterministic `execution_waves`, a bounded
+`max_parallelism`, `critical_path_cost`, and round/peak-width estimates. Use
+`validate_brain_plan_schedule()` or `BrainPlanSchedule.from_plan()` to validate this metadata
+before handing it to a caller-owned executor. The validator checks that waves preserve the exact
+topological order, dependencies never share or follow an invalid wave, costs agree with the step
+graph, and no scheduling field was tampered with. It does not authorize provider/tool work or
+provide distributed leases; older projections without these fields remain readable.
+
 Both remote worker variants support bounded draining with `max_parallelism` and
 `continue_on_non_terminal`. The default remains serial (`max_parallelism=1`) and the requested
 limit is always finite. Increasing the bound claims independent jobs concurrently while each job

@@ -40,6 +40,7 @@ pub const SELECTION_WEIGHTS_SCHEMA: &str = "bioprism-autonomous-selection-weight
 const MAX_MODELS: usize = 256;
 const MAX_PROMPT_CHUNKS: usize = 512;
 const MAX_PLAN_STEPS: usize = 256;
+const MAX_PLAN_PARALLELISM: u64 = 64;
 const MAX_TOOL_NAME_BYTES: usize = 256;
 const MAX_EVALUATOR_ID_BYTES: usize = 256;
 const MAX_CONTEXT_LABEL_BYTES: usize = 256;
@@ -104,6 +105,8 @@ pub enum BrainError {
     InvalidDigest { field: &'static str },
     #[error("invalid JSON for digest: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("plan cost overflows the bounded cost representation")]
+    CostOverflow,
 }
 
 fn non_empty(value: &str, field: &'static str) -> Result<(), BrainError> {
@@ -169,6 +172,10 @@ pub struct ModelDescriptor {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_plan_parallelism() -> u64 {
+    4
 }
 
 impl ModelDescriptor {
@@ -1156,6 +1163,10 @@ pub struct AutonomousPlanRequest {
     pub max_cost: u64,
     #[serde(default = "default_true")]
     pub require_approval_for_effects: bool,
+    /// Maximum number of independent steps that a caller may schedule in one execution wave.
+    /// This is planning metadata only; the kernel never dispatches work.
+    #[serde(default = "default_plan_parallelism")]
+    pub max_parallelism: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1165,6 +1176,14 @@ pub struct AutonomousPlan {
     pub ordered_step_ids: Vec<String>,
     pub steps: Vec<PlanStep>,
     pub estimated_cost: u64,
+    /// Dependency-closed, deterministic batches. Each inner vector may be scheduled together
+    /// by a caller after its predecessor vectors have completed.
+    pub execution_waves: Vec<Vec<String>>,
+    /// Longest dependency-path cost, useful for a caller's critical-path budget projection.
+    pub critical_path_cost: u64,
+    pub max_parallelism: u64,
+    pub estimated_parallel_rounds: usize,
+    pub peak_parallelism: usize,
     pub requires_approval: bool,
     pub execution: String,
     pub plan_digest: String,
@@ -1200,6 +1219,13 @@ pub fn plan_autonomous(
             max: MAX_PLAN_STEPS,
         });
     }
+    let mut errors = Vec::new();
+    if request.max_parallelism == 0 || request.max_parallelism > MAX_PLAN_PARALLELISM {
+        errors.push(format!(
+            "max_parallelism must be within [1, {}]",
+            MAX_PLAN_PARALLELISM
+        ));
+    }
     let allowed = request
         .allowed_tools
         .iter()
@@ -1207,7 +1233,6 @@ pub fn plan_autonomous(
         .cloned()
         .collect::<BTreeSet<_>>();
     let mut by_id = BTreeMap::new();
-    let mut errors = Vec::new();
     for step in &request.steps {
         non_empty(&step.id, "step.id")?;
         non_empty(&step.objective, "step.objective")?;
@@ -1228,7 +1253,14 @@ pub fn plan_autonomous(
         }
     }
     for step in &request.steps {
+        let mut dependencies = BTreeSet::new();
         for dependency in &step.depends_on {
+            if !dependencies.insert(dependency) {
+                errors.push(format!(
+                    "step {:?} lists dependency {:?} more than once",
+                    step.id, dependency
+                ));
+            }
             if dependency == &step.id {
                 errors.push(format!("step {:?} depends on itself", step.id));
             } else if !by_id.contains_key(dependency) {
@@ -1242,11 +1274,11 @@ pub fn plan_autonomous(
             }
         }
     }
-    let estimated_cost = request
-        .steps
-        .iter()
-        .map(|step| step.estimated_cost)
-        .sum::<u64>();
+    let estimated_cost = request.steps.iter().try_fold(0_u64, |total, step| {
+        total
+            .checked_add(step.estimated_cost)
+            .ok_or(BrainError::CostOverflow)
+    })?;
     if estimated_cost > request.max_cost {
         errors.push(format!(
             "estimated cost {} exceeds max cost {}",
@@ -1308,6 +1340,47 @@ pub fn plan_autonomous(
         .iter()
         .map(|id| (*by_id.get(id).expect("ordered id was validated")).clone())
         .collect::<Vec<_>>();
+    let mut dependency_wave_by_id = BTreeMap::new();
+    let mut critical_path_cost_by_id = BTreeMap::new();
+    let mut dependency_waves: Vec<Vec<String>> = Vec::new();
+    for step in &steps {
+        let dependency_wave = step
+            .depends_on
+            .iter()
+            .map(|dependency| dependency_wave_by_id[dependency] + 1)
+            .max()
+            .unwrap_or(0);
+        let dependency_cost: u64 = step
+            .depends_on
+            .iter()
+            .map(|dependency| critical_path_cost_by_id[dependency])
+            .max()
+            .unwrap_or(0_u64);
+        let critical_cost = dependency_cost
+            .checked_add(step.estimated_cost)
+            .ok_or(BrainError::CostOverflow)?;
+        dependency_wave_by_id.insert(step.id.clone(), dependency_wave);
+        critical_path_cost_by_id.insert(step.id.clone(), critical_cost);
+        if dependency_waves.len() <= dependency_wave {
+            dependency_waves.resize_with(dependency_wave + 1, Vec::new);
+        }
+        dependency_waves[dependency_wave].push(step.id.clone());
+    }
+    let max_parallelism = request.max_parallelism as usize;
+    let mut execution_waves = Vec::new();
+    for dependency_wave in dependency_waves {
+        for chunk in dependency_wave.chunks(max_parallelism) {
+            execution_waves.push(chunk.to_vec());
+        }
+    }
+    let estimated_parallel_rounds = execution_waves.len();
+    let peak_parallelism = execution_waves.iter().map(Vec::len).max().unwrap_or(0);
+    let critical_path_cost = steps
+        .iter()
+        .filter_map(|step| critical_path_cost_by_id.get(&step.id))
+        .copied()
+        .max()
+        .unwrap_or(0);
     let requires_approval = request.require_approval_for_effects
         && steps.iter().any(|step| step.effect.needs_approval());
     let mut plan = AutonomousPlan {
@@ -1316,6 +1389,11 @@ pub fn plan_autonomous(
         ordered_step_ids,
         steps,
         estimated_cost,
+        execution_waves,
+        critical_path_cost,
+        max_parallelism: request.max_parallelism,
+        estimated_parallel_rounds,
+        peak_parallelism,
         requires_approval,
         execution: "not_started".into(),
         plan_digest: String::new(),
@@ -2723,6 +2801,7 @@ mod tests {
             allowed_tools: vec!["inspect".into(), "invoke".into()],
             max_cost: 10,
             require_approval_for_effects: true,
+            max_parallelism: 2,
             steps: vec![
                 PlanStep {
                     id: "invoke".into(),
@@ -2747,6 +2826,10 @@ mod tests {
         .unwrap();
         let plan = report.plan.unwrap();
         assert_eq!(plan.ordered_step_ids, vec!["inspect", "invoke"]);
+        assert_eq!(plan.execution_waves, vec![vec!["inspect"], vec!["invoke"]]);
+        assert_eq!(plan.critical_path_cost, 6);
+        assert_eq!(plan.estimated_parallel_rounds, 2);
+        assert_eq!(plan.peak_parallelism, 1);
         assert!(plan.requires_approval);
         assert_eq!(plan.execution, "not_started");
     }
@@ -3209,6 +3292,7 @@ mod tests {
             allowed_tools: vec!["x".into()],
             max_cost: 10,
             require_approval_for_effects: true,
+            max_parallelism: 4,
             steps: vec![
                 PlanStep {
                     id: "a".into(),
@@ -3234,5 +3318,129 @@ mod tests {
         assert!(!report.ok);
         assert_eq!(report.status, "refused_dependency_cycle");
         assert!(report.plan.is_none());
+    }
+
+    #[test]
+    fn planner_emits_bounded_parallel_waves_and_critical_path_metadata() {
+        let report = plan_autonomous(&AutonomousPlanRequest {
+            objective: "fan out then synthesize".into(),
+            allowed_tools: vec!["observe".into(), "synthesize".into()],
+            max_cost: 20,
+            require_approval_for_effects: true,
+            max_parallelism: 2,
+            steps: vec![
+                PlanStep {
+                    id: "synthesize".into(),
+                    objective: "combine observations".into(),
+                    tool: "synthesize".into(),
+                    arguments: Value::Null,
+                    depends_on: vec!["alpha".into(), "beta".into(), "gamma".into()],
+                    effect: PlanEffect::ProviderCall,
+                    estimated_cost: 5,
+                },
+                PlanStep {
+                    id: "gamma".into(),
+                    objective: "observe gamma".into(),
+                    tool: "observe".into(),
+                    arguments: Value::Null,
+                    depends_on: vec![],
+                    effect: PlanEffect::ReadOnly,
+                    estimated_cost: 3,
+                },
+                PlanStep {
+                    id: "alpha".into(),
+                    objective: "observe alpha".into(),
+                    tool: "observe".into(),
+                    arguments: Value::Null,
+                    depends_on: vec![],
+                    effect: PlanEffect::ReadOnly,
+                    estimated_cost: 2,
+                },
+                PlanStep {
+                    id: "beta".into(),
+                    objective: "observe beta".into(),
+                    tool: "observe".into(),
+                    arguments: Value::Null,
+                    depends_on: vec![],
+                    effect: PlanEffect::ReadOnly,
+                    estimated_cost: 4,
+                },
+            ],
+        })
+        .unwrap();
+        let plan = report.plan.unwrap();
+        assert_eq!(
+            plan.ordered_step_ids,
+            vec!["alpha", "beta", "gamma", "synthesize"]
+        );
+        assert_eq!(
+            plan.execution_waves,
+            vec![vec!["alpha", "beta"], vec!["gamma"], vec!["synthesize"],]
+        );
+        assert_eq!(plan.critical_path_cost, 9);
+        assert_eq!(plan.max_parallelism, 2);
+        assert_eq!(plan.estimated_parallel_rounds, 3);
+        assert_eq!(plan.peak_parallelism, 2);
+        assert_eq!(plan.estimated_cost, 14);
+    }
+
+    #[test]
+    fn planner_rejects_invalid_parallelism_and_duplicate_dependencies() {
+        let invalid_parallelism = plan_autonomous(&AutonomousPlanRequest {
+            objective: "invalid parallelism".into(),
+            allowed_tools: vec!["observe".into()],
+            max_cost: 1,
+            require_approval_for_effects: true,
+            max_parallelism: 0,
+            steps: vec![PlanStep {
+                id: "observe".into(),
+                objective: "observe".into(),
+                tool: "observe".into(),
+                arguments: Value::Null,
+                depends_on: vec![],
+                effect: PlanEffect::ReadOnly,
+                estimated_cost: 1,
+            }],
+        })
+        .unwrap();
+        assert!(!invalid_parallelism.ok);
+        assert!(invalid_parallelism
+            .errors
+            .iter()
+            .any(|error| error.contains("max_parallelism")));
+
+        let duplicate_dependency = plan_autonomous(&AutonomousPlanRequest {
+            objective: "duplicate dependency".into(),
+            allowed_tools: vec!["observe".into()],
+            max_cost: 2,
+            require_approval_for_effects: true,
+            max_parallelism: 1,
+            steps: vec![
+                PlanStep {
+                    id: "root".into(),
+                    objective: "root".into(),
+                    tool: "observe".into(),
+                    arguments: Value::Null,
+                    depends_on: vec![],
+                    effect: PlanEffect::ReadOnly,
+                    estimated_cost: 1,
+                },
+                PlanStep {
+                    id: "child".into(),
+                    objective: "child".into(),
+                    tool: "observe".into(),
+                    arguments: Value::Null,
+                    depends_on: vec!["root".into(), "root".into()],
+                    effect: PlanEffect::ReadOnly,
+                    estimated_cost: 1,
+                },
+            ],
+        })
+        .unwrap();
+        assert!(!duplicate_dependency.ok);
+        assert!(duplicate_dependency
+            .errors
+            .iter()
+            .any(|error| error.contains("more than once")));
     }
 }

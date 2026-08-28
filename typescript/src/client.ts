@@ -1769,6 +1769,7 @@ export class ApiClient {
     if (!isObject(args) || typeof args.objective !== "string" || !args.objective.trim()) throw new ArgumentError("brain plan objective must be a non-empty string");
     if (!Array.isArray(args.steps) || args.steps.length === 0) throw new ArgumentError("brain plan steps must be non-empty");
     if (!Array.isArray(args.allowed_tools)) throw new ArgumentError("brain plan allowed_tools must be an array");
+    if (args.max_parallelism !== undefined && (!Number.isSafeInteger(args.max_parallelism) || args.max_parallelism < 1 || args.max_parallelism > 64)) throw new ArgumentError("brain plan max_parallelism must be a safe integer in [1, 64]");
     return this.callTool<BrainPlanResult>("brain_plan", args, options);
   }
 

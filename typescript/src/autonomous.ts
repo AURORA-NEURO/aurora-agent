@@ -681,6 +681,12 @@ export interface AutonomousPlan extends JsonObject {
   workflow_digest: string;
   ordered_step_ids: string[];
   steps: AutonomousPlanStep[];
+  /** Deterministic dependency-closed batches for caller-owned scheduling. */
+  execution_waves: string[][];
+  critical_path_cost: number;
+  max_parallelism: number;
+  estimated_parallel_rounds: number;
+  peak_parallelism: number;
   allowed_tools: string[];
   estimated_cost: number;
   requires_approval: boolean;
@@ -4462,7 +4468,7 @@ function compareCapabilityScores(left: readonly number[], right: readonly number
 export async function compileAutonomousPlan(
   profile: AutonomousDomainProfile,
   task: string,
-  options: { taskDigest?: string; capability?: string; activeToolNames?: readonly string[]; selectedToolNames?: readonly string[]; selectedToolOrder?: readonly string[]; responseContractDigest?: string } = {},
+  options: { taskDigest?: string; capability?: string; activeToolNames?: readonly string[]; selectedToolNames?: readonly string[]; selectedToolOrder?: readonly string[]; responseContractDigest?: string; maxParallelism?: number } = {},
 ): Promise<AutonomousPlan> {
   const taskText = boundedText("autonomous plan objective", task, 32_000);
   const taskDigest = options.taskDigest ?? await digestJson({ task: taskText });
@@ -4509,6 +4515,29 @@ export async function compileAutonomousPlan(
       estimated_cost: index + 1,
     };
   });
+  const maxParallelism = options.maxParallelism ?? 4;
+  if (!Number.isSafeInteger(maxParallelism) || maxParallelism < 1 || maxParallelism > 8) throw new ArgumentError("autonomous plan maxParallelism must be a safe integer in [1, 8]");
+  const waveById = new Map<string, number>();
+  const criticalCostById = new Map<string, number>();
+  const dependencyWaves: string[][] = [];
+  for (const step of steps) {
+    const dependencyWave = step.depends_on.reduce((maximum, dependency) => {
+      const dependencyWaveIndex = waveById.get(dependency);
+      if (dependencyWaveIndex === undefined) throw new ArgumentError(`autonomous plan dependency is not closed or ordered: ${step.id} -> ${dependency}`);
+      return Math.max(maximum, dependencyWaveIndex + 1);
+    }, 0);
+    const dependencyCost = step.depends_on.reduce((maximum, dependency) => Math.max(maximum, criticalCostById.get(dependency) ?? 0), 0);
+    waveById.set(step.id, dependencyWave);
+    criticalCostById.set(step.id, dependencyCost + step.estimated_cost);
+    while (dependencyWaves.length <= dependencyWave) dependencyWaves.push([]);
+    dependencyWaves[dependencyWave]!.push(step.id);
+  }
+  const executionWaves = dependencyWaves.flatMap((wave) => {
+    const chunks: string[][] = [];
+    for (let index = 0; index < wave.length; index += maxParallelism) chunks.push(wave.slice(index, index + maxParallelism));
+    return chunks;
+  });
+  const criticalPathCost = Math.max(0, ...steps.map((step) => criticalCostById.get(step.id) ?? 0));
   const descriptor = {
     schema: AUTONOMOUS_PLAN_SCHEMA,
     objective: taskText,
@@ -4516,6 +4545,11 @@ export async function compileAutonomousPlan(
     workflow_digest: profile.workflow.workflow_digest,
     ordered_step_ids: stages.map((stage) => stage.id),
     steps,
+    execution_waves: executionWaves,
+    critical_path_cost: criticalPathCost,
+    max_parallelism: maxParallelism,
+    estimated_parallel_rounds: executionWaves.length,
+    peak_parallelism: Math.max(0, ...executionWaves.map((wave) => wave.length)),
     allowed_tools: ["provider.invoke", ...[...active].sort()],
     estimated_cost: steps.reduce((sum, step) => sum + step.estimated_cost, 0),
     requires_approval: true,

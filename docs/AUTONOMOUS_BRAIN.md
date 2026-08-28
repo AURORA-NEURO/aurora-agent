@@ -6309,7 +6309,15 @@ reconciliation, health, and replay lifecycle:
 - `brain_prompt_assemble` orders required and prioritized context under a hard input budget. It
   refuses when required material does not fit and reports optional omissions with a prompt digest.
 - `brain_plan` validates an allow-listed dependency DAG, orders it deterministically, checks cost,
-  and marks provider calls or external effects as approval-required. It never executes.
+  and marks provider calls or external effects as approval-required. It also emits
+  `execution_waves`, a bounded dependency-closed schedule for caller-owned parallel dispatch,
+  plus `critical_path_cost`, `estimated_parallel_rounds`, and `peak_parallelism`. Independent
+  steps are sorted deterministically and chunked by the requested `max_parallelism` (default 4,
+  hard maximum 64); a later wave never contains a step whose dependency is still in an earlier
+  wave. These are projections, not leases, retries, quotas, or execution authority: callers must
+  still apply their own approval, provider-capacity, idempotency, checkpoint, and reconciliation
+  controls. Duplicate dependencies and invalid parallelism are refused so a malformed graph
+  cannot create ambiguous credit or scheduling semantics.
 - `brain_bandit_select` uses caller-persisted UCB, epsilon-greedy, or deterministic Thompson arm
   statistics. Unexplored arms receive either an explicit UCB bonus or a Beta posterior draw, and
   disabled arms are excluded. Thompson rankings retain posterior alpha/beta/sample metadata for

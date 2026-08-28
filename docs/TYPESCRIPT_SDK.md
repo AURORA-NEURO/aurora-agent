@@ -1295,7 +1295,10 @@ semantic proof. `assembleAutonomousPrompt()` adds system/developer/task messages
 requiredness and priority, rejects secret-shaped keys, and reports included/omitted context plus a
 content digest under a token budget. `compileAutonomousPlan()` produces dependency-closed workflow
 steps with reviewed workflow-to-adapter aliases, exact active tool names, effect classes, and an
-explicit `execution: "not_started"` boundary.
+explicit `execution: "not_started"` boundary. It also returns deterministic
+`execution_waves` bounded by `maxParallelism` (default 4), `critical_path_cost`, and parallel
+round metadata. The schedule is only a caller-owned dispatch hint: it does not grant tool or
+provider authority, create leases, reserve capacity, or turn approval into execution.
 
 `semanticRouteAutonomousTask()` is the provider-assisted decision path for ambiguous or novel
 intake. It sends the task only to the caller-approved local provider, requires a bounded structured

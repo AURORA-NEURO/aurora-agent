@@ -297,6 +297,8 @@ export interface BrainPlanArgs extends JsonObject {
   allowed_tools: string[];
   max_cost: number;
   require_approval_for_effects?: boolean;
+  /** Maximum number of dependency-independent steps a caller may schedule together. */
+  max_parallelism?: number;
 }
 
 export interface BrainPlan extends JsonObject {
@@ -305,6 +307,12 @@ export interface BrainPlan extends JsonObject {
   ordered_step_ids: string[];
   steps: BrainPlanStep[];
   estimated_cost: number;
+  /** Deterministic, dependency-closed batches for caller-owned execution. */
+  execution_waves: string[][];
+  critical_path_cost: number;
+  max_parallelism: number;
+  estimated_parallel_rounds: number;
+  peak_parallelism: number;
   requires_approval: boolean;
   execution: "not_started";
   plan_digest: string;
