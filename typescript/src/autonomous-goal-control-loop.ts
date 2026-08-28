@@ -1,7 +1,7 @@
 import { ArgumentError, isObject } from "./errors.js";
 import { AutonomousGoalWorker, type AutonomousGoalWorkerBatch } from "./autonomous-goal-worker.js";
 import type { AutonomousGoalRecord, InMemoryAutonomousGoalLedger } from "./autonomous-goals.js";
-import type { AutonomousGoalSchedulingSignal } from "./autonomous-goal-scheduler.js";
+import type { AutonomousGoalSchedule, AutonomousGoalSchedulingSignal } from "./autonomous-goal-scheduler.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 import {
@@ -18,10 +18,13 @@ export const AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS = 8_192;
 export const AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_BATCH_PREFIX_BYTES = 128;
 export const AUTONOMOUS_GOAL_CONTROL_EVALUATION_SCHEMA = "bioprism-autonomous-goal-control-evaluation/0.1" as const;
 export const AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA = "bioprism-autonomous-goal-control-bandit/0.1" as const;
+export const AUTONOMOUS_GOAL_CONTROL_PREVIEW_SCHEMA = "bioprism-autonomous-goal-control-preview/0.1" as const;
+export const AUTONOMOUS_GOAL_CONTROL_PREVIEW_RETENTION = "metadata_only_goal_control_preview;tasks_prompts_parameters_credentials_and_results_not_retained" as const;
 export const AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS = 128;
 export const AUTONOMOUS_GOAL_CONTROL_MAX_SIGNALS = 4_096;
 
 export type AutonomousGoalControlLoopStopReason = "all_terminal" | "no_admissible_work" | "cycle_budget_exhausted" | "run_budget_exhausted";
+export type AutonomousGoalControlLoopPreviewStatus = "admissible_work" | "all_terminal" | "no_admissible_work";
 
 export interface AutonomousGoalControlLoopContext extends JsonObject {
   schema: typeof AUTONOMOUS_GOAL_CONTROL_LOOP_SCHEMA;
@@ -98,6 +101,21 @@ export interface AutonomousGoalControlLoopJSON extends JsonObject {
   retention: typeof AUTONOMOUS_GOAL_CONTROL_LOOP_RETENTION;
   secret_material: "never_returned";
   loop_digest: string;
+}
+
+export interface AutonomousGoalControlLoopPreviewJSON extends JsonObject {
+  schema: typeof AUTONOMOUS_GOAL_CONTROL_PREVIEW_SCHEMA;
+  schedule: AutonomousGoalSchedule;
+  status: AutonomousGoalControlLoopPreviewStatus;
+  eligible_goal_count: number;
+  decision_counts: Record<string, number>;
+  reason_counts: Record<string, number>;
+  status_counts: Record<string, number>;
+  dependency_blocked_goal_ids: string[];
+  learning_state_digest: string | null;
+  retention: typeof AUTONOMOUS_GOAL_CONTROL_PREVIEW_RETENTION;
+  secret_material: "never_returned";
+  preview_digest: string;
 }
 
 function fail(message: string): never {
@@ -370,6 +388,38 @@ export class AutonomousGoalControlLoopResult {
   }
 }
 
+/** Provider-free explanation of the next scheduler decision. */
+export class AutonomousGoalControlLoopPreview {
+  constructor(
+    readonly schedule: AutonomousGoalSchedule,
+    readonly status: AutonomousGoalControlLoopPreviewStatus,
+    readonly eligible_goal_count: number,
+    readonly decision_counts: Readonly<Record<string, number>>,
+    readonly reason_counts: Readonly<Record<string, number>>,
+    readonly status_counts: Readonly<Record<string, number>>,
+    readonly dependency_blocked_goal_ids: readonly string[],
+    readonly learning_state_digest: string | null,
+    readonly preview_digest: string,
+  ) {}
+
+  toJSON(): AutonomousGoalControlLoopPreviewJSON {
+    return clone({
+      schema: AUTONOMOUS_GOAL_CONTROL_PREVIEW_SCHEMA,
+      schedule: this.schedule,
+      status: this.status,
+      eligible_goal_count: this.eligible_goal_count,
+      decision_counts: { ...this.decision_counts },
+      reason_counts: { ...this.reason_counts },
+      status_counts: { ...this.status_counts },
+      dependency_blocked_goal_ids: [...this.dependency_blocked_goal_ids],
+      learning_state_digest: this.learning_state_digest,
+      retention: AUTONOMOUS_GOAL_CONTROL_PREVIEW_RETENTION,
+      secret_material: "never_returned" as const,
+      preview_digest: this.preview_digest,
+    });
+  }
+}
+
 export class AutonomousGoalControlLoop {
   readonly worker: AutonomousGoalWorker;
   readonly batch_id_prefix: string;
@@ -385,6 +435,68 @@ export class AutonomousGoalControlLoop {
     if (options.learner !== undefined && options.learner !== null && options.evaluator === undefined) fail("learner requires an explicit evaluator");
     this.evaluator = options.evaluator ?? null;
     this.learner = this.evaluator === null ? null : options.learner ?? new AutonomousGoalBanditLearner();
+  }
+
+  /**
+   * Explain the next admission decision without entering the execution boundary.
+   *
+   * This reads only the metadata-only ledger and computes the same deterministic schedule used
+   * by run. It never calls the task resolver, action handoff, provider, evaluator, credential,
+   * journal, or learner-update boundary.
+   */
+  preview(options: { schedule_options?: Record<string, unknown> } = {}): AutonomousGoalControlLoopPreview {
+    if (!options || typeof options !== "object" || Array.isArray(options)) fail("preview options must be an object");
+    if (options.schedule_options !== undefined && !isObject(options.schedule_options)) fail("preview schedule_options must be an object");
+    const scheduleOptions = options.schedule_options === undefined ? {} : { ...options.schedule_options };
+    const schedule = this.worker.scheduler.plan(this.worker.ledger.list({ limit: 512 }), scheduleOptions);
+    const decisionCounts: Record<string, number> = {};
+    const reasonCounts: Record<string, number> = {};
+    const statusCounts: Record<string, number> = {};
+    const dependencyBlocked: string[] = [];
+    let eligibleGoalCount = 0;
+    for (const row of schedule.rows) {
+      decisionCounts[row.decision] = (decisionCounts[row.decision] ?? 0) + 1;
+      reasonCounts[row.reason] = (reasonCounts[row.reason] ?? 0) + 1;
+      statusCounts[row.status] = (statusCounts[row.status] ?? 0) + 1;
+      if (row.decision === "admit" || row.decision === "defer") eligibleGoalCount += 1;
+      if (row.reason === "dependency_not_ready" || row.reason === "dependency_cycle") dependencyBlocked.push(row.goal_id);
+    }
+    const status: AutonomousGoalControlLoopPreviewStatus = schedule.selected_goal_ids.length > 0
+      ? "admissible_work"
+      : allTerminal(this.worker.ledger)
+        ? "all_terminal"
+        : "no_admissible_work";
+    const learningStateDigest = this.learner instanceof AutonomousGoalBanditLearner
+      ? String(this.learner.snapshot().state_digest)
+      : null;
+    const normalizedDecisionCounts = Object.fromEntries(Object.entries(decisionCounts).sort(([left], [right]) => left.localeCompare(right)));
+    const normalizedReasonCounts = Object.fromEntries(Object.entries(reasonCounts).sort(([left], [right]) => left.localeCompare(right)));
+    const normalizedStatusCounts = Object.fromEntries(Object.entries(statusCounts).sort(([left], [right]) => left.localeCompare(right)));
+    const dependencyBlockedGoalIds = [...new Set(dependencyBlocked)].sort();
+    const body = {
+      schema: AUTONOMOUS_GOAL_CONTROL_PREVIEW_SCHEMA,
+      schedule: schedule,
+      status,
+      eligible_goal_count: eligibleGoalCount,
+      decision_counts: normalizedDecisionCounts,
+      reason_counts: normalizedReasonCounts,
+      status_counts: normalizedStatusCounts,
+      dependency_blocked_goal_ids: dependencyBlockedGoalIds,
+      learning_state_digest: learningStateDigest,
+      retention: AUTONOMOUS_GOAL_CONTROL_PREVIEW_RETENTION,
+      secret_material: "never_returned" as const,
+    };
+    return new AutonomousGoalControlLoopPreview(
+      schedule,
+      status,
+      eligibleGoalCount,
+      normalizedDecisionCounts,
+      normalizedReasonCounts,
+      normalizedStatusCounts,
+      dependencyBlockedGoalIds,
+      learningStateDigest,
+      digestJsonSync(body),
+    );
   }
 
   async run(options: {

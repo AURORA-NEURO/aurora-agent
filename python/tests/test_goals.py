@@ -86,6 +86,77 @@ def test_goal_scheduler_prioritizes_dependency_closed_work_across_every_domain(t
         assert schedule.schedule_digest == "30451f0e55e23ad929f23415a2ffe0a9281e3c3632c51ac9420d00995c789654"
 
 
+def test_goal_control_loop_preview_is_provider_free_and_explains_all_domain_admission() -> None:
+    domains = tuple(AUTONOMOUS_DOMAINS)
+    ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=len(domains) + 1)
+    for domain in domains:
+        ledger.create(goal_id=f"preview-{domain}", task_digest=_digest(f"private preview task {domain}"), domain=domain, now_ns=0)
+    ledger.create(goal_id="preview-blocked", task_digest=_digest("private preview blocked task"), domain="evaluation", now_ns=0)
+    journal = AutonomousGoalWorkerJournal(clock=lambda: 101)
+    calls = {"resolve": 0, "execute": 0}
+    learner = AutonomousGoalBanditLearner()
+
+    def must_not_resolve(_goal, _row):
+        calls["resolve"] += 1
+        raise AssertionError("preview must not rehydrate tasks")
+
+    def must_not_execute(_request):
+        calls["execute"] += 1
+        raise AssertionError("preview must not dispatch work")
+
+    loop = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(ledger, journal=journal, resolver=must_not_resolve, executor=must_not_execute),
+        evaluator=lambda _cycle: (),
+        learner=learner,
+    )
+    preview_options = {
+        "now_ns": 100,
+        "max_selected": len(domains),
+        "max_concurrent": len(domains),
+        "required_domains": list(domains),
+        "signals": [{"goal_id": "preview-blocked", "dependencies": ["missing-preview-goal"], "priority": 1.0}],
+    }
+    preview = loop.preview(schedule_options=preview_options)
+    assert preview.preview_digest == loop.preview(schedule_options=preview_options).preview_digest
+    assert preview.status == "admissible_work"
+    assert preview.eligible_goal_count == len(domains) + 1
+    assert set(preview.schedule.selected_domains) == set(domains)
+    assert preview.schedule.missing_domains == ()
+    assert preview.dependency_blocked_goal_ids == ("preview-blocked",)
+    assert preview.reason_counts["dependency_not_ready"] == 1
+    assert preview.learning_state_digest == learner.snapshot()["state_digest"]
+    assert calls == {"resolve": 0, "execute": 0}
+    assert journal.events() == ()
+    assert learner.snapshot()["generation"] == 0
+    public = json.dumps(preview.to_dict(), sort_keys=True)
+    assert "private preview task" not in public
+    assert "private preview blocked task" not in public
+
+
+def test_goal_control_loop_preview_reports_terminal_and_policy_blocked_states() -> None:
+    ledger = AutonomousGoalLedger(clock=lambda: 200, max_goals=2)
+    ledger.create(goal_id="preview-completed", task_digest=_digest("private completed preview"), domain="coding", now_ns=0)
+    ledger.transition("preview-completed", "running", expected_revision=0, now_ns=1)
+    ledger.transition("preview-completed", "completed", expected_revision=1, now_ns=2)
+    terminal_loop = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(ledger, resolver=lambda _goal, _row: {"task": "private completed preview"}, executor=lambda _request: {"status": "completed"})
+    )
+    terminal = terminal_loop.preview(schedule_options={"now_ns": 200})
+    assert terminal.status == "all_terminal"
+    assert terminal.schedule.selected_goal_ids == ()
+
+    blocked_ledger = AutonomousGoalLedger(clock=lambda: 201, max_goals=1)
+    blocked_ledger.create(goal_id="preview-failed", task_digest=_digest("private failed preview"), domain="operations", max_attempts=1, now_ns=0)
+    blocked_ledger.transition("preview-failed", "running", expected_revision=0, now_ns=1)
+    blocked_ledger.transition("preview-failed", "failed", expected_revision=1, now_ns=2)
+    blocked_loop = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(blocked_ledger, resolver=lambda _goal, _row: {"task": "private failed preview"}, executor=lambda _request: {"status": "completed"})
+    )
+    blocked = blocked_loop.preview(schedule_options={"now_ns": 201, "allow_failed_retry": True})
+    assert blocked.status == "no_admissible_work"
+    assert blocked.reason_counts["retry_budget_exhausted"] == 1
+
+
 def test_goal_scheduler_enforces_budgets_cycles_retries_and_stale_claims(tmp_path: Path) -> None:
     with AutonomousGoalLedger(str(tmp_path / "scheduler-claim.sqlite3"), clock=lambda: 20, max_goals=8) as ledger:
         ledger.create(goal_id="base", task_digest=_digest("base task"), domain="coding", now_ns=0)

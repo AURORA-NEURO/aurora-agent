@@ -3483,6 +3483,8 @@ export type {
 export {
   AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA,
   AUTONOMOUS_GOAL_CONTROL_EVALUATION_SCHEMA,
+  AUTONOMOUS_GOAL_CONTROL_PREVIEW_SCHEMA,
+  AUTONOMOUS_GOAL_CONTROL_PREVIEW_RETENTION,
   AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_BATCH_PREFIX_BYTES,
   AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES,
   AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS,
@@ -3493,6 +3495,7 @@ export {
   AutonomousGoalControlLoop,
   AutonomousGoalBanditLearner,
   AutonomousGoalControlLoopCycle,
+  AutonomousGoalControlLoopPreview,
   AutonomousGoalControlLoopResult,
 } from "./autonomous-goal-control-loop.js";
 export type {
@@ -3503,6 +3506,8 @@ export type {
   AutonomousGoalControlLoopJSON,
   AutonomousGoalControlLoopOptionsFactory,
   AutonomousGoalControlLoopStopReason,
+  AutonomousGoalControlLoopPreviewStatus,
+  AutonomousGoalControlLoopPreviewJSON,
   AutonomousGoalEvaluation,
 } from "./autonomous-goal-control-loop.js";
 export {

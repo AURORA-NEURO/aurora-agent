@@ -19,6 +19,7 @@ from .autonomy import AUTONOMOUS_DOMAINS, AutonomousTaskOrchestrator
 from .autonomous_goal_control_loop import (
     AutonomousGoalBanditLearner,
     AutonomousGoalControlLoop,
+    AutonomousGoalControlLoopPreview,
     AutonomousGoalControlLoopResult,
     GoalLoopEvaluator,
     GoalLoopCheckpoint,
@@ -478,6 +479,11 @@ class AutonomousGoalAgentRuntime:
             resume_snapshot=resume_snapshot,
             checkpoint=checkpoint,
         )
+
+    def preview(self, *, schedule_options: Mapping[str, Any] | None = None) -> AutonomousGoalControlLoopPreview:
+        """Return the next goal admission explanation without rehydrating or dispatching work."""
+
+        return self.loop.preview(schedule_options=schedule_options)
 
     def run_with_trace(
         self,

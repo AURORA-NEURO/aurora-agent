@@ -13071,3 +13071,59 @@ data, tool arguments, and provider responses are not retained in it. If the prot
 cannot fit, the call fails closed with `invalid_request`. The layer does not invoke a second LLM
 to summarize history: deployments that need semantic summarization must add a separately reviewed
 caller-owned policy and preserve its own authorization and provenance boundaries.
+
+## Provider-free goal admission previews
+
+Long-horizon operation needs an inspectable decision before a worker rehydrates protected task
+text or enters a provider boundary. Both SDKs now expose `AutonomousGoalControlLoop.preview()`
+and the high-level goal runtime forwards the same operation as `preview()`. A preview reads only
+the metadata-only goal ledger and runs the exact deterministic scheduler used by the next worker
+cycle. It does not call the task resolver, protected rehydration adapter, action-handoff
+resolver, evaluator, learner update callback, journal, provider, connector, tool, or effect
+boundary.
+
+```python
+preview = runtime.preview(
+    schedule_options={
+        "now_ns": 1_700_000_000,
+        "max_selected": 8,
+        "max_concurrent": 4,
+        "required_domains": ["coding", "science", "evaluation"],
+        "include_paused": True,
+        "allow_failed_retry": True,
+    }
+)
+print(preview.status, preview.schedule.selected_goal_ids)
+print(preview.reason_counts, preview.dependency_blocked_goal_ids)
+```
+
+The TypeScript form is synchronous because the preview has no asynchronous boundary:
+
+```typescript
+const preview = runtime.preview({
+  schedule_options: {
+    now_ns: 1_700_000_000,
+    max_selected: 8,
+    max_concurrent: 4,
+    required_domains: ["coding", "science", "evaluation"],
+    include_paused: true,
+    allow_failed_retry: true,
+  },
+});
+```
+
+The result contains the digest-bound schedule, `admissible_work`, `all_terminal`, or
+`no_admissible_work` status, eligible-goal count, decision and reason histograms, lifecycle
+status counts, and dependency-blocked goal identities. When the built-in goal bandit is
+configured, its current value-state digest is included without mutating its generation. The
+preview digest binds those projections to the exact schedule digest and normalized policy. A
+caller can therefore show an operator why a goal is waiting on a dependency, paused-policy
+choice, retry budget, concurrency/cost quota, or terminal state before deciding whether to call
+`run()`.
+
+Preview output retains only goal IDs, domains, lifecycle metadata, schedule scores, reason codes,
+dependency IDs, and digests. Task text, prompts, model candidates, credentials, provider output,
+tool arguments, evidence, evaluator prose, and live results remain absent. The preview is an
+explanation and not an authorization: a later `run()` still repeats scheduling and optimistic
+claim validation against the current ledger revision, so a concurrent writer or policy change
+cannot turn a stale preview into execution authority.

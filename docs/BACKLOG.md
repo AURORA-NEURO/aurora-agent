@@ -2355,3 +2355,14 @@ is blocked, incomplete, or fails at the provider/credential boundary, `allow_par
 typed blocking result with no synthesis call. Structured-response assessment likewise ignores
 incomplete child envelopes, preventing a failed child from being treated as missing structured
 evidence that aborts otherwise healthy sibling work.
+
+The long-horizon goal control plane now exposes a provider-free admission preview in both SDKs.
+`AutonomousGoalControlLoop.preview()` and the high-level goal runtime compute the exact next
+metadata-only schedule without invoking task rehydration, action handoffs, evaluators, learner
+updates, journals, providers, connectors, tools, or effects. The digest-bound projection includes
+admission status, eligible count, decision/reason histograms, lifecycle counts,
+dependency-blocked goal IDs, selected-domain coverage, and the current built-in bandit state
+digest without mutating its generation. This gives operator and UI layers an explainable
+pre-execution decision surface; it is not an authorization and `run()` still repeats revision
+and claim checks. The remaining deployment work is caller-owned preview storage/retention,
+operator identity, policy approval, and reconciliation of state changes between preview and run.

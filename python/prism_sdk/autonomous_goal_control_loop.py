@@ -15,7 +15,7 @@ import math
 from typing import Any, Literal
 
 from .authoring import content_digest
-from .autonomous_goal_scheduler import AutonomousGoalSchedulingSignal
+from .autonomous_goal_scheduler import AutonomousGoalSchedule, AutonomousGoalSchedulingSignal
 from .autonomous_goal_worker import AutonomousGoalWorker, AutonomousGoalWorkerBatch
 from .autonomous_goal_control_persistence import (
     seal_autonomous_goal_control_loop_snapshot,
@@ -31,6 +31,8 @@ MAX_GOAL_CONTROL_LOOP_RUNS = 8_192
 MAX_GOAL_CONTROL_LOOP_BATCH_PREFIX_BYTES = 128
 GOAL_CONTROL_EVALUATION_SCHEMA = "bioprism-autonomous-goal-control-evaluation/0.1"
 GOAL_CONTROL_BANDIT_SCHEMA = "bioprism-autonomous-goal-control-bandit/0.1"
+GOAL_CONTROL_PREVIEW_SCHEMA = "bioprism-autonomous-goal-control-preview/0.1"
+GOAL_CONTROL_PREVIEW_RETENTION = "metadata_only_goal_control_preview;tasks_prompts_parameters_credentials_and_results_not_retained"
 MAX_GOAL_CONTROL_EVALUATIONS = 128
 MAX_GOAL_CONTROL_SIGNALS = 4_096
 
@@ -40,6 +42,7 @@ ControlLoopStopReason = Literal[
     "cycle_budget_exhausted",
     "run_budget_exhausted",
 ]
+GoalControlPreviewStatus = Literal["admissible_work", "all_terminal", "no_admissible_work"]
 GoalLoopOptionsFactory = Callable[["AutonomousGoalControlLoopContext"], Mapping[str, Any]]
 GoalLoopEvaluator = Callable[["AutonomousGoalControlLoopCycle"], Sequence[Any]]
 GoalLoopLearner = Callable[[Sequence[Mapping[str, Any]], Sequence[Mapping[str, Any]]], Mapping[str, Any]]
@@ -327,6 +330,43 @@ class AutonomousGoalControlLoopCycle:
 
 
 @dataclass(frozen=True, slots=True)
+class AutonomousGoalControlLoopPreview:
+    """Provider-free explanation of the next scheduler decision.
+
+    A preview deliberately stops before task rehydration, optimistic claiming, execution,
+    evaluator callbacks, and learner mutation.  The returned schedule is therefore safe for
+    operator UIs and admission prompts, while its digest binds the explanation to the exact
+    metadata-only schedule that a subsequent worker pass would attempt.
+    """
+
+    schedule: AutonomousGoalSchedule
+    status: GoalControlPreviewStatus
+    eligible_goal_count: int
+    decision_counts: Mapping[str, int]
+    reason_counts: Mapping[str, int]
+    status_counts: Mapping[str, int]
+    dependency_blocked_goal_ids: tuple[str, ...]
+    learning_state_digest: str | None
+    preview_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "schema": GOAL_CONTROL_PREVIEW_SCHEMA,
+            "schedule": self.schedule.to_dict(),
+            "status": self.status,
+            "eligible_goal_count": self.eligible_goal_count,
+            "decision_counts": dict(sorted(self.decision_counts.items())),
+            "reason_counts": dict(sorted(self.reason_counts.items())),
+            "status_counts": dict(sorted(self.status_counts.items())),
+            "dependency_blocked_goal_ids": list(self.dependency_blocked_goal_ids),
+            "learning_state_digest": self.learning_state_digest,
+            "retention": GOAL_CONTROL_PREVIEW_RETENTION,
+            "secret_material": "never_returned",
+        }
+        return {**body, "preview_digest": self.preview_digest}
+
+
+@dataclass(frozen=True, slots=True)
 class AutonomousGoalControlLoopResult:
     cycles: tuple[AutonomousGoalControlLoopCycle, ...]
     stop_reason: ControlLoopStopReason
@@ -417,6 +457,70 @@ class AutonomousGoalControlLoop:
             _fail("learner requires an explicit evaluator")
         self.evaluator = evaluator
         self.learner = AutonomousGoalBanditLearner() if evaluator is not None and learner is None else learner
+
+    def preview(self, *, schedule_options: Mapping[str, Any] | None = None) -> AutonomousGoalControlLoopPreview:
+        """Explain the next admission decision without entering the execution boundary.
+
+        This is intentionally synchronous and side-effect free.  It reads the current ledger,
+        computes the same deterministic schedule used by :meth:`run`, and reports why rows were
+        admitted, deferred, or rejected.  No task resolver, action handoff, provider, evaluator,
+        credential handle, journal event, or learner update is touched.
+        """
+
+        if schedule_options is not None and not isinstance(schedule_options, Mapping):
+            _fail("schedule_options must be a mapping or None")
+        options = {} if schedule_options is None else dict(schedule_options)
+        goals = self.worker.ledger.list(limit=512)
+        schedule = self.worker.scheduler.plan(goals, options)
+        rows = schedule.rows
+        decision_counts: dict[str, int] = {}
+        reason_counts: dict[str, int] = {}
+        status_counts: dict[str, int] = {}
+        dependency_blocked: list[str] = []
+        eligible_count = 0
+        for row in rows:
+            decision_counts[row.decision] = decision_counts.get(row.decision, 0) + 1
+            reason_counts[row.reason] = reason_counts.get(row.reason, 0) + 1
+            status_counts[row.status] = status_counts.get(row.status, 0) + 1
+            if row.decision in {"admit", "defer"}:
+                eligible_count += 1
+            if row.reason in {"dependency_not_ready", "dependency_cycle"}:
+                dependency_blocked.append(row.goal_id)
+        status: GoalControlPreviewStatus
+        if schedule.selected_goal_ids:
+            status = "admissible_work"
+        elif _all_terminal(self.worker.ledger):
+            status = "all_terminal"
+        else:
+            status = "no_admissible_work"
+        learning_state_digest: str | None = None
+        if isinstance(self.learner, AutonomousGoalBanditLearner):
+            snapshot = self.learner.snapshot()
+            learning_state_digest = str(snapshot["state_digest"])
+        body = {
+            "schema": GOAL_CONTROL_PREVIEW_SCHEMA,
+            "schedule": schedule.to_dict(),
+            "status": status,
+            "eligible_goal_count": eligible_count,
+            "decision_counts": dict(sorted(decision_counts.items())),
+            "reason_counts": dict(sorted(reason_counts.items())),
+            "status_counts": dict(sorted(status_counts.items())),
+            "dependency_blocked_goal_ids": sorted(dependency_blocked),
+            "learning_state_digest": learning_state_digest,
+            "retention": GOAL_CONTROL_PREVIEW_RETENTION,
+            "secret_material": "never_returned",
+        }
+        return AutonomousGoalControlLoopPreview(
+            schedule=schedule,
+            status=status,
+            eligible_goal_count=eligible_count,
+            decision_counts=dict(decision_counts),
+            reason_counts=dict(reason_counts),
+            status_counts=dict(status_counts),
+            dependency_blocked_goal_ids=tuple(sorted(dependency_blocked)),
+            learning_state_digest=learning_state_digest,
+            preview_digest=content_digest(body),
+        )
 
     def run(
         self,
@@ -685,6 +789,8 @@ __all__ = [
     "MAX_GOAL_CONTROL_LOOP_RUNS",
     "GOAL_CONTROL_EVALUATION_SCHEMA",
     "GOAL_CONTROL_BANDIT_SCHEMA",
+    "GOAL_CONTROL_PREVIEW_SCHEMA",
+    "GOAL_CONTROL_PREVIEW_RETENTION",
     "MAX_GOAL_CONTROL_EVALUATIONS",
     "MAX_GOAL_CONTROL_SIGNALS",
     "AutonomousGoalControlLoop",
@@ -692,8 +798,10 @@ __all__ = [
     "AutonomousGoalEvaluation",
     "AutonomousGoalControlLoopContext",
     "AutonomousGoalControlLoopCycle",
+    "AutonomousGoalControlLoopPreview",
     "AutonomousGoalControlLoopResult",
     "ControlLoopStopReason",
+    "GoalControlPreviewStatus",
     "GoalLoopOptionsFactory",
     "GoalLoopEvaluator",
     "GoalLoopLearner",

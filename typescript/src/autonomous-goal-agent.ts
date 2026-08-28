@@ -20,6 +20,7 @@ import {
 import {
   AutonomousGoalControlLoop,
   AutonomousGoalBanditLearner,
+  AutonomousGoalControlLoopPreview,
   type AutonomousGoalControlLoopEvaluator,
   type AutonomousGoalControlLoopLearner,
   type AutonomousGoalControlLoopOptionsFactory,
@@ -402,6 +403,11 @@ export class AutonomousGoalAgentRuntime {
       ...options,
       checkpoint: (snapshot: AutonomousGoalControlLoopCheckpoint) => this.recovery!.checkpoint(snapshot),
     });
+  }
+
+  /** Return the next goal admission explanation without rehydrating or dispatching work. */
+  preview(options: { schedule_options?: Record<string, unknown> } = {}): AutonomousGoalControlLoopPreview {
+    return this.loop.preview(options);
   }
 
   /**

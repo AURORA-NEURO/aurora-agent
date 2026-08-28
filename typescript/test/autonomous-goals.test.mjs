@@ -69,6 +69,66 @@ test("goal scheduler prioritizes dependency-closed work across every domain", ()
   assert.equal(schedule.schedule_digest, "30451f0e55e23ad929f23415a2ffe0a9281e3c3632c51ac9420d00995c789654");
 });
 
+test("goal control loop preview is provider-free and explains all-domain admission", () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length + 1, clock: () => 100 });
+  for (const domain of domains) ledger.create({ goal_id: `preview-${domain}`, task_digest: goalTaskDigest(`private preview task ${domain}`), domain, now_ns: 0 });
+  ledger.create({ goal_id: "preview-blocked", task_digest: goalTaskDigest("private preview blocked task"), domain: "evaluation", now_ns: 0 });
+  const journal = new AutonomousGoalWorkerJournal({ clock: () => 101 });
+  const calls = { resolve: 0, execute: 0 };
+  const learner = new AutonomousGoalBanditLearner();
+  const worker = new AutonomousGoalWorker({
+    ledger,
+    journal,
+    resolver: () => { calls.resolve += 1; throw new Error("preview must not rehydrate tasks"); },
+    executor: () => { calls.execute += 1; throw new Error("preview must not dispatch work"); },
+  });
+  const loop = new AutonomousGoalControlLoop({ worker, evaluator: () => [], learner });
+  const schedule_options = {
+    now_ns: 100,
+    max_selected: domains.length,
+    max_concurrent: domains.length,
+    required_domains: domains,
+    signals: [{ goal_id: "preview-blocked", dependencies: ["missing-preview-goal"], priority: 1 }],
+  };
+  const preview = loop.preview({ schedule_options });
+  assert.equal(preview.preview_digest, loop.preview({ schedule_options }).preview_digest);
+  assert.equal(preview.status, "admissible_work");
+  assert.equal(preview.eligible_goal_count, domains.length + 1);
+  assert.deepEqual(new Set(preview.schedule.coverage.selected_domains), new Set(domains));
+  assert.deepEqual(preview.schedule.coverage.missing_domains, []);
+  assert.deepEqual(preview.dependency_blocked_goal_ids, ["preview-blocked"]);
+  assert.equal(preview.reason_counts.dependency_not_ready, 1);
+  assert.equal(preview.learning_state_digest, learner.snapshot().state_digest);
+  assert.deepEqual(calls, { resolve: 0, execute: 0 });
+  assert.deepEqual(journal.events(), []);
+  assert.equal(learner.snapshot().generation, 0);
+  assert.equal(JSON.stringify(preview).includes("private preview task"), false);
+  assert.equal(JSON.stringify(preview).includes("private preview blocked task"), false);
+});
+
+test("goal control loop preview reports terminal and retry-policy-blocked states", () => {
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: 2, clock: () => 200 });
+  ledger.create({ goal_id: "preview-completed", task_digest: goalTaskDigest("private completed preview"), domain: "coding", now_ns: 0 });
+  ledger.transition("preview-completed", "running", { expected_revision: 0, now_ns: 1 });
+  ledger.transition("preview-completed", "completed", { expected_revision: 1, now_ns: 2 });
+  const terminal = new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({ ledger, resolver: () => ({ task: "private completed preview" }), executor: () => ({ status: "completed" }) }),
+  }).preview({ schedule_options: { now_ns: 200 } });
+  assert.equal(terminal.status, "all_terminal");
+  assert.deepEqual(terminal.schedule.selected_goal_ids, []);
+
+  const blockedLedger = new InMemoryAutonomousGoalLedger({ maxGoals: 1, clock: () => 201 });
+  blockedLedger.create({ goal_id: "preview-failed", task_digest: goalTaskDigest("private failed preview"), domain: "operations", max_attempts: 1, now_ns: 0 });
+  blockedLedger.transition("preview-failed", "running", { expected_revision: 0, now_ns: 1 });
+  blockedLedger.transition("preview-failed", "failed", { expected_revision: 1, now_ns: 2 });
+  const blocked = new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({ ledger: blockedLedger, resolver: () => ({ task: "private failed preview" }), executor: () => ({ status: "completed" }) }),
+  }).preview({ schedule_options: { now_ns: 201, allow_failed_retry: true } });
+  assert.equal(blocked.status, "no_admissible_work");
+  assert.equal(blocked.reason_counts.retry_budget_exhausted, 1);
+});
+
 test("goal scheduler enforces cycles, budgets, retry policy, and stale claims", () => {
   const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: 8, clock: () => 20 });
   ledger.create({ goal_id: "base", task_digest: goalTaskDigest("base task"), domain: "coding", now_ns: 0 });
