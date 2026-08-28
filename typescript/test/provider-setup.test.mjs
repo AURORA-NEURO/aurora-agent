@@ -138,7 +138,7 @@ test("ProviderSetup provides the real protected-input-to-session lifecycle", asy
         maxOutputTokens: 64,
       },
     }, { credential: handle }),
-    ProviderRuntimeError,
+    CredentialError,
   );
   assert.equal(requests.length, 1);
 });

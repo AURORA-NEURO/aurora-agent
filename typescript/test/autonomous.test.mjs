@@ -846,6 +846,92 @@ test("provider planning converts malformed structured output into a digest-only 
   assert.doesNotMatch(JSON.stringify(result), /provider_private_text/);
 });
 
+test("provider planning preserves credential and transport failures as redacted review outcomes", async () => {
+  let credentialFetchCalls = 0;
+  const credentialedLlm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      credentialFetchCalls += 1;
+      throw new Error("credential planner diagnostic must never escape");
+    },
+  });
+  credentialedLlm.registerProvider(openaiCompatibleProvider("credentialed-planner", "https://credentialed-planner.invalid", { requiresCredential: true }));
+  const credentialedAgent = new AutonomousAgent(credentialedLlm);
+  const allCapabilities = ["reasoning", "code", "web", "data", "science", "biomedical", "neuroscience", "coordination", "operations", "enterprise", "multimodal", "evaluation", "structured_output"];
+  const credentialedModel = candidate("credentialed-planner", "planner-model", allCapabilities);
+  credentialedAgent.registerModel(credentialedModel);
+
+  const singleBlueprint = await credentialedAgent.blueprint("Debug this coding repository.", { domain: "coding" });
+  const single = await credentialedAgent.planWithProvider(singleBlueprint.blueprint, {
+    candidates: [credentialedModel],
+    approveProviderCall: true,
+  });
+  assert.equal(single.status, "provider_failed");
+  assert.equal(single.failure?.error_class, "CredentialError");
+  assert.equal(single.failure?.code, "credential");
+  assert.equal(single.failure?.retryable, false);
+  assert.equal(single.failure?.status_code, null);
+  assert.equal(single.failure?.circuit_open, false);
+  assert.equal(JSON.stringify(single).includes("credential planner diagnostic"), false);
+
+  const ordered = await credentialedAgent.planOrderedStepsWithProvider({
+    task: "Order the existing coding steps.",
+    domain: "coding",
+    steps: [
+      { id: "scope", domain: "coding", capability: "planning", objective: "Bound the task.", depends_on: [] },
+      { id: "verify", domain: "coding", capability: "planning", objective: "Define verification.", depends_on: ["scope"] },
+    ],
+  }, { candidates: [credentialedModel], approveProviderCall: true });
+  assert.equal(ordered.status, "provider_failed");
+  assert.equal(ordered.failure?.error_class, "CredentialError");
+  assert.equal(ordered.failure?.code, "credential");
+
+  const crossEnvelope = await credentialedAgent.blueprint("Write Python code for this dataset pipeline.");
+  assert.ok(crossEnvelope.cross_domain_blueprint);
+  const cross = await credentialedAgent.planCrossDomainWithProvider(crossEnvelope.cross_domain_blueprint, {
+    candidates: [credentialedModel],
+    approveProviderCall: true,
+  });
+  assert.equal(cross.status, "provider_failed");
+  assert.equal(cross.failure?.error_class, "CredentialError");
+  assert.equal(cross.failure?.code, "credential");
+  assert.equal(credentialFetchCalls, 0, "credential failures stop before transport");
+
+  let transportFetchCalls = 0;
+  const transportLlm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      transportFetchCalls += 1;
+      throw new Error("sensitive planner transport diagnostic");
+    },
+  });
+  transportLlm.registerProvider(openaiCompatibleProvider("failing-planner", "https://failing-planner.invalid", { requiresCredential: false }));
+  const transportAgent = new AutonomousAgent(transportLlm);
+  const transportModel = candidate("failing-planner", "planner-model", ["reasoning", "code", "structured_output"]);
+  transportAgent.registerModel(transportModel);
+  const transportBlueprint = await transportAgent.blueprint("Debug this coding repository.", { domain: "coding" });
+  const transport = await transportAgent.planWithProvider(transportBlueprint.blueprint, {
+    candidates: [transportModel],
+    approveProviderCall: true,
+  });
+  assert.equal(transport.status, "provider_failed");
+  assert.equal(transport.failure?.error_class, "ProviderRuntimeError");
+  assert.equal(transport.failure?.retryable, true);
+  assert.equal(JSON.stringify(transport).includes("sensitive planner transport diagnostic"), false);
+  assert.equal(transportFetchCalls, 1);
+
+  const automatic = await transportAgent.planAndRun("Debug this coding repository.", {
+    domain: "coding",
+    planning: { candidates: [transportModel], approveProviderCall: true },
+    approveProviderCall: true,
+  });
+  assert.equal(automatic.status, "provider_failed");
+  assert.equal(automatic.plan_refinement?.status, "provider_failed");
+  assert.equal(automatic.plan_refinement?.failure?.error_class, "ProviderRuntimeError");
+  assert.equal(automatic.result, null);
+  assert.equal(transportFetchCalls, 2, "automatic planning performs only its bounded planner attempt");
+});
+
 test("provider planning rejects a broken blueprint dependency closure before dispatch", async () => {
   const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }));
   const blueprint = await agent.blueprint("Debug this coding repository.", { domain: "coding" });

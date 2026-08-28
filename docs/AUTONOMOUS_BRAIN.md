@@ -4999,8 +4999,14 @@ existing stage or child ids, bounded confidence, selected-model metadata, budget
 digests, and must be accepted and applied by the caller's workflow executor after rechecking the
 blueprint digests. It never authorizes tools,
 effects, credentials, new domains, or synthesis. Malformed structured output becomes a typed,
-digest-only `provider_invalid` result, while credential and transport failures remain typed runtime
-errors for application retry or review policy.
+digest-only `provider_invalid` result. Credential and operational provider failures become a
+typed `provider_failed` result with a bounded `failure` projection containing only the stable
+error class, code, retryability, HTTP status (when safe), and circuit state. Exception messages,
+provider payloads, prompts, task text, credentials, and secret material are never copied into
+that projection, its digest, or the public planning envelope. Callers can route `provider_failed`
+to retry/review policy without catching provider transport exceptions around every planning
+surface. Programming errors, malformed caller input, and configuration errors still propagate
+as hard failures.
 
 For direct provider invocation, `agent.planAndRun()` composes the same bounded sequence: route,
 blueprint, provider planning proposal, explicit plan acceptance, and execution. Planning approval

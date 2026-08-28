@@ -342,6 +342,7 @@ import type {
   AgentMissionStep,
   JsonObject,
   JsonValue,
+  AutonomousPlanningFailureProjection,
   AutonomousCrossDomainPlanRefinementResult,
   AutonomousOrderedStepPlanRefinementResult,
   AutonomousPlanRefinementResult,
@@ -1131,14 +1132,8 @@ export type AutonomousRunStatus = "completed" | "route_review_required" | "appro
  * include sensitive diagnostics in exception text, and a child failure must be safe to persist
  * in the parent execution receipt.
  */
-export interface AutonomousProviderFailureProjection extends JsonObject {
-  error_class: "ProviderRuntimeError" | "CredentialError";
+export interface AutonomousProviderFailureProjection extends AutonomousPlanningFailureProjection {
   code: ProviderErrorCode | "credential";
-  retryable: boolean;
-  status_code: number | null;
-  circuit_open: boolean;
-  retention: "metadata_only;provider_error_message_and_payloads_not_retained";
-  secret_material: "never_returned";
 }
 
 export type AutonomousToolLoopStatus = "completed" | "authorization_required" | "reconciliation_required" | "turn_limit_reached";
@@ -1960,6 +1955,7 @@ export type AutonomousPlanAndRunStatus =
   | AutonomousCrossDomainRunStatus
   | "plan_review_required"
   | "provider_invalid"
+  | "provider_failed"
   | "provider_disagreement";
 
 /** Options for the explicit provider-planning -> human acceptance -> execution bridge. */
@@ -3727,12 +3723,29 @@ async function planningOutcomeDigest(
   return digestJson({ selection: execution.selection, response_digest: responseDigest, learning_context_digest: learningContextDigest, prompt_digest: promptDigest });
 }
 
-/** Project a malformed provider response into a digest-only planning refusal. */
-async function planningProviderFailureDigest(error: ProviderRuntimeError): Promise<string> {
+/** Project a provider planning failure without retaining its message, payload, or credential. */
+function planningProviderFailureProjection(error: ProviderRuntimeError | CredentialError): AutonomousPlanningFailureProjection {
+  return {
+    error_class: error instanceof CredentialError ? "CredentialError" : "ProviderRuntimeError",
+    code: error instanceof CredentialError ? "credential" : error.code,
+    retryable: error instanceof CredentialError ? false : error.retryable,
+    status_code: error instanceof CredentialError ? null : error.statusCode ?? null,
+    circuit_open: error instanceof CredentialError ? false : error.circuitOpen,
+    retention: "metadata_only;provider_error_message_and_payloads_not_retained",
+    secret_material: "never_returned",
+  };
+}
+
+/** Digest only the stable metadata of a provider planning failure. */
+async function planningProviderFailureDigest(error: ProviderRuntimeError | CredentialError): Promise<string> {
+  const projection = planningProviderFailureProjection(error);
   return digestJson({
-    code: error.code,
-    provider: error.provider ?? null,
-    status_code: error.statusCode ?? null,
+    error_class: projection.error_class,
+    code: projection.code,
+    retryable: projection.retryable,
+    status_code: projection.status_code,
+    circuit_open: projection.circuit_open,
+    provider: error instanceof ProviderRuntimeError ? error.provider ?? null : null,
   });
 }
 
@@ -7587,7 +7600,7 @@ export class AutonomousAgent {
 
     const nextAction = (status: AutonomousPlanAndRunStatus, result: AutonomousRunResult | AutonomousCrossDomainRunResult | null): AutonomousAutoRunNextAction => {
       if (status === "route_review_required" || status === "abstained") return "review_route";
-      if (status === "plan_review_required" || status === "provider_invalid" || status === "provider_disagreement") return "review_plan";
+      if (status === "plan_review_required" || status === "provider_invalid" || status === "provider_failed" || status === "provider_disagreement") return "review_plan";
       if (status === "approval_required" || status === "policy_review_required" || status === "policy_blocked" || status === "reconciliation_required") return "review_provider_or_effect_approval";
       if (result === null) return "inspect_result";
       return status === "completed" ? "complete" : "inspect_result";
@@ -8006,8 +8019,15 @@ export class AutonomousAgent {
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
       });
     } catch (error) {
-      if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
-      return { ...base, status: "provider_invalid", outcome_digest: await planningProviderFailureDigest(error), cost_budget: budgetSnapshot() };
+      if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
+      const failure = planningProviderFailureProjection(error);
+      return {
+        ...base,
+        status: error instanceof ProviderRuntimeError && error.code === "invalid_response" ? "provider_invalid" : "provider_failed",
+        failure,
+        outcome_digest: await planningProviderFailureDigest(error),
+        cost_budget: budgetSnapshot(),
+      };
     }
     const metadata = {
       ...base,
@@ -8113,10 +8133,12 @@ export class AutonomousAgent {
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
       });
     } catch (error) {
-      if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
+      if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
+      const failure = planningProviderFailureProjection(error);
       return {
         ...base,
-        status: "provider_invalid",
+        status: error instanceof ProviderRuntimeError && error.code === "invalid_response" ? "provider_invalid" : "provider_failed",
+        failure,
         outcome_digest: await planningProviderFailureDigest(error),
         cost_budget: budgetSnapshot(),
       };
@@ -8213,10 +8235,12 @@ export class AutonomousAgent {
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
       });
     } catch (error) {
-      if (!(error instanceof ProviderRuntimeError) || error.code !== "invalid_response") throw error;
+      if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
+      const failure = planningProviderFailureProjection(error);
       return {
         ...base,
-        status: "provider_invalid",
+        status: error instanceof ProviderRuntimeError && error.code === "invalid_response" ? "provider_invalid" : "provider_failed",
+        failure,
         outcome_digest: await planningProviderFailureDigest(error),
         cost_budget: budgetSnapshot(),
       };
@@ -8321,7 +8345,7 @@ export class AutonomousAgent {
     if (envelope.cross_domain_blueprint) {
       const proposal = await this.planCrossDomainWithProvider(envelope.cross_domain_blueprint, planningOptions);
       if (proposal.status !== "completed") {
-        const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
+        const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : proposal.status === "provider_failed" ? "provider_failed" : "provider_disagreement";
         return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
       }
       if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
@@ -8332,7 +8356,7 @@ export class AutonomousAgent {
     if (!blueprint) throw new ProviderRuntimeError("planAndRun single-domain blueprint is missing");
     const proposal = await this.planWithProvider(blueprint, planningOptions);
     if (proposal.status !== "completed") {
-      const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : "provider_disagreement";
+      const status: AutonomousPlanAndRunStatus = proposal.status === "approval_required" ? "approval_required" : proposal.status === "policy_review_required" ? "policy_review_required" : proposal.status === "policy_blocked" ? "policy_blocked" : proposal.status === "provider_invalid" ? "provider_invalid" : proposal.status === "provider_failed" ? "provider_failed" : "provider_disagreement";
       return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status, route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
     }
     if (proposal.review_required || options.acceptPlan !== true) return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "plan_review_required", route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: proposal, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };

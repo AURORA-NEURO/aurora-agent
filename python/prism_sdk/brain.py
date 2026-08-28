@@ -6896,9 +6896,9 @@ class AutonomousBrain:
 
         handle = credentials.get(provider)
         if self.runtime.provider_requires_credential(provider) and handle is None:
-            raise BrainRunError(f"no user credential handle was supplied for provider {provider!r}")
+            raise CredentialError(f"no user credential handle was supplied for provider {provider!r}")
         if handle is not None and handle.provider != provider:
-            raise BrainRunError(f"credential handle does not belong to provider {provider!r}")
+            raise CredentialError(f"credential handle does not belong to provider {provider!r}")
         provider_messages = _provider_messages_with_content_parts(messages, normalized_content_parts)
         effective_idempotency_key = idempotency_key
         if prompt_override is not None:
@@ -7178,9 +7178,9 @@ class AutonomousBrain:
         provider_messages = _provider_messages_with_content_parts(prompt_messages, normalized_content_parts)
         handle = credentials.get(provider)
         if self.runtime.provider_requires_credential(provider) and handle is None:
-            raise BrainRunError(f"no user credential handle was supplied for provider {provider!r}")
+            raise CredentialError(f"no user credential handle was supplied for provider {provider!r}")
         if handle is not None and handle.provider != provider:
-            raise BrainRunError(f"credential handle does not belong to provider {provider!r}")
+            raise CredentialError(f"credential handle does not belong to provider {provider!r}")
         continuation_idempotency_key = idempotency_key
         if prompt_request.get("_provider_messages_override") is not None:
             prompt_metadata = first.prompt.get("autonomous_prompt")

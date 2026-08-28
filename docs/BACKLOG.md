@@ -1,5 +1,17 @@
 # Remaining backlog
 
+Provider-assisted planning now has a symmetric failure contract across Python and TypeScript.
+Single-domain, ordered-step, cross-domain, automatic, and direct plan-and-run entrypoints convert
+credential-boundary and operational provider failures into metadata-only `provider_failed`
+proposals, while malformed structured responses remain `provider_invalid`. The projection is
+limited to error class/code, retryability, safe status code, circuit state, and fixed retention
+markers; exception text, prompts, tasks, credentials, provider responses, and wire payloads are
+never retained. Missing credentials are detected before transport, and the model selector only
+classifies a no-candidate outcome as a credential failure when credential gating is the sole
+cause. Legacy Python failure envelopes without a code are normalized to the canonical code.
+Caller-owned retry, credential collection, provider reconciliation, and durable protected logs
+remain deployment responsibilities.
+
 The autonomous provider boundary now compiles a digest-bound model continuation plan in both SDKs.
 It preserves the exact eligible fallback ladder, separates model-scoped timeout recovery from
 provider-scoped outages, and exposes an independently sealed cursor for restart/resume without

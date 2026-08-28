@@ -1582,6 +1582,8 @@ class AutonomousPlanRefinementResult:
     planner_context: Mapping[str, Any] | None = None
     planner_context_digest: str | None = None
     domain_policy_admission: AutonomousDomainPolicyAdmission | None = None
+    # Redacted provider/credential metadata; planner messages and exception text are never retained.
+    failure: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -1589,6 +1591,7 @@ class AutonomousPlanRefinementResult:
             "approval_required",
             "plan_refused",
             "provider_invalid",
+            "provider_failed",
             "provider_disagreement",
             "policy_review_required",
             "policy_blocked",
@@ -1637,6 +1640,10 @@ class AutonomousPlanRefinementResult:
             object.__setattr__(self, "planner_context_digest", context_digest)
         if self.domain_policy_admission is not None and not isinstance(self.domain_policy_admission, AutonomousDomainPolicyAdmission):
             raise BrainRunError("plan refinement domain policy admission is malformed")
+        if self.status == "provider_failed" and self.failure is None:
+            raise BrainRunError("provider_failed plan refinement result requires a failure projection")
+        if self.failure is not None:
+            object.__setattr__(self, "failure", _normalize_planning_failure(self.failure, "plan refinement"))
         object.__setattr__(self, "priority_stage_ids", priority)
         object.__setattr__(self, "focus_stage_ids", focus)
         object.__setattr__(self, "confidence", float(self.confidence))
@@ -1667,6 +1674,8 @@ class AutonomousPlanRefinementResult:
             result["planner_context_digest"] = self.planner_context_digest
         if self.domain_policy_admission is not None:
             result["domain_policy_admission"] = self.domain_policy_admission.to_dict()
+        if self.failure is not None:
+            result["failure"] = dict(self.failure)
         return result
 
 
@@ -4050,7 +4059,7 @@ def _autonomous_decision_cycle_next_action(status: str) -> str:
         "policy_blocked",
     }:
         return "review_route"
-    if status in {"planning_review_required", "provider_invalid", "provider_disagreement", "plan_refused"}:
+    if status in {"planning_review_required", "provider_failed", "provider_invalid", "provider_disagreement", "plan_refused"}:
         return "review_plan"
     if status in {"approval_required", "reconciliation_required"}:
         return "review_provider_or_effect_approval"
@@ -4290,6 +4299,7 @@ class AutonomousAutoReplanResult:
         "policy_review_required",
         "policy_blocked",
         "approval_required",
+        "provider_failed",
         "provider_invalid",
         "plan_refused",
         "provider_abstained",
@@ -4388,6 +4398,7 @@ class AutonomousAutoReplanResult:
                 "replan_limit_reached": "review_replan_limit",
                 "route_review_required": "review_route",
                 "planning_review_required": "review_plan",
+                "provider_failed": "review_provider_output",
                 "policy_review_required": "review_policy",
                 "policy_blocked": "resolve_policy_block",
                 "approval_required": "approve_provider_call",
@@ -5669,6 +5680,8 @@ class AutonomousCrossDomainPlanRefinementResult:
     planner_context: Mapping[str, Any] | None = None
     planner_context_digest: str | None = None
     domain_policy_admission: AutonomousDomainPolicyAdmission | None = None
+    # Redacted provider/credential metadata; planner messages and exception text are never retained.
+    failure: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -5676,6 +5689,7 @@ class AutonomousCrossDomainPlanRefinementResult:
             "approval_required",
             "plan_refused",
             "provider_invalid",
+            "provider_failed",
             "provider_disagreement",
             "policy_review_required",
             "policy_blocked",
@@ -5731,6 +5745,10 @@ class AutonomousCrossDomainPlanRefinementResult:
             object.__setattr__(self, "planner_context_digest", context_digest)
         if self.domain_policy_admission is not None and not isinstance(self.domain_policy_admission, AutonomousDomainPolicyAdmission):
             raise BrainRunError("cross-domain plan refinement domain policy admission is malformed")
+        if self.status == "provider_failed" and self.failure is None:
+            raise BrainRunError("provider_failed cross-domain plan refinement result requires a failure projection")
+        if self.failure is not None:
+            object.__setattr__(self, "failure", _normalize_planning_failure(self.failure, "cross-domain plan refinement"))
         object.__setattr__(self, "priority_child_ids", priority)
         object.__setattr__(self, "focus_child_ids", focus)
         object.__setattr__(self, "confidence", float(self.confidence))
@@ -5760,7 +5778,75 @@ class AutonomousCrossDomainPlanRefinementResult:
             result["planner_context_digest"] = self.planner_context_digest
         if self.domain_policy_admission is not None:
             result["domain_policy_admission"] = self.domain_policy_admission.to_dict()
+        if self.failure is not None:
+            result["failure"] = dict(self.failure)
         return result
+
+
+_AUTONOMOUS_PLANNING_FAILURE_RETENTION = "metadata_only;provider_error_message_and_payloads_not_retained"
+
+
+def _planning_failure_projection(error: ProviderError | CredentialError) -> dict[str, Any]:
+    """Convert an operational planner exception into a stable, secret-free value projection."""
+
+    if isinstance(error, CredentialError):
+        return {
+            "error_class": "CredentialError",
+            "code": "credential",
+            "retryable": False,
+            "status_code": None,
+            "circuit_open": False,
+            "retention": _AUTONOMOUS_PLANNING_FAILURE_RETENTION,
+            "secret_material": "never_returned",
+        }
+    if not isinstance(error, ProviderError):
+        raise BrainRunError("planning failure must be a provider or credential error")
+    status_code = error.status_code
+    if isinstance(status_code, bool) or not isinstance(status_code, int) or not 100 <= status_code <= 599:
+        status_code = None
+    return {
+        "error_class": "ProviderError",
+        "code": "provider_error",
+        "retryable": bool(error.retryable),
+        "status_code": status_code,
+        "circuit_open": bool(error.circuit_open),
+        "retention": _AUTONOMOUS_PLANNING_FAILURE_RETENTION,
+        "secret_material": "never_returned",
+    }
+
+
+def _normalize_planning_failure(value: Mapping[str, Any], subject: str) -> dict[str, Any]:
+    """Validate and copy only the public fields allowed in a planner failure projection."""
+
+    if not isinstance(value, Mapping):
+        raise BrainRunError(f"{subject} failure must be a mapping or None")
+    error_class = value.get("error_class")
+    expected_code = "credential" if error_class == "CredentialError" else "provider_error"
+    # Older BrainRunResult envelopes did not expose a stable code field. Accept that
+    # legacy shape here, then emit the canonical code for deterministic replay/parity.
+    code = value.get("code", expected_code)
+    if error_class not in {"ProviderError", "CredentialError"} or code != expected_code:
+        raise BrainRunError(f"{subject} failure class or code is malformed")
+    retryable = value.get("retryable")
+    circuit_open = value.get("circuit_open")
+    status_code = value.get("status_code")
+    if not isinstance(retryable, bool) or not isinstance(circuit_open, bool):
+        raise BrainRunError(f"{subject} failure retryability metadata is malformed")
+    if isinstance(status_code, bool) or (status_code is not None and (not isinstance(status_code, int) or not 100 <= status_code <= 599)):
+        raise BrainRunError(f"{subject} failure status_code is malformed")
+    if value.get("retention") != _AUTONOMOUS_PLANNING_FAILURE_RETENTION or value.get("secret_material") != "never_returned":
+        raise BrainRunError(f"{subject} failure retention metadata is malformed")
+    if error_class == "CredentialError" and (retryable or circuit_open or status_code is not None):
+        raise BrainRunError(f"{subject} credential failure metadata is inconsistent")
+    return {
+        "error_class": error_class,
+        "code": code,
+        "retryable": retryable,
+        "status_code": status_code,
+        "circuit_open": circuit_open,
+        "retention": _AUTONOMOUS_PLANNING_FAILURE_RETENTION,
+        "secret_material": "never_returned",
+    }
 
 
 def _autonomous_result_digest(
@@ -9776,21 +9862,57 @@ class AutonomousTaskOrchestrator:
             selection_weights=selection_weights,
             selection_observations=selection_observations,
         )
-        run = self.brain.run(
-            task=planner_task,
-            model_selection=selection_request,
-            prompt=planner_blueprint.prompt,
-            plan=planner_blueprint.plan,
-            credentials=credentials,
-            approve_provider_call=approve_provider_call,
-            run_id=run_id,
-            max_output_tokens=max_output_tokens,
-            temperature=temperature,
-            require_json=True,
-            response_schema=response_schema,
-            context=planner_selection_context,
-            contextual_observations=contextual_observations,
-        )
+        try:
+            run = self.brain.run(
+                task=planner_task,
+                model_selection=selection_request,
+                prompt=planner_blueprint.prompt,
+                plan=planner_blueprint.plan,
+                credentials=credentials,
+                approve_provider_call=approve_provider_call,
+                run_id=run_id,
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                require_json=True,
+                response_schema=response_schema,
+                context=planner_selection_context,
+                contextual_observations=contextual_observations,
+            )
+        except (ProviderError, CredentialError) as error:
+            failure = _planning_failure_projection(error)
+            selected = selection_request.get("selected_model")
+            safe_model = (
+                {"provider": selected["provider"], "model": selected["model"]}
+                if isinstance(selected, Mapping)
+                and isinstance(selected.get("provider"), str)
+                and isinstance(selected.get("model"), str)
+                else None
+            )
+            selection_digest = selection_request.get("decision_digest")
+            if not isinstance(selection_digest, str):
+                selection_digest = None
+            return AutonomousPlanRefinementResult(
+                status="provider_failed",
+                task_digest=blueprint.spec.task_digest,
+                base_plan_digest=base_plan_digest,
+                workflow_digest=blueprint.workflow.workflow_digest,
+                selected_model=safe_model,
+                selection_digest=selection_digest,
+                planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
+                outcome_digest=_json_digest({
+                    "status": "provider_failed",
+                    "failure": failure,
+                    "task_digest": blueprint.spec.task_digest,
+                    "base_plan_digest": base_plan_digest,
+                    "planner_context_digest": planner_learning_context_digest,
+                    "planner_prompt_digest": planner_prompt_digest,
+                }),
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
+                domain_policy_admission=domain_policy_admission,
+                failure=failure,
+            )
         selection = run.selection
         selected_model = selection.get("selected_model")
         safe_model = None
@@ -9826,9 +9948,13 @@ class AutonomousTaskOrchestrator:
         }
         if domain_policy_admission is not None:
             metadata["domain_policy_admission"] = domain_policy_admission
+        if run.status == "provider_failed":
+            if not isinstance(run.failure, Mapping):
+                raise BrainRunError("provider_failed planning result did not contain a failure projection")
+            metadata["failure"] = _normalize_planning_failure(run.failure, "plan refinement")
         if run.status != "completed_provider_call" or run.response is None:
             return AutonomousPlanRefinementResult(
-                status=run.status if run.status in {"approval_required", "plan_refused"} else "provider_invalid",
+                status=run.status if run.status in {"approval_required", "plan_refused", "provider_failed"} else "provider_invalid",
                 **metadata,
             )
         raw = run.response.structured
@@ -10072,21 +10198,56 @@ class AutonomousTaskOrchestrator:
             selection_weights=selection_weights,
             selection_observations=selection_observations,
         )
-        run = self.brain.run(
-            task=planner_task,
-            model_selection=selection_request,
-            prompt=planner_blueprint.prompt,
-            plan=planner_blueprint.plan,
-            credentials=credentials,
-            approve_provider_call=approve_provider_call,
-            run_id=run_id,
-            max_output_tokens=max_output_tokens,
-            temperature=temperature,
-            require_json=True,
-            response_schema=response_schema,
-            context=planner_selection_context,
-            contextual_observations=contextual_observations,
-        )
+        try:
+            run = self.brain.run(
+                task=planner_task,
+                model_selection=selection_request,
+                prompt=planner_blueprint.prompt,
+                plan=planner_blueprint.plan,
+                credentials=credentials,
+                approve_provider_call=approve_provider_call,
+                run_id=run_id,
+                max_output_tokens=max_output_tokens,
+                temperature=temperature,
+                require_json=True,
+                response_schema=response_schema,
+                context=planner_selection_context,
+                contextual_observations=contextual_observations,
+            )
+        except (ProviderError, CredentialError) as error:
+            failure = _planning_failure_projection(error)
+            selected = selection_request.get("selected_model")
+            safe_model = (
+                {"provider": selected["provider"], "model": selected["model"]}
+                if isinstance(selected, Mapping)
+                and isinstance(selected.get("provider"), str)
+                and isinstance(selected.get("model"), str)
+                else None
+            )
+            selection_digest = selection_request.get("decision_digest")
+            if not isinstance(selection_digest, str):
+                selection_digest = None
+            return AutonomousCrossDomainPlanRefinementResult(
+                status="provider_failed",
+                task_digest=blueprint.task_digest,
+                base_plan_digest=base_plan_digest,
+                selected_model=safe_model,
+                selection_digest=selection_digest,
+                planner_prompt_digest=planner_prompt_digest,
+                adaptive_selection=adaptive_selection,
+                outcome_digest=_json_digest({
+                    "status": "provider_failed",
+                    "failure": failure,
+                    "task_digest": blueprint.task_digest,
+                    "base_plan_digest": base_plan_digest,
+                    "planner_context_digest": planner_learning_context_digest,
+                    "planner_prompt_digest": planner_prompt_digest,
+                }),
+                planner_context=planner_learning_context,
+                planner_context_digest=planner_learning_context_digest,
+                domain_policy_admission=domain_policy_admission,
+                failure=failure,
+            )
         selected_model = run.selection.get("selected_model")
         safe_model = None
         if isinstance(selected_model, Mapping) and isinstance(selected_model.get("provider"), str) and isinstance(
@@ -10113,9 +10274,13 @@ class AutonomousTaskOrchestrator:
         }
         if domain_policy_admission is not None:
             metadata["domain_policy_admission"] = domain_policy_admission
+        if run.status == "provider_failed":
+            if not isinstance(run.failure, Mapping):
+                raise BrainRunError("provider_failed cross-domain planning result did not contain a failure projection")
+            metadata["failure"] = _normalize_planning_failure(run.failure, "cross-domain plan refinement")
         if run.status != "completed_provider_call" or run.response is None:
             return AutonomousCrossDomainPlanRefinementResult(
-                status=run.status if run.status in {"approval_required", "plan_refused"} else "provider_invalid",
+                status=run.status if run.status in {"approval_required", "plan_refused", "provider_failed"} else "provider_invalid",
                 **metadata,
             )
         raw = run.response.structured

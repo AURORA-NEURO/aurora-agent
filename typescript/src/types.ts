@@ -392,7 +392,7 @@ export interface AutonomousSemanticRouteResult extends JsonObject {
 
 export interface AutonomousPlanRefinementResult extends JsonObject {
   schema: "bioprism-python-autonomous-plan-refinement/0.1" | string;
-  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_disagreement" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_failed" | "provider_disagreement" | "policy_review_required" | "policy_blocked" | string;
   task_digest: string;
   base_plan_digest: string;
   workflow_digest: string;
@@ -412,6 +412,8 @@ export interface AutonomousPlanRefinementResult extends JsonObject {
   planner_context_digest?: string;
   /** Strict-mode provider-free admission for the planner call, when enabled. */
   domain_policy_admission?: JsonObject;
+  /** Redacted provider/credential metadata; provider messages and exception text are never retained. */
+  failure?: AutonomousPlanningFailureProjection | null;
   /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
   cost_budget?: {
     max_cost_units: number;
@@ -425,7 +427,7 @@ export interface AutonomousPlanRefinementResult extends JsonObject {
 /** Provider-assisted ordering proposal for an existing cross-domain fan-out. */
 export interface AutonomousCrossDomainPlanRefinementResult extends JsonObject {
   schema: "bioprism-python-autonomous-cross-domain-plan-refinement/0.1" | string;
-  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_disagreement" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_failed" | "provider_disagreement" | "policy_review_required" | "policy_blocked" | string;
   task_digest: string;
   base_plan_digest: string;
   priority_child_ids: string[];
@@ -444,6 +446,8 @@ export interface AutonomousCrossDomainPlanRefinementResult extends JsonObject {
   planner_context_digest?: string;
   /** Strict-mode provider-free admission for the cross-domain planner call, when enabled. */
   domain_policy_admission?: JsonObject;
+  /** Redacted provider/credential metadata; provider messages and exception text are never retained. */
+  failure?: AutonomousPlanningFailureProjection | null;
   /** Metadata-only aggregate accounting for the provider planning call, when budgeted. */
   cost_budget?: {
     max_cost_units: number;
@@ -463,7 +467,7 @@ export interface AutonomousCrossDomainPlanRefinementResult extends JsonObject {
  */
 export interface AutonomousOrderedStepPlanRefinementResult extends JsonObject {
   schema: "bioprism-typescript-autonomous-ordered-step-plan-refinement/0.1" | string;
-  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_disagreement" | string;
+  status: "completed" | "approval_required" | "plan_refused" | "provider_invalid" | "provider_failed" | "provider_disagreement" | string;
   task_digest: string;
   base_plan_digest: string;
   protected_contract_digest: string | null;
@@ -487,8 +491,27 @@ export interface AutonomousOrderedStepPlanRefinementResult extends JsonObject {
     consumed_cost_units: number;
     remaining_cost_units: number;
   } | null;
+  /** Redacted provider/credential metadata; provider messages and exception text are never retained. */
+  failure?: AutonomousPlanningFailureProjection | null;
   retention: string;
   authorization: string;
+}
+
+/**
+ * Stable metadata for an operational provider-planning failure.
+ *
+ * This intentionally excludes exception messages, request/response bodies, credential handles,
+ * and provider-specific diagnostics so a planning result can be persisted or shown to an
+ * operator without becoming a secret-bearing error channel.
+ */
+export interface AutonomousPlanningFailureProjection extends JsonObject {
+  error_class: "ProviderRuntimeError" | "CredentialError";
+  code: string;
+  retryable: boolean;
+  status_code: number | null;
+  circuit_open: boolean;
+  retention: "metadata_only;provider_error_message_and_payloads_not_retained";
+  secret_material: "never_returned";
 }
 
 export interface AutonomousRoutingHoldoutReport extends JsonObject {

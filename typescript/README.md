@@ -758,7 +758,10 @@ owned accounting boundary. The returned `cost_budget` is a numeric value-only sn
 exhausted budget fails before provider dispatch. Provider output is checked for strict JSON shape, exact
 permutations, dependency safety, abstention, and confidence bounds. A malformed structured
 response is converted into a typed `provider_invalid` result with a digest-only failure receipt;
-credential and transport failures remain typed runtime errors for the caller's retry policy.
+credential and operational provider failures become a typed `provider_failed` result with a
+redacted failure projection containing only error class/code, retryability, safe status code, and
+circuit state. Provider messages, payloads, prompts, tasks, credentials, and secret material are
+never retained; malformed input and programming/configuration errors still propagate.
 
 For applications that want the whole bounded sequence in one explicit call, use
 `agent.planAndRun()`. It routes and builds the blueprint, requests a provider proposal, pauses with

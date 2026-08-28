@@ -2235,6 +2235,108 @@ def test_agent_prepare_auto_and_run_auto_reuse_explicit_runtime_boundaries():
         server.server_close()
 
 
+def test_provider_planning_preserves_credential_failures_for_all_planning_entrypoints():
+    runtime, _, server, thread = _runtime()
+    try:
+        agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+        blueprint = agent.prepare(task="fix the Rust tests in the repository", domain="coding")
+        expected_failure = {
+            "error_class": "CredentialError",
+            "code": "credential",
+            "retryable": False,
+            "status_code": None,
+            "circuit_open": False,
+            "retention": "metadata_only;provider_error_message_and_payloads_not_retained",
+            "secret_material": "never_returned",
+        }
+
+        single = agent.plan_with_provider(
+            blueprint=blueprint,
+            model_candidates=_model(),
+            credentials={},
+            approve_provider_call=True,
+        )
+        assert single.status == "provider_failed"
+        assert single.failure == expected_failure
+        assert "no user credential handle" not in json.dumps(single.to_dict())
+
+        cross_blueprint = agent.prepare_cross_domain(
+            task="Combine engineering and data review into one decision package.",
+            subtasks=[
+                {"id": "engineering-review", "task": "Review implementation risk.", "domain": "coding"},
+                {"id": "data-review", "task": "Review data lineage risk.", "domain": "data"},
+            ],
+        )
+        cross = agent.plan_cross_domain_with_provider(
+            blueprint=cross_blueprint,
+            model_candidates=_model(),
+            credentials={},
+            approve_provider_call=True,
+        )
+        assert cross.status == "provider_failed"
+        assert cross.failure == expected_failure
+
+        assert getattr(server, "request_count", 0) == 0
+
+        automatic = agent.run_auto(
+            task="fix the Rust tests in the repository",
+            credentials={},
+            planning_mode="provider",
+            approve_provider_call=True,
+        )
+        assert automatic.status == "planning_review_required"
+        assert automatic.planning is not None
+        assert automatic.planning.status == "provider_failed"
+        assert automatic.planning.failure == expected_failure
+        assert automatic.result is None
+        assert "no user credential handle" not in json.dumps(automatic.to_dict())
+
+        def fail_planning(_request: ProviderRequest) -> str:
+            raise ProviderError(
+                "sensitive planner transport diagnostic",
+                retryable=True,
+                status_code=503,
+            )
+
+        runtime.register_in_memory_provider("failing-planner", fail_planning)
+        failing_model = [dict(_model()[0], provider="failing-planner", model="planner-model", requires_credential=False)]
+
+        class FailingProviderWorkspace(_Workspace):
+            def tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+                result = super().tool(name, arguments)
+                if name == "brain_model_select":
+                    result["selected_model"] = {"provider": "failing-planner", "model": "planner-model"}
+                elif name == "brain_model_select_contextual":
+                    selection = result.get("selection")
+                    assert isinstance(selection, dict)
+                    selection["selected_model"] = {"provider": "failing-planner", "model": "planner-model"}
+                return result
+
+        failing_agent = AutonomousAgent(FailingProviderWorkspace(), runtime, model_catalogue=ModelCatalogue(failing_model))
+        failing_blueprint = failing_agent.prepare(task="fix the Rust tests in the repository", domain="coding")
+        failing = failing_agent.plan_with_provider(
+            blueprint=failing_blueprint,
+            model_candidates=failing_model,
+            credentials={},
+            approve_provider_call=True,
+        )
+        assert failing.status == "provider_failed"
+        assert failing.failure == {
+            "error_class": "ProviderError",
+            "code": "provider_error",
+            "retryable": True,
+            "status_code": 503,
+            "circuit_open": False,
+            "retention": "metadata_only;provider_error_message_and_payloads_not_retained",
+            "secret_material": "never_returned",
+        }
+        assert "sensitive planner transport diagnostic" not in json.dumps(failing.to_dict())
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_run_auto_provider_planning_is_approval_gated_and_never_dispatches_without_consent():
     runtime, store, server, thread = _runtime()
     cycle_store = InMemoryAutonomousDecisionCycleStateStore()

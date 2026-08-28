@@ -950,7 +950,10 @@ test("autonomous runtime gates candidates on provider readiness and feeds health
   const gatedRuntime = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => jsonResponse({ output_text: "must not run" }) });
   gatedRuntime.registerProvider(openaiProvider({ baseUrl: "https://gated.test" }));
   const gatedAgent = new AutonomousRuntime(gatedRuntime);
-  await assert.rejects(gatedAgent.invoke({ ...plan, candidates: [{ ...candidates[0], provider: "openai", model: "gated-model", requires_credential: true }] }), ProviderRuntimeError);
+  await assert.rejects(
+    gatedAgent.invoke({ ...plan, candidates: [{ ...candidates[0], provider: "openai", model: "gated-model", requires_credential: true }] }),
+    CredentialError,
+  );
 });
 
 test("weighted model selection is deterministic, auditable, and learning-policy aware", () => {

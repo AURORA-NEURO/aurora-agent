@@ -3400,6 +3400,14 @@ function modelFailoverAllowed(error: ProviderRuntimeError): boolean {
   return error.code === "timeout" && error.circuitOpen !== true;
 }
 
+function selectionIsCredentialUnavailable(ranking: readonly AutonomousModelRanking[]): boolean {
+  const credentialGateReasons = new Set(["credential not ready", "provider health ineligible"]);
+  return ranking.length > 0 && ranking.every((row) =>
+    row.reasons.includes("credential not ready")
+    && row.reasons.every((reason) => credentialGateReasons.has(reason))
+  );
+}
+
 async function emitContinuationSelectionTrace(
   callback: AutonomousModelSelectionTraceEventCallback | undefined,
   selection: AutonomousSelectionDecision,
@@ -3570,7 +3578,10 @@ export class AutonomousRuntime {
   ): Promise<AutonomousExecutionResult> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
     const initialSelection = await this.select(plan, { selectionEventCallback: options.selectionEventCallback, attempt: 1 });
-    if (!initialSelection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${initialSelection.abstention_reason ?? "no model"}`);
+    if (!initialSelection.selected_model) {
+      if (selectionIsCredentialUnavailable(initialSelection.ranking)) throw new CredentialError("autonomous selection requires a user credential handle");
+      throw new ProviderRuntimeError(`autonomous selection abstained: ${initialSelection.abstention_reason ?? "no model"}`);
+    }
     const continuationPlan = await compileAutonomousModelContinuationPlan(plan, initialSelection, { maxFailovers: maxProviderFailovers });
     let continuationState: AutonomousModelContinuationState = await createAutonomousModelContinuationState(continuationPlan);
     const invocationSamples: AutonomousProviderInvocationSample[] = [];
@@ -3642,7 +3653,10 @@ export class AutonomousRuntime {
   ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult; continuation_plan: AutonomousModelContinuationPlan; provider_invocations: AutonomousProviderInvocationReceipt[]; provider_failover: AutonomousProviderFailoverProjection | null }> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
     const initialSelection = await this.select(plan, { selectionEventCallback: options.selectionEventCallback, attempt: 1 });
-    if (!initialSelection.selected_model) throw new ProviderRuntimeError(`autonomous selection abstained: ${initialSelection.abstention_reason ?? "no model"}`);
+    if (!initialSelection.selected_model) {
+      if (selectionIsCredentialUnavailable(initialSelection.ranking)) throw new CredentialError("autonomous selection requires a user credential handle");
+      throw new ProviderRuntimeError(`autonomous selection abstained: ${initialSelection.abstention_reason ?? "no model"}`);
+    }
     const continuationPlan = await compileAutonomousModelContinuationPlan(plan, initialSelection, { maxFailovers: maxProviderFailovers });
     let continuationState: AutonomousModelContinuationState = await createAutonomousModelContinuationState(continuationPlan);
     const invocationSamples: AutonomousProviderInvocationSample[] = [];
