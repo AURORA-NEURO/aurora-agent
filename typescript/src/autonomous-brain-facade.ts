@@ -1,5 +1,6 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
+import { ProviderSetup } from "./provider-setup.js";
 import {
   AutonomousGoalAgentRuntime,
   type AutonomousGoalAgentLoopRunOptions,
@@ -1676,6 +1677,7 @@ export class AutonomousBrainFacade {
   readonly agent: AutonomousAgent;
   readonly connectorOperations?: AutonomousConnectorOperationFacade;
   readonly connectorIntent?: AutonomousConnectorIntentFacade;
+  private provider_setup: ProviderSetup | undefined;
 
   constructor(options: { agent: AutonomousAgent; connectorOperations?: AutonomousConnectorOperationFacade }) {
     if (!options || !options.agent || typeof options.agent.route !== "function" || typeof options.agent.blueprint !== "function" || typeof options.agent.run !== "function" || typeof options.agent.runCrossDomain !== "function" || typeof options.agent.readiness !== "function" || typeof options.agent.refreshActivation !== "function") throw new ArgumentError("autonomous brain facade requires an AutonomousAgent");
@@ -1688,6 +1690,18 @@ export class AutonomousBrainFacade {
         operationFacade: options.connectorOperations,
         route: (task, routeOptions) => this.agent.route(task, routeOptions),
       });
+  }
+
+  /**
+   * Reusable protected provider registration, credential-session, and revocation boundary.
+   *
+   * The setup object is lazy so provider-free facade doubles and structural agents can still be
+   * used for planning, recovery, and review-only operations without constructing credentials.
+   * Accessing this property requires the bound agent to provide a real `LLMRuntime`.
+   */
+  get providerSetup(): ProviderSetup {
+    this.provider_setup ??= new ProviderSetup(this.agent.llm);
+    return this.provider_setup;
   }
 
   /**

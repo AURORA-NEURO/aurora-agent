@@ -81,6 +81,37 @@ function semanticRuntime(payloads, onRequest = () => {}) {
   return { runtime, calls: () => calls };
 }
 
+test("brain facade exposes protected provider onboarding without retaining user credentials", async () => {
+  let networkCalls = 0;
+  const runtime = new LLMRuntime({ fetch: async () => { networkCalls += 1; throw new Error("onboarding must not contact HTTP"); } });
+  const agent = new AutonomousAgent(runtime);
+  const brain = new AutonomousBrainFacade({ agent });
+  const setup = brain.providerSetup;
+
+  assert.equal(setup.runtime, runtime);
+  setup.registerProvider("groq");
+  const session = setup.startSession({ sessionId: "facade-onboarding", ttlMs: 60_000, clock: () => 100 });
+  const before = setup.instructions("groq");
+  assert.equal(before.provider_registered, true);
+  assert.equal(before.ready, false);
+  assert.equal(before.next_action, "collect_user_credential");
+
+  const handle = setup.collectUserCredential(session, "groq", "offline-fixture-secret", { ttlMs: 30_000 });
+  assert.equal(handle.provider, "groq");
+  assert.equal(setup.instructions("groq").ready, true);
+  const readiness = await brain.readiness();
+  const provider = readiness.providers.find((row) => row.provider === "groq");
+  assert.equal(provider.credential_ready, true);
+  assert.equal(provider.credential.active_handles, 1);
+  assert.doesNotMatch(JSON.stringify({ before, readiness, handle }), /offline-fixture-secret/);
+  assert.equal(networkCalls, 0);
+
+  session.close();
+  assert.equal(runtime.credentials.status("groq").active_handles, 0);
+  assert.equal(session.status().active, false);
+  assert.throws(() => setup.collectUserCredential(session, "groq", "another-fixture-secret"), /closed or expired/);
+});
+
 test("brain facade creates request-free plans for every built-in domain and executes a bounded batch", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

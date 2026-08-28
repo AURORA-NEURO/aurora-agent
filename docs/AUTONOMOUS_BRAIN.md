@@ -30,6 +30,39 @@ flowchart LR
     BU --> MS
 ```
 
+## Provider onboarding at the application boundary
+
+`AutonomousBrainFacade.providerSetup` is the reusable BYOK onboarding surface for a UI, desktop
+client, or operator service. It exposes provider catalogues and redacted instructions, registers
+transport metadata, opens a short-lived credential session, converts a user-entered value into an
+opaque process-local handle, and revokes the session after execution. The facade never accepts a
+key in a task, prompt, trace, plan, goal, checkpoint, or durable projection.
+
+```typescript
+const setup = brain.providerSetup;
+setup.registerProvider("openai");
+const session = setup.startSession({ ttlMs: 15 * 60_000 });
+try {
+  const instructions = setup.instructions("openai");
+  // Render instructions.next_action in the protected UI; do not log the input value.
+  const handle = setup.collectUserCredential(session, "openai", valueFromPasswordInput, { ttlMs: 10 * 60_000 });
+  await brain.execute({ task, domain: "coding" }, {
+    approveProviderCall: true,
+    run: { credential: handle },
+  });
+} finally {
+  session.close();
+}
+```
+
+`ProviderSetup` also supports no-echo prompt, environment-variable, and external secret-resolver
+sources for deployments that do not collect a browser value. All sources converge on the same
+short-lived credential store and provider-scoped handle. `brain.readiness()` reports only
+registered-provider state, active-handle counts, expiry metadata, model capability coverage, and
+next actions; it performs no discovery or provider call. A custom inline transport is explicitly
+credentialless for offline fixtures, while the normal built-in provider presets remain
+credential-required until a session collects or provisions a user credential.
+
 ## Evidence-first application boundary
 
 The application-facing TypeScript `AutonomousBrainFacade` exposes the complete evidence-first

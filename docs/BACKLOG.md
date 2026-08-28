@@ -1,5 +1,12 @@
 # Remaining backlog
 
+The TypeScript `AutonomousBrainFacade` now exposes a reusable `providerSetup` onboarding boundary
+for the normal user-key lifecycle: provider registration, redacted instructions, short-lived
+credential sessions, opaque handles, readiness projection, and revocation. Offline coverage
+confirms that credentials remain out of readiness and serialized metadata and that no network call
+is made during onboarding. Secret-manager integration, encryption, tenant authorization, and
+production UI remain deployment responsibilities.
+
 The TypeScript `AutonomousBrainFacade` now exposes `createGoalAgentRuntime()`, binding the
 long-horizon scheduler/worker/evaluator/bandit runtime to the exact facade agent and injecting the
 facade for reviewed action-handoff replay. Factory coverage exercises task rehydration, adaptive
