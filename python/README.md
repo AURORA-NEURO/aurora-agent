@@ -732,6 +732,12 @@ protected; older tool turns are removed only as complete atomic units. The `cont
 only counts, dropped indexes, structural digests, and retention metadata. Protected overflow
 fails closed with `invalid_request`, and no summarization model is called.
 
+For live UI or worker consumption, `AutonomousStreamRuntime.open()` (also available through
+`AutonomousBrain.open_stream()`) exposes the same transient provider-neutral event contract with
+pre-event-only failover, required terminal `done` events, explicit abandonment, and a
+metadata-only completion receipt. See
+[`docs/AUTONOMOUS_STREAMING.md`](../docs/AUTONOMOUS_STREAMING.md) for the cross-language contract.
+
 After a restart, rehydrate only `episode.to_dict()` and the value-only
 `response_evaluation`; omit `contract` when the provider response is no longer retained. The
 settlement refuses altered evaluation digests, mismatched episode/run identities, duplicate

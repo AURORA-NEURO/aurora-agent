@@ -255,6 +255,7 @@ export {
   AUTONOMOUS_COST_BUDGET_MAX_COST_UNITS,
   AUTONOMOUS_PROVIDER_INVOCATION_SCHEMA,
   AUTONOMOUS_PROVIDER_FAILOVER_SCHEMA,
+  AUTONOMOUS_STREAM_COMPLETION_SCHEMA,
   AutonomousCostBudget,
   CredentialHandle,
   CredentialProvisioner,
@@ -289,6 +290,9 @@ export {
 } from "./llm.js";
 export type {
   AutonomousExecutionPlan,
+  AutonomousStreamCompletion,
+  AutonomousStreamHandle,
+  AutonomousStreamInvocationOptions,
   AutonomousExecutionResult,
   AutonomousCostReservation,
   AutonomousCostReservationCallback,

@@ -179,6 +179,11 @@ contains only counts, dropped indexes, structural digests, and retention metadat
 overflow fails closed with `invalid_request`; no summarization model is called and no prompt text
 is copied into the receipt.
 
+For live UI or worker consumption, `AutonomousRuntime.invokeStream()` returns a single-consumer
+provider-neutral event handle with pre-event-only failover, required terminal `done` events,
+explicit abandonment, and a metadata-only completion receipt. See
+[`docs/AUTONOMOUS_STREAMING.md`](../docs/AUTONOMOUS_STREAMING.md) for the cross-language contract.
+
 ```typescript
 await agent.run(task, {
   domain: "research",

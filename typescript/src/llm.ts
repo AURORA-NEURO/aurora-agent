@@ -1064,6 +1064,54 @@ export interface AutonomousExecutionResult {
   context_budget?: AutonomousContextBudgetPlan | null;
 }
 
+/** Public schema for the live autonomous provider-neutral stream envelope. */
+export const AUTONOMOUS_STREAM_COMPLETION_SCHEMA = "bioprism-typescript-autonomous-stream-completion/0.1" as const;
+
+/**
+ * Metadata-only completion state for an autonomous stream.
+ *
+ * Stream deltas are deliberately absent. Consumers can render the transient events, while this
+ * value-only receipt can be persisted, replayed, and sent to an evaluator without retaining task
+ * text, provider payloads, credentials, or model output.
+ */
+export interface AutonomousStreamCompletion extends JsonObject {
+  schema: typeof AUTONOMOUS_STREAM_COMPLETION_SCHEMA;
+  status: "completed" | "failed" | "abandoned";
+  event_count: number;
+  text_delta_bytes: number;
+  done_seen: boolean;
+  provider_invocations: AutonomousProviderInvocationReceipt[];
+  provider_failover: AutonomousProviderFailoverProjection | null;
+  error_code: ProviderErrorCode | null;
+  error_class: string | null;
+  retention: "metadata_only_no_stream_payloads_or_credentials";
+  secret_material: "never_returned";
+}
+
+/** Handle returned after autonomous selection, before the transient stream is consumed. */
+export interface AutonomousStreamHandle {
+  selection: AutonomousSelectionDecision;
+  continuation_plan: AutonomousModelContinuationPlan;
+  context_budget: AutonomousContextBudgetPlan | null;
+  events: AsyncIterable<ProviderStreamEvent>;
+  /** Resolves after normal exhaustion, terminal failure, or consumer cancellation. */
+  completion: Promise<AutonomousStreamCompletion>;
+}
+
+export interface AutonomousStreamInvocationOptions {
+  credential?: CredentialHandle;
+  credentialFor?: (provider: string) => CredentialHandle | undefined;
+  signal?: AbortSignal;
+  observer?: ProviderInvocationObserver;
+  feedback?: (decision: AutonomousSelectionDecision, outcome: ProviderInvocationOutcome) => void | Promise<void>;
+  selectionEventCallback?: AutonomousModelSelectionTraceEventCallback;
+  execution?: AutonomousExecutionController;
+  executionAttempt?: number;
+  maxProviderFailovers?: number;
+  reserveCost?: AutonomousCostReservationCallback;
+  effectBoundary?: AutonomousEffectBoundary;
+}
+
 export type AutonomousModelSelector = (request: AutonomousSelectionRequest) => AutonomousSelectionDecision | Promise<AutonomousSelectionDecision>;
 
 export interface ProviderHealth extends JsonObject {
@@ -3679,6 +3727,192 @@ export class AutonomousRuntime {
         if (continuationState.status !== "ready") throw error;
       }
     }
+  }
+
+  /**
+   * Select a model and open a live provider-neutral stream.
+   *
+   * Selection, context compaction, continuation compilation, and provider admission all happen
+   * before the handle is returned. Once an event has been observed, the stream is never replayed
+   * onto another model: a partial assistant turn may contain a caller-visible tool intent. A
+   * retry is therefore limited to a provider/model failure that occurs before the first event.
+   */
+  async invokeStream(
+    plan: AutonomousExecutionPlan,
+    options: AutonomousStreamInvocationOptions = {},
+  ): Promise<AutonomousStreamHandle> {
+    const maxProviderFailovers = autonomousProviderFailoverLimit(options);
+    let contextBudget: AutonomousContextBudgetPlan | null = null;
+    if (plan.contextBudget !== undefined) {
+      const prepared = await compactAutonomousProviderRequest(plan.request, plan.contextBudget);
+      plan = { ...plan, request: prepared.request };
+      contextBudget = prepared.plan;
+    }
+    const initialSelection = await this.select(plan, {
+      selectionEventCallback: options.selectionEventCallback,
+      attempt: 1,
+    });
+    if (!initialSelection.selected_model) {
+      if (selectionIsCredentialUnavailable(initialSelection.ranking)) throw new CredentialError("autonomous selection requires a user credential handle");
+      throw new ProviderRuntimeError(`autonomous selection abstained: ${initialSelection.abstention_reason ?? "no model"}`);
+    }
+    const continuationPlan = await compileAutonomousModelContinuationPlan(plan, initialSelection, { maxFailovers: maxProviderFailovers });
+    let completionResolver: ((completion: AutonomousStreamCompletion) => void) | undefined;
+    const completion = new Promise<AutonomousStreamCompletion>((resolve) => { completionResolver = resolve; });
+    const invocationSamples: AutonomousProviderInvocationSample[] = [];
+    const executionId = options.execution?.state.execution_id ?? null;
+    let eventCount = 0;
+    let textDeltaBytes = 0;
+    let doneSeen = false;
+    let sawEvent = false;
+    let finalized = false;
+    let consumed = false;
+    const runtime = this.llm;
+
+    const finish = (status: AutonomousStreamCompletion["status"], error: unknown = null): void => {
+      if (finalized) return;
+      finalized = true;
+      const errorCode = error instanceof ProviderRuntimeError ? error.code : null;
+      const errorClass = error instanceof Error ? error.constructor.name : error === null ? null : "UnknownError";
+      void autonomousProviderInvocationProjection(invocationSamples, continuationPlan).then((projection) => {
+        completionResolver?.({
+          schema: AUTONOMOUS_STREAM_COMPLETION_SCHEMA,
+          status,
+          event_count: eventCount,
+          text_delta_bytes: textDeltaBytes,
+          done_seen: doneSeen,
+          provider_invocations: projection.providerInvocations,
+          provider_failover: projection.providerFailover,
+          error_code: errorCode,
+          error_class: errorClass,
+          retention: "metadata_only_no_stream_payloads_or_credentials",
+          secret_material: "never_returned",
+        });
+      }).catch(() => {
+        // Completion is a non-authoritative metadata receipt. Never turn a provider result into
+        // an unhandled promise rejection because a local digest/evidence projection failed.
+        completionResolver?.({
+          schema: AUTONOMOUS_STREAM_COMPLETION_SCHEMA,
+          status,
+          event_count: eventCount,
+          text_delta_bytes: textDeltaBytes,
+          done_seen: doneSeen,
+          provider_invocations: [],
+          provider_failover: null,
+          error_code: errorCode,
+          error_class: errorClass,
+          retention: "metadata_only_no_stream_payloads_or_credentials",
+          secret_material: "never_returned",
+        });
+      });
+    };
+
+    const events: AsyncIterable<ProviderStreamEvent> = {
+      [Symbol.asyncIterator]: async function* (): AsyncGenerator<ProviderStreamEvent> {
+        if (consumed) throw new ArgumentError("autonomous stream handles are single-consumer");
+        consumed = true;
+        let continuationState: AutonomousModelContinuationState;
+        try {
+          continuationState = await createAutonomousModelContinuationState(continuationPlan);
+          while (true) {
+            const step = continuationPlan.steps[continuationState.next_step_index ?? -1];
+            if (!step) throw new ProviderRuntimeError("autonomous stream continuation has no next model");
+            const failovers = continuationState.failovers_used;
+            const selection = failovers === 0 ? initialSelection : continuationSelectionDecision(initialSelection, step);
+            if (failovers > 0) await emitContinuationSelectionTrace(options.selectionEventCallback, selection, continuationPlan, failovers + 1);
+            const provider = step.provider;
+            const credential = options.credential ?? options.credentialFor?.(provider);
+            const selectedCandidate = plan.candidates.find((candidate) => candidate.provider === provider && candidate.model === step.model);
+            const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
+            const selectionDigest = await digestJson(selection);
+            const observer: ProviderInvocationObserver = {
+              before: options.observer?.before,
+              after: async (metadata, outcome) => {
+                try {
+                  await options.observer?.after?.(metadata, outcome);
+                  await options.feedback?.(selection, outcome);
+                } finally {
+                  invocationSamples.push({
+                    executionId,
+                    metadata: { ...metadata },
+                    outcome: { ...outcome },
+                    attempt: failovers,
+                    turn: 0,
+                    selectionDigest,
+                    estimatedCostUnits,
+                    costPerMillionTokens: selectedCandidate?.cost_per_million_tokens ?? 0,
+                  });
+                }
+              },
+            };
+            const attemptEventCount = eventCount;
+            try {
+              let localDone = false;
+              for await (const event of runtime.invokeStream(provider, { ...plan.request, model: step.model }, {
+                credential,
+                signal: options.signal,
+                observer,
+                effectBoundary: options.effectBoundary,
+                invocationKind: "autonomous_selected_model_stream",
+                execution: options.execution,
+                executionAttempt: options.executionAttempt,
+                executionTurn: 1,
+                executionFailover: failovers > 0,
+                selectionDigest,
+                estimatedCostUnits,
+                reserveCost: options.reserveCost,
+              })) {
+                sawEvent = true;
+                eventCount += 1;
+                textDeltaBytes += bytes(event.textDelta);
+                doneSeen = doneSeen || event.done;
+                localDone = localDone || event.done;
+                yield event;
+              }
+              if (!localDone) {
+                throw new ProviderRuntimeError("autonomous provider stream ended without a done event", {
+                  retryable: attemptEventCount === eventCount,
+                  code: "invalid_response",
+                });
+              }
+              continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, {
+                provider,
+                model: step.model,
+                statusCode: null,
+              });
+              finish("completed");
+              return;
+            } catch (error) {
+              // A stream can only fail over before its first event. This protects callers from
+              // receiving a concatenation of two model answers or replayed tool intent.
+              if (sawEvent || !(error instanceof ProviderRuntimeError) || !error.retryable || failovers >= maxProviderFailovers) {
+                finish("failed", error);
+                throw error;
+              }
+              const failureScope: AutonomousContinuationFailureScope = modelFailoverAllowed(error) ? "model" : "provider";
+              continuationState = await advanceAutonomousModelContinuationState(continuationPlan, continuationState, {
+                provider,
+                model: step.model,
+                failureScope,
+                failureCode: error.code,
+                statusCode: error.statusCode,
+              });
+              if (continuationState.status !== "ready") {
+                finish("failed", error);
+                throw error;
+              }
+            }
+          }
+        } catch (error) {
+          if (!finalized) finish("failed", error);
+          throw error;
+        } finally {
+          if (!finalized) finish("abandoned");
+        }
+      },
+    };
+
+    return { selection: initialSelection, continuation_plan: continuationPlan, context_budget: contextBudget, events, completion };
   }
 
   async invokeToolLoop(

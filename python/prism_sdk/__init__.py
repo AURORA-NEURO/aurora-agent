@@ -2102,6 +2102,16 @@ from .autonomous_context_budget import (
     compact_autonomous_provider_request,
     normalize_autonomous_context_budget,
 )
+from .autonomous_stream import (
+    AUTONOMOUS_STREAM_COMPLETION_SCHEMA,
+    AUTONOMOUS_STREAM_CONTINUATION_SCHEMA,
+    MAX_AUTONOMOUS_STREAM_FAILOVERS,
+    MAX_AUTONOMOUS_STREAM_STEPS,
+    AutonomousStreamArm,
+    AutonomousStreamCompletion,
+    AutonomousStreamHandle,
+    AutonomousStreamRuntime,
+)
 from .provider_quota import (
     PROVIDER_QUOTA_SCHEMA,
     PROVIDER_QUOTA_SNAPSHOT_SCHEMA,
@@ -4571,6 +4581,14 @@ __all__ = [
     "BioQlCompileRequest",
     "ApiClient",
     "AutonomousBrain",
+    "AUTONOMOUS_STREAM_COMPLETION_SCHEMA",
+    "AUTONOMOUS_STREAM_CONTINUATION_SCHEMA",
+    "MAX_AUTONOMOUS_STREAM_FAILOVERS",
+    "MAX_AUTONOMOUS_STREAM_STEPS",
+    "AutonomousStreamArm",
+    "AutonomousStreamCompletion",
+    "AutonomousStreamHandle",
+    "AutonomousStreamRuntime",
     "BrainJobRunResult",
     "BrainJobStore",
     "BrainJobPersistenceCoordinator",

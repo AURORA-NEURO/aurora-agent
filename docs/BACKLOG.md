@@ -1,5 +1,17 @@
 # Remaining backlog
 
+The TypeScript and Python provider bridges now expose a first-class autonomous live-stream
+contract. TypeScript performs one authoritative model selection, compacts the exact dispatch
+request, and opens a fixed continuation ladder; Python accepts the already-ranked arm order from
+the Rust/MCP brain so it cannot silently replace that decision. Both bridges forward transient
+provider-neutral deltas, require a terminal `done` event, permit retryable failover only before
+the first observed event, refuse partial-output replay, enforce single-consumer ownership, and
+return metadata-only completion receipts. Offline fixtures cover context compaction, pre-event
+recovery, partial-stream refusal, abandonment, redaction, and all twelve domains. The bridge does
+not provide provider credentials, distributed stream recovery, remote reconciliation, or semantic
+summarization; those remain deployment responsibilities. See
+[`AUTONOMOUS_STREAMING.md`](AUTONOMOUS_STREAMING.md).
+
 The TypeScript and Python autonomous provider boundaries now expose an explicit, deterministic
 context-window budget. Before selection and invocation, callers can cap estimated input tokens
 and message count; system/developer instructions, the latest user task, recent turns, and the

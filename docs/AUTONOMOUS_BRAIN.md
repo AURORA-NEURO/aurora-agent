@@ -5837,6 +5837,19 @@ after yielding deltas, or a process that disappears before exhaustion leaves the
 Completed streams are never replayed because deltas are intentionally not cached; applications
 must use a provider status endpoint or durable outbox to reconcile the remote outcome.
 
+The higher-level autonomous stream bridge now composes that transport boundary with model
+selection. TypeScript's `AutonomousRuntime.invokeStream()` selects once, compacts the exact
+request, compiles the same fixed continuation ladder used by direct invocations, and returns
+transient `ProviderStreamEvent` values plus an awaitable metadata-only completion receipt.
+Python's `AutonomousStreamRuntime.open()` and `AutonomousBrain.open_stream()` accept the ranked
+arm order from the authoritative Rust/MCP selection report, so a Python worker cannot silently
+re-rank an approved decision. Both bridges require a terminal `done` event, refuse a second
+consumer, mark early close as `abandoned`, and permit retryable failover only before the first
+event. The completion receipt includes event/byte counters, safe failure class/code, invocation
+receipts, and bounded failover digests; it contains no prompt, delta, tool argument, provider
+payload, or credential. See [`AUTONOMOUS_STREAMING.md`](AUTONOMOUS_STREAMING.md) for the full
+cross-language contract and offline verification matrix.
+
 Provider reconciliation can be made explicit without widening the journal's data surface. The
 `AutonomousProviderEffectResolver` adapter accepts a caller-owned lookup with
 `(provider, operation, idempotency_key, metadata_only_record)` and validates that it is resolving

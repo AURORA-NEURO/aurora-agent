@@ -3508,6 +3508,19 @@ class AutonomousBrain:
             raise BrainRunError("memory must be a BrainEpisodicMemory or None")
         self.memory = memory
 
+    def open_stream(self, request: ProviderRequest, **options: Any) -> Any:
+        """Open a live stream after the brain has admitted a caller-ranked model arm.
+
+        ``options`` are forwarded to :class:`AutonomousStreamRuntime.open`; in particular,
+        ``provider``, ``model``, and optional ``fallbacks`` must come from the caller's reviewed
+        selection snapshot. The returned handle exposes transient ``events`` and a metadata-only
+        ``completion`` receipt, so this convenience method never serializes provider output.
+        """
+
+        from .autonomous_stream import AutonomousStreamRuntime
+
+        return AutonomousStreamRuntime(self.runtime).open(request, **options)
+
     def prepare_autonomous(self, **kwargs: Any) -> Any:
         """Build a domain-aware task blueprint without contacting a provider.
 
