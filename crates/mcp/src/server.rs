@@ -275,6 +275,9 @@ use bioprism_ids::{
 use bioprism_ids::{IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION, IDS_PROTOCOL_SIMULATION_FEATURE_ID};
 use bioprism_ids::{IDS_QUALITY_CONTROL_CONTRACT_VERSION, IDS_QUALITY_CONTROL_FEATURE_ID};
 use bioprism_ids::{
+    IDS_REPLICATION_INTEROPERABILITY_CONTRACT_VERSION, IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID,
+};
+use bioprism_ids::{
     IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
     IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
 };
@@ -1878,6 +1881,9 @@ impl Server {
             }
             "ids_retrieval_synthesis_assurance_harness" => {
                 self.ids_retrieval_synthesis_assurance_harness(&arguments)
+            }
+            "ids_replication_negative_results_interoperability_gateway" => {
+                self.ids_replication_negative_results_interoperability_gateway(&arguments)
             }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
@@ -25111,6 +25117,30 @@ impl Server {
         }))
     }
 
+    fn ids_replication_negative_results_interoperability_gateway(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt =
+            crate::research_contracts::operate_ids_replication_interoperability_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID,
+            "contract_version": IDS_REPLICATION_INTEROPERABILITY_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "multimodal study, modality, observation, site, outcome, and peer states are deterministically partitioned",
+                "positive, null, negative, inconclusive, incomparable, contradictory, omitted, and uncertain evidence remains visible with a robust effect median",
+                "only aggregate digest summaries cross the interoperability boundary and the route never reruns experiments, exports raw observations, or makes clinical decisions"
+            ],
+            "limitations": [
+                "the route validates caller-supplied replication attestations and does not independently reproduce experiments or inspect raw imaging/omics data",
+                "a qualified replication record is not causal proof, publication approval, or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -41633,6 +41663,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized ScopedRetrievalQuery6 containing typed evidence candidates, aggregate peer summaries, query terms, thresholds, policy, approval, federation, locality, budget, and replay declarations." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "ids_replication_negative_results_interoperability_gateway",
+            "description": "Validate multimodal multi-study replication attestations and emit an interoperable negative-results record. The gateway preserves positive, null, negative, inconclusive, incomparable, contradictory, omitted, and uncertain outcomes while enforcing study/modality closure, provenance, replay, peer quorum, policy, federation, approval, budget, and aggregate-only locality without rerunning experiments.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ClaimAndProtocol7Request containing the typed claim/protocol, multimodal observations, aggregate peer summaries, checkpoint, policy, federation, approval, budget, and locality declarations." }
                 },
                 "required": ["request"]
             }

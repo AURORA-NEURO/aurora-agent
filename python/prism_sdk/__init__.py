@@ -7809,3 +7809,17 @@ __all__ += [
     "assure_ids_retrieval_synthesis",
     "idsRetrievalSynthesisAssuranceDigest",
 ]
+
+from .ids_replication_negative_results_interoperability_gateway import (
+    ReplicationRecord9 as IdsReplicationRecord9,
+    replication_interoperability_manifest as ids_replication_interoperability_manifest,
+    interoperate_replication as interoperate_ids_replication,
+    idsReplicationInteroperabilityDigest,
+)
+
+__all__ += [
+    "IdsReplicationRecord9",
+    "ids_replication_interoperability_manifest",
+    "interoperate_ids_replication",
+    "idsReplicationInteroperabilityDigest",
+]

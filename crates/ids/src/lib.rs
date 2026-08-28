@@ -22,6 +22,7 @@ pub mod mechanism_exploration_assurance;
 pub mod multimodal_ingestion_research_copilot;
 pub mod protocol_simulation_workbench;
 pub mod quality_control_assurance;
+pub mod replication_negative_results_interoperability_gateway;
 pub mod retrieval_synthesis_assurance_harness;
 pub mod statistical_causal_ml_research_copilot;
 pub mod throughput_evidence_surveillance_contract_model;
@@ -111,6 +112,13 @@ pub use quality_control_assurance::{
     QualityControlReport8, QualityControlReport8Artifact, QualityEvidenceState,
     QualityObservation4, CONTRACT_VERSION as IDS_QUALITY_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as IDS_QUALITY_CONTROL_FEATURE_ID,
+};
+pub use replication_negative_results_interoperability_gateway::{
+    interoperate_replication, replication_interoperability_manifest, ClaimAndProtocol7,
+    ClaimAndProtocol7Request, ReplicationEvidenceState, ReplicationInteroperabilityError,
+    ReplicationObservation7, ReplicationPeer7, ReplicationRecord9, ReplicationRecord9Artifact,
+    CONTRACT_VERSION as IDS_REPLICATION_INTEROPERABILITY_CONTRACT_VERSION,
+    FEATURE_ID as IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID,
 };
 pub use retrieval_synthesis_assurance_harness::{
     assure_retrieval_synthesis, retrieval_synthesis_assurance_manifest, EvidenceSynthesis11,

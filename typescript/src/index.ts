@@ -4443,3 +4443,13 @@ export {
   validateIdsEvidenceSynthesis11,
 } from "./research-contracts.js";
 export type { IdsEvidenceSynthesis11 } from "./research-contracts.js";
+
+export {
+  IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID,
+  IDS_REPLICATION_INTEROPERABILITY_CONTRACT_VERSION,
+  IDS_REPLICATION_INTEROPERABILITY_INPUT_SCHEMA,
+  IDS_REPLICATION_INTEROPERABILITY_OUTPUT_SCHEMA,
+  idsReplicationInteroperabilityDigest,
+  validateIdsReplicationRecord9,
+} from "./research-contracts.js";
+export type { IdsReplicationRecord9 } from "./research-contracts.js";

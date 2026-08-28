@@ -469,6 +469,10 @@ use bioprism_ids::{
     IDS_LABORATORY_INTEGRATION_FEATURE_ID,
 };
 use bioprism_ids::{
+    interoperate_replication, ClaimAndProtocol7Request, ReplicationInteroperabilityError,
+    ReplicationRecord9, IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID,
+};
+use bioprism_ids::{
     interoperate_resources, PeerResourceSummary4, QualifiedResourceSet6, ResourceEndpoint4,
     ResourceNeed4, IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
 };
@@ -3880,6 +3884,36 @@ pub fn validate_ids_retrieval_synthesis_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID {
         return Err("ids retrieval-synthesis assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_REPLICATION_INTEROPERABILITY_TOOL: &str =
+    "ids_replication_negative_results_interoperability_gateway";
+
+pub fn operate_ids_replication_interoperability_json(value: &Value) -> Result<Value, String> {
+    let request: ClaimAndProtocol7Request =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid ids replication interoperability request: {error}")
+            })?;
+    let receipt =
+        interoperate_replication(&request).map_err(|error: ReplicationInteroperabilityError| {
+            format!("ids replication interoperability failed: {error}")
+        })?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize ids replication interoperability receipt: {error}")
+    })
+}
+
+pub fn validate_ids_replication_interoperability_json(
+    value: &Value,
+) -> Result<ReplicationRecord9, String> {
+    let receipt: ReplicationRecord9 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids replication interoperability receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID {
+        return Err("ids replication interoperability feature id mismatch".into());
     }
     Ok(receipt)
 }
