@@ -14051,6 +14051,30 @@ class AutonomousTaskOrchestrator:
             failure=failure,
         )
 
+    @classmethod
+    def _provider_failure_call(
+        cls,
+        blueprint: AutonomousTaskBlueprint,
+        *,
+        child_id: str,
+        run_id: str | None,
+        invoke: Callable[[], BrainRunResult | BrainToolLoopResult | BrainMissionResult],
+    ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
+        """Run one provider-bound item while preserving a typed failure envelope."""
+
+        try:
+            result = invoke()
+        except (ProviderError, CredentialError) as error:
+            result = cls._provider_failure_result(
+                blueprint,
+                child_id=child_id,
+                error=error,
+                run_id=run_id,
+            )
+        if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
+            raise BrainRunError("provider-bound cross-domain call returned an unsupported result")
+        return result
+
     @staticmethod
     def _cross_domain_output(result: BrainRunResult | BrainToolLoopResult | BrainMissionResult) -> str:
         response = None
@@ -14507,7 +14531,11 @@ class AutonomousTaskOrchestrator:
                 "focus_child_ids": list(plan_focus_child_ids),
             }
         synthesis = blueprint.synthesis_blueprint
-        synthesis_result = self.run(
+        synthesis_result = self._provider_failure_call(
+            synthesis,
+            child_id="synthesis",
+            run_id=self._cross_domain_identity("cross-synthesis", run_id, "synthesis"),
+            invoke=lambda: self.run(
             task=synthesis.spec.task,
             domain=synthesis.spec.domain,
             model_candidates=model_candidates,
@@ -14577,6 +14605,7 @@ class AutonomousTaskOrchestrator:
             execution_controller=execution_controller,
             invocation_observer=invocation_observer,
             trace_event_callback=trace_event_callback,
+            ),
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
             raise BrainRunError("cross-domain synthesis returned an unsupported result")
@@ -14850,7 +14879,11 @@ class AutonomousTaskOrchestrator:
                     "priority_rank": plan_priority[child_id],
                     "focus": child_id in plan_focus_child_ids,
                 }
-            result = self.run(
+            result = self._provider_failure_call(
+                child,
+                child_id=child_id,
+                run_id=self._cross_domain_identity("cross-child", run_id, child_id),
+                invoke=lambda: self.run(
                 task=child.spec.task,
                 domain=child.spec.domain,
                 model_candidates=model_candidates,
@@ -14911,6 +14944,7 @@ class AutonomousTaskOrchestrator:
                 ),
                 bandit_state=state,
                 execution_controller=execution_controller,
+                ),
             )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("cross-domain learning child returned an unsupported result")
@@ -14923,17 +14957,29 @@ class AutonomousTaskOrchestrator:
                 result=result,
                 item_evidence=item_evidence,
             )
+            # A strict learning fan-out must not spend provider/evaluator budget on later
+            # specialists after a refusal or provider-boundary failure.  The caller can opt into
+            # sibling continuation with allow_partial=True; already-settled results remain in the
+            # ordered envelope either way.
+            if not allow_partial and not result.status.startswith("completed"):
+                break
 
         complete = [result.status.startswith("completed") for result in child_results]
         if not all(complete) and not allow_partial:
-            status = "approval_required" if any(result.status == "approval_required" for result in child_results) else "child_incomplete"
+            status = (
+                "approval_required"
+                if any(result.status == "approval_required" for result in child_results)
+                else "child_failed"
+                if any(result.status == "provider_failed" for result in child_results)
+                else "child_incomplete"
+            )
             cross_domain = AutonomousCrossDomainResult(
                 status,
                 blueprint,
                 tuple(child_results),
                 None,
                 plan_refinement_digest,
-                execution_child_ids,
+                execution_child_ids[: len(child_results)],
             )
             return AutonomousCrossDomainLearningResult(status, cross_domain, tuple(evaluations), state, tuple(memory_receipts))
         if not synthesize:
@@ -14972,7 +15018,11 @@ class AutonomousTaskOrchestrator:
                 "priority_child_ids": list(execution_child_ids),
                 "focus_child_ids": list(plan_focus_child_ids),
             }
-        synthesis_result = self.run(
+        synthesis_result = self._provider_failure_call(
+            synthesis,
+            child_id="synthesis",
+            run_id=self._cross_domain_identity("cross-synthesis", run_id, "synthesis"),
+            invoke=lambda: self.run(
             task=synthesis.spec.task,
             domain=synthesis.spec.domain,
             model_candidates=model_candidates,
@@ -15028,6 +15078,7 @@ class AutonomousTaskOrchestrator:
             ),
             bandit_state=state,
             execution_controller=execution_controller,
+            ),
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
             raise BrainRunError("cross-domain learning synthesis returned an unsupported result")

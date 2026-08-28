@@ -2727,7 +2727,7 @@ test("cross-domain provider failures become redacted child results and respect p
   llm.registerInMemoryProvider("failure-isolation", (request) => {
     calls += 1;
     const promptText = JSON.stringify(request.messages);
-    if (promptText.includes("FAIL_CHILD")) throw new Error("sensitive provider diagnostic must not cross the child boundary");
+    if (promptText.includes("FAIL_CHILD") || promptText.includes("FAIL_SYNTHESIS")) throw new Error("sensitive provider diagnostic must not cross the child boundary");
     return { text: "healthy bounded specialist or synthesis output" };
   });
   const agent = new AutonomousAgent(llm);
@@ -2770,4 +2770,20 @@ test("cross-domain provider failures become redacted child results and respect p
   assert.equal(blocked.synthesis, null);
   assert.equal(blocked.child_runs.length, 1);
   assert.equal(blocked.child_runs[0].result.status, "child_failed");
+
+  const synthesisFailed = await agent.runCrossDomain("Coordinate a biomedical and neuroscience review with FAIL_SYNTHESIS at fan-in.", {
+    candidates: [model],
+    subtasks: [
+      { id: "biomedical-specialist", domain: "biomedical", task: "Review the biomedical evidence." },
+      { id: "neuroscience-specialist", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+    ],
+    approveProviderCall: true,
+    allowPartial: true,
+    maxParallelChildren: 2,
+  });
+  assert.equal(synthesisFailed.status, "child_failed");
+  assert.deepEqual(synthesisFailed.child_runs.map((child) => child.result.status), ["completed", "completed"]);
+  assert.equal(synthesisFailed.synthesis?.status, "child_failed");
+  assert.equal(synthesisFailed.synthesis?.failure?.error_class, "ProviderRuntimeError");
+  assert.equal(JSON.stringify(synthesisFailed).includes("sensitive provider diagnostic"), false);
 });

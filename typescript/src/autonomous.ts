@@ -9398,7 +9398,9 @@ export class AutonomousAgent {
         priority: 90,
       })),
     ];
-    const synthesis = await this.run(synthesisTaskMessage.content, {
+    let synthesis: AutonomousRunResult;
+    try {
+      synthesis = await this.run(synthesisTaskMessage.content, {
       domain: "cross_domain",
       capability: "cross_domain_synthesis",
       candidates,
@@ -9449,8 +9451,14 @@ export class AutonomousAgent {
       selectionEventCallback: options.selectionEventCallback,
       toolSelectionState: options.toolSelectionState,
       toolSelectionExploration: options.toolSelectionExploration,
-      maxToolRiskClass: options.maxToolRiskClass,
-    });
+        maxToolRiskClass: options.maxToolRiskClass,
+      });
+    } catch (error) {
+      if (!(error instanceof ProviderRuntimeError)) throw error;
+      // Keep synthesis failures on the same typed boundary as child failures. The parent
+      // remains explicit about the failed synthesis and never serializes provider diagnostics.
+      synthesis = providerFailureRunResult(route, blueprint.synthesis_blueprint, error, learning);
+    }
     if (options.learning && synthesis.status === "completed") {
       const episodeId = `cross:${route.task_digest}:synthesis`;
       const episode = await options.learning.prepareRun(synthesis, { episodeId, runId: episodeId, stageId: "synthesis", parentJobId: `cross:${route.task_digest}`, planRefinementDigest });

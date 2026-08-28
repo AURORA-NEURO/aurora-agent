@@ -50,14 +50,16 @@ tool data. This direct path is intentionally separate from evaluator-driven cros
 and replanning: those APIs keep sequential delayed-credit settlement so concurrent completion
 cannot change bandit updates or trajectory identity.
 
-Provider and credential boundary failures inside a child are converted into a typed,
-metadata-only `BrainRunResult` with `status="provider_failed"`. It exposes only stable failure
-metadata such as retryability, circuit state, and status code; exception text, request messages,
-credential material, provider responses, and wire payloads are never retained. With
+Provider and credential boundary failures inside a child or the synthesis leg are converted into a
+typed, metadata-only `BrainRunResult` with `status="provider_failed"`. It exposes only stable
+failure metadata such as retryability, circuit state, and status code; exception text, request
+messages, credential material, provider responses, and wire payloads are never retained. With
 `allow_partial=True`, healthy siblings and synthesis can proceed and the parent can complete while
-the failed child remains visible. With `allow_partial=False`, dispatch stops and the parent returns
-`child_failed` without synthesis. Programming, malformed-input, and configuration errors remain
-hard failures.
+the failed child remains visible. The evaluator-driven `run_cross_domain_learning()` path uses the
+same envelope and does not settle rewards or memory for failed items; it preserves declaration/
+accepted-plan order for the items that did settle. With `allow_partial=False`, the parent returns
+`child_failed` without synthesis after a strict child failure. Programming, malformed-input, and
+configuration errors remain hard failures.
 
 For a local durable worker, `SQLiteAutonomousExecutionSnapshotPersistence(path)` is a ready
 transactional implementation of the snapshot adapter. It stores one canonical metadata snapshot

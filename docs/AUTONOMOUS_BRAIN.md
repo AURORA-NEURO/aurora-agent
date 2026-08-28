@@ -4522,15 +4522,18 @@ ordered delayed-credit APIs remain sequential so completion timing cannot change
 `AutonomousCrossDomainResult.to_dict()` exposes the requested ceiling as control-plane metadata
 only; it grants no provider, credential, tool, source, or external-effect authority.
 
-Provider and credential boundary failures inside a child are converted into a typed,
-metadata-only child envelope in both SDKs. The envelope exposes only the stable error class/code,
+Provider and credential boundary failures inside a child or the synthesis leg are converted into
+a typed, metadata-only result envelope in both SDKs. The envelope exposes only the stable error
+class/code,
 retryability, circuit state, and bounded status code; exception text, request messages, credential
 material, provider responses, and wire payloads are never copied into the parent result. With
 `allow_partial=True`, healthy siblings remain available and synthesis may complete, so the parent
 can report `completed` while the failed child remains explicitly `provider_failed`/`child_failed`.
-With `allow_partial=False`, dispatch stops at the failed child and the parent returns `child_failed`
-without synthesis. Programming, malformed-input, and configuration errors still propagate as
-hard failures instead of being disguised as provider outages.
+The same envelope is used when synthesis itself fails, yielding an explicit provider failure
+instead of losing the completed child state. With `allow_partial=False`, the parent returns
+`child_failed` without synthesis once a strict child failure is observed. Programming,
+malformed-input, and configuration errors still propagate as hard failures instead of being
+disguised as provider outages.
 
 For applications that want the evaluator to drive a bounded recovery loop, use the explicit
 `run_workflow_cycle()` entry point. It is intentionally separate from `run_workflow_learning()`:

@@ -3479,7 +3479,7 @@ def test_cross_domain_provider_failures_become_redacted_child_results_and_respec
 
     def handler(request: ProviderRequest) -> Mapping[str, object]:
         prompt_text = json.dumps(list(request.messages))
-        if "FAIL_CHILD" in prompt_text:
+        if "FAIL_CHILD" in prompt_text or "FAIL_SYNTHESIS" in prompt_text:
             raise ProviderError(
                 "sensitive provider diagnostic must not cross the child boundary",
                 retryable=True,
@@ -3541,6 +3541,104 @@ def test_cross_domain_provider_failures_become_redacted_child_results_and_respec
     assert blocked.status == "child_failed"
     assert blocked.synthesis_result is None
     assert blocked.child_results[0].status == "provider_failed"
+
+    synthesis_failed = agent.run_cross_domain(
+        task="Coordinate a biomedical and neuroscience review with FAIL_SYNTHESIS at fan-in.",
+        subtasks=[
+            {"id": "biomedical-specialist", "task": "Review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "neuroscience-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+        ],
+        credentials={},
+        approve_provider_call=True,
+        allow_partial=True,
+        max_parallelism=2,
+    )
+    assert synthesis_failed.status == "provider_failed"
+    assert all(result.status == "completed_provider_call" for result in synthesis_failed.child_results)
+    assert synthesis_failed.synthesis_result is not None
+    assert synthesis_failed.synthesis_result.status == "provider_failed"
+    assert isinstance(synthesis_failed.synthesis_result, BrainRunResult)
+    assert synthesis_failed.synthesis_result.failure == {
+        "error_class": "ProviderError",
+        "retryable": True,
+        "circuit_open": False,
+        "status_code": 503,
+        "retention": "metadata_only;provider_error_message_and_payloads_not_retained",
+        "secret_material": "never_returned",
+    }
+    assert "sensitive provider diagnostic" not in json.dumps(synthesis_failed.to_dict())
+
+
+def test_cross_domain_learning_provider_failures_preserve_ordered_evaluator_settlement(tmp_path: Path):
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda request: (
+            (_ for _ in ()).throw(
+                ProviderError(
+                    "sensitive learning provider diagnostic",
+                    retryable=True,
+                    status_code=503,
+                )
+            )
+            if "FAIL_CHILD" in json.dumps(list(request.messages))
+            else {"output_text": "healthy learning child or synthesis output"}
+        ),
+    )
+    memory = BrainEpisodicMemory(tmp_path / "cross-domain-learning-failure.sqlite3")
+    evaluator = BrainOutcomeEvaluator(
+        lambda _input: {"reward": 0.8, "passed": True, "failed": False},
+        evaluator_id="cross-domain-learning-failure-quality",
+        evaluator_version="1",
+    )
+    try:
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            memory=memory,
+            model_catalogue=ModelCatalogue(_model()),
+        )
+        subtasks = [
+            {"id": "failing-specialist", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "healthy-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+        ]
+        partial = agent.run_cross_domain_learning(
+            task="Learn from a partially available biomedical and neuroscience review.",
+            subtasks=subtasks,
+            credentials={},
+            model_candidates=_model(),
+            evaluator=evaluator,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            approve_provider_call=True,
+            allow_partial=True,
+        )
+        assert partial.status == "completed"
+        assert [result.status for result in partial.cross_domain.child_results] == [
+            "provider_failed",
+            "completed_provider_call",
+        ]
+        assert partial.cross_domain.synthesis_result is not None
+        assert partial.cross_domain.synthesis_result.status == "completed_provider_call"
+        assert len(partial.evaluations) == 2
+        assert all(item["scope"] in {"child", "synthesis"} for item in partial.evaluations)
+        assert "sensitive learning provider diagnostic" not in json.dumps(partial.to_dict())
+
+        blocked = agent.run_cross_domain_learning(
+            task="Learn from a strict biomedical and neuroscience review.",
+            subtasks=subtasks,
+            credentials={},
+            model_candidates=_model(),
+            evaluator=evaluator,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            approve_provider_call=True,
+            allow_partial=False,
+        )
+        assert blocked.status == "child_failed"
+        assert blocked.cross_domain.synthesis_result is None
+        assert blocked.cross_domain.child_results[0].status == "provider_failed"
+        assert blocked.evaluations == ()
+    finally:
+        memory.close()
 
 
 def test_cross_domain_learning_updates_state_between_children_and_synthesis(tmp_path: Path):
