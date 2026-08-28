@@ -36,6 +36,15 @@ import {
   type AutonomousConnectorOperationInput,
 } from "./autonomous-connector-facade.js";
 import {
+  runAutonomousConnectorMission,
+  runAutonomousConnectorMissionWithLaunchAdmission,
+  runAutonomousConnectorMissionWithProviderPlanning,
+  runAutonomousConnectorMissionWithProviderPlanningAndLaunchAdmission,
+  type AutonomousConnectorMissionProviderPlanningOptions as ConnectorMissionProviderPlanningOptions,
+  type AutonomousConnectorMissionRunOptions as ConnectorMissionRunOptions,
+  type AutonomousConnectorPlannedMissionRun as ConnectorPlannedMissionRun,
+} from "./autonomous-connector-mission.js";
+import {
   runAutonomousCrossDomainDecisionCycle,
   runAutonomousCrossDomainReplanCycle,
   runAutonomousDecisionCycle,
@@ -449,6 +458,18 @@ export interface AutonomousBrainTracedMissionReplanResult {
   retention: "mission_execution_values_caller_owned;trace_metadata_only_no_prompts_responses_arguments_or_credentials";
   secret_material: "never_returned";
 }
+
+/** Direct connector mission controls exposed by the high-level brain facade. */
+export type AutonomousBrainConnectorMissionOptions = ConnectorMissionRunOptions;
+
+/** Provider-planned connector mission controls exposed by the high-level brain facade. */
+export type AutonomousBrainConnectorMissionProviderPlanningOptions = ConnectorMissionProviderPlanningOptions;
+
+/** Caller-owned connector mission execution values; checkpoints and events remain metadata-only. */
+export type AutonomousBrainConnectorMissionExecution = Awaited<ReturnType<typeof runAutonomousConnectorMission>>;
+
+/** Two-phase connector mission result with a safe metadata-only JSON projection. */
+export type AutonomousBrainPlannedConnectorMission = ConnectorPlannedMissionRun;
 
 /** Options for executing one caller-approved, digest-bound model-selection preview. */
 export interface AutonomousBrainApprovedSelectionOptions {
@@ -1555,6 +1576,59 @@ export class AutonomousBrainFacade {
     admission: AutonomousLaunchAdmissionReport,
   ): AutonomousLaunchAdmissionReport {
     return authorizeAutonomousLaunchDomains(admission, missionDomains(mission));
+  }
+
+  /**
+   * Execute a caller-owned connector mission through the high-level brain boundary.
+   *
+   * This keeps the mission graph, connector approval, tool catalogue, and transient result in
+   * the caller's process while delegating scheduling, checkpointing, receipt idempotency,
+   * evaluator hooks, and online feedback to the reviewed mission adapter. No provider call or
+   * external effect is implied by exposing this convenience method.
+   */
+  async runConnectorMission(
+    mission: AgentMissionArgs,
+    options: AutonomousBrainConnectorMissionOptions,
+  ): Promise<AutonomousBrainConnectorMissionExecution> {
+    const validated = validateMissionForBrain(mission);
+    return runAutonomousConnectorMission(validated, options);
+  }
+
+  /** Execute a connector mission only after a provider-free launch admission covers its domains. */
+  async runConnectorMissionWithLaunchAdmission(
+    mission: AgentMissionArgs,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainConnectorMissionOptions,
+  ): Promise<AutonomousBrainConnectorMissionExecution> {
+    const validated = validateMissionForBrain(mission);
+    if (options?.execute?.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted connector execution requires provider-free routing; admit semantic mission routing separately");
+    return runAutonomousConnectorMissionWithLaunchAdmission(validated, admission, options);
+  }
+
+  /**
+   * Produce or replay a provider-ordered connector mission proposal, requiring explicit plan
+   * acceptance before any connector dispatch. Accepted replays never call the planner again.
+   */
+  async runConnectorMissionWithProviderPlanning(
+    mission: AgentMissionArgs,
+    options: AutonomousBrainConnectorMissionProviderPlanningOptions,
+  ): Promise<AutonomousBrainPlannedConnectorMission> {
+    const validated = validateMissionForBrain(mission);
+    return runAutonomousConnectorMissionWithProviderPlanning(this.agent, validated, options);
+  }
+
+  /**
+   * Provider-planned connector mission with launch admission checked before planner invocation.
+   * Plan acceptance and connector approval remain independent caller decisions.
+   */
+  async runConnectorMissionWithProviderPlanningAndLaunchAdmission(
+    mission: AgentMissionArgs,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainConnectorMissionProviderPlanningOptions,
+  ): Promise<AutonomousBrainPlannedConnectorMission> {
+    const validated = validateMissionForBrain(mission);
+    if (options?.execution?.execute?.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted connector execution requires provider-free routing; admit semantic mission routing separately");
+    return runAutonomousConnectorMissionWithProviderPlanningAndLaunchAdmission(this.agent, validated, admission, options);
   }
 
   /**

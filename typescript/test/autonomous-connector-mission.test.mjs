@@ -217,6 +217,101 @@ test("launch admission is checked before provider planning or connector dispatch
   assert.equal(fixtureValue.calls(), 0);
 });
 
+test("brain facade exposes the complete all-domain connector mission lifecycle", async () => {
+  const fixtureValue = await fixture();
+  const brain = new AutonomousBrainFacade({ agent: fixtureValue.agent });
+  const allDomainMission = mission(
+    AUTONOMOUS_DOMAIN_NAMES.map((domain, index) => step(`facade-domain-${index}`, domain, [], `facade-private-${domain}`)),
+    "facade-all-domain-mission",
+  );
+  const direct = await brain.runConnectorMission(allDomainMission, {
+    catalogue: fixtureValue.catalogue,
+    connector: { runtime: fixtureValue.runtime, approved: true },
+    execute: { approveProviderCall: true },
+  });
+  assert.equal(direct.status, "succeeded");
+  assert.equal(direct.completed_steps, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(fixtureValue.calls(), AUTONOMOUS_DOMAIN_NAMES.length);
+
+  const plannedMission = mission([
+    step("finish", "coding", ["seed"], "facade-secret-finish"),
+    step("seed", "coding", [], "facade-secret-seed"),
+    step("parallel", "data", [], "facade-secret-parallel"),
+  ], "facade-provider-planned-mission");
+  let plannerCalls = 0;
+  const proposed = {
+    ...refinementFor(plannedMission),
+    priority_step_ids: ["seed", "parallel", "finish"],
+    focus_step_ids: ["seed", "parallel", "finish"],
+    planner_context: { prompt: "facade-provider-transcript-secret" },
+  };
+  fixtureValue.agent.planOrderedStepsWithProvider = async (request) => {
+    plannerCalls += 1;
+    assert.equal(request.task, plannedMission.goal);
+    assert.deepEqual(request.steps, connectorMissionPlannerSteps(plannedMission));
+    assert.equal(JSON.stringify(request).includes("connector_probe"), false);
+    assert.equal(JSON.stringify(request).includes("facade-secret-seed"), false);
+    return proposed;
+  };
+  const held = await brain.runConnectorMissionWithProviderPlanning(plannedMission, {
+    execution: {
+      catalogue: fixtureValue.catalogue,
+      connector: { runtime: fixtureValue.runtime, approved: true },
+      execute: { approveProviderCall: true },
+    },
+    providerPlanning: { approveProviderCall: true },
+    acceptPlan: false,
+  });
+  assert.equal(held.status, "planning_acceptance_required");
+  assert.equal(plannerCalls, 1);
+  assert.equal(fixtureValue.calls(), AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(JSON.stringify(held), JSON.stringify(held.toJSON()));
+  assert.doesNotMatch(JSON.stringify(held), /facade-secret-seed|facade-provider-transcript-secret/);
+
+  const replay = await brain.runConnectorMissionWithProviderPlanning(plannedMission, {
+    execution: {
+      catalogue: fixtureValue.catalogue,
+      connector: { runtime: fixtureValue.runtime, approved: true },
+      execute: { approveProviderCall: true },
+    },
+    acceptedPlanRefinement: held.plan_refinement,
+    acceptPlan: true,
+  });
+  assert.equal(replay.status, "succeeded");
+  assert.equal(plannerCalls, 1, "facade replay must not invoke the planner again");
+  assert.deepEqual(replay.execution.results.map(({ step: missionStep }) => missionStep.id), ["seed", "parallel", "finish"]);
+  assert.doesNotMatch(JSON.stringify(replay), /facade-secret-seed|facade-provider-transcript-secret/);
+
+  const heldAdmission = brain.admitLaunchPreflight(await brain.launchPreflight(), { decision: "hold" });
+  const plannerCallsBeforeHold = plannerCalls;
+  await assert.rejects(
+    () => brain.runConnectorMissionWithProviderPlanningAndLaunchAdmission(plannedMission, heldAdmission, {
+      execution: {
+        catalogue: fixtureValue.catalogue,
+        connector: { runtime: fixtureValue.runtime, approved: true },
+        execute: { approveProviderCall: true },
+      },
+      providerPlanning: { approveProviderCall: true },
+      acceptPlan: true,
+    }),
+    /not approved/,
+  );
+  assert.equal(plannerCalls, plannerCallsBeforeHold, "launch admission must precede facade planner invocation");
+  assert.equal(fixtureValue.calls(), AUTONOMOUS_DOMAIN_NAMES.length + 3);
+  await assert.rejects(
+    () => brain.runConnectorMissionWithLaunchAdmission(
+      mission([step("semantic", "coding", [], "semantic-secret")], "facade-semantic-launch"),
+      heldAdmission,
+      {
+        catalogue: fixtureValue.catalogue,
+        connector: { runtime: fixtureValue.runtime, approved: true },
+        execute: { approveProviderCall: true, semanticRouting: { enabled: true } },
+      },
+    ),
+    /provider-free routing/,
+  );
+});
+
 test("tampered ordered plans cannot change protected mission fields or dependency order", async () => {
   const missionValue = mission([step("first", "coding"), step("second", "data", ["first"])], "tamper-mission");
   const refinement = refinementFor(missionValue);

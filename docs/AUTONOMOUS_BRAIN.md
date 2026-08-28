@@ -1419,6 +1419,18 @@ TypeScript path for composing model selection, provider invocation, autonomous D
 connector selection, receipt idempotency, replay/reconciliation, and online feedback while
 keeping the authorization boundaries independent.
 
+The same four lifecycle paths are available from `AutonomousBrainFacade`, so an embedding
+application can keep ordinary task execution and connector missions behind one application API:
+`runConnectorMission()`, `runConnectorMissionWithLaunchAdmission()`,
+`runConnectorMissionWithProviderPlanning()`, and
+`runConnectorMissionWithProviderPlanningAndLaunchAdmission()`. The facade validates the mission
+before delegation, rejects semantic routing on a launch-admitted connector path, and preserves
+the distinction between launch admission, provider-plan acceptance, connector approval, and
+effect/provider authorization. Direct execution returns caller-owned transient step values;
+provider-planned execution returns `AutonomousConnectorPlannedMissionRun`, whose JSON projection
+is metadata-only and safe for logs, queues, and durable state. Accepted plan replays continue to
+skip the provider planner, including when called through the facade.
+
 Connector status is deliberately not reward. A caller evaluator can settle a receipt later through
 `AutonomousConnectorMissionAdapter.settle_evaluator_feedback()` or at dispatch time through
 `feedback_by_step`. The feedback ledger accepts only bounded, explicit `source="caller_evaluator"`

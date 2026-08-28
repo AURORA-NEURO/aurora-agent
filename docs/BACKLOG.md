@@ -6,6 +6,12 @@ mission-contract replay, explicit plan acceptance, connector approval, durable m
 and launch admission. Remaining work below is deployment hardening, external authority, and the
 other explicitly enumerated gaps; this addition is not a claim that the whole product is complete.
 
+The high-level TypeScript `AutonomousBrainFacade` now exposes the same direct, launch-admitted,
+provider-planned, and launch-admitted provider-planned connector mission lifecycle as
+`AutonomousAgent`. Facade tests cover all twelve domains, accepted-plan replay without a second
+planner call, independent connector approval, metadata-only planned projections, semantic-route
+refusal on launch-admitted execution, and launch holds before planner or connector dispatch.
+
 Provider-assisted planning now has a symmetric failure contract across Python and TypeScript.
 Single-domain, ordered-step, cross-domain, automatic, and direct plan-and-run entrypoints convert
 credential-boundary and operational provider failures into metadata-only `provider_failed`
