@@ -5,7 +5,11 @@ for the normal user-key lifecycle: provider registration, redacted instructions,
 credential sessions, opaque handles, readiness projection, and revocation. Offline coverage
 confirms that credentials remain out of readiness and serialized metadata and that no network call
 is made during onboarding. The facade also exposes one-call provisioned direct, closed-loop, and
-adaptive execution wrappers, the automatic route/planning envelope, and launch-admitted variants.
+adaptive execution wrappers, the automatic route/planning envelope, launch-admitted variants,
+and traced provisioned variants for every core execution mode. The traced path keeps the
+credential resolver transient, emits only metadata/digests, and checks launch admission before
+opening a session. Offline all-domain coverage verifies session closure, trace integrity,
+redaction, and direct/automatic/cycle/adaptive admission composition.
 Secret-manager integration, encryption, tenant authorization, and production UI remain deployment
 responsibilities.
 

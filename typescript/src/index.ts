@@ -339,9 +339,13 @@ export type {
   AutonomousExplicitProvisionedExecutionOptions,
   AutonomousAutomaticProvisionedExecutionOptions,
   AutonomousProvisionedBrainExecuteOptions,
+  AutonomousProvisionedBrainTraceOptions,
   AutonomousProvisionedBrainAutoExecuteOptions,
+  AutonomousProvisionedBrainAutoTraceOptions,
   AutonomousProvisionedBrainCycleOptions,
+  AutonomousProvisionedBrainCycleTraceOptions,
   AutonomousProvisionedBrainAdaptiveCycleOptions,
+  AutonomousProvisionedBrainAdaptiveCycleTraceOptions,
   SupportedProviderName,
 } from "./provider-setup.js";
 export {

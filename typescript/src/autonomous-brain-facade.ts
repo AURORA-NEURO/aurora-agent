@@ -3,9 +3,13 @@ import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-re
 import {
   ProviderSetup,
   type AutonomousProvisionedBrainAdaptiveCycleOptions,
+  type AutonomousProvisionedBrainAdaptiveCycleTraceOptions,
   type AutonomousProvisionedBrainAutoExecuteOptions,
+  type AutonomousProvisionedBrainAutoTraceOptions,
   type AutonomousProvisionedBrainCycleOptions,
+  type AutonomousProvisionedBrainCycleTraceOptions,
   type AutonomousProvisionedBrainExecuteOptions,
+  type AutonomousProvisionedBrainTraceOptions,
   type AutonomousProvisionedRun,
 } from "./provider-setup.js";
 import {
@@ -1727,6 +1731,14 @@ export class AutonomousBrainFacade {
     return this.providerSetup.runBrainWithProvisionedCredentials(this, input, options);
   }
 
+  /** Execute through protected provisioning while exposing the redacted brain lifecycle trace. */
+  executeWithProvisionedCredentialsWithTrace(
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedExecution>> {
+    return this.providerSetup.runBrainWithProvisionedCredentialsWithTrace(this, input, options);
+  }
+
   /** Provision and execute the facade only after a caller-owned launch admission covers the route. */
   executeWithProvisionedCredentialsWithLaunchAdmission(
     input: AutonomousBrainRequest,
@@ -1736,12 +1748,29 @@ export class AutonomousBrainFacade {
     return this.providerSetup.runBrainWithProvisionedCredentialsWithLaunchAdmission(this, input, admission, options);
   }
 
+  /** Provision and trace direct execution only after a caller-owned launch admission. */
+  executeWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedExecution>> {
+    return this.providerSetup.runBrainWithProvisionedCredentialsWithLaunchAdmissionAndTrace(this, input, admission, options);
+  }
+
   /** Execute automatic route/planning/invocation through one deployment-managed session. */
   executeAutoWithProvisionedCredentials(
     input: AutonomousBrainRequest,
     options: AutonomousProvisionedBrainAutoExecuteOptions = {},
   ): Promise<AutonomousProvisionedRun<AutonomousBrainAutoExecution>> {
     return this.providerSetup.runBrainAutoWithProvisionedCredentials(this, input, options);
+  }
+
+  /** Execute automatic routing/planning through protected provisioning and a redacted trace. */
+  executeAutoWithProvisionedCredentialsWithTrace(
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainAutoTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedAutoExecution>> {
+    return this.providerSetup.runBrainAutoWithProvisionedCredentialsWithTrace(this, input, options);
   }
 
   /** Run automatic facade execution only after a caller-owned launch admission covers the route. */
@@ -1753,12 +1782,29 @@ export class AutonomousBrainFacade {
     return this.providerSetup.runBrainAutoWithProvisionedCredentialsWithLaunchAdmission(this, input, admission, options);
   }
 
+  /** Provision and trace automatic execution only after a caller-owned launch admission. */
+  executeAutoWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainAutoTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedAutoExecution>> {
+    return this.providerSetup.runBrainAutoWithProvisionedCredentialsWithLaunchAdmissionAndTrace(this, input, admission, options);
+  }
+
   /** Execute the closed-loop evaluator and online-learning cycle inside one credential session. */
   executeCycleWithProvisionedCredentials(
     input: AutonomousBrainRequest,
     options: AutonomousProvisionedBrainCycleOptions = {},
   ): Promise<AutonomousProvisionedRun<AutonomousBrainCycleExecution>> {
     return this.providerSetup.runBrainCycleWithProvisionedCredentials(this, input, options);
+  }
+
+  /** Execute the closed-loop cycle through protected provisioning and a redacted trace. */
+  executeCycleWithProvisionedCredentialsWithTrace(
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedCycleExecution>> {
+    return this.providerSetup.runBrainCycleWithProvisionedCredentialsWithTrace(this, input, options);
   }
 
   /** Run the closed-loop cycle only after a caller-owned launch admission covers the route. */
@@ -1770,12 +1816,29 @@ export class AutonomousBrainFacade {
     return this.providerSetup.runBrainCycleWithProvisionedCredentialsWithLaunchAdmission(this, input, admission, options);
   }
 
+  /** Provision and trace the closed-loop cycle only after a caller-owned launch admission. */
+  executeCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedCycleExecution>> {
+    return this.providerSetup.runBrainCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(this, input, admission, options);
+  }
+
   /** Execute bounded evaluator-guided replanning with deployment-managed credentials. */
   executeAdaptiveCycleWithProvisionedCredentials(
     input: AutonomousBrainRequest,
     options: AutonomousProvisionedBrainAdaptiveCycleOptions,
   ): Promise<AutonomousProvisionedRun<AutonomousBrainAdaptiveCycleExecution>> {
     return this.providerSetup.runBrainAdaptiveCycleWithProvisionedCredentials(this, input, options);
+  }
+
+  /** Execute bounded adaptive replanning through protected provisioning and a redacted trace. */
+  executeAdaptiveCycleWithProvisionedCredentialsWithTrace(
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainAdaptiveCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedAdaptiveCycleExecution>> {
+    return this.providerSetup.runBrainAdaptiveCycleWithProvisionedCredentialsWithTrace(this, input, options);
   }
 
   /** Run bounded adaptive replanning only after a caller-owned launch admission covers the route. */
@@ -1785,6 +1848,15 @@ export class AutonomousBrainFacade {
     options: AutonomousProvisionedBrainAdaptiveCycleOptions,
   ): Promise<AutonomousProvisionedRun<AutonomousBrainAdaptiveCycleExecution>> {
     return this.providerSetup.runBrainAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmission(this, input, admission, options);
+  }
+
+  /** Provision and trace adaptive replanning only after a caller-owned launch admission. */
+  executeAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainAdaptiveCycleTraceOptions,
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainTracedAdaptiveCycleExecution>> {
+    return this.providerSetup.runBrainAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace(this, input, admission, options);
   }
 
   /**

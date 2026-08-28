@@ -8,6 +8,7 @@ import {
   AutonomousBrainFacade,
   CredentialError,
   CredentialStore,
+  InMemoryAutonomousRunTraceStore,
   LLMRuntime,
   ProviderSetup,
   builtinAutonomousDomainProfiles,
@@ -40,6 +41,25 @@ function candidate(provider, capabilities, model = "offline-model") {
     reliability: 0.99,
     requires_credential: provider !== "offline",
   };
+}
+
+async function approvedLaunchAdmission(brain) {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const availableToolNames = profiles.flatMap((profile) => profile.tool_profile.bindings.map((binding) => binding.name));
+  const availableEvidence = profiles.flatMap((profile) => profile.workflow.stages.flatMap((stage) => stage.evidence_outputs.map((label) => `${profile.domain}:${stage.id}:${label}`)));
+  const ready = { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true };
+  const preflight = await brain.launchPreflight({
+    availableToolNames,
+    availableEvidence,
+    deploymentCapabilities: {
+      persistence: ready,
+      queue: ready,
+      approval_authority: ready,
+      external_auth: ready,
+      telemetry: ready,
+    },
+  });
+  return brain.admitLaunchPreflight(preflight, { decision: "approve", authorizationDigest: "b".repeat(64) });
 }
 
 test("provisioned TypeScript execution closes sessions and serializes metadata only", async () => {
@@ -191,6 +211,68 @@ test("provisioned brain facade executes direct, closed-loop, and adaptive paths 
   });
   assert.equal(adaptive.status, "completed");
   assert.equal(adaptive.result.adaptive.attempts.length, 1);
+  assert.equal(runtime.credentials.status("offline").active_handles, 0);
+});
+
+test("provisioned brain tracing covers every domain and keeps launch admission before session opening", async () => {
+  const capabilities = await broadCapabilities();
+  const runtime = localRuntime("offline");
+  const setup = new ProviderSetup(runtime);
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(candidate("offline", capabilities));
+  const brain = new AutonomousBrainFacade({ agent });
+  const store = new InMemoryAutonomousRunTraceStore();
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const run = await brain.executeWithProvisionedCredentialsWithTrace({ task: `trace a bounded ${domain} review`, domain }, {
+      credentialProviders: ["offline"],
+      approveProviderCall: true,
+      traceStore: store,
+      runId: `provisioned-trace-${domain}`,
+    });
+    assert.equal(run.status, "completed", domain);
+    assert.equal(run.result.execution.status, "completed", domain);
+    assert.equal(run.result.trace.status, "completed", domain);
+    assert.equal(JSON.stringify(run.toJSON()).includes(`trace a bounded ${domain} review`), false, domain);
+  }
+
+  const admission = await approvedLaunchAdmission(brain);
+  const direct = await brain.executeWithProvisionedCredentialsWithLaunchAdmissionAndTrace({ task: "trace an admitted coding review", domain: "coding" }, admission, {
+    credentialProviders: ["offline"],
+    approveProviderCall: true,
+    traceStore: store,
+    runId: "provisioned-trace-admitted-direct",
+  });
+  assert.equal(direct.result.trace.status, "completed");
+
+  const automatic = await brain.executeAutoWithProvisionedCredentialsWithLaunchAdmissionAndTrace({ task: "trace an admitted browser review", domain: "browser" }, admission, {
+    credentialProviders: ["offline"],
+    approveProviderCall: true,
+    traceStore: store,
+    runId: "provisioned-trace-admitted-automatic",
+  });
+  assert.equal(automatic.result.trace.status, "completed");
+
+  const cycle = await brain.executeCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace({ task: "trace an admitted science cycle", domain: "science" }, admission, {
+    credentialProviders: ["offline"],
+    approveProviderCall: true,
+    traceStore: store,
+    runId: "provisioned-trace-admitted-cycle",
+  });
+  assert.equal(cycle.result.trace.status, "completed");
+
+  const adaptive = await brain.executeAdaptiveCycleWithProvisionedCredentialsWithLaunchAdmissionAndTrace({ task: "trace an admitted evaluation cycle", domain: "evaluation" }, admission, {
+    credentialProviders: ["offline"],
+    approveProviderCall: true,
+    traceStore: store,
+    runId: "provisioned-trace-admitted-adaptive",
+    adaptive: {
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: "provisioned-trace-evaluator", evaluator_version: "1", reward: 0.8, passed: true, replan_requested: false }),
+    },
+  });
+  assert.equal(adaptive.result.trace.status, "completed");
+  assert.equal(store.verifyIntegrity().verified, true);
   assert.equal(runtime.credentials.status("offline").active_handles, 0);
 });
 

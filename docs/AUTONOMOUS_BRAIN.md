@@ -74,6 +74,16 @@ check the caller's frozen domain admission before resolving a credential or refr
 This keeps the common application path to one call while retaining `brain.providerSetup` for
 multi-step onboarding screens and `ProviderSetup` for explicit worker orchestration.
 
+For applications that need operational visibility, append `WithTrace` to each of those four
+facade entrypoints. The traced provisioned variants keep `traceStore` and `runId` in the
+caller-owned metadata boundary, inject the short-lived credential resolver only into the
+transient nested run policy, and close the session even when planning, provider invocation,
+evaluation, or tracing fails. `WithLaunchAdmissionAndTrace` combines the same trace with the
+provider-free admission check, so a held or stale launch is rejected before credential
+provisioning, inventory refresh, or provider resolution. Traces contain lifecycle phases,
+selection/provider metadata, digests, and bounded failures only; task text, prompts, responses,
+evidence, tool arguments, and credentials remain outside serialized output.
+
 ## Evidence-first application boundary
 
 The application-facing TypeScript `AutonomousBrainFacade` exposes the complete evidence-first
