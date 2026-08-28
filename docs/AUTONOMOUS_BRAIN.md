@@ -7902,6 +7902,17 @@ if run is not None and run.status == "reconciliation_required":
     )
 ```
 
+Both the synchronous and asynchronous remote workers support bounded draining with
+`run(limit=32, max_parallelism=8, continue_on_non_terminal=False)`. The default remains one
+claim at a time. An opted-in bound applies only to independent leases; every claimed job keeps
+its own approval gate, heartbeat, protected credential session, result digest, and
+post-dispatch reconciliation boundary. Batch metadata reports `requested_count`,
+`max_parallelism`, and `stopped_on_non_terminal`. Approval, retry, or reconciliation backpressure
+stops new claims by default while already-started leases settle. The explicit continuation flag is
+finite and caller-controlled; it does not authorize provider work or create an unbounded retry
+loop. No task text, prompt, provider response, evaluator value, credential, or tool payload is
+added to the remote job or batch projection.
+
 Approval is recorded while a leased worker still owns the job, then the control plane atomically
 parks it in `waiting_approval`; approval release returns it to `queued` and the next attempt
 rehydrates the private context. The worker preserves the monotonic side-effect boundary across
@@ -7910,8 +7921,8 @@ approval release, creates a fresh deployment-managed `CredentialSession` per att
 it in the worker's `finally` path. The resolver must therefore omit `credentials` and any
 `credential_for` hook; the scope injects opaque handles transiently into the runner kwargs and
 the remote control plane still receives neither handles nor raw keys. The async worker applies the
-same contract and moves synchronous provisioning/cleanup off the event loop.
-that re-entry, renews the lease during provider work, and never retries an uncertain post-dispatch
+same contract and moves synchronous provisioning/cleanup off the event loop. On re-entry, it
+renews the lease during provider work and never retries an uncertain post-dispatch
 effect automatically. Typed resolver/transport failures before dispatch can be requeued within
 `max_attempts`; spec drift and malformed remote metadata fail closed. The same digest and
 redaction tests cover all nine modes and the built-in domain catalogue, so cross-domain execution

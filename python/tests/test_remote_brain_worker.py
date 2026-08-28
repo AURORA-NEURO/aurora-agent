@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
 
 import pytest
 
@@ -93,6 +95,29 @@ class _BlockingAsyncBrain(_Brain):
         self.started.set()
         await asyncio.Event().wait()
         return _Result()
+
+
+class _DelayedBrain(_Brain):
+    """Thread-safe offline runner used to prove the worker-level concurrency ceiling."""
+
+    def __init__(self, delay: float = 0.03) -> None:
+        super().__init__()
+        self.delay = delay
+        self._lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+
+    def _run(self, name: str, **kwargs: object) -> _Result:
+        with self._lock:
+            self.calls.append((name, dict(kwargs)))
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            time.sleep(self.delay)
+            return _Result()
+        finally:
+            with self._lock:
+                self.active -= 1
 
 
 class _ProvisionedSession:
@@ -202,6 +227,122 @@ def test_remote_worker_provisions_opaque_handles_only_after_approval_and_closes_
 
 def test_async_remote_worker_provisions_and_closes_scope_in_worker_lifecycle(tmp_path):
     asyncio.run(_run_async_provisioned_scope(tmp_path))
+
+
+def test_remote_worker_bounded_parallel_drain_preserves_domain_and_redaction_contract(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = _control(tmp_path, seen)
+    brain = _DelayedBrain()
+    domains = tuple(domain for domain in AUTONOMOUS_DOMAIN_NAMES if domain != "cross_domain")[:6]
+    jobs: dict[str, tuple[dict[str, object], str]] = {}
+
+    def resolve(context):
+        job = context["job"]
+        request, selected_policy = jobs[job["job_id"]]
+        return {
+            "spec_digest": job["spec_digest"],
+            "policy_digest": selected_policy,
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"]},
+        }
+
+    worker = RemoteBrainJobWorker(brain, control, worker_id="parallel-worker", resolver=resolve)
+    submitted = []
+    for index, domain in enumerate(domains):
+        request = {"task": f"private parallel task {domain}", "domain": domain}
+        selected_policy = _policy("abcdef"[index])
+        result = worker.submit(
+            idempotency_key=f"parallel-{domain}",
+            request=request,
+            mode="autonomous",
+            domain=domain,
+            capability="bounded",
+            risk_class="review",
+            policy_digest=selected_policy,
+        )
+        assert result.job is not None
+        jobs[result.job["job_id"]] = (request, selected_policy)
+        submitted.append(result.job)
+
+    for job in submitted:
+        waiting = worker.run_once(job["job_id"])
+        assert waiting is not None and waiting.status == "waiting_approval"
+        worker.approval(job["job_id"], "approve", authorization_digest="a" * 64)
+
+    batch = worker.run(limit=len(submitted), max_parallelism=3)
+    assert batch.status == "completed"
+    assert batch.requested_count == len(submitted)
+    assert batch.max_parallelism == 3
+    assert batch.stopped_on_non_terminal is False
+    assert len(batch.runs) == len(submitted)
+    assert batch.succeeded_count == len(submitted)
+    assert brain.max_active >= 2
+    assert brain.max_active <= 3
+    assert brain.active == 0
+    assert "private parallel task" not in json.dumps([record.to_dict() for record in store.inventory(limit=64)])
+    assert all("task" not in arguments and "prompt" not in arguments for _name, arguments in seen)
+    store.close()
+
+
+def test_async_remote_worker_bounded_parallel_drain_preserves_event_loop_and_metadata_contract(tmp_path):
+    asyncio.run(_run_async_parallel_drain(tmp_path))
+
+
+async def _run_async_parallel_drain(tmp_path):
+    seen: list[tuple[str, dict[str, object]]] = []
+    control, store = await _async_control(tmp_path, seen)
+    brain = _DelayedBrain()
+    domains = tuple(domain for domain in AUTONOMOUS_DOMAIN_NAMES if domain != "cross_domain")[:4]
+    jobs: dict[str, tuple[dict[str, object], str]] = {}
+
+    def resolve(context):
+        job = context["job"]
+        request, selected_policy = jobs[job["job_id"]]
+        return {
+            "spec_digest": job["spec_digest"],
+            "policy_digest": selected_policy,
+            "mode": "autonomous",
+            "request": request,
+            "kwargs": {"task": request["task"], "domain": request["domain"]},
+        }
+
+    worker = AsyncRemoteBrainJobWorker(brain, control, worker_id="async-parallel-worker", resolver=resolve)
+    submitted = []
+    for index, domain in enumerate(domains):
+        request = {"task": f"private async parallel task {domain}", "domain": domain}
+        selected_policy = _policy("abcdef"[index])
+        result = await worker.submit(
+            idempotency_key=f"async-parallel-{domain}",
+            request=request,
+            mode="autonomous",
+            domain=domain,
+            capability="bounded",
+            risk_class="review",
+            policy_digest=selected_policy,
+        )
+        assert result.job is not None
+        jobs[result.job["job_id"]] = (request, selected_policy)
+        submitted.append(result.job)
+
+    for job in submitted:
+        waiting = await worker.run_once(job["job_id"])
+        assert waiting is not None and waiting.status == "waiting_approval"
+        await worker.approval(job["job_id"], "approve", authorization_digest="b" * 64)
+
+    batch = await worker.run(limit=len(submitted), max_parallelism=2)
+    assert batch.status == "completed"
+    assert batch.requested_count == len(submitted)
+    assert batch.max_parallelism == 2
+    assert batch.stopped_on_non_terminal is False
+    assert len(batch.runs) == len(submitted)
+    assert batch.succeeded_count == len(submitted)
+    assert brain.max_active >= 2
+    assert brain.max_active <= 2
+    assert brain.active == 0
+    assert "private async parallel task" not in json.dumps([record.to_dict() for record in store.inventory(limit=64)])
+    assert all("task" not in arguments and "prompt" not in arguments for _name, arguments in seen)
+    store.close()
 
 
 async def _run_async_provisioned_scope(tmp_path):

@@ -15,6 +15,7 @@ import hashlib
 import inspect
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Awaitable, Callable, Mapping, Protocol, Sequence
 
 from .brain import BrainRunError
@@ -157,6 +158,9 @@ class RemoteBrainJobBatch:
     retry_scheduled_count: int
     reconciliation_count: int
     failed_count: int
+    requested_count: int = 0
+    max_parallelism: int = 1
+    stopped_on_non_terminal: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -169,6 +173,9 @@ class RemoteBrainJobBatch:
             "retry_scheduled_count": self.retry_scheduled_count,
             "reconciliation_count": self.reconciliation_count,
             "failed_count": self.failed_count,
+            "requested_count": self.requested_count,
+            "max_parallelism": self.max_parallelism,
+            "stopped_on_non_terminal": self.stopped_on_non_terminal,
             "batch_digest": _digest_json([
                 {
                     "job_id": run.job.get("job_id"),
@@ -636,6 +643,24 @@ def _validate_mode(value: Any) -> str:
     return str(value)
 
 
+def _validate_batch_options(
+    *,
+    limit: Any,
+    max_parallelism: Any,
+    continue_on_non_terminal: Any,
+    label: str,
+) -> tuple[int, int, bool]:
+    """Validate finite worker draining controls shared by sync and async implementations."""
+
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH:
+        raise RemoteBrainWorkerError(f"{label} limit must be within [1, {MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH}]")
+    if not isinstance(max_parallelism, int) or isinstance(max_parallelism, bool) or not 1 <= max_parallelism <= min(limit, MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH):
+        raise RemoteBrainWorkerError(f"{label} max_parallelism must be within [1, {min(limit, MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH)}]")
+    if not isinstance(continue_on_non_terminal, bool):
+        raise RemoteBrainWorkerError(f"{label} continue_on_non_terminal must be boolean")
+    return limit, max_parallelism, continue_on_non_terminal
+
+
 def _assert_no_private_fields(value: Any, depth: int = 0) -> None:
     if depth > 8:
         raise RemoteBrainWorkerError("remote brain control-plane projection is too deeply nested", code="protocol")
@@ -1077,24 +1102,67 @@ class RemoteBrainJobWorker:
             if credential_binding is not None:
                 credential_binding.close()
 
-    def run(self, *, limit: int = 1) -> RemoteBrainJobBatch:
-        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH:
-            raise RemoteBrainWorkerError(f"remote brain worker limit must be within [1, {MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH}]")
-        runs: list[RemoteBrainJobRun] = []
-        for _ in range(limit):
-            result = self.run_once()
-            if result is None:
-                break
-            runs.append(result)
-            if result.status in {"waiting_approval", "retry_scheduled", "reconciliation_required"}:
-                break
+    def run(
+        self,
+        *,
+        limit: int = 1,
+        max_parallelism: int = 1,
+        continue_on_non_terminal: bool = False,
+    ) -> RemoteBrainJobBatch:
+        limit, max_parallelism, continue_on_non_terminal = _validate_batch_options(
+            limit=limit,
+            max_parallelism=max_parallelism,
+            continue_on_non_terminal=continue_on_non_terminal,
+            label="remote brain worker",
+        )
+        indexed_runs: list[tuple[int, RemoteBrainJobRun]] = []
+        next_index = 0
+        lock = threading.Lock()
+        stop_claiming = threading.Event()
+        stopped_on_non_terminal = False
+
+        def drain() -> None:
+            nonlocal next_index, stopped_on_non_terminal
+            while not stop_claiming.is_set():
+                with lock:
+                    if stop_claiming.is_set() or next_index >= limit:
+                        return
+                    index = next_index
+                    next_index += 1
+                result = self.run_once()
+                if result is None:
+                    stop_claiming.set()
+                    return
+                with lock:
+                    indexed_runs.append((index, result))
+                    if not continue_on_non_terminal and result.status in {"waiting_approval", "retry_scheduled", "reconciliation_required"}:
+                        stopped_on_non_terminal = True
+                        stop_claiming.set()
+
+        with ThreadPoolExecutor(max_workers=max_parallelism, thread_name_prefix=f"aurora-remote-brain-{self.worker_id}") as executor:
+            futures = [executor.submit(drain) for _ in range(max_parallelism)]
+            for future in futures:
+                future.result()
+        runs = [result for _index, result in sorted(indexed_runs, key=lambda item: item[0])]
         succeeded = sum(run.status == "succeeded" for run in runs)
         waiting = sum(run.status == "waiting_approval" for run in runs)
         retryable = sum(run.status == "retry_scheduled" for run in runs)
         reconciliation = sum(run.status == "reconciliation_required" for run in runs)
         failed = sum(run.status == "failed" for run in runs)
         status = "empty" if not runs else "failed" if failed and not succeeded and not waiting and not retryable and not reconciliation else "partial" if failed or waiting or retryable or reconciliation else "completed"
-        return RemoteBrainJobBatch(status, tuple(runs), len(runs), succeeded, waiting, retryable, reconciliation, failed)
+        return RemoteBrainJobBatch(
+            status,
+            tuple(runs),
+            len(runs),
+            succeeded,
+            waiting,
+            retryable,
+            reconciliation,
+            failed,
+            limit,
+            max_parallelism,
+            stopped_on_non_terminal,
+        )
 
     def _resolve(self, job: Mapping[str, Any], approval_released: bool) -> RemoteBrainJobResolution:
         context = {"job": dict(job), "approval_released": approval_released, "attempt": job["attempts"]}
@@ -1603,24 +1671,64 @@ class AsyncRemoteBrainJobWorker:
             if credential_binding is not None:
                 await _close_async_credential_binding(credential_binding)
 
-    async def run(self, *, limit: int = 1) -> RemoteBrainJobBatch:
-        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH:
-            raise RemoteBrainWorkerError(f"async remote brain worker limit must be within [1, {MAX_AUTONOMOUS_REMOTE_BRAIN_WORKER_BATCH}]")
-        runs: list[RemoteBrainJobRun] = []
-        for _ in range(limit):
-            result = await self.run_once()
-            if result is None:
-                break
-            runs.append(result)
-            if result.status in {"waiting_approval", "retry_scheduled", "reconciliation_required"}:
-                break
+    async def run(
+        self,
+        *,
+        limit: int = 1,
+        max_parallelism: int = 1,
+        continue_on_non_terminal: bool = False,
+    ) -> RemoteBrainJobBatch:
+        limit, max_parallelism, continue_on_non_terminal = _validate_batch_options(
+            limit=limit,
+            max_parallelism=max_parallelism,
+            continue_on_non_terminal=continue_on_non_terminal,
+            label="async remote brain worker",
+        )
+        indexed_runs: list[tuple[int, RemoteBrainJobRun]] = []
+        next_index = 0
+        lock = asyncio.Lock()
+        stop_claiming = asyncio.Event()
+        stopped_on_non_terminal = False
+
+        async def drain() -> None:
+            nonlocal next_index, stopped_on_non_terminal
+            while not stop_claiming.is_set():
+                async with lock:
+                    if stop_claiming.is_set() or next_index >= limit:
+                        return
+                    index = next_index
+                    next_index += 1
+                result = await self.run_once()
+                if result is None:
+                    stop_claiming.set()
+                    return
+                async with lock:
+                    indexed_runs.append((index, result))
+                    if not continue_on_non_terminal and result.status in {"waiting_approval", "retry_scheduled", "reconciliation_required"}:
+                        stopped_on_non_terminal = True
+                        stop_claiming.set()
+
+        await asyncio.gather(*(drain() for _ in range(max_parallelism)))
+        runs = [result for _index, result in sorted(indexed_runs, key=lambda item: item[0])]
         succeeded = sum(run.status == "succeeded" for run in runs)
         waiting = sum(run.status == "waiting_approval" for run in runs)
         retryable = sum(run.status == "retry_scheduled" for run in runs)
         reconciliation = sum(run.status == "reconciliation_required" for run in runs)
         failed = sum(run.status == "failed" for run in runs)
         status = "empty" if not runs else "failed" if failed and not succeeded and not waiting and not retryable and not reconciliation else "partial" if failed or waiting or retryable or reconciliation else "completed"
-        return RemoteBrainJobBatch(status, tuple(runs), len(runs), succeeded, waiting, retryable, reconciliation, failed)
+        return RemoteBrainJobBatch(
+            status,
+            tuple(runs),
+            len(runs),
+            succeeded,
+            waiting,
+            retryable,
+            reconciliation,
+            failed,
+            limit,
+            max_parallelism,
+            stopped_on_non_terminal,
+        )
 
     async def _resolve(self, job: Mapping[str, Any], approval_released: bool) -> RemoteBrainJobResolution:
         context = {"job": dict(job), "approval_released": approval_released, "attempt": job["attempts"]}

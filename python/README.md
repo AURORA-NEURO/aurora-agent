@@ -770,6 +770,28 @@ helpers provide the optional reviewed-identity bindings without serializing thos
 offloads a synchronous `AutonomousBrain` runner to a worker thread (or awaits a native async
 runner), so async HTTP/MCP hosts retain responsive event loops without creating a second lifecycle
 implementation.
+
+Both remote worker variants support bounded draining with `max_parallelism` and
+`continue_on_non_terminal`. The default remains serial (`max_parallelism=1`) and the requested
+limit is always finite. Increasing the bound claims independent jobs concurrently while each job
+keeps its own lease heartbeat, approval gate, protected credential session, result digest, and
+post-dispatch reconciliation boundary. The batch projection reports `requested_count`,
+`max_parallelism`, and `stopped_on_non_terminal`; approval, retry, or reconciliation backpressure
+stops new claims by default after already-started leases settle. Set
+`continue_on_non_terminal=True` only when the deployment deliberately wants to continue through
+other queued jobs:
+
+```python
+batch = worker.run(
+    limit=32,
+    max_parallelism=8,
+    continue_on_non_terminal=False,
+)
+```
+
+The async worker uses the same controls with `await worker.run(...)`. Parallel scheduling never
+places task text, prompts, provider responses, evaluator values, credentials, or tool payloads in
+the remote job or batch metadata.
 Contextual model adaptation is shared with the Rust and TypeScript contracts: the canonical
 domain/capability/risk/task-family digest selects a nested contextual arm ledger, while global arms
 remain only a cold-start prior. Evaluator settlement sends the digest and bounded context identity

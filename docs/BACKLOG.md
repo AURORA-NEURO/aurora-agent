@@ -9,6 +9,14 @@ local and remote workers. This improves throughput for deployments with independ
 it does not provide distributed scheduling, provider quotas, external authorization, or durable
 multi-host lease consensus.
 
+Python's synchronous and asynchronous remote brain workers now expose the same bounded-drain
+contract as well. Their finite `max_parallelism` controls use independent leases and retain the
+same metadata-only, approval-safe, protected-credential, heartbeat, retry, and reconciliation
+boundaries, with `requested_count`, `max_parallelism`, and `stopped_on_non_terminal` in the batch
+projection. Sync and async tests cover concurrent all-domain-compatible execution and redaction;
+deployment-owned distributed queue semantics, provider quotas, and external authorization remain
+explicit.
+
 The TypeScript `AutonomousBrainFacade` now exposes a reusable `providerSetup` onboarding boundary
 for the normal user-key lifecycle: provider registration, redacted instructions, short-lived
 credential sessions, opaque handles, readiness projection, and revocation. Offline coverage
