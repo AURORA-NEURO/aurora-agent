@@ -2623,6 +2623,20 @@ export class AutonomousBrainFacade {
     return this.executeAutoPreparedWithTrace(prepared, options);
   }
 
+  /** Automatic route/planning/invocation with provider-free launch admission and a metadata trace. */
+  async executeAutoWithLaunchAdmissionAndTrace(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoExecution> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeAutoWithLaunchAdmissionAndTrace options must be an object");
+    if (options.semanticRouting !== undefined && options.semanticRouting !== false) throw new ArgumentError("launch-admitted automatic tracing requires provider-free routing; admit semantic routing separately before enabling it");
+    const request = validateRequest(input);
+    const prepared = await this.prepare(request, undefined, options, options.approveProviderCall);
+    if (!prepared.route.abstained) authorizeAutonomousLaunchDomains(admission, prepared.route.selected_domains);
+    return this.executeAutoPreparedWithTrace(prepared, options);
+  }
+
   /**
    * Execute only when a caller-owned admission explicitly covers the final reviewed route.
    * Planning remains provider-free; the admission check is the last facade decision before
@@ -2647,6 +2661,20 @@ export class AutonomousBrainFacade {
     const request = validateRequest(input);
     if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeWithTrace options must be an object");
     const prepared = await this.prepare(request, selectBrainSemanticRouting(options.semanticRouting, options.run?.semanticRouting), options.run, options.approveProviderCall);
+    return this.executePreparedWithTrace(prepared, options);
+  }
+
+  /** Direct facade execution with provider-free launch admission and a metadata trace. */
+  async executeWithLaunchAdmissionAndTrace(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainTraceOptions,
+  ): Promise<AutonomousBrainTracedExecution> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeWithLaunchAdmissionAndTrace options must be an object");
+    if (options.semanticRouting === true || (isObject(options.semanticRouting) && options.semanticRouting.enabled === true) || options.run?.semanticRouting === true || (isObject(options.run?.semanticRouting) && options.run.semanticRouting.enabled === true)) throw new ArgumentError("launch-admitted tracing requires provider-free routing; admit semantic routing separately before enabling it");
+    const request = validateRequest(input);
+    const prepared = await this.prepare(request, selectBrainSemanticRouting(options.semanticRouting, options.run?.semanticRouting), options.run, options.approveProviderCall);
+    authorizeAutonomousLaunchDomains(admission, prepared.route.selected_domains);
     return this.executePreparedWithTrace(prepared, options);
   }
 
@@ -2706,6 +2734,20 @@ export class AutonomousBrainFacade {
     return this.executeCyclePreparedWithTrace(prepared, options);
   }
 
+  /** Closed-loop cycle with provider-free launch admission and a metadata trace. */
+  async executeCycleWithLaunchAdmissionAndTrace(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainCycleTraceOptions,
+  ): Promise<AutonomousBrainTracedCycleExecution> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeCycleWithLaunchAdmissionAndTrace options must be an object");
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted cycle tracing requires provider-free routing; admit semantic routing separately before enabling it");
+    const request = validateRequest(input);
+    const prepared = await this.prepare(request, options.semanticRouting, options.cycle, options.approveProviderCall);
+    authorizeAutonomousLaunchDomains(admission, prepared.route.selected_domains);
+    return this.executeCyclePreparedWithTrace(prepared, options);
+  }
+
   /** Rehydrate a reviewed plan, then execute its closed-loop cycle through the trace boundary. */
   async executePlannedCycleWithTrace(plan: AutonomousBrainPlan, input: AutonomousBrainRequest, options: AutonomousBrainCycleTraceOptions): Promise<AutonomousBrainTracedCycleExecution> {
     if (!(plan instanceof AutonomousBrainPlan)) throw new ArgumentError("autonomous brain executePlannedCycleWithTrace requires a typed plan");
@@ -2753,6 +2795,20 @@ export class AutonomousBrainFacade {
     const request = validateRequest(input);
     if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeAdaptiveCycleWithTrace options must be an object");
     const prepared = await this.prepare(request, options.semanticRouting, options.adaptive, options.approveProviderCall);
+    return this.executeAdaptiveCyclePreparedWithTrace(prepared, options);
+  }
+
+  /** Adaptive evaluator/replan execution with provider-free launch admission and a metadata trace. */
+  async executeAdaptiveCycleWithLaunchAdmissionAndTrace(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAdaptiveCycleTraceOptions,
+  ): Promise<AutonomousBrainTracedAdaptiveCycleExecution> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain executeAdaptiveCycleWithLaunchAdmissionAndTrace options must be an object");
+    if (options.semanticRouting?.enabled === true) throw new ArgumentError("launch-admitted adaptive tracing requires provider-free routing; admit semantic routing separately before enabling it");
+    const request = validateRequest(input);
+    const prepared = await this.prepare(request, options.semanticRouting, options.adaptive, options.approveProviderCall);
+    authorizeAutonomousLaunchDomains(admission, prepared.route.selected_domains);
     return this.executeAdaptiveCyclePreparedWithTrace(prepared, options);
   }
 
