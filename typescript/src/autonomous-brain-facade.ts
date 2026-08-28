@@ -3,6 +3,7 @@ import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-re
 import {
   ProviderSetup,
   type AutonomousProvisionedBrainAdaptiveCycleOptions,
+  type AutonomousProvisionedBrainAutoExecuteOptions,
   type AutonomousProvisionedBrainCycleOptions,
   type AutonomousProvisionedBrainExecuteOptions,
   type AutonomousProvisionedRun,
@@ -1733,6 +1734,23 @@ export class AutonomousBrainFacade {
     options: AutonomousProvisionedBrainExecuteOptions = {},
   ): Promise<AutonomousProvisionedRun<AutonomousBrainExecution>> {
     return this.providerSetup.runBrainWithProvisionedCredentialsWithLaunchAdmission(this, input, admission, options);
+  }
+
+  /** Execute automatic route/planning/invocation through one deployment-managed session. */
+  executeAutoWithProvisionedCredentials(
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainAutoExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAutoExecution>> {
+    return this.providerSetup.runBrainAutoWithProvisionedCredentials(this, input, options);
+  }
+
+  /** Run automatic facade execution only after a caller-owned launch admission covers the route. */
+  executeAutoWithProvisionedCredentialsWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainAutoExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAutoExecution>> {
+    return this.providerSetup.runBrainAutoWithProvisionedCredentialsWithLaunchAdmission(this, input, admission, options);
   }
 
   /** Execute the closed-loop evaluator and online-learning cycle inside one credential session. */

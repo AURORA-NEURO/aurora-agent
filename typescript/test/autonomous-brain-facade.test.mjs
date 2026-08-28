@@ -128,6 +128,14 @@ test("brain facade owns provisioned direct, cycle, and adaptive execution wrappe
   assert.equal(direct.result.run?.response.provider, "offline");
   assert.equal(direct.toJSON().result_metadata.serialized, false);
 
+  const automatic = await brain.executeAutoWithProvisionedCredentials(
+    { task: "automatically route a bounded coding review", domain: "coding" },
+    provisioning,
+  );
+  assert.equal(automatic.status, "completed");
+  assert.equal(automatic.result.automatic?.status, "completed");
+  assert.equal(automatic.result.automatic?.result?.response.provider, "offline");
+
   const cycle = await brain.executeCycleWithProvisionedCredentials(
     { task: "close a bounded science review", domain: "science" },
     provisioning,
@@ -160,6 +168,14 @@ test("brain facade owns provisioned direct, cycle, and adaptive execution wrappe
   await assert.rejects(
     () => brain.executeWithProvisionedCredentialsWithLaunchAdmission(
       { task: "held direct run", domain: "coding" },
+      heldAdmission,
+      provisioning,
+    ),
+    /not approved/,
+  );
+  await assert.rejects(
+    () => brain.executeAutoWithProvisionedCredentialsWithLaunchAdmission(
+      { task: "held automatic run", domain: "coding" },
       heldAdmission,
       provisioning,
     ),

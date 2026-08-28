@@ -339,6 +339,7 @@ export type {
   AutonomousExplicitProvisionedExecutionOptions,
   AutonomousAutomaticProvisionedExecutionOptions,
   AutonomousProvisionedBrainExecuteOptions,
+  AutonomousProvisionedBrainAutoExecuteOptions,
   AutonomousProvisionedBrainCycleOptions,
   AutonomousProvisionedBrainAdaptiveCycleOptions,
   SupportedProviderName,

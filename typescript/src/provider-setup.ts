@@ -32,6 +32,8 @@ import type {
 import type {
   AutonomousBrainAdaptiveCycleExecution,
   AutonomousBrainAdaptiveCycleOptions,
+  AutonomousBrainAutoExecution,
+  AutonomousBrainAutoExecuteOptions,
   AutonomousBrainCycleExecution,
   AutonomousBrainCycleOptions,
   AutonomousBrainExecuteOptions,
@@ -160,6 +162,9 @@ type AutonomousBrainAdaptivePolicy = NonNullable<AutonomousBrainAdaptiveCycleOpt
 export type AutonomousProvisionedBrainExecuteOptions = Omit<AutonomousBrainExecuteOptions, "run"> & {
   run?: WithoutCredentialFields<AutonomousBrainRunOptions>;
 } & AutonomousProvisioningControls;
+
+/** Automatic route/planning/execution controls with credential fields owned by this setup boundary. */
+export type AutonomousProvisionedBrainAutoExecuteOptions = WithoutCredentialFields<AutonomousBrainAutoExecuteOptions> & AutonomousProvisioningControls;
 
 /** Brain-facade closed-loop controls with credential handles owned by this setup boundary. */
 export type AutonomousProvisionedBrainCycleOptions = Omit<AutonomousBrainCycleOptions, "cycle"> & {
@@ -637,6 +642,40 @@ export class ProviderSetup {
     });
   }
 
+  /** Execute the automatic facade route, optional provider planning, and invocation in one session. */
+  async runBrainAutoWithProvisionedCredentials(
+    brain: AutonomousBrainFacade,
+    input: AutonomousBrainRequest,
+    options: AutonomousProvisionedBrainAutoExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAutoExecution>> {
+    this.assertBrainFacade(brain, "executeAuto");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, []);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainAutoExecuteOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      return brain.executeAuto(input, { ...brainOptions, credentialFor } as AutonomousBrainAutoExecuteOptions);
+    });
+  }
+
+  /** Automatic facade execution with launch admission checked before credential provisioning. */
+  async runBrainAutoWithProvisionedCredentialsWithLaunchAdmission(
+    brain: AutonomousBrainFacade,
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousProvisionedBrainAutoExecuteOptions = {},
+  ): Promise<AutonomousProvisionedRun<AutonomousBrainAutoExecution>> {
+    this.assertBrainFacade(brain, "executeAuto");
+    this.assertBrainInput(input);
+    this.rejectNestedCredentialFields(options, []);
+    await this.authorizeBrainLaunchAdmission(brain, input, admission, options.semanticRouting);
+    return this.runProvisioned(brain.agent, input.task, options, async (runOptions, session) => {
+      const brainOptions = runOptions as Omit<AutonomousProvisionedBrainAutoExecuteOptions, keyof AutonomousProvisioningControls>;
+      const credentialFor = this.credentialResolver(brain.agent, session);
+      return brain.executeAutoWithLaunchAdmission(input, admission, { ...brainOptions, credentialFor } as AutonomousBrainAutoExecuteOptions);
+    });
+  }
+
   /** Execute the application-facing evaluator/learning cycle with one fresh session. */
   async runBrainCycleWithProvisionedCredentials(
     brain: AutonomousBrainFacade,
@@ -795,7 +834,7 @@ export class ProviderSetup {
     };
   }
 
-  private assertBrainFacade(brain: AutonomousBrainFacade, operation: "execute" | "executeCycle" | "executeAdaptiveCycle"): void {
+  private assertBrainFacade(brain: AutonomousBrainFacade, operation: "execute" | "executeAuto" | "executeCycle" | "executeAdaptiveCycle"): void {
     if (!brain || !brain.agent || typeof brain[operation] !== "function") throw new CredentialError(`provisioned brain ${operation} requires an AutonomousBrainFacade`);
   }
 

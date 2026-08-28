@@ -64,7 +64,9 @@ credentialless for offline fixtures, while the normal built-in provider presets 
 credential-required until a session collects or provisions a user credential.
 
 For applications that want the facade to own the entire request-scoped lifecycle, use
-`brain.executeWithProvisionedCredentials(request, options)`. The corresponding
+`brain.executeWithProvisionedCredentials(request, options)`. Use
+`brain.executeAutoWithProvisionedCredentials(request, options)` when the automatic result
+envelope and optional provider-planning acceptance path are desired. The corresponding
 `executeCycleWithProvisionedCredentials()` and
 `executeAdaptiveCycleWithProvisionedCredentials()` methods cover evaluator settlement, online
 learning, and bounded replanning with the same session boundary. Their launch-admitted variants
