@@ -4,6 +4,8 @@ import { test } from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
+  AutonomousAgentPersistenceLifecycleCoordinator,
+  AutonomousBrainFacade,
   AutonomousBrainControlPlaneBridge,
   AutonomousModelHealthController,
   AutonomousModelHealthPersistenceCoordinator,
@@ -223,6 +225,40 @@ test("AutonomousAgent wires a persisted health store into selection and invocati
   assert.equal(result.status, "completed");
   assert.equal((await store.health({ model: "health-model" }))[0].attempts, 1);
   assert.equal(JSON.stringify(await store.snapshot()).includes("bounded answer"), false);
+});
+
+test("AutonomousAgent owns restart-safe model health persistence and lifecycle ordering", async () => {
+  const sourceStore = new InMemoryAutonomousModelHealthStore({ clock: () => 300 });
+  let persisted = null;
+  const persistence = {
+    read: () => persisted,
+    write: (snapshot) => { persisted = structuredClone(snapshot); },
+  };
+  const sourcePersistence = new AutonomousModelHealthPersistenceCoordinator(sourceStore, persistence);
+  const source = new AutonomousAgent(new LLMRuntime(), {
+    modelHealthStore: sourceStore,
+    modelHealthPersistence: sourcePersistence,
+  });
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) await sourceStore.recordInvocation(invocation(domain, "durable-model"));
+  const flushed = await source.flushHealth();
+  assert.equal(flushed.events.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(flushed.snapshot_generation, 1);
+
+  const restartedStore = new InMemoryAutonomousModelHealthStore({ clock: () => 301 });
+  const restartedPersistence = new AutonomousModelHealthPersistenceCoordinator(restartedStore, persistence);
+  const restarted = new AutonomousAgent(new LLMRuntime(), { modelHealthPersistence: restartedPersistence });
+  const restored = await restarted.restoreModelHealth();
+  assert.equal(restored?.snapshot_digest, flushed.snapshot_digest);
+  assert.equal((await restarted.modelHealthStore.health({ model: "durable-model" }))[0].attempts, AUTONOMOUS_DOMAIN_NAMES.length);
+
+  const lifecycle = new AutonomousAgentPersistenceLifecycleCoordinator(restarted);
+  const report = await lifecycle.flush({ strict: false });
+  const health = report.components.find((component) => component.component_id === "health");
+  assert.equal(health?.status, "flushed");
+  assert.equal(health?.snapshot_digest, persisted.snapshot_digest);
+  const facade = new AutonomousBrainFacade({ agent: restarted });
+  assert.equal((await facade.restoreHealth())?.snapshot_digest, persisted.snapshot_digest);
+  assert.doesNotMatch(JSON.stringify(report), /durable-model|provider payload|credentials/);
 });
 
 test("online learner adapts through persisted health gates across every built-in domain", async () => {

@@ -12,7 +12,13 @@ import {
 import { AutonomousSelectionPromotionLifecycle } from "./autonomous-selection-lifecycle.js";
 import type { AutonomousSelectionLifecycleState, AutonomousSelectionLifecycleStore } from "./autonomous-selection-lifecycle.js";
 import type { AutonomousSelectionPromotionReport } from "./autonomous-selection-promotion.js";
-import { AutonomousBrainControlPlaneBridge, AutonomousModelHealthController, type AutonomousModelHealthStore } from "./autonomous-control.js";
+import {
+  AutonomousBrainControlPlaneBridge,
+  AutonomousModelHealthController,
+  AutonomousModelHealthPersistenceCoordinator,
+  type AutonomousModelHealthSnapshot,
+  type AutonomousModelHealthStore,
+} from "./autonomous-control.js";
 import type {
   AutonomousExecutionController,
   AutonomousExecutionPersistenceCoordinator,
@@ -1413,6 +1419,8 @@ export interface AutonomousAgentOptions {
   selector?: AutonomousModelSelector;
   /** Optional caller-owned persisted health ledger used for selection and invocation telemetry. */
   modelHealthStore?: AutonomousModelHealthStore;
+  /** Optional CAS-fenced persistence coordinator bound to `modelHealthStore` for restart-safe health. */
+  modelHealthPersistence?: AutonomousModelHealthPersistenceCoordinator;
   /** Optional CAS-fenced persistence coordinator for process-local transport health and circuits. */
   runtimeHealthPersistence?: LLMRuntimeHealthPersistenceCoordinator;
   /** Optional Rust/Python control-plane sink for restart-safe transport health observations. */
@@ -5075,6 +5083,10 @@ export class AutonomousAgent {
   readonly runtime: AutonomousRuntime;
   readonly activation: AutonomousCapabilityActivation;
   readonly modelHealthController?: AutonomousModelHealthController;
+  /** Caller-owned provider/model health ledger used as a durable selection prior. */
+  readonly modelHealthStore?: AutonomousModelHealthStore;
+  /** Caller-owned persistence for aggregate model-health observations and evaluator quality. */
+  readonly modelHealthPersistence?: AutonomousModelHealthPersistenceCoordinator;
   /** Caller-owned persistence for transport counters and provider circuit continuity. */
   readonly runtimeHealthPersistence?: LLMRuntimeHealthPersistenceCoordinator;
   readonly modelHealthBridge?: AutonomousBrainControlPlaneBridge;
@@ -5144,6 +5156,18 @@ export class AutonomousAgent {
     if (options.toolCatalogue !== undefined && !(options.toolCatalogue instanceof ToolCatalogue)) throw new ArgumentError("AutonomousAgent toolCatalogue must be a ToolCatalogue");
     if (options.toolExecutor !== undefined && typeof options.toolExecutor !== "function") throw new ArgumentError("AutonomousAgent toolExecutor must be callable");
     if (options.effectBoundary !== undefined && !(options.effectBoundary instanceof AutonomousEffectBoundary)) throw new ArgumentError("AutonomousAgent effectBoundary must be an AutonomousEffectBoundary");
+    const modelHealthStore = options.modelHealthStore ?? options.modelHealthPersistence?.store;
+    if (options.modelHealthPersistence !== undefined && !(options.modelHealthPersistence instanceof AutonomousModelHealthPersistenceCoordinator)) throw new ArgumentError("AutonomousAgent modelHealthPersistence must be an AutonomousModelHealthPersistenceCoordinator");
+    if (options.modelHealthPersistence !== undefined && options.modelHealthStore !== undefined && options.modelHealthPersistence.store !== options.modelHealthStore) throw new ArgumentError("AutonomousAgent modelHealthPersistence must be bound to the supplied modelHealthStore");
+    if (modelHealthStore !== undefined && (
+      typeof modelHealthStore.record !== "function"
+      || typeof modelHealthStore.recordInvocation !== "function"
+      || typeof modelHealthStore.recordEvaluation !== "function"
+      || typeof modelHealthStore.health !== "function"
+      || typeof modelHealthStore.selectorHealth !== "function"
+      || typeof modelHealthStore.snapshot !== "function"
+      || typeof modelHealthStore.restore !== "function"
+    )) throw new ArgumentError("AutonomousAgent modelHealthStore is malformed");
     if (options.runtimeHealthPersistence !== undefined && !(options.runtimeHealthPersistence instanceof LLMRuntimeHealthPersistenceCoordinator)) throw new ArgumentError("AutonomousAgent runtimeHealthPersistence must be an LLMRuntimeHealthPersistenceCoordinator");
     if (options.runtimeHealthPersistence !== undefined && options.runtimeHealthPersistence.runtime !== llm) throw new ArgumentError("AutonomousAgent runtimeHealthPersistence must be bound to the supplied LLMRuntime");
     if (options.activation !== undefined && !(options.activation instanceof AutonomousCapabilityActivation)) throw new ArgumentError("AutonomousAgent activation must be an AutonomousCapabilityActivation");
@@ -5174,6 +5198,8 @@ export class AutonomousAgent {
     this.apiClient = options.apiClient;
     this.learner = options.learner;
     this.learnerPersistence = options.learnerPersistence;
+    this.modelHealthStore = modelHealthStore;
+    this.modelHealthPersistence = options.modelHealthPersistence;
     this.selectionPromotion = options.selectionPromotion;
     this.evaluatorCalibrationRegistry = options.evaluatorCalibrationRegistry;
     this.evaluatorCalibrationPersistence = options.evaluatorCalibrationPersistence;
@@ -5206,7 +5232,7 @@ export class AutonomousAgent {
       }, this.toolSelectionPersistence);
     }
     this.activation = options.activation ?? new AutonomousCapabilityActivation();
-    this.modelHealthController = options.modelHealthStore === undefined ? undefined : new AutonomousModelHealthController(options.modelHealthStore);
+    this.modelHealthController = modelHealthStore === undefined ? undefined : new AutonomousModelHealthController(modelHealthStore);
     this.runtimeHealthPersistence = options.runtimeHealthPersistence;
     if (options.modelHealthBridge !== undefined && !(options.modelHealthBridge instanceof AutonomousBrainControlPlaneBridge)) throw new ArgumentError("AutonomousAgent modelHealthBridge must be an AutonomousBrainControlPlaneBridge");
     this.modelHealthBridge = options.modelHealthBridge;
@@ -5305,6 +5331,36 @@ export class AutonomousAgent {
     if (!this.learner) throw new ArgumentError("AutonomousAgent has no AutonomousOnlineLearner");
     if (!this.learnerPersistence) throw new ArgumentError("AutonomousAgent online learner persistence is not configured");
     return this.learnerPersistence.flush();
+  }
+
+  /**
+   * Restore aggregate provider/model health before admitting new selections.
+   *
+   * Health is an availability and quality prior, not evaluator authority. Restoration is
+   * therefore explicit and coordinator-bound: it can never silently replace a missing ledger
+   * with an empty one or make a previously unregistered model eligible.
+   */
+  async restoreHealth(): Promise<AutonomousModelHealthSnapshot | null> {
+    if (!this.modelHealthStore) throw new ArgumentError("AutonomousAgent has no model health store");
+    if (!this.modelHealthPersistence) throw new ArgumentError("AutonomousAgent model health persistence is not configured");
+    return this.modelHealthPersistence.restore();
+  }
+
+  /** Flush aggregate provider/model health through the caller-owned CAS boundary. */
+  async flushHealth(): Promise<AutonomousModelHealthSnapshot> {
+    if (!this.modelHealthStore) throw new ArgumentError("AutonomousAgent has no model health store");
+    if (!this.modelHealthPersistence) throw new ArgumentError("AutonomousAgent model health persistence is not configured");
+    return this.modelHealthPersistence.flush();
+  }
+
+  /** Compatibility alias whose name makes the provider/model scope explicit. */
+  async restoreModelHealth(): Promise<AutonomousModelHealthSnapshot | null> {
+    return this.restoreHealth();
+  }
+
+  /** Compatibility alias whose name makes the provider/model scope explicit. */
+  async flushModelHealth(): Promise<AutonomousModelHealthSnapshot> {
+    return this.flushHealth();
   }
 
   /** Return the agent-owned value-only adaptive tool state without exposing mutable internals. */

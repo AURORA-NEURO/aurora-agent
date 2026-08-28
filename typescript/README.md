@@ -1511,6 +1511,16 @@ well, persisted health is merged into the learner's selection request: circuits,
 availability gates remain authoritative, while contextual evaluator rewards still adapt the chosen
 model. Health therefore constrains the bandit rather than silently replacing it.
 
+The high-level facade also owns the restart boundary when `modelHealthPersistence` is supplied.
+Bind an `AutonomousModelHealthPersistenceCoordinator` to the exact store, call
+`agent.restoreHealth()` before admitting work, and call `agent.flushHealth()` at the deployment's
+chosen observation boundary. A restart can pass only the coordinator and infer its bound store;
+supplying a different store is rejected. `restoreModelHealth()` and `flushModelHealth()` are
+scoped aliases. The coordinator validates the complete event and snapshot chains and fences stale
+writes with CAS when the underlying adapter supports it. The lifecycle coordinator reports this
+component as `health`, after runtime transport health and before evaluator/learning state, so
+provider availability and quality priors are restored before any domain selects a model.
+
 The live tool boundary is opt-in and catalogue-backed. Create a `ToolCatalogue` from the gateway's
 tool definitions, pass it with a caller-owned executor, and inspect
 `AutonomousDomainToolRegistry.plan()` before allowing a run. Read-only tools can be proposed

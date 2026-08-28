@@ -68,6 +68,7 @@ import {
   type AutonomousExecutionPolicyDecision,
 } from "./autonomous-execution-policy.js";
 import type { AutonomousMemorySnapshot } from "./autonomous-memory.js";
+import type { AutonomousModelHealthSnapshot } from "./autonomous-control.js";
 import type {
   AutonomousWorkflowPortfolioAdmission,
   AutonomousWorkflowPortfolioAdmissionOptions,
@@ -2080,6 +2081,16 @@ export class AutonomousBrainFacade {
   /** Flush the agent's value-only episodic memory through its CAS-fenced persistence boundary. */
   async flushMemory(): Promise<AutonomousMemorySnapshot> {
     return this.agent.flushMemory();
+  }
+
+  /** Restore the agent's caller-owned provider/model health prior before execution. */
+  async restoreHealth(): Promise<AutonomousModelHealthSnapshot | null> {
+    return this.agent.restoreHealth();
+  }
+
+  /** Flush the agent's aggregate provider/model health through its CAS-fenced boundary. */
+  async flushHealth(): Promise<AutonomousModelHealthSnapshot> {
+    return this.agent.flushHealth();
   }
 
   /**

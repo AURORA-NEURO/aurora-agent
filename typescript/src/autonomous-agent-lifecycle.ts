@@ -182,7 +182,12 @@ export class AutonomousAgentPersistenceLifecycleCoordinator {
     if (componentId === "capability_journal") return Boolean(this.capabilityJournalPersistence ?? (this.agent as unknown as { capabilityJournalPersistence?: unknown }).capabilityJournalPersistence);
     if (componentId === "decision_cycle") return Boolean(this.decisionCyclePersistence ?? (this.agent as unknown as { decisionCyclePersistence?: unknown }).decisionCyclePersistence);
     if (componentId === "execution") return Boolean(this.executionPersistence ?? (this.agent as unknown as { executionPersistence?: unknown }).executionPersistence);
-    if (componentId === "health") return Boolean((this.agent as unknown as { healthPersistence?: unknown }).healthPersistence);
+    if (componentId === "health") {
+      const typed = this.agent as unknown as { modelHealthPersistence?: unknown; healthPersistence?: unknown };
+      // `healthPersistence` is retained for lightweight test doubles and older embeddings;
+      // the concrete agent uses the more precise model-health name.
+      return Boolean(typed.modelHealthPersistence ?? typed.healthPersistence);
+    }
     const names = {
       runtime_health: "runtimeHealthPersistence",
       evaluator_calibration: "evaluatorCalibrationPersistence",

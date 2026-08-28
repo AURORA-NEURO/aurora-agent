@@ -8612,6 +8612,17 @@ provides the browser seam; HTTP/object-store adapters can implement the same tex
 The snapshot remains metadata-only and never contains prompts, responses, credentials, or raw
 evaluator evidence.
 
+The high-level TypeScript agent can own this boundary as well. Supply
+`modelHealthPersistence: new AutonomousModelHealthPersistenceCoordinator(healthStore, persistence)`
+alongside (or instead of) `modelHealthStore`; the coordinator's exact bound store is inferred when
+the latter is omitted. `agent.restoreHealth()`/`agent.restoreModelHealth()` must run before new
+work is admitted, and `agent.flushHealth()`/`agent.flushModelHealth()` is the explicit shutdown or
+checkpoint operation. A foreign store is rejected during construction. The coordinated agent
+lifecycle reports the health component in dependency order, after runtime transport health and
+before evaluator and learning state. This makes the historical provider/model prior durable for
+direct, workflow, mission, goal, and all-domain runs without making health an authorization or
+task-quality oracle.
+
 ### Agent-owned online learner persistence
 
 The online bandit has a parallel CAS-fenced persistence coordinator. It can be attached to
