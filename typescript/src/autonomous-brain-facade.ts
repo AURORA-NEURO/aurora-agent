@@ -41,6 +41,7 @@ import {
   type AutonomousRouteProposal,
   type AutonomousRunOptions,
   type AutonomousRunResult,
+  type AutonomousRunStreamHandle,
   type AutonomousModelSelectionPreview,
   type AutonomousModelSelectionPreviewOptions,
   type AutonomousTaskBlueprint,
@@ -362,6 +363,15 @@ export interface AutonomousBrainAutoExecution {
   authorization: "route_review_and_provider_or_effect_approval_remain_explicit";
   secret_material: "never_returned";
 }
+
+/** Lower-level provider/policy controls for the facade's transient direct stream. */
+export type AutonomousBrainStreamOptions = Omit<AutonomousRunOptions, "domain" | "routeOverride" | "capability" | "context" | "hints" | "allowCrossDomain">;
+
+/** Automatic deterministic stream controls; provider-planned mode remains review-gated. */
+export type AutonomousBrainAutoStreamOptions = Omit<AutonomousAutoRunOptions, "domain" | "routeOverride" | "capability" | "context" | "hints" | "allowCrossDomain">;
+
+/** Bounded cross-domain stream controls with the request owning the route identity. */
+export type AutonomousBrainCrossDomainStreamOptions = Omit<AutonomousCrossDomainRunOptions, "domain" | "routeOverride" | "capability" | "context" | "hints" | "allowCrossDomain">;
 
 /** High-level brain execution plus the caller-owned metadata trace of its full boundary. */
 export interface AutonomousBrainTraceOptions extends AutonomousBrainExecuteOptions {
@@ -2819,6 +2829,52 @@ export class AutonomousBrainFacade {
   async execute(input: AutonomousBrainRequest, options: AutonomousBrainExecuteOptions = {}): Promise<AutonomousBrainExecution> {
     const prepared = await this.prepare(input, selectBrainSemanticRouting(options.semanticRouting, options.run?.semanticRouting), options.run, options.approveProviderCall);
     return this.executePrepared(prepared, options);
+  }
+
+  /**
+   * Open a transient direct stream through the façade's request validation boundary.
+   * Connector-bearing requests are rejected because a stream cannot silently skip the reviewed
+   * connector phase; callers should use `execute()` when connector-first execution is required.
+   */
+  async executeStream(input: AutonomousBrainRequest, options: AutonomousBrainStreamOptions = {}): Promise<AutonomousRunStreamHandle> {
+    const request = validateRequest(input);
+    if (request.connector !== undefined) throw new ArgumentError("autonomous brain streaming does not skip connector execution; use execute() for connector-bearing requests");
+    return this.agent.runStream(request.task, {
+      ...options,
+      ...(request.domain === undefined ? {} : { domain: request.domain }),
+      ...(request.capability === undefined ? {} : { capability: request.capability }),
+      ...(request.hints === undefined ? {} : { hints: request.hints }),
+      ...(request.context === undefined ? {} : { context: request.context }),
+      ...(request.allow_cross_domain === undefined ? {} : { allowCrossDomain: request.allow_cross_domain }),
+    });
+  }
+
+  /** Open the deterministic automatic stream through the façade's validated request boundary. */
+  async executeAutoStream(input: AutonomousBrainRequest, options: AutonomousBrainAutoStreamOptions = {}): Promise<AutonomousRunStreamHandle> {
+    const request = validateRequest(input);
+    if (request.connector !== undefined) throw new ArgumentError("autonomous brain streaming does not skip connector execution; use executeAuto() for connector-bearing requests");
+    return this.agent.runAutoStream(request.task, {
+      ...options,
+      ...(request.domain === undefined ? {} : { domain: request.domain }),
+      ...(request.capability === undefined ? {} : { capability: request.capability }),
+      ...(request.hints === undefined ? {} : { hints: request.hints }),
+      ...(request.context === undefined ? {} : { context: request.context }),
+      ...(request.allow_cross_domain === undefined ? {} : { allowCrossDomain: request.allow_cross_domain }),
+    });
+  }
+
+  /** Open the bounded specialist-fan-out/synthesis stream through the validated façade boundary. */
+  async executeCrossDomainStream(input: AutonomousBrainRequest, options: AutonomousBrainCrossDomainStreamOptions = {}): Promise<AutonomousRunStreamHandle> {
+    const request = validateRequest(input);
+    if (request.connector !== undefined) throw new ArgumentError("autonomous brain streaming does not skip connector execution; use executeCrossDomain() for connector-bearing requests");
+    if (request.domain !== undefined) throw new ArgumentError("autonomous brain cross-domain streaming does not accept an explicit single domain");
+    return this.agent.runCrossDomainStream(request.task, {
+      ...options,
+      ...(request.capability === undefined ? {} : { capability: request.capability }),
+      ...(request.hints === undefined ? {} : { hints: request.hints }),
+      ...(request.context === undefined ? {} : { context: request.context }),
+      ...(request.allow_cross_domain === undefined ? {} : { allowCrossDomain: request.allow_cross_domain }),
+    });
   }
 
   /**

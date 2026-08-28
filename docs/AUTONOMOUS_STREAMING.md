@@ -5,6 +5,36 @@ the application that renders or consumes model output. It is intentionally a tra
 not a second planning engine: the brain still owns domain routing, model eligibility, prompt
 assembly, plan approval, effect authority, evaluator credit, and learning policy.
 
+The TypeScript application façade exposes the same boundary above the raw runtime:
+
+```typescript
+const handle = await agent.runAutoStream("debug and verify this change", {
+  domain: "coding",
+  candidates,
+  credentialFor: (provider) => credentials.get(provider),
+  approveProviderCall: true,
+});
+
+for await (const item of handle.events) {
+  if (item.kind === "provider") ui.append(item.event.textDelta);
+}
+const completion = await handle.completion;
+```
+
+`AutonomousAgent.runStream()` performs a provider-free high-level preflight first, so route,
+task decision, blueprint, structured-output, memory, cost, policy, and caller approval gates are
+still authoritative. `runAutoStream()` is the deterministic automatic route wrapper. Provider-
+planned automatic execution remains a separate review/acceptance flow and is rejected by the
+stream wrapper until a caller has explicitly accepted the plan. `runCrossDomainStream()` adds
+bounded specialist fan-out, transient child lifecycle events, and synthesis over bounded local
+specialist text. Its event channel distinguishes `direct`, `child`, and `synthesis` stages.
+
+Cross-domain stream output is never inserted into the completion receipt or memory/learning
+stores. The fan-in buffer is process-local and bounded per child; callers should consume the
+single-consumer event iterator promptly and close it when abandoning a stream. A caller abort
+signal cancels the child/synthesis boundary, while each child keeps the same credential resolver,
+execution controller, cost budget, and provider failover policy.
+
 ## Contract shape
 
 TypeScript opens the full autonomous path:

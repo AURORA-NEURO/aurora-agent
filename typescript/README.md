@@ -181,7 +181,12 @@ is copied into the receipt.
 
 For live UI or worker consumption, `AutonomousRuntime.invokeStream()` returns a single-consumer
 provider-neutral event handle with pre-event-only failover, required terminal `done` events,
-explicit abandonment, and a metadata-only completion receipt. See
+explicit abandonment, and a metadata-only completion receipt. The application-facing
+`AutonomousAgent.runStream()` and `runAutoStream()` wrappers perform the normal route, task
+decision, blueprint, prompt, policy, and approval preflight before opening that stream.
+`runCrossDomainStream()` multiplexes bounded specialist streams and then streams synthesis over
+transient bounded child text; lifecycle events identify `child` and `synthesis` stages while
+completion receipts remain digest-only. See
 [`docs/AUTONOMOUS_STREAMING.md`](../docs/AUTONOMOUS_STREAMING.md) for the cross-language contract.
 
 ```typescript

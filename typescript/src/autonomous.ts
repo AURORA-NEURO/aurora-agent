@@ -289,6 +289,10 @@ import {
   type ProviderModelDiscovery,
   type AutonomousProviderFailoverProjection,
   type AutonomousProviderInvocationReceipt,
+  type AutonomousStreamCompletion,
+  type AutonomousStreamHandle,
+  type AutonomousStreamInvocationOptions,
+  type ProviderStreamEvent,
   LLMRuntimeHealthPersistenceCoordinator,
   type LLMRuntimeHealthSnapshot,
 } from "./llm.js";
@@ -381,6 +385,9 @@ export const AUTONOMOUS_CROSS_DOMAIN_PLAN_REFINEMENT_SCHEMA = "bioprism-python-a
 export const AUTONOMOUS_ORDERED_STEP_PLAN_REFINEMENT_SCHEMA = "bioprism-typescript-autonomous-ordered-step-plan-refinement/0.1" as const;
 export const AUTONOMOUS_PLAN_AND_RUN_SCHEMA = "bioprism-typescript-autonomous-plan-and-run/0.1" as const;
 export const AUTONOMOUS_AUTO_RUN_SCHEMA = "bioprism-typescript-autonomous-auto-run/0.1" as const;
+export const AUTONOMOUS_RUN_STREAM_SCHEMA = "bioprism-typescript-autonomous-run-stream/0.1" as const;
+export const AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA = "bioprism-typescript-autonomous-run-stream-completion/0.1" as const;
+export const AUTONOMOUS_RUN_STREAM_MAX_QUEUED_EVENTS = 4_096;
 export const AUTONOMOUS_EVIDENCE_BACKED_RUN_SCHEMA = "bioprism-typescript-autonomous-evidence-backed-run/0.1" as const;
 export const MAX_AUTONOMOUS_EVIDENCE_BACKED_PROMPT_CHUNKS = 32;
 export const MAX_AUTONOMOUS_EVIDENCE_BACKED_CONTEXT_BYTES = 48_000;
@@ -2041,6 +2048,67 @@ export interface AutonomousAutoRunResult {
   next_action: AutonomousAutoRunNextAction;
   retention: "provider_response_local;route_and_plan_metadata_value_only;execution_result_caller_owned";
   authorization: "route_review_and_provider_or_effect_approval_remain_explicit";
+}
+
+/**
+ * Transient event emitted by the application-facing autonomous stream.
+ *
+ * Provider text and tool-call deltas are available only while the caller consumes `events`.
+ * Lifecycle events intentionally contain digests and counters rather than task text, provider
+ * payloads, credentials, or specialist output.
+ */
+export type AutonomousRunStreamEvent =
+  | {
+      kind: "provider";
+      stage: "direct" | "child" | "synthesis";
+      child_id?: string;
+      event: ProviderStreamEvent;
+    }
+  | {
+      kind: "lifecycle";
+      stage: "route" | "child" | "synthesis";
+      phase: "child_started" | "child_completed" | "synthesis_started" | "synthesis_completed";
+      child_id?: string;
+      domain?: string;
+      status?: string;
+      event_count?: number;
+      text_delta_bytes?: number;
+      selection_digest?: string | null;
+    };
+
+/** Metadata-only terminal receipt for an application-facing autonomous stream. */
+export interface AutonomousRunStreamCompletion extends JsonObject {
+  schema: typeof AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA;
+  status: AutonomousRunStatus | AutonomousCrossDomainRunStatus | "failed" | "abandoned";
+  route_digest: string;
+  task_digest: string;
+  blueprint_digest: string | null;
+  event_count: number;
+  text_delta_bytes: number;
+  stage_count: number;
+  provider_invocations: AutonomousProviderInvocationReceipt[];
+  provider_failover: AutonomousProviderFailoverProjection | null;
+  inner_completions: Array<AutonomousStreamCompletion | AutonomousRunStreamCompletion>;
+  error_code: ProviderErrorCode | null;
+  error_class: string | null;
+  retention: "metadata_only_no_stream_payloads_or_credentials";
+  secret_material: "never_returned";
+}
+
+/**
+ * Application-facing stream handle. Selection and blueprint metadata are available before the
+ * first event; text remains transient and is never copied into the completion receipt.
+ */
+export interface AutonomousRunStreamHandle {
+  schema: typeof AUTONOMOUS_RUN_STREAM_SCHEMA;
+  route: AutonomousRouteProposal;
+  semantic_route: AutonomousSemanticRouteResult | null;
+  blueprint: AutonomousTaskBlueprint | AutonomousCrossDomainBlueprint | null;
+  selection: AutonomousSelectionDecision | null;
+  continuation_plan: AutonomousModelContinuationPlan | null;
+  context_budget: AutonomousContextBudgetPlan | null;
+  events: AsyncIterable<AutonomousRunStreamEvent>;
+  completion: Promise<AutonomousRunStreamCompletion>;
 }
 
 const AUTONOMOUS_RUN_SEMANTIC_ROUTING_FIELDS = new Set([
@@ -9084,6 +9152,517 @@ export class AutonomousAgent {
   async flushPromptLearning(): Promise<unknown> {
     if (this.promptLearningCoordinator === undefined) throw new ArgumentError("prompt learning coordinator is not configured");
     return this.promptLearningCoordinator.flush();
+  }
+
+  /**
+   * Open a bounded cross-domain stream. Specialist streams are multiplexed into one transient
+   * event channel, then their bounded local text is handed to a final synthesis stream. Nothing
+   * in the fan-in queue or synthesis context is written to autonomy state.
+   */
+  async runCrossDomainStream(task: string, options: AutonomousCrossDomainRunOptions = {}): Promise<AutonomousRunStreamHandle> {
+    options = this.withPromptLearningOptions(options);
+    const taskText = boundedText("cross-domain stream task", task, 32_000);
+    validateAutonomousStructuredOutputOptions(options);
+    const contentParts = options.contentParts === undefined ? undefined : normalizeProviderContentParts(options.contentParts);
+    const costBudget = resolveAutonomousCostBudget(options);
+    const routeResolution = await this.resolveExecutionRoute(taskText, options, costBudget);
+    const route = routeResolution.route;
+    const emptyHandle = async (status: AutonomousRunStreamCompletion["status"], blueprint: AutonomousTaskBlueprint | AutonomousCrossDomainBlueprint | null = null): Promise<AutonomousRunStreamHandle> => {
+      let consumed = false;
+      const events: AsyncIterable<AutonomousRunStreamEvent> = {
+        [Symbol.asyncIterator]: async function* (): AsyncGenerator<AutonomousRunStreamEvent> {
+          if (consumed) throw new ArgumentError("autonomous stream handles are single-consumer");
+          consumed = true;
+        },
+      };
+      return {
+        schema: AUTONOMOUS_RUN_STREAM_SCHEMA,
+        route,
+        semantic_route: routeResolution.semanticRoute,
+        blueprint,
+        selection: null,
+        continuation_plan: null,
+        context_budget: null,
+        events,
+        completion: Promise.resolve({
+          schema: AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA,
+          status,
+          route_digest: route.route_digest,
+          task_digest: route.task_digest,
+          blueprint_digest: blueprint === null ? null : await digestJson(blueprint),
+          event_count: 0,
+          text_delta_bytes: 0,
+          stage_count: 0,
+          provider_invocations: [],
+          provider_failover: null,
+          inner_completions: [],
+          error_code: null,
+          error_class: null,
+          retention: "metadata_only_no_stream_payloads_or_credentials",
+          secret_material: "never_returned",
+        }),
+      };
+    };
+    if (routeResolution.semanticRoute !== null && routeResolution.semanticRoute.status !== "completed") return emptyHandle(semanticRouteCrossDomainStatus(routeResolution.semanticRoute.status));
+    if (route.abstained || !route.cross_domain || route.selected_domains.length < 2) return emptyHandle("route_review_required");
+
+    // Cross-domain `run()` provides the canonical no-provider preflight, including child/synthesis
+    // blueprints and strict policy admissions. Streaming starts only after that gate succeeds.
+    const preflight = await this.runCrossDomain(taskText, {
+      ...options,
+      routeOverride: route,
+      contentParts,
+      approveProviderCall: false,
+      recordMemory: false,
+      learning: undefined,
+      maxTotalCostUnits: undefined,
+      costBudget,
+    });
+    if (options.approveProviderCall !== true || !preflight.blueprint || preflight.status !== "approval_required") return emptyHandle(preflight.status, preflight.blueprint);
+    const blueprint = preflight.blueprint;
+    const candidates = options.candidates ? [...options.candidates] : this.models();
+    if (!candidates.length) throw new ProviderRuntimeError("cross-domain stream requires at least one registered model candidate");
+
+    type QueueItem = { event?: AutonomousRunStreamEvent; done?: boolean; error?: unknown };
+    const queued: AutonomousRunStreamEvent[] = [];
+    const waiters: Array<(item: QueueItem) => void> = [];
+    let queueClosed = false;
+    let queueError: unknown = null;
+    const push = (event: AutonomousRunStreamEvent): void => {
+      if (queueClosed) return;
+      if (queued.length >= AUTONOMOUS_RUN_STREAM_MAX_QUEUED_EVENTS) {
+        queueError = new ProviderRuntimeError("cross-domain stream queue exceeded its bounded event capacity", { code: "invalid_response" });
+        queueClosed = true;
+        abortController.abort();
+        while (waiters.length) waiters.shift()!({ done: true, error: queueError });
+        return;
+      }
+      const waiter = waiters.shift();
+      if (waiter) waiter({ event });
+      else queued.push(event);
+    };
+    const close = (error: unknown = null): void => {
+      if (queueClosed) return;
+      queueClosed = true;
+      queueError = error;
+      while (waiters.length) waiters.shift()!({ done: true, error });
+    };
+    const next = async (): Promise<QueueItem> => {
+      const event = queued.shift();
+      if (event !== undefined) return { event };
+      if (queueClosed) return { done: true, error: queueError };
+      return new Promise<QueueItem>((resolve) => waiters.push(resolve));
+    };
+    const abortController = new AbortController();
+    if (options.signal?.aborted) abortController.abort(options.signal.reason);
+    const abortListener = (): void => abortController.abort(options.signal?.reason);
+    options.signal?.addEventListener("abort", abortListener, { once: true });
+    const childOutputsByIndex: Array<{ id: string; domain: AutonomousDomainName; status: string; output: string } | undefined> = new Array(blueprint.child_blueprints.length);
+    const innerCompletions: Array<AutonomousStreamCompletion | AutonomousRunStreamCompletion> = [];
+    const providerInvocations: AutonomousProviderInvocationReceipt[] = [];
+    let eventCount = 0;
+    let textDeltaBytes = 0;
+    let completionResolver: ((completion: AutonomousRunStreamCompletion) => void) | undefined;
+    let completionSettled = false;
+    const settle = async (status: AutonomousRunStreamCompletion["status"], error: unknown = null): Promise<void> => {
+      if (completionSettled) return;
+      completionSettled = true;
+      const providerFailover = [...innerCompletions].reverse().find((item) => item.provider_failover !== null)?.provider_failover ?? null;
+      completionResolver?.({
+        schema: AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA,
+        status,
+        route_digest: route.route_digest,
+        task_digest: route.task_digest,
+        blueprint_digest: await digestJson(blueprint),
+        event_count: eventCount,
+        text_delta_bytes: textDeltaBytes,
+        stage_count: innerCompletions.length,
+        provider_invocations: [...providerInvocations],
+        provider_failover: providerFailover,
+        inner_completions: [...innerCompletions],
+        error_code: error instanceof ProviderRuntimeError ? error.code : null,
+        error_class: error instanceof Error ? error.constructor.name : error === null ? null : "UnknownError",
+        retention: "metadata_only_no_stream_payloads_or_credentials",
+        secret_material: "never_returned",
+      });
+    };
+    let started = false;
+    const start = (): void => {
+      if (started) return;
+      started = true;
+      void (async (): Promise<void> => {
+        try {
+          const executionOrder = blueprint.child_blueprints.map((_, index) => index);
+          const maxParallelChildren = normalizedCrossDomainConcurrency(options.maxParallelChildren, executionOrder.length);
+          let nextIndex = 0;
+          let stopDispatch = false;
+          const executeChild = async (index: number): Promise<void> => {
+            const child = blueprint.child_blueprints[index];
+            if (!child) throw new ProviderRuntimeError(`cross-domain stream child ${index + 1} is missing`);
+            const childId = blueprint.child_ids[index] ?? `child-${index + 1}`;
+            const taskMessage = child.prompt.messages.find((message) => message.source_id === "task");
+            if (!taskMessage) throw new ProviderRuntimeError(`cross-domain stream child ${childId} has no bounded task message`);
+            const childContext: AutonomousPromptChunk[] = [
+              ...(options.context ?? []),
+              { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}; child id: ${childId}`, required: true, priority: 100 },
+            ];
+            let handle: AutonomousRunStreamHandle | null = null;
+            try {
+              handle = await this.runStream(taskMessage.content, {
+                ...options,
+                domain: child.domain_profile.domain,
+                routeOverride: undefined,
+                semanticRouting: false,
+                allowCrossDomain: false,
+                context: childContext,
+                contentParts,
+                retrieveMemory: false,
+                recordMemory: false,
+                learning: undefined,
+                approveProviderCall: true,
+                signal: abortController.signal,
+                maxTotalCostUnits: undefined,
+                costBudget,
+              });
+              push({ kind: "lifecycle", stage: "child", phase: "child_started", child_id: childId, domain: child.domain_profile.domain, selection_digest: handle.selection ? await digestJson(handle.selection) : null });
+              let output = "";
+              for await (const event of handle.events) {
+                if (event.kind === "provider") {
+                  output += event.event.textDelta;
+                  if (bytes(output) > 48_000) output = `${output.slice(0, 47_000)}\n[child output bounded locally]`;
+                  eventCount += 1;
+                  textDeltaBytes += bytes(event.event.textDelta);
+                  push({ kind: "provider", stage: "child", child_id: childId, event: event.event });
+                }
+              }
+              const childCompletion = await handle.completion;
+              innerCompletions.push(childCompletion);
+              providerInvocations.push(...childCompletion.provider_invocations);
+              const completed = childCompletion.status === "completed";
+              childOutputsByIndex[index] = { id: childId, domain: child.domain_profile.domain, status: childCompletion.status, output: output.trim() || "[child returned no textual output]" };
+              push({ kind: "lifecycle", stage: "child", phase: "child_completed", child_id: childId, domain: child.domain_profile.domain, status: childCompletion.status, event_count: childCompletion.event_count, text_delta_bytes: childCompletion.text_delta_bytes });
+              if (!completed && !options.allowPartial) stopDispatch = true;
+            } catch (error) {
+              if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
+              const childCompletion = handle === null ? null : await handle.completion;
+              if (childCompletion) {
+                innerCompletions.push(childCompletion);
+                providerInvocations.push(...childCompletion.provider_invocations);
+              }
+              childOutputsByIndex[index] = { id: childId, domain: child.domain_profile.domain, status: "failed", output: "[child stream failed]" };
+              push({ kind: "lifecycle", stage: "child", phase: "child_completed", child_id: childId, domain: child.domain_profile.domain, status: "failed" });
+              stopDispatch = true;
+              if (!options.allowPartial) return;
+            }
+          };
+          const worker = async (): Promise<void> => {
+            while (true) {
+              if (stopDispatch && !options.allowPartial) return;
+              const sequenceIndex = nextIndex++;
+              const index = executionOrder[sequenceIndex];
+              if (index === undefined) return;
+              await executeChild(index);
+            }
+          };
+          await Promise.all(Array.from({ length: maxParallelChildren }, () => worker()));
+          const childOutputs = executionOrder.flatMap((index) => childOutputsByIndex[index] ? [childOutputsByIndex[index]!] : []);
+          const completedChildren = childOutputs.filter((child) => child.status === "completed").length;
+          if (completedChildren === 0 || options.synthesize === false) {
+            await settle(completedChildren === executionOrder.length ? "completed" : "child_failed");
+            close();
+            return;
+          }
+          const synthesisTaskMessage = blueprint.synthesis_blueprint.prompt.messages.find((message) => message.source_id === "task");
+          if (!synthesisTaskMessage) throw new ProviderRuntimeError("cross-domain stream synthesis has no bounded task message");
+          const synthesisContext: AutonomousPromptChunk[] = [
+            ...(options.context ?? []),
+            { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}`, required: true, priority: 100 },
+            ...childOutputs.filter((child) => child.status === "completed").map((child) => ({ id: `cross-domain-output-${child.id}`, content: JSON.stringify(child), priority: 90 })),
+          ];
+          const synthesis = await this.runStream(synthesisTaskMessage.content, {
+            ...options,
+            domain: "cross_domain",
+            routeOverride: undefined,
+            semanticRouting: false,
+            allowCrossDomain: false,
+            context: synthesisContext,
+            contentParts,
+            retrieveMemory: false,
+            recordMemory: false,
+            learning: undefined,
+            approveProviderCall: true,
+            signal: abortController.signal,
+            maxTotalCostUnits: undefined,
+            costBudget,
+          });
+          push({ kind: "lifecycle", stage: "synthesis", phase: "synthesis_started", domain: "cross_domain", selection_digest: synthesis.selection ? await digestJson(synthesis.selection) : null });
+          for await (const event of synthesis.events) {
+            if (event.kind !== "provider") continue;
+            eventCount += 1;
+            textDeltaBytes += bytes(event.event.textDelta);
+            push({ kind: "provider", stage: "synthesis", event: event.event });
+          }
+          const synthesisCompletion = await synthesis.completion;
+          innerCompletions.push(synthesisCompletion);
+          providerInvocations.push(...synthesisCompletion.provider_invocations);
+          push({ kind: "lifecycle", stage: "synthesis", phase: "synthesis_completed", domain: "cross_domain", status: synthesisCompletion.status, event_count: synthesisCompletion.event_count, text_delta_bytes: synthesisCompletion.text_delta_bytes });
+          await settle(synthesisCompletion.status === "completed" ? "completed" : synthesisCompletion.status === "abandoned" ? "abandoned" : "failed");
+          close();
+        } catch (error) {
+          await settle("failed", error);
+          close(error);
+        } finally {
+          options.signal?.removeEventListener("abort", abortListener);
+        }
+      })();
+    };
+    const completion = new Promise<AutonomousRunStreamCompletion>((resolve) => { completionResolver = resolve; });
+    let consumed = false;
+    const events: AsyncIterable<AutonomousRunStreamEvent> = {
+      [Symbol.asyncIterator]: async function* (): AsyncGenerator<AutonomousRunStreamEvent> {
+        if (consumed) throw new ArgumentError("autonomous stream handles are single-consumer");
+        consumed = true;
+        start();
+        try {
+          while (true) {
+            const item = await next();
+            if (item.error) throw item.error;
+            if (item.done) return;
+            if (item.event) yield item.event;
+          }
+        } finally {
+          if (!queueClosed) {
+            abortController.abort();
+            await settle("abandoned");
+            close();
+          }
+        }
+      },
+    };
+    return { schema: AUTONOMOUS_RUN_STREAM_SCHEMA, route, semantic_route: routeResolution.semanticRoute, blueprint, selection: null, continuation_plan: null, context_budget: null, events, completion };
+  }
+
+  /** Automatic deterministic mode with the same live stream contract as `run()`. */
+  async runAutoStream(task: string, options: AutonomousAutoRunOptions = {}): Promise<AutonomousRunStreamHandle> {
+    if (options.planningMode === "provider" || options.planning !== undefined || options.acceptPlan === true) {
+      throw new ArgumentError("provider-planned automatic streaming requires an explicit plan acceptance flow; use runAuto() before opening a stream");
+    }
+    return this.runStream(task, options);
+  }
+
+  /** Open the provider-neutral stream after the same route/blueprint/policy gates as `run()`. */
+  async runStream(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunStreamHandle> {
+    options = this.withPromptLearningOptions(options);
+    const taskText = boundedText("autonomous stream task", task, 32_000);
+    validateAutonomousStructuredOutputOptions(options);
+    const contentParts = options.contentParts === undefined ? undefined : normalizeProviderContentParts(options.contentParts);
+    const costBudget = resolveAutonomousCostBudget(options);
+    const routeResolution = await this.resolveExecutionRoute(taskText, options, costBudget);
+    const route = routeResolution.route;
+    if (route.cross_domain && options.domain === undefined) {
+      if (options.acceptedSingleDomainPlanRefinement !== undefined) throw new ArgumentError("single-domain plan refinement cannot be applied to a cross-domain stream");
+      const cross = await this.runCrossDomainStream(taskText, { ...options, routeOverride: route, contentParts });
+      return routeResolution.semanticRoute === null ? cross : { ...cross, semantic_route: routeResolution.semanticRoute };
+    }
+
+    const emptyHandle = async (status: AutonomousRunStreamCompletion["status"], blueprint: AutonomousTaskBlueprint | AutonomousCrossDomainBlueprint | null = null): Promise<AutonomousRunStreamHandle> => {
+      let consumed = false;
+      const events: AsyncIterable<AutonomousRunStreamEvent> = {
+        [Symbol.asyncIterator]: async function* (): AsyncGenerator<AutonomousRunStreamEvent> {
+          if (consumed) throw new ArgumentError("autonomous stream handles are single-consumer");
+          consumed = true;
+        },
+      };
+      return {
+        schema: AUTONOMOUS_RUN_STREAM_SCHEMA,
+        route,
+        semantic_route: routeResolution.semanticRoute,
+        blueprint,
+        selection: null,
+        continuation_plan: null,
+        context_budget: null,
+        events,
+        completion: Promise.resolve({
+          schema: AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA,
+          status,
+          route_digest: route.route_digest,
+          task_digest: route.task_digest,
+          blueprint_digest: blueprint === null ? null : await digestJson(blueprint),
+          event_count: 0,
+          text_delta_bytes: 0,
+          stage_count: 0,
+          provider_invocations: [],
+          provider_failover: null,
+          inner_completions: [],
+          error_code: null,
+          error_class: null,
+          retention: "metadata_only_no_stream_payloads_or_credentials",
+          secret_material: "never_returned",
+        }),
+      };
+    };
+    if (routeResolution.semanticRoute !== null && routeResolution.semanticRoute.status !== "completed") return emptyHandle(semanticRouteRunStatus(routeResolution.semanticRoute.status));
+    if (route.abstained || !route.primary_domain) return emptyHandle("route_review_required");
+
+    // `run()` is used only as a provider-free preflight so the stream cannot bypass any existing
+    // blueprint, task-decision, memory, structured-output, or explicit-approval gate.
+    const preflight = await this.run(taskText, {
+      ...options,
+      routeOverride: route,
+      contentParts,
+      approveProviderCall: false,
+      recordMemory: false,
+      learning: undefined,
+      maxTotalCostUnits: undefined,
+      costBudget,
+    });
+    if (options.approveProviderCall !== true || !preflight.blueprint || preflight.status !== "approval_required") return emptyHandle(preflight.status, preflight.blueprint);
+    let blueprint = preflight.blueprint;
+    if (preflight.memory?.consolidated_retrieval_digest) {
+      blueprint = { ...blueprint, selection_context: { ...blueprint.selection_context, consolidated_memory_retrieval_digest: preflight.memory.consolidated_retrieval_digest } };
+    }
+    const acceptedPlan = await acceptedAutonomousPlan(blueprint, options.acceptedSingleDomainPlanRefinement);
+    const domainPolicyMode = normalizeAutonomousDomainPolicyMode(options.domainPolicyMode);
+    const domainPolicyAdmission = domainPolicyAdmissionForBlueprint(route, blueprint, options, acceptedPlan !== null);
+    if (domainPolicyMode === "strict" && domainPolicyAdmission && domainPolicyAdmission.decision !== "admitted") return emptyHandle(domainPolicyStatus(domainPolicyAdmission), blueprint);
+    const domainPolicy = blueprint.domain_policy;
+    const streamCostBudget = costBudget ?? (domainPolicyMode === "strict" ? new AutonomousCostBudget(domainPolicy.max_total_cost_units) : undefined);
+    const effectiveMaxProviderFailovers = domainPolicyMode === "strict"
+      ? Math.min(options.maxProviderFailovers ?? Math.max(0, domainPolicy.max_provider_attempts - 1), Math.max(0, domainPolicy.max_provider_attempts - 1))
+      : options.maxProviderFailovers;
+    const candidates = options.candidates ? [...options.candidates] : this.models();
+    if (!candidates.length) throw new ProviderRuntimeError("autonomous stream requires at least one registered model candidate");
+    const selectedDomains = route.selected_domains.length ? route.selected_domains : [route.primary_domain];
+    if (options.tools && this.toolCatalogue && this.toolExecutor) await this.ensureToolRegistry();
+    const defaultToolNames = blueprint.plan.allowed_tools.filter((name) => name !== "provider.invoke");
+    const tools = options.tools === undefined ? await this.liveToolsForNames(selectedDomains, defaultToolNames) : this.filterActivatedTools(options.tools);
+    const renderedPrompt = await renderAutonomousRunPrompt(taskText, blueprint, route, options);
+    const messages: ProviderMessage[] = renderedPrompt
+      ? renderedPrompt.messages.map((message) => ({ ...message }))
+      : blueprint.prompt.messages.map((message) => ({ role: message.role, content: message.content }));
+    if (renderedPrompt) {
+      const supportingMessages = blueprint.prompt.messages
+        .filter((message) => !["domain-system", "domain-developer", "task"].includes(message.source_id))
+        .map((message) => ({ role: message.role, content: message.content } as ProviderMessage));
+      if (supportingMessages.length) {
+        const lastUserIndex = messages.reduce((found, message, index) => message.role === "user" ? index : found, -1);
+        messages.splice(lastUserIndex < 0 ? messages.length : lastUserIndex, 0, ...supportingMessages);
+      }
+    }
+    if (contentParts) {
+      let taskMessageIndex = -1;
+      for (let index = messages.length - 1; index >= 0; index -= 1) if (messages[index]?.role === "user") { taskMessageIndex = index; break; }
+      if (taskMessageIndex < 0) throw new ProviderRuntimeError("autonomous stream prompt has no user task message for content parts");
+      const taskMessage = messages[taskMessageIndex];
+      if (!taskMessage || typeof taskMessage.content !== "string") throw new ProviderRuntimeError("autonomous stream task message must be text before content parts are attached");
+      messages[taskMessageIndex] = { ...taskMessage, content: [providerTextPart(taskMessage.content), ...contentParts] };
+    }
+    if (acceptedPlan) messages.push({ role: "user", content: `Accepted provider plan refinement (digest ${acceptedPlan.refinement_digest}). Follow this existing workflow order and focus only; do not add tools, effects, permissions, credentials, or claims. Priority stages: ${acceptedPlan.priority_stage_ids.join(", ")}. Focus stages: ${acceptedPlan.focus_stage_ids.join(", ")}.` });
+    const promptProjection: AutonomousRunPromptProjection | null = renderedPrompt === null ? null : {
+      mode: renderedPrompt.mode,
+      prompt_id: renderedPrompt.metadata.prompt_id,
+      version: renderedPrompt.metadata.version,
+      domain: renderedPrompt.metadata.domain,
+      stage: renderedPrompt.metadata.stage,
+      manifest_digest: renderedPrompt.metadata.manifest_digest,
+      rendered_prompt_digest: renderedPrompt.metadata.rendered_prompt_digest,
+      final_prompt_digest: await digestJson(messages),
+      selection_plan_digest: renderedPrompt.metadata.selection_plan_digest,
+      ...(renderedPrompt.metadata.adaptive_selection_digest !== undefined ? { adaptive_selection_digest: renderedPrompt.metadata.adaptive_selection_digest } : {}),
+      ...(renderedPrompt.metadata.adaptive_arm_id !== undefined ? { adaptive_arm_id: renderedPrompt.metadata.adaptive_arm_id } : {}),
+      ...(renderedPrompt.metadata.adaptive_generation !== undefined ? { adaptive_generation: renderedPrompt.metadata.adaptive_generation } : {}),
+      ...(renderedPrompt.metadata.selection_policy !== undefined ? { selection_policy: renderedPrompt.metadata.selection_policy } : {}),
+      ...(renderedPrompt.metadata.adaptive_selection !== undefined ? { adaptive_selection: renderedPrompt.metadata.adaptive_selection } : {}),
+      retention: "prompt_messages_transient;digest_only_projection",
+      secret_material: "never_returned",
+    };
+    const requiredCapabilities = [...blueprint.required_capabilities];
+    const requireJson = options.structuredDomainResponse === true || options.requireJson === true;
+    const responseSchema = options.structuredDomainResponse === true ? blueprint.response_contract?.response_schema : options.responseSchema;
+    if (options.structuredDomainResponse === true && !responseSchema) throw new ProviderRuntimeError("structured domain response contract was not compiled into the stream blueprint");
+    if (requireJson && !requiredCapabilities.includes("structured_output")) requiredCapabilities.push("structured_output");
+    const request: ProviderRequest = {
+      model: "selection-delegated",
+      messages,
+      maxOutputTokens: options.maxOutputTokens ?? 1_024,
+      temperature: options.temperature,
+      ...(promptProjection ? { idempotencyKey: await digestJson({ schema: "bioprism-typescript-autonomous-run-stream-request/0.1", task_digest: blueprint.task_digest, plan_digest: blueprint.plan.plan_digest, prompt_digest: promptProjection.final_prompt_digest, manifest_digest: promptProjection.manifest_digest, selection_plan_digest: promptProjection.selection_plan_digest, consolidated_memory_retrieval_digest: preflight.memory?.consolidated_retrieval_digest ?? null }) } : {}),
+      ...(requireJson ? { requireJson: true } : options.requireJson === false ? { requireJson: false } : {}),
+      ...(responseSchema !== undefined ? { responseSchema } : {}),
+      tools: tools.length ? tools : undefined,
+      toolChoice: tools.length ? "auto" : undefined,
+    };
+    const executionPlan: AutonomousExecutionPlan = {
+      task: taskText,
+      domain: blueprint.domain_profile.domain,
+      capability: blueprint.selection_context.capability,
+      riskClass: blueprint.domain_profile.risk_class,
+      taskFamily: blueprint.selection_context.task_family ?? undefined,
+      learningContextDigest: blueprint.learning_context_digest,
+      requiredCapabilities,
+      maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+      maxLatencyMs: options.maxLatencyMs,
+      minQuality: options.minQuality,
+      minSelectionConfidence: domainPolicyMode === "strict" ? Math.max(options.minSelectionConfidence ?? 0, domainPolicy.min_selection_confidence) : options.minSelectionConfidence,
+      selectionWeights: options.selectionWeights,
+      selectionObservations: options.selectionObservations,
+      contextBudget: options.contextBudget,
+      candidates,
+      request,
+    };
+    const healthObserver = this.modelHealthController?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
+    const remoteHealthObserver = this.modelHealthBridge?.observer({ domain: blueprint.domain_profile.domain, capability: executionPlan.capability ?? blueprint.domain_profile.default_capability, riskClass: blueprint.domain_profile.risk_class });
+    const feedbackObserver = composeInvocationObservers(options.observer, healthObserver, remoteHealthObserver);
+    const inner = await this.runtime.invokeStream(executionPlan, {
+      credential: options.credential,
+      credentialFor: options.credentialFor,
+      signal: options.signal,
+      observer: feedbackObserver,
+      selectionEventCallback: options.selectionEventCallback,
+      execution: options.execution,
+      executionAttempt: options.executionAttempt,
+      maxProviderFailovers: effectiveMaxProviderFailovers,
+      reserveCost: streamCostBudget ? (costUnits) => streamCostBudget.reserve(costUnits) : undefined,
+      effectBoundary: options.effectBoundary ?? this.effectBoundary,
+    });
+    let completionResolver: ((completion: AutonomousRunStreamCompletion) => void) | undefined;
+    const completion = new Promise<AutonomousRunStreamCompletion>((resolve) => { completionResolver = resolve; });
+    let consumed = false;
+    const events: AsyncIterable<AutonomousRunStreamEvent> = {
+      [Symbol.asyncIterator]: async function* (): AsyncGenerator<AutonomousRunStreamEvent> {
+        if (consumed) throw new ArgumentError("autonomous stream handles are single-consumer");
+        consumed = true;
+        let eventCount = 0;
+        let textDeltaBytes = 0;
+        try {
+          for await (const event of inner.events) {
+            eventCount += 1;
+            textDeltaBytes += bytes(event.textDelta);
+            yield { kind: "provider", stage: "direct", event };
+          }
+        } finally {
+          const innerCompletion = await inner.completion;
+          completionResolver?.({
+            schema: AUTONOMOUS_RUN_STREAM_COMPLETION_SCHEMA,
+            status: innerCompletion.status === "completed" ? "completed" : innerCompletion.status === "abandoned" ? "abandoned" : "failed",
+            route_digest: route.route_digest,
+            task_digest: route.task_digest,
+            blueprint_digest: await digestJson(blueprint),
+            event_count: eventCount,
+            text_delta_bytes: textDeltaBytes,
+            stage_count: 1,
+            provider_invocations: innerCompletion.provider_invocations,
+            provider_failover: innerCompletion.provider_failover,
+            inner_completions: [innerCompletion],
+            error_code: innerCompletion.error_code,
+            error_class: innerCompletion.error_class,
+            retention: "metadata_only_no_stream_payloads_or_credentials",
+            secret_material: "never_returned",
+          });
+        }
+      },
+    };
+    return { schema: AUTONOMOUS_RUN_STREAM_SCHEMA, route, semantic_route: routeResolution.semanticRoute, blueprint, selection: inner.selection, continuation_plan: inner.continuation_plan, context_budget: inner.context_budget, events, completion };
   }
 
   async run(task: string, options: AutonomousRunOptions = {}): Promise<AutonomousRunResult> {
