@@ -75,6 +75,7 @@ from prism_sdk import (
     ProviderHealthLedger,
     ProviderError,
     ProviderRequest,
+    ProviderStreamEvent,
     ProviderTool,
     ProviderToolResult,
     builtin_autonomous_domain_evaluator_profiles,
@@ -3009,6 +3010,116 @@ def test_run_autonomous_selects_assembles_plans_and_preserves_provider_approval(
         server.shutdown()
         thread.join(timeout=2)
         server.server_close()
+
+
+def test_agent_run_stream_preflights_lazily_invokes_and_redacts_completion():
+    calls: list[ProviderRequest] = []
+
+    def stream_handler(request: ProviderRequest) -> list[ProviderStreamEvent]:
+        calls.append(request)
+        return [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.text",
+                text_delta="bounded ",
+                done=False,
+            ),
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=1,
+                event_type="fixture.done",
+                text_delta="answer",
+                done=True,
+                usage={"output_tokens": 2},
+            ),
+        ]
+
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda _request: "unused",
+        stream_handler=stream_handler,
+    )
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+
+    waiting = agent.run_stream(
+        task="stream a reviewed coding answer",
+        domain="coding",
+        credentials={},
+        model_candidates=_model(),
+    )
+    assert waiting.completion is not None
+    assert waiting.completion.status == "approval_required"
+    assert list(waiting.events) == []
+    assert calls == []
+
+    live = agent.run_stream(
+        task="stream a reviewed coding answer",
+        domain="coding",
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+    )
+    assert live.completion is None
+    events = list(live.events)
+    assert [event.event.text_delta for event in events if event.event is not None] == [
+        "bounded ",
+        "answer",
+    ]
+    assert live.completion is not None
+    assert live.completion.status == "completed"
+    assert live.completion.event_count == 2
+    assert live.completion.text_delta_bytes == len("bounded answer".encode("utf-8"))
+    assert live.completion.stage_count == 1
+    assert "bounded answer" not in json.dumps(live.completion.to_dict())
+    assert live.blueprint is not None
+    assert live.completion.blueprint_digest is not None
+    assert len(calls) == 1
+    assert calls[0].model == "test-model"
+    assert "stream a reviewed coding answer" in calls[0].messages[-1]["content"]
+    with pytest.raises(ProviderError, match="single-consumer"):
+        _ = live.events
+
+
+def test_agent_run_auto_stream_keeps_provider_free_routing_and_allows_only_one_domain():
+    runtime = LLMRuntime()
+    runtime.register_in_memory_provider(
+        "openai",
+        lambda _request: "unused",
+        stream_handler=lambda request: [
+            ProviderStreamEvent(
+                provider="openai",
+                model=request.model,
+                sequence=0,
+                event_type="fixture.done",
+                text_delta="auto",
+                done=True,
+            )
+        ],
+    )
+    agent = AutonomousAgent(_Workspace(), runtime, model_catalogue=ModelCatalogue(_model()))
+    live = agent.run_auto_stream(
+        task="review this coding implementation",
+        credentials={},
+        model_candidates=_model(),
+        approve_provider_call=True,
+    )
+    assert live.route is not None
+    assert live.completion is None
+    assert [event.event.text_delta for event in live.events if event.event is not None] == ["auto"]
+    assert live.completion is not None
+    assert live.completion.status == "completed"
+
+    with pytest.raises(BrainRunError, match="semantic routing"):
+        agent.run_auto_stream(
+            task="review this coding implementation",
+            credentials={},
+            model_candidates=_model(),
+            semantic_routing=True,
+        )
 
 
 def test_run_autonomous_learning_records_explicit_reward_and_only_metadata_in_memory(tmp_path: Path):

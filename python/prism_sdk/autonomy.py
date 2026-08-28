@@ -134,6 +134,7 @@ from .brain import (
     _context_identity_digest,
     _ensure_bandit_arm,
     _json_digest,
+    _provider_messages_with_content_parts,
     _valid_digest,
     build_model_selection_audit,
 )
@@ -23986,6 +23987,330 @@ class AutonomousAgent:
         self._record_model_quality_from_learning_result(result)
         self._finish_execution(execution_controller, result=result)
         return result
+
+    def run_stream(
+        self,
+        *,
+        task: str,
+        domain: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        execution_id: str | None = None,
+        resume_execution: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Run one reviewed domain task as a lazy, provider-neutral event stream.
+
+        The method performs the normal route, blueprint, model-selection, prompt, and plan
+        preflight immediately with ``approve_provider_call=False``.  The returned handle starts
+        provider transport only when its ``events`` iterator is consumed and only when the
+        caller supplied ``approve_provider_call=True``.  Streaming is intentionally limited to
+        the direct provider mode: tool-loop, mission, evaluator settlement, and memory writes
+        remain on their existing execution APIs, where their separate authority boundaries can
+        be represented faithfully.
+
+        ``execution_id``/``resume_execution`` are rejected here because a streamed provider
+        response cannot be atomically checkpointed by this synchronous façade.  Deployments that
+        need restart recovery should use the existing resumable result controllers and rehydrate
+        the caller-owned response explicitly rather than replaying a partial stream.
+        """
+
+        from .autonomous_agent_stream import (
+            AutonomousAgentStreamHandle,
+            build_autonomous_agent_stream_request,
+        )
+        from .autonomous_stream import AutonomousStreamArm, AutonomousStreamRuntime
+
+        if execution_id is not None or resume_execution:
+            raise BrainRunError(
+                "run_stream does not support execution persistence; use a resumable result controller"
+            )
+        if not isinstance(task, str) or not task.strip():
+            raise BrainRunError("stream task must be a non-empty string")
+        if not isinstance(domain, str) or not domain.strip():
+            raise BrainRunError("stream domain must be a non-empty string")
+        requested_approval = kwargs.pop("approve_provider_call", False)
+        if not isinstance(requested_approval, bool):
+            raise BrainRunError("stream approve_provider_call must be a boolean")
+        execution_mode = kwargs.get("execution_mode", "provider")
+        if execution_mode not in (None, "provider"):
+            raise BrainRunError("run_stream supports only execution_mode='provider'")
+        if kwargs.get("mission_policy") is not None or kwargs.get("tool_loop_options") is not None:
+            raise BrainRunError(
+                "run_stream cannot execute mission or tool-loop continuations; use run() for those modes"
+            )
+        if kwargs.get("learn") is True or kwargs.get("evaluator") is not None or kwargs.get("evidence") is not None:
+            raise BrainRunError(
+                "run_stream cannot settle evaluator learning; use run_learning() or run()"
+            )
+
+        run_options = self._prompt_learning_options(kwargs)
+        candidates, resolved_credentials, resolved_options, execution_controller = self._execution_inputs(
+            credentials=credentials,
+            model_candidates=model_candidates,
+            options=run_options,
+            tool_domains=(domain,),
+            task=task,
+            resume_learning=False,
+        )
+        if execution_controller is not None:
+            raise BrainRunError(
+                "run_stream cannot attach a durable execution controller; use a resumable result controller"
+            )
+
+        # Compile the same blueprint used by the ordinary direct runner.  This second provider-
+        # free compilation gives the stream handle a stable public plan digest without putting
+        # transient task/prompt values into its completion receipt.
+        prepare_options = {
+            key: resolved_options[key]
+            for key in (
+                "capability",
+                "risk_class",
+                "constraints",
+                "desired_outputs",
+                "context",
+                "max_steps",
+                "require_json",
+                "structured_domain_response",
+                "response_schema",
+                "execution_mode",
+                "max_input_tokens",
+                "required_model_capabilities",
+                "memory_episodes",
+            )
+            if key in resolved_options
+        }
+        blueprint = self.orchestrator.prepare(task=task, domain=domain, **prepare_options)
+        route_binding = blueprint.selection_context.get("autonomous_route")
+        blueprint = _apply_versioned_prompt(
+            blueprint,
+            route=route_binding if isinstance(route_binding, Mapping) else None,
+            prompt_template=resolved_options.get("prompt_template"),
+            prompt_registry=resolved_options.get("prompt_registry"),
+            prompt_selection=resolved_options.get("prompt_selection"),
+            prompt_stage=resolved_options.get("prompt_stage", "answer"),
+            prompt_learning_state=resolved_options.get("prompt_learning_state"),
+            prompt_learning_exploration=resolved_options.get("prompt_learning_exploration", 0.35),
+        )
+        blueprint_public = blueprint.to_dict()
+        blueprint_digest = content_digest(blueprint_public)
+        task_digest = content_digest({"task": task})
+        resolved_options["approve_provider_call"] = False
+        try:
+            preflight = self.orchestrator.run(
+                task=task,
+                domain=domain,
+                model_candidates=candidates,
+                credentials=resolved_credentials,
+                **resolved_options,
+            )
+        except Exception:
+            # Do not translate malformed/configuration errors into a stream receipt.  This is
+            # the same hard-failure posture as the non-streaming API and avoids hiding contract
+            # bugs behind a deferred iterator.
+            raise
+        if not isinstance(preflight, BrainRunResult):
+            raise BrainRunError("run_stream preflight returned a non-direct result")
+
+        route = blueprint.selection_context.get("autonomous_route")
+        route_public = dict(route) if isinstance(route, Mapping) else None
+        selected = preflight.selection.get("selected_model")
+        if not isinstance(selected, Mapping):
+            return AutonomousAgentStreamHandle(
+                selection=preflight.selection,
+                route=route_public,
+                blueprint=blueprint_public,
+                task_digest=task_digest,
+                blueprint_digest=blueprint_digest,
+                inner=None,
+                initial_status="selection_refused",
+            )
+        provider = selected.get("provider")
+        model = selected.get("model")
+        if not isinstance(provider, str) or not isinstance(model, str):
+            raise BrainRunError("run_stream preflight selected malformed provider metadata")
+        if preflight.status != "approval_required":
+            status = preflight.status if preflight.status in {"plan_refused", "route_review_required"} else "selection_refused"
+            return AutonomousAgentStreamHandle(
+                selection=preflight.selection,
+                route=route_public,
+                blueprint=blueprint_public,
+                task_digest=task_digest,
+                blueprint_digest=blueprint_digest,
+                inner=None,
+                initial_status=status,
+            )
+        if not requested_approval:
+            return AutonomousAgentStreamHandle(
+                selection=preflight.selection,
+                route=route_public,
+                blueprint=blueprint_public,
+                task_digest=task_digest,
+                blueprint_digest=blueprint_digest,
+                inner=None,
+                initial_status="approval_required",
+            )
+
+        raw_messages = preflight.prompt.get("messages")
+        if not isinstance(raw_messages, Sequence) or isinstance(raw_messages, (str, bytes)) or not raw_messages:
+            raise BrainRunError("run_stream preflight did not retain provider messages")
+        normalized_content_parts = resolved_options.get("content_parts")
+        if normalized_content_parts is not None:
+            normalized_content_parts = normalize_provider_content_parts(normalized_content_parts)
+        provider_messages = _provider_messages_with_content_parts(
+            [dict(message) for message in raw_messages],
+            () if normalized_content_parts is None else normalized_content_parts,
+        )
+        tools = resolved_options.get("provider_tools", ())
+        if not isinstance(tools, Sequence) or isinstance(tools, (str, bytes)):
+            raise BrainRunError("run_stream provider_tools must be a sequence")
+        max_output_tokens = resolved_options.get("max_output_tokens", 2_048)
+        if not isinstance(max_output_tokens, int) or isinstance(max_output_tokens, bool):
+            raise BrainRunError("run_stream max_output_tokens must be an integer")
+        max_provider_failovers = resolved_options.get("max_provider_failovers", 2)
+        if (
+            not isinstance(max_provider_failovers, int)
+            or isinstance(max_provider_failovers, bool)
+            or not 0 <= max_provider_failovers <= 8
+        ):
+            raise BrainRunError("run_stream max_provider_failovers must be within [0, 8]")
+        request = build_autonomous_agent_stream_request(
+            model=model,
+            messages=provider_messages,
+            max_output_tokens=max_output_tokens,
+            temperature=resolved_options.get("temperature"),
+            require_json=blueprint.spec.require_json,
+            response_schema=blueprint.spec.response_schema,
+            idempotency_key=resolved_options.get("idempotency_key"),
+            tools=tools,
+            tool_choice=resolved_options.get("tool_choice"),
+        )
+        selection_models = preflight.selection.get("models", ())
+        if not isinstance(selection_models, Sequence) or isinstance(selection_models, (str, bytes)):
+            selection_models = ()
+        fallbacks: list[AutonomousStreamArm] = []
+        seen = {f"{provider}/{model}"}
+        for candidate in selection_models:
+            if not isinstance(candidate, Mapping):
+                continue
+            fallback_provider = candidate.get("provider")
+            fallback_model = candidate.get("model")
+            if not isinstance(fallback_provider, str) or not isinstance(fallback_model, str):
+                continue
+            arm_id = f"{fallback_provider}/{fallback_model}"
+            if arm_id in seen:
+                continue
+            if len(fallbacks) >= max_provider_failovers:
+                break
+            seen.add(arm_id)
+            cost = candidate.get("cost_per_million_tokens", 0.0)
+            if isinstance(cost, bool) or not isinstance(cost, (int, float)):
+                cost = 0.0
+            fallbacks.append(
+                AutonomousStreamArm(
+                    provider=fallback_provider,
+                    model=fallback_model,
+                    cost_per_million_tokens=float(cost),
+                )
+            )
+        inner = AutonomousStreamRuntime(self.runtime).open(
+            request,
+            provider=provider,
+            model=model,
+            fallbacks=fallbacks,
+            credential=resolved_credentials.get(provider),
+            credential_for=lambda name: resolved_credentials.get(name),
+            max_provider_failovers=max_provider_failovers,
+            context_budget=resolved_options.get("context_budget"),
+            observer=resolved_options.get("invocation_observer"),
+            invocation_kind="autonomous_agent_stream",
+            selection=preflight.selection,
+        )
+        return AutonomousAgentStreamHandle(
+            selection=preflight.selection,
+            route=route_public,
+            blueprint=blueprint_public,
+            task_digest=task_digest,
+            blueprint_digest=blueprint_digest,
+            inner=inner,
+        )
+
+    def run_auto_stream(
+        self,
+        *,
+        task: str,
+        credentials: Mapping[str, CredentialHandle] | CredentialSession,
+        model_candidates: Sequence[ModelCandidate | Mapping[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Route deterministically, then expose the selected single-domain stream.
+
+        Provider-assisted semantic routing, provider planning, learning loops, and cross-domain
+        fan-out are intentionally rejected until their separate stream lifecycle contracts are
+        available.  This prevents an automatic stream from silently making an unreviewed second
+        provider call or collapsing several child completions into one ambiguous transcript.
+        """
+
+        from .autonomous_agent_stream import AutonomousAgentStreamHandle
+
+        if kwargs.get("semantic_routing") is True:
+            raise BrainRunError("run_auto_stream requires provider-free routing; semantic routing is a separate provider boundary")
+        if kwargs.get("planning_mode", "deterministic") != "deterministic":
+            raise BrainRunError("run_auto_stream supports only deterministic planning")
+        if any(
+            kwargs.get(name) is True
+            for name in (
+                "workflow_execution",
+                "workflow_learning",
+                "workflow_trajectory_learning",
+                "cross_domain_learning",
+                "cross_domain_trajectory_learning",
+                "cross_domain_replan_learning",
+            )
+        ) or kwargs.get("learn") is True:
+            raise BrainRunError("run_auto_stream cannot combine automatic learning or workflow execution")
+        route_options = self._automatic_route_options(kwargs)
+        automatic = self.prepare_auto(task=task, **route_options)
+        route = automatic.route
+        task_digest = content_digest({"task": task})
+        if route.abstained:
+            return AutonomousAgentStreamHandle(
+                selection={},
+                route=route.to_dict(),
+                blueprint=None,
+                task_digest=task_digest,
+                blueprint_digest=None,
+                inner=None,
+                initial_status="route_review_required",
+            )
+        if len(route.selected_domains) != 1:
+            raise BrainRunError(
+                "run_auto_stream selected multiple domains; use an explicit cross-domain stream lifecycle"
+            )
+        selected_domain = route.selected_domains[0]
+        direct_options = dict(kwargs)
+        for name in (
+            "hints",
+            "min_confidence",
+            "min_margin",
+            "max_domains",
+            "allow_cross_domain",
+            "semantic_routing",
+            "semantic_weight",
+            "planning_mode",
+        ):
+            direct_options.pop(name, None)
+        handle = self.run_stream(
+            task=task,
+            domain=selected_domain,
+            credentials=credentials,
+            model_candidates=model_candidates,
+            **direct_options,
+        )
+        if not isinstance(handle, AutonomousAgentStreamHandle):
+            raise BrainRunError("run_auto_stream direct stream returned an invalid handle")
+        handle.route = route.to_dict()
+        return handle
 
     def run_mission_replan_cycle(
         self,

@@ -12,6 +12,15 @@ not provide provider credentials, distributed stream recovery, remote reconcilia
 summarization; those remain deployment responsibilities. See
 [`AUTONOMOUS_STREAMING.md`](AUTONOMOUS_STREAMING.md).
 
+The Python application façade now reaches that transport boundary without requiring callers to
+rebuild selection and prompt assembly. `AutonomousAgent.run_stream()` performs the ordinary
+domain blueprint and adaptive-selection preflight with provider approval forced off, then lazily
+dispatches the exact selected arm through the existing synchronous stream runtime after explicit
+approval. `run_auto_stream()` adds deterministic single-domain routing; semantic classifier calls,
+provider planning, evaluator settlement, mission/tool-loop continuations, durable execution
+controllers, and cross-domain fan-out remain explicit boundaries rather than being hidden behind
+an incomplete streamed result shape. The completion receipt remains digest- and metadata-only.
+
 The TypeScript and Python autonomous provider boundaries now expose an explicit, deterministic
 context-window budget. Before selection and invocation, callers can cap estimated input tokens
 and message count; system/developer instructions, the latest user task, recent turns, and the

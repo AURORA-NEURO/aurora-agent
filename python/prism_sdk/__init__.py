@@ -2112,6 +2112,15 @@ from .autonomous_stream import (
     AutonomousStreamHandle,
     AutonomousStreamRuntime,
 )
+from .autonomous_agent_stream import (
+    AUTONOMOUS_AGENT_STREAM_SCHEMA,
+    AUTONOMOUS_AGENT_STREAM_COMPLETION_SCHEMA,
+    MAX_AUTONOMOUS_AGENT_STREAM_TEXT_BYTES,
+    AutonomousAgentStreamEvent,
+    AutonomousAgentStreamCompletion,
+    AutonomousAgentStreamHandle,
+    build_autonomous_agent_stream_request,
+)
 from .provider_quota import (
     PROVIDER_QUOTA_SCHEMA,
     PROVIDER_QUOTA_SNAPSHOT_SCHEMA,
@@ -4589,6 +4598,13 @@ __all__ = [
     "AutonomousStreamCompletion",
     "AutonomousStreamHandle",
     "AutonomousStreamRuntime",
+    "AUTONOMOUS_AGENT_STREAM_SCHEMA",
+    "AUTONOMOUS_AGENT_STREAM_COMPLETION_SCHEMA",
+    "MAX_AUTONOMOUS_AGENT_STREAM_TEXT_BYTES",
+    "AutonomousAgentStreamEvent",
+    "AutonomousAgentStreamCompletion",
+    "AutonomousAgentStreamHandle",
+    "build_autonomous_agent_stream_request",
     "BrainJobRunResult",
     "BrainJobStore",
     "BrainJobPersistenceCoordinator",

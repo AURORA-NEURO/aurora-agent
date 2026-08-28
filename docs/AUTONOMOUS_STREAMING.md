@@ -101,6 +101,32 @@ reviewed choice. `AutonomousStreamArm` can carry an in-memory credential capabil
 arm, but credentials never appear in `selection`, `continuation_plan`, completion receipts, or
 event values.
 
+The Python application façade now exposes the same direct preflight boundary:
+
+```python
+handle = agent.run_stream(
+    task="review this implementation",
+    domain="coding",
+    credentials=credential_session,
+    model_candidates=catalogue,
+    approve_provider_call=True,
+)
+
+for item in handle.events:
+    if item.kind == "provider":
+        render(item.event.text_delta)
+receipt = handle.completion
+```
+
+`AutonomousAgent.run_stream()` compiles the ordinary domain blueprint and model selection with
+provider approval forced off, then lazily invokes the selected arm only after the caller has
+approved the call and consumes the iterator. `run_auto_stream()` adds deterministic single-domain
+routing. Semantic routing, provider planning, learning settlement, missions, tool loops, and
+cross-domain fan-out remain explicit non-streaming boundaries until their separate lifecycle and
+recovery contracts are selected. Python streaming also rejects durable execution-controller
+inputs: a partial provider transcript must be rehydrated by the caller rather than implicitly
+replayed after a restart.
+
 ## Failover and partial-output safety
 
 Failover is deliberately asymmetric:
