@@ -2,8 +2,10 @@ import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
 import {
   AutonomousGoalAgentRuntime,
+  type AutonomousGoalAgentLoopRunOptions,
   type AutonomousGoalAgentRuntimeOptions,
 } from "./autonomous-goal-agent.js";
+import type { AutonomousGoalControlLoopResult } from "./autonomous-goal-control-loop.js";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   validateAutonomousRouteOverride,
@@ -511,6 +513,15 @@ export type AutonomousBrainGoalAgentRuntimeOptions = Omit<AutonomousGoalAgentRun
 
 /** Long-horizon scheduler/worker/evaluator/learner runtime bound to this brain facade. */
 export type AutonomousBrainGoalAgentRuntime = AutonomousGoalAgentRuntime;
+
+/** One-call long-horizon execution with construction and control-loop options kept separate. */
+export interface AutonomousBrainGoalAgentControlOptions {
+  runtime: AutonomousBrainGoalAgentRuntimeOptions;
+  run?: AutonomousGoalAgentLoopRunOptions;
+}
+
+/** Value-only control-loop result returned to the initiating caller. */
+export type AutonomousBrainGoalAgentControlResult = AutonomousGoalControlLoopResult;
 
 /** Restart-safe evidence controls plus a caller-owned hash-chained metadata trace. */
 export interface AutonomousBrainEvidenceBackedResumableTraceOptions extends AutonomousBrainEvidenceBackedResumableExecutionOptions {
@@ -1690,6 +1701,20 @@ export class AutonomousBrainFacade {
   createGoalAgentRuntime(options: AutonomousBrainGoalAgentRuntimeOptions): AutonomousBrainGoalAgentRuntime {
     if (!options || typeof options !== "object" || Array.isArray(options)) throw new ArgumentError("autonomous brain goal runtime options must be an object");
     return new AutonomousGoalAgentRuntime({ ...options, agent: this.agent, brain: this });
+  }
+
+  /**
+   * Construct and run one bounded long-horizon goal loop through this facade.
+   *
+   * Runtime construction remains explicit under `runtime`, while scheduling, checkpoint, resume,
+   * and cycle limits remain explicit under `run`. This mirrors the Python convenience entry point
+   * without turning a one-call helper into an implicit persistence, credential, or approval layer.
+   */
+  runGoalControlLoop(options: AutonomousBrainGoalAgentControlOptions): Promise<AutonomousBrainGoalAgentControlResult> {
+    if (!options || typeof options !== "object" || Array.isArray(options)) throw new ArgumentError("autonomous brain goal control options must be an object");
+    if (!options.runtime || typeof options.runtime !== "object" || Array.isArray(options.runtime)) throw new ArgumentError("autonomous brain goal control runtime must be an object");
+    if (options.run !== undefined && (typeof options.run !== "object" || options.run === null || Array.isArray(options.run))) throw new ArgumentError("autonomous brain goal control run options must be an object");
+    return this.createGoalAgentRuntime(options.runtime).run(options.run ?? {});
   }
 
   /** Compile routing and workflow metadata without contacting a provider or connector. */

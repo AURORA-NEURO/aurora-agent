@@ -2115,6 +2115,8 @@ export type {
   AutonomousBrainEvidenceBackedResumableRun,
   AutonomousBrainGoalAgentRuntimeOptions,
   AutonomousBrainGoalAgentRuntime,
+  AutonomousBrainGoalAgentControlOptions,
+  AutonomousBrainGoalAgentControlResult,
   AutonomousBrainEvidenceBackedTraceOptions,
   AutonomousBrainDomainEvidenceBrainTraceOptions,
   AutonomousBrainTracedEvidenceBackedRunResult,

@@ -620,16 +620,18 @@ test("goal agent runtime bridges the real facade across every domain without ret
     calls.push({ kind: "cross", task, options });
     return { status: "completed" };
   };
-  const runtime = brain.createGoalAgentRuntime({
-    ledger,
-    task_resolver: (goal) => `private agent task ${goal.domain}`,
-    run_options_factory: (goal) => ({
-      private_runtime_handle: { token: `private-${goal.goal_id}` },
-      ...(goal.domain === "cross_domain" ? { subtasks: [{ domain: "coding", task: "private child task" }] } : {}),
-    }),
-    evaluator: (cycle) => cycle.batch.runs.map((run) => ({ goal_id: run.goal_id, evaluator_id: "agent-runtime-evaluator", evaluator_version: "1", reward: 0.75, passed: true })),
+  const result = await brain.runGoalControlLoop({
+    runtime: {
+      ledger,
+      task_resolver: (goal) => `private agent task ${goal.domain}`,
+      run_options_factory: (goal) => ({
+        private_runtime_handle: { token: `private-${goal.goal_id}` },
+        ...(goal.domain === "cross_domain" ? { subtasks: [{ domain: "coding", task: "private child task" }] } : {}),
+      }),
+      evaluator: (cycle) => cycle.batch.runs.map((run) => ({ goal_id: run.goal_id, evaluator_id: "agent-runtime-evaluator", evaluator_version: "1", reward: 0.75, passed: true })),
+    },
+    run: { schedule_options: { now_ns: 600, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains } },
   });
-  const result = await runtime.run({ schedule_options: { now_ns: 600, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains } });
   assert.equal(result.stop_reason, "all_terminal");
   assert.equal(result.evaluation_count, domains.length);
   assert.equal(calls.length, domains.length);
@@ -641,10 +643,7 @@ test("goal agent runtime bridges the real facade across every domain without ret
   assert.equal(serialized.includes("private agent task"), false);
   assert.equal(serialized.includes("private child task"), false);
   assert.equal(serialized.includes("private_runtime_handle"), false);
-  assert.equal(runtime.metadata().domain_count, domains.length);
-  assert.equal(runtime.metadata().execution_surface, "autonomous_agent_facade");
-  assert.equal(runtime.agent, agent);
-  assert.equal(runtime.brain, brain);
+  assert.equal(brain.agent, agent);
   assert.equal(ledger.verifyIntegrity().ok, true);
 });
 

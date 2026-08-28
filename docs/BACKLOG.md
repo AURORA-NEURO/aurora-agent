@@ -6,7 +6,9 @@ facade for reviewed action-handoff replay. Factory coverage exercises task rehyd
 settlement, metadata-only traces, protected task receipts, and reviewed handoffs across all twelve
 autonomous domains, including the explicit cross-domain route. Remaining work is deployment
 hardening and external authority; the factory does not make the project complete or provide
-credentials, source truth, durable storage, or effect reconciliation.
+credentials, source truth, durable storage, or effect reconciliation. A matching
+`runGoalControlLoop({ runtime, run })` convenience call keeps construction and restart controls
+explicit while matching Python's one-call control-loop entry point.
 
 The TypeScript connector mission composition boundary is now implemented and tested across all
 twelve autonomous domains. The new bridge combines metadata-only provider ordering, protected

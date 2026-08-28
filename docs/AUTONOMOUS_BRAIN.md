@@ -101,6 +101,10 @@ const result = await runtime.run({
 });
 ```
 
+For callers that do not need to retain the runtime object, `brain.runGoalControlLoop({ runtime,
+run })` provides the same composition in one typed call; the nested shape deliberately keeps
+runtime construction inputs separate from scheduler and restart controls.
+
 The runtime uses the same bounded route, domain workflow, prompt, model-selection, provider,
 connector/tool, evaluator, and online-learning surfaces as direct brain calls. It schedules every
 built-in domain—including the explicit `cross_domain` fan-out/fan-in route—through one ledger and
