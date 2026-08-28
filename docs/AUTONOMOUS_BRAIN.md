@@ -1378,6 +1378,47 @@ Use `run_connector_mission_with_provider_planning_and_launch_admission(...)` whe
 must authorize all mission domains before planner credential resolution or either execution phase;
 the launch gate does not collapse the planner and connector approvals into one permission.
 
+The TypeScript SDK now exposes the same composition boundary directly through
+`AutonomousAgent.runConnectorMissionWithProviderPlanning()`. The attached `ToolCatalogue` is
+used by default, while connector runtime, checkpoint store, result store, and provider controls
+remain explicit caller inputs:
+
+```typescript
+const planned = await agent.runConnectorMissionWithProviderPlanning(mission, {
+  execution: {
+    connector: { runtime: connectorRuntime, approved: true },
+    checkpointStore,
+    resultStore,
+    execute: { approveProviderCall: true },
+  },
+  providerPlanning: { approveProviderCall: true, candidates },
+  acceptPlan: false,
+});
+
+// After operator review, replay the exact proposal without invoking a planner again:
+const executed = await agent.runConnectorMissionWithProviderPlanning(mission, {
+  execution: {
+    connector: { runtime: connectorRuntime, approved: true },
+    checkpointStore,
+    resultStore,
+    execute: { approveProviderCall: true },
+  },
+  acceptedPlanRefinement: planned.plan_refinement,
+  acceptPlan: true,
+});
+const metadataOnlyLog = JSON.stringify(executed); // no arguments, connector values, prompts, or keys
+```
+
+`connectorMissionPlannerSteps()` is the provider-visible projection and
+`connectorMissionProtectedContractDigest()` binds the complete private mission contract. The
+accepted ordering must be an exact permutation, preserve dependency edges, and match the
+order-independent protected digest. `runAutonomousConnectorMissionWithLaunchAdmission()` and
+`runAutonomousConnectorMissionWithProviderPlanningAndLaunchAdmission()` check the reviewed
+domain admission before provider planning or connector resolution. This is the first-class
+TypeScript path for composing model selection, provider invocation, autonomous DAG scheduling,
+connector selection, receipt idempotency, replay/reconciliation, and online feedback while
+keeping the authorization boundaries independent.
+
 Connector status is deliberately not reward. A caller evaluator can settle a receipt later through
 `AutonomousConnectorMissionAdapter.settle_evaluator_feedback()` or at dispatch time through
 `feedback_by_step`. The feedback ledger accepts only bounded, explicit `source="caller_evaluator"`

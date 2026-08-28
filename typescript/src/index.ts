@@ -2742,6 +2742,27 @@ export type {
   AutonomousWorkflowConnectorAdapterOptions,
 } from "./autonomous-connector-adapters.js";
 export {
+  AUTONOMOUS_CONNECTOR_MISSION_SCHEMA,
+  AUTONOMOUS_CONNECTOR_PLANNED_MISSION_SCHEMA,
+  AUTONOMOUS_CONNECTOR_MISSION_MAX_STEPS,
+  AutonomousConnectorPlannedMissionRun,
+  applyAutonomousOrderedStepPlan,
+  connectorMissionPlannerSteps,
+  connectorMissionProtectedContractDigest,
+  runAutonomousConnectorMission,
+  runAutonomousConnectorMissionWithLaunchAdmission,
+  runAutonomousConnectorMissionWithProviderPlanning,
+  runAutonomousConnectorMissionWithProviderPlanningAndLaunchAdmission,
+  validateAutonomousConnectorMission,
+} from "./autonomous-connector-mission.js";
+export type {
+  AutonomousConnectorMissionAgentRunOptions,
+  AutonomousConnectorMissionPlannedRunJSON,
+  AutonomousConnectorMissionPlanningStatus,
+  AutonomousConnectorMissionProviderPlanningOptions,
+  AutonomousConnectorMissionRunOptions,
+} from "./autonomous-connector-mission.js";
+export {
   AUTONOMOUS_MISSION_CHECKPOINT_SCHEMA,
   AUTONOMOUS_MISSION_EVENT_SCHEMA,
   AUTONOMOUS_MISSION_EVENT_TYPES,

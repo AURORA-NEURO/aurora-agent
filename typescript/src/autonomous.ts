@@ -155,6 +155,7 @@ import type {
 import type {
   AutonomousMissionCheckpointStore,
   AutonomousMissionExecuteOptions,
+  AutonomousMissionExecutionResult,
   AutonomousMissionResultStore,
   AutonomousMissionStepResult,
 } from "./mission-execution.js";
@@ -163,6 +164,11 @@ import type {
   AutonomousMissionReplanPromptLearningProjection,
   AutonomousMissionReplanResult,
 } from "./mission-replan.js";
+import type {
+  AutonomousConnectorMissionAgentRunOptions,
+  AutonomousConnectorPlannedMissionRun,
+  AutonomousConnectorMissionProviderPlanningOptions,
+} from "./autonomous-connector-mission.js";
 import type {
   AutonomousEvidenceExecutionCheckpointStore,
   AutonomousEvidenceExecutionResumableRun,
@@ -7949,6 +7955,72 @@ export class AutonomousAgent {
       secret_material: "never_returned",
     };
     return { ...result, prompt_learning };
+  }
+
+  /**
+   * Execute a caller-reviewed mission through the all-domain connector boundary.
+   *
+   * This is intentionally a thin agent-owned convenience method: the connector runtime,
+   * approval decision, checkpoint store, and optional raw-result store remain caller-owned.
+   * The attached ToolCatalogue is used when the caller does not provide an exact snapshot.
+   */
+  async runConnectorMission(
+    mission: AgentMissionArgs,
+    options: AutonomousConnectorMissionAgentRunOptions,
+  ): Promise<AutonomousMissionExecutionResult> {
+    if (!isObject(options)) throw new ArgumentError("runConnectorMission requires execution options");
+    const catalogue = options.catalogue ?? this.toolCatalogue;
+    if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("runConnectorMission requires a ToolCatalogue on the agent or call options");
+    const { runAutonomousConnectorMission } = await import("./autonomous-connector-mission.js");
+    return runAutonomousConnectorMission(mission, { ...options, catalogue, agent: this });
+  }
+
+  /** Execute a connector mission only after the exact domain admission is approved. */
+  async runConnectorMissionWithLaunchAdmission(
+    mission: AgentMissionArgs,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousConnectorMissionAgentRunOptions,
+  ): Promise<AutonomousMissionExecutionResult> {
+    if (!isObject(options)) throw new ArgumentError("runConnectorMissionWithLaunchAdmission requires execution options");
+    const catalogue = options.catalogue ?? this.toolCatalogue;
+    if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("runConnectorMissionWithLaunchAdmission requires a ToolCatalogue on the agent or call options");
+    const { runAutonomousConnectorMissionWithLaunchAdmission } = await import("./autonomous-connector-mission.js");
+    return runAutonomousConnectorMissionWithLaunchAdmission(mission, admission, { ...options, catalogue, agent: this });
+  }
+
+  /**
+   * Provider-order an existing mission, require explicit caller acceptance, then execute it
+   * through the strict connector adapter. A supplied accepted refinement is replayed locally and
+   * never causes a second provider invocation.
+   */
+  async runConnectorMissionWithProviderPlanning(
+    mission: AgentMissionArgs,
+    options: AutonomousConnectorMissionProviderPlanningOptions,
+  ): Promise<AutonomousConnectorPlannedMissionRun> {
+    if (!isObject(options) || !isObject(options.execution)) throw new ArgumentError("runConnectorMissionWithProviderPlanning requires execution options");
+    const catalogue = options.execution.catalogue ?? this.toolCatalogue;
+    if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("runConnectorMissionWithProviderPlanning requires a ToolCatalogue on the agent or call options");
+    const { runAutonomousConnectorMissionWithProviderPlanning } = await import("./autonomous-connector-mission.js");
+    return runAutonomousConnectorMissionWithProviderPlanning(this, mission, {
+      ...options,
+      execution: { ...options.execution, catalogue, agent: this },
+    });
+  }
+
+  /** Provider-order a mission with the launch admission checked before any planner call. */
+  async runConnectorMissionWithProviderPlanningAndLaunchAdmission(
+    mission: AgentMissionArgs,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousConnectorMissionProviderPlanningOptions,
+  ): Promise<AutonomousConnectorPlannedMissionRun> {
+    if (!isObject(options) || !isObject(options.execution)) throw new ArgumentError("runConnectorMissionWithProviderPlanningAndLaunchAdmission requires execution options");
+    const catalogue = options.execution.catalogue ?? this.toolCatalogue;
+    if (!(catalogue instanceof ToolCatalogue)) throw new ArgumentError("runConnectorMissionWithProviderPlanningAndLaunchAdmission requires a ToolCatalogue on the agent or call options");
+    const { runAutonomousConnectorMissionWithProviderPlanningAndLaunchAdmission } = await import("./autonomous-connector-mission.js");
+    return runAutonomousConnectorMissionWithProviderPlanningAndLaunchAdmission(this, mission, admission, {
+      ...options,
+      execution: { ...options.execution, catalogue, agent: this },
+    });
   }
 
   /**

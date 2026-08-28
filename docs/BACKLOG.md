@@ -1,5 +1,11 @@
 # Remaining backlog
 
+The TypeScript connector mission composition boundary is now implemented and tested across all
+twelve autonomous domains. The new bridge combines metadata-only provider ordering, protected
+mission-contract replay, explicit plan acceptance, connector approval, durable mission execution,
+and launch admission. Remaining work below is deployment hardening, external authority, and the
+other explicitly enumerated gaps; this addition is not a claim that the whole product is complete.
+
 Provider-assisted planning now has a symmetric failure contract across Python and TypeScript.
 Single-domain, ordered-step, cross-domain, automatic, and direct plan-and-run entrypoints convert
 credential-boundary and operational provider failures into metadata-only `provider_failed`
