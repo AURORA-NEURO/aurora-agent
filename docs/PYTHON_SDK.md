@@ -61,6 +61,16 @@ accepted-plan order for the items that did settle. With `allow_partial=False`, t
 `child_failed` without synthesis after a strict child failure. Programming, malformed-input, and
 configuration errors remain hard failures.
 
+The delayed `run_cross_domain_trajectory_learning()` and
+`settle_cross_domain_trajectory_learning()` entry points apply the same admission at the
+trajectory boundary. They preserve accepted execution order but pass only `completed*` child and
+synthesis results to the generic trajectory preparer. Incomplete provider, approval, route, or
+response-review envelopes remain visible in `cross_domain` control-plane metadata and receive no
+trajectory episode, evaluator call, reward, or episodic-memory receipt. Partial execution must be
+explicitly enabled with `allow_partial=True`; strict delayed learning raises before evaluation if
+any result is incomplete. The caller-owned settlement path applies this filtering again after a
+durable worker handoff, making replay safe without re-invoking providers.
+
 For a local durable worker, `SQLiteAutonomousExecutionSnapshotPersistence(path)` is a ready
 transactional implementation of the snapshot adapter. It stores one canonical metadata snapshot
 row, uses WAL plus full synchronous commits, and fences `flush()` with an atomic

@@ -4667,6 +4667,18 @@ synthesis rewards remain comparable; domain-specific rubrics should be composed 
 value-only evaluator by the application. These modes intentionally trade within-run state updates
 for correct delayed credit and avoid double-counting immediate and terminal rewards.
 
+Cross-domain delayed trajectories have an additional result-level admission boundary. Python
+`run_cross_domain_trajectory_learning(...)` and
+`settle_cross_domain_trajectory_learning(...)` preserve accepted specialist/synthesis order but
+include only results whose status is `completed*`; provider failures, approval waits, route
+reviews, and other incomplete envelopes remain control-plane evidence and receive no episode,
+reward, evaluator receipt, or episodic-memory write. A run with `allow_partial=True` can therefore
+settle healthy siblings and a healthy synthesis while excluding the failed leg. Strict mode
+raises before evaluator invocation when any result is incomplete, preventing a partial run from
+being mistaken for a completed trajectory. This filtering is also applied when a durable worker
+hands an already-assembled result back to the caller, so delayed settlement is safe across
+process and restart boundaries.
+
 The TypeScript evaluator-feedback outbox is now restart-capable as well. Its snapshot validator
 allow-lists every command field, verifies each command digest and value-only payload, rejects
 duplicate identities and unsafe metadata, and enforces a bounded canonical byte size.

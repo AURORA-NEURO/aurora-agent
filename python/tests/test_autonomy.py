@@ -3641,6 +3641,118 @@ def test_cross_domain_learning_provider_failures_preserve_ordered_evaluator_sett
         memory.close()
 
 
+def test_cross_domain_trajectory_learning_never_credits_incomplete_results(tmp_path: Path):
+    runtime = LLMRuntime()
+    evaluator_inputs: list[object] = []
+
+    def handler(request: ProviderRequest) -> Mapping[str, object]:
+        prompt_text = json.dumps(list(request.messages))
+        if "FAIL_CHILD" in prompt_text or "FAIL_SYNTHESIS" in prompt_text:
+            raise ProviderError(
+                "sensitive delayed-trajectory provider diagnostic",
+                retryable=True,
+                status_code=503,
+            )
+        return {"output_text": "healthy delayed-trajectory result"}
+
+    runtime.register_in_memory_provider("openai", handler)
+    memory = BrainEpisodicMemory(tmp_path / "cross-domain-trajectory-failure.sqlite3")
+    evaluator = BrainOutcomeEvaluator(
+        lambda value: (evaluator_inputs.append(value) or {"reward": 0.7, "passed": True, "failed": False}),
+        evaluator_id="cross-domain-delayed-failure-quality",
+        evaluator_version="1",
+    )
+    try:
+        agent = AutonomousAgent(
+            _Workspace(),
+            runtime,
+            memory=memory,
+            model_catalogue=ModelCatalogue(_model()),
+        )
+        subtasks = [
+            {"id": "failing-specialist", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "healthy-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+        ]
+        partial = agent.run_cross_domain_trajectory_learning(
+            task="Settle a delayed biomedical and neuroscience review despite one provider outage.",
+            subtasks=subtasks,
+            model_candidates=_model(),
+            credentials={},
+            approve_provider_call=True,
+            allow_partial=True,
+            max_parallelism=2,
+            evaluator=evaluator,
+            trajectory_id="python-partial-cross-domain-trajectory",
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
+        assert partial.status == "completed"
+        assert [result.status for result in partial.cross_domain.child_results] == [
+            "provider_failed",
+            "completed_provider_call",
+        ]
+        assert partial.cross_domain.synthesis_result is not None
+        assert partial.cross_domain.synthesis_result.status == "completed_provider_call"
+        assert [item["item_id"] for item in partial.evaluations] == ["healthy-specialist", "synthesis"]
+        assert len(partial.trajectory_result.trajectory.episodes) == 2
+        assert len(partial.trajectory_result.credited_rewards) == 2
+        assert len(evaluator_inputs) == 2
+        assert "sensitive delayed-trajectory provider diagnostic" not in json.dumps(partial.to_dict())
+
+        # Durable/caller-owned settlement applies the same filter even when the execution
+        # envelope was assembled elsewhere and advertises an overall completed synthesis.
+        settled = agent.settle_cross_domain_trajectory_learning(
+            cross_domain=partial.cross_domain,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            evaluator=evaluator,
+            trajectory_id="python-replayed-partial-cross-domain-trajectory",
+        )
+        assert [item["item_id"] for item in settled.evaluations] == ["healthy-specialist", "synthesis"]
+        assert len(settled.trajectory_result.trajectory.episodes) == 2
+        assert len(evaluator_inputs) == 4
+
+        synthesis_partial = agent.run_cross_domain_trajectory_learning(
+            task="Settle a delayed biomedical and neuroscience review with FAIL_SYNTHESIS at fan-in.",
+            subtasks=[
+                {"id": "biomedical-specialist", "task": "Review the biomedical evidence.", "domain": "biomedical"},
+                {"id": "neuroscience-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+            ],
+            model_candidates=_model(),
+            credentials={},
+            approve_provider_call=True,
+            allow_partial=True,
+            max_parallelism=2,
+            evaluator=evaluator,
+            trajectory_id="python-synthesis-failure-cross-domain-trajectory",
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+        )
+        assert synthesis_partial.cross_domain.synthesis_result is not None
+        assert synthesis_partial.cross_domain.synthesis_result.status == "provider_failed"
+        assert [item["item_id"] for item in synthesis_partial.evaluations] == [
+            "biomedical-specialist",
+            "neuroscience-specialist",
+        ]
+        assert len(synthesis_partial.trajectory_result.trajectory.episodes) == 2
+        assert len(evaluator_inputs) == 6
+
+        before_strict_evaluations = len(evaluator_inputs)
+        with pytest.raises(BrainRunError, match="strict mode"):
+            agent.run_cross_domain_trajectory_learning(
+                task="Strictly reject a delayed biomedical and neuroscience review with one outage.",
+                subtasks=subtasks,
+                model_candidates=_model(),
+                credentials={},
+                approve_provider_call=True,
+                allow_partial=False,
+                max_parallelism=1,
+                evaluator=evaluator,
+                trajectory_id="python-strict-cross-domain-trajectory",
+                bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            )
+        assert len(evaluator_inputs) == before_strict_evaluations
+    finally:
+        memory.close()
+
+
 def test_cross_domain_learning_updates_state_between_children_and_synthesis(tmp_path: Path):
     runtime, store, server, thread = _runtime()
     workspace = _Workspace()

@@ -14162,6 +14162,55 @@ class AutonomousTaskOrchestrator:
         )
         return scoped
 
+    @staticmethod
+    def _cross_domain_trajectory_items(
+        cross_domain: AutonomousCrossDomainResult,
+        *,
+        allow_partial: bool,
+    ) -> list[tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]]:
+        """Return only completed fan-out/fan-in results that may receive delayed credit.
+
+        Provider, approval, route, and execution failures are useful control-plane evidence, but
+        they are not task outcomes. Keeping them out of a trajectory is especially important for
+        delayed settlement: ``prepare_learning_trajectory`` intentionally accepts typed result
+        envelopes without deciding whether an individual envelope is creditable. This boundary
+        therefore performs the status admission once and preserves accepted execution order; the
+        original ``cross_domain`` envelope remains available to the caller for control-plane
+        inspection without exposing provider payloads through the trajectory.
+        """
+
+        if not isinstance(cross_domain, AutonomousCrossDomainResult):
+            raise BrainRunError("cross-domain trajectory requires an execution result")
+        if not isinstance(allow_partial, bool):
+            raise BrainRunError("cross-domain trajectory allow_partial must be a boolean")
+        child_by_id = dict(zip(cross_domain.blueprint.child_ids, cross_domain.blueprint.child_blueprints))
+        raw_items: list[
+            tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]
+        ] = []
+        for child_id, result in zip(cross_domain.execution_child_ids, cross_domain.child_results):
+            child = child_by_id[child_id]
+            raw_items.append(("child", child_id, child, result))
+        if cross_domain.synthesis_result is not None:
+            raw_items.append(
+                (
+                    "synthesis",
+                    "synthesis",
+                    cross_domain.blueprint.synthesis_blueprint,
+                    cross_domain.synthesis_result,
+                )
+            )
+        if not raw_items:
+            raise BrainRunError("cross-domain trajectory contains no results to evaluate")
+        if any(not item[3].status.startswith("completed") for item in raw_items) and not allow_partial:
+            raise BrainRunError(
+                "cross-domain trajectory cannot settle a non-completed run in strict mode; "
+                "set allow_partial=True to settle completed items only"
+            )
+        completed_items = [item for item in raw_items if item[3].status.startswith("completed")]
+        if not completed_items:
+            raise BrainRunError("cross-domain trajectory contains no completed results to evaluate")
+        return completed_items
+
     def run_cross_domain(
         self,
         *,
@@ -15147,15 +15196,10 @@ class AutonomousTaskOrchestrator:
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain trajectory memory must be a BrainEpisodicMemory")
         normalized_tags = _sequence("cross-domain trajectory memory_tags", memory_tags, maximum=32)
-        child_by_id = dict(zip(cross_domain.blueprint.child_ids, cross_domain.blueprint.child_blueprints))
-        items: list[tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]] = []
-        for child_id, result in zip(cross_domain.execution_child_ids, cross_domain.child_results):
-            child = child_by_id[child_id]
-            items.append(("child", child_id, child, result))
-        if cross_domain.synthesis_result is not None:
-            items.append(("synthesis", "synthesis", cross_domain.blueprint.synthesis_blueprint, cross_domain.synthesis_result))
-        if not items:
-            raise BrainRunError("cross-domain trajectory contains no results to evaluate")
+        items = self._cross_domain_trajectory_items(
+            cross_domain,
+            allow_partial=True,
+        )
         results = [item[3] for item in items]
         evidence_packets = [None if evidence is None else evidence.get(item[1]) for item in items]
         trajectory = self.brain.prepare_learning_trajectory(
@@ -15306,6 +15350,9 @@ class AutonomousTaskOrchestrator:
         execution_options.pop("bandit_state", None)
         execution_options["memory"] = memory_store
         execution_options["ledger"] = ledger
+        allow_partial = execution_options.get("allow_partial", False)
+        if not isinstance(allow_partial, bool):
+            raise BrainRunError("cross-domain trajectory allow_partial must be a boolean")
         cross_domain = self.run_cross_domain(
             task=task,
             subtasks=subtasks,
@@ -15314,15 +15361,10 @@ class AutonomousTaskOrchestrator:
             bandit_state=bandit_state,
             **execution_options,
         )
-        items: list[tuple[str, str, AutonomousTaskBlueprint, BrainRunResult | BrainToolLoopResult | BrainMissionResult]] = []
-        child_by_id = dict(zip(cross_domain.blueprint.child_ids, cross_domain.blueprint.child_blueprints))
-        for child_id, result in zip(cross_domain.execution_child_ids, cross_domain.child_results):
-            child = child_by_id[child_id]
-            items.append(("child", child_id, child, result))
-        if cross_domain.synthesis_result is not None:
-            items.append(("synthesis", "synthesis", cross_domain.blueprint.synthesis_blueprint, cross_domain.synthesis_result))
-        if not items:
-            raise BrainRunError("cross-domain trajectory contains no results to evaluate")
+        items = self._cross_domain_trajectory_items(
+            cross_domain,
+            allow_partial=allow_partial,
+        )
         results = [item[3] for item in items]
         evidence_packets = [None if evidence is None else evidence.get(item[1]) for item in items]
         trajectory = self.brain.prepare_learning_trajectory(

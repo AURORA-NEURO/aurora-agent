@@ -2176,3 +2176,13 @@ episodes, preserve execution order, and return `partially_settled` without creat
 failed leg. `children_completed` fan-out without synthesis is also eligible; route, approval,
 response-review, and hard-failure states remain ineligible. This closes the SDK learning mismatch
 without turning provider availability into task correctness or retaining raw diagnostics.
+
+Python delayed cross-domain trajectory settlement now applies the same result-level admission at
+both entry points: `run_cross_domain_trajectory_learning(...)` and the caller-owned durable
+`settle_cross_domain_trajectory_learning(...)` filter trajectories to `completed*` specialist
+and synthesis results in accepted execution order. With `allow_partial=True`, healthy legs can
+still receive delayed credit after a provider outage; failed, approval-pending, route-review,
+and other incomplete legs receive no episode, reward, evaluator receipt, or memory write. Strict
+runs fail before evaluator invocation when any leg is incomplete. This closes the remaining
+Python delayed-credit path where typed failure envelopes could otherwise be admitted by the
+generic trajectory preparer; distributed retry and reconciliation remain deployment-owned.
