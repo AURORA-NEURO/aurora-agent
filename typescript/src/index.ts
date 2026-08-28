@@ -4393,3 +4393,13 @@ export {
   validateIdsDesignFrontier8,
 } from "./research-contracts.js";
 export type { IdsDesignFrontier8 } from "./research-contracts.js";
+
+export {
+  IDS_PROTOCOL_SIMULATION_FEATURE_ID,
+  IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION,
+  IDS_PROTOCOL_SIMULATION_INPUT_SCHEMA,
+  IDS_PROTOCOL_SIMULATION_OUTPUT_SCHEMA,
+  idsProtocolSimulationWorkbenchDigest,
+  validateIdsProtocolWorkbenchReport9,
+} from "./research-contracts.js";
+export type { IdsProtocolWorkbenchReport9 } from "./research-contracts.js";

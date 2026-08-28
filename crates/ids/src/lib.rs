@@ -19,6 +19,7 @@ pub mod multimodal_ingestion_research_copilot;
 pub mod quality_control_assurance;
 pub mod mechanism_exploration_assurance;
 pub mod experiment_design_workbench;
+pub mod protocol_simulation_workbench;
 pub mod throughput_evidence_surveillance_contract_model;
 
 pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
@@ -87,6 +88,14 @@ pub use experiment_design_workbench::{
     DesignFrontier8, DesignFrontier8Artifact, ExperimentDesignError, ExperimentDesignRequest4,
     CONTRACT_VERSION as IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
     FEATURE_ID as IDS_EXPERIMENT_DESIGN_FEATURE_ID,
+};
+pub use protocol_simulation_workbench::{
+    protocol_workbench_manifest, simulate_protocol_workbench, ProtocolEvidenceState,
+    ProtocolPeer5, ProtocolScenario5,
+    ProtocolStage5, ProtocolWorkbenchArtifact9, ProtocolWorkbenchError,
+    ProtocolWorkbenchReport9, ProtocolWorkbenchRequest5,
+    CONTRACT_VERSION as IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION,
+    FEATURE_ID as IDS_PROTOCOL_SIMULATION_FEATURE_ID,
 };
 pub use throughput_evidence_surveillance_contract_model::{
     model_throughput_evidence_surveillance_contract,

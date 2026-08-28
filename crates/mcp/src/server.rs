@@ -45,6 +45,7 @@ use bioprism_ids::{
 use bioprism_ids::{IDS_QUALITY_CONTROL_CONTRACT_VERSION, IDS_QUALITY_CONTROL_FEATURE_ID};
 use bioprism_ids::{IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION, IDS_MECHANISM_EXPLORATION_FEATURE_ID};
 use bioprism_ids::{IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION, IDS_EXPERIMENT_DESIGN_FEATURE_ID};
+use bioprism_ids::{IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION, IDS_PROTOCOL_SIMULATION_FEATURE_ID};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -1848,6 +1849,7 @@ impl Server {
             "ids_quality_control_assurance" => self.ids_quality_control_assurance(&arguments),
             "ids_mechanism_exploration_assurance" => self.ids_mechanism_exploration_assurance(&arguments),
             "ids_experiment_design_workbench" => self.ids_experiment_design_workbench(&arguments),
+            "ids_protocol_simulation_workbench" => self.ids_protocol_simulation_workbench(&arguments),
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -24950,6 +24952,26 @@ impl Server {
         }))
     }
 
+    fn ids_protocol_simulation_workbench(&self, arguments: &Value) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_ids_protocol_simulation_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_PROTOCOL_SIMULATION_FEATURE_ID,
+            "contract_version": IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "stage, scenario, batch, capacity, peer, recovery, and evidence partitions are deterministic and replay-bound",
+                "fault scenarios, unknown evidence, contradictions, budget overflow, and federation omissions remain explicit",
+                "the route produces protocol metadata only and cannot schedule animals, control instruments, or make clinical decisions"
+            ],
+            "limitations": [
+                "the route simulates caller-supplied protocol summaries and does not execute protocols or inspect instrument state",
+                "a qualified simulation report is not biological validity, operational approval, or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -41102,6 +41124,17 @@ pub fn tool_definitions() -> Vec<Value> {
                     "candidates": { "type": "array", "description": "Typed DesignCandidate4 summaries with controls, power/effect scores, provenance, evidence state, and authorization declarations." }
                 },
                 "required": ["request", "candidates"]
+            }
+        }),
+        json!({
+            "name": "ids_protocol_simulation_workbench",
+            "description": "Simulate a bounded prospective high-throughput preclinical protocol across declared stages, fault scenarios, batches, capacity budgets, and aggregate peer summaries. The workbench preserves unknown and negative evidence and fails closed before any laboratory effect.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ProtocolWorkbenchRequest5 containing protocol stages, scenario faults, peer attestations, batch size, budget, policy, approval, federation, locality, and replay declarations." }
+                },
+                "required": ["request"]
             }
         }),
         json!({

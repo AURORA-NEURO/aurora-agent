@@ -542,6 +542,10 @@ use bioprism_ids::{
     design_experiment, DesignCandidate4, DesignFrontier8, ExperimentDesignRequest4,
     IDS_EXPERIMENT_DESIGN_FEATURE_ID,
 };
+use bioprism_ids::{
+    simulate_protocol_workbench, ProtocolWorkbenchReport9, ProtocolWorkbenchRequest5,
+    IDS_PROTOCOL_SIMULATION_FEATURE_ID,
+};
 use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
     PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
@@ -3137,6 +3141,29 @@ pub fn validate_ids_experiment_design_json(value: &Value) -> Result<DesignFronti
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_EXPERIMENT_DESIGN_FEATURE_ID {
         return Err("ids experiment-design feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_PROTOCOL_SIMULATION_TOOL: &str = "ids_protocol_simulation_workbench";
+
+pub fn operate_ids_protocol_simulation_json(value: &Value) -> Result<Value, String> {
+    let request: ProtocolWorkbenchRequest5 = serde_json::from_value(
+        value.get("request").cloned().ok_or("request is required")?,
+    )
+    .map_err(|error| format!("invalid ids protocol-workbench request: {error}"))?;
+    let receipt = simulate_protocol_workbench(&request)
+        .map_err(|error| format!("ids protocol simulation failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids protocol-workbench receipt: {error}"))
+}
+
+pub fn validate_ids_protocol_simulation_json(value: &Value) -> Result<ProtocolWorkbenchReport9, String> {
+    let receipt: ProtocolWorkbenchReport9 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids protocol-workbench receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_PROTOCOL_SIMULATION_FEATURE_ID {
+        return Err("ids protocol-workbench feature id mismatch".into());
     }
     Ok(receipt)
 }

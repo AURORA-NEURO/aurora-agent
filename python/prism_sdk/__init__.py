@@ -7739,3 +7739,17 @@ __all__ += [
     "design_ids_experiment",
     "idsExperimentDesignDigest",
 ]
+
+from .ids_protocol_simulation_workbench import (
+    ProtocolWorkbenchReport9 as IdsProtocolWorkbenchReport9,
+    protocol_workbench_manifest as ids_protocol_workbench_manifest,
+    simulate_protocol_workbench as simulate_ids_protocol_workbench,
+    idsProtocolSimulationWorkbenchDigest,
+)
+
+__all__ += [
+    "IdsProtocolWorkbenchReport9",
+    "ids_protocol_workbench_manifest",
+    "simulate_ids_protocol_workbench",
+    "idsProtocolSimulationWorkbenchDigest",
+]
