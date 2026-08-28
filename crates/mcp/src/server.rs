@@ -46,6 +46,7 @@ use bioprism_ids::{IDS_QUALITY_CONTROL_CONTRACT_VERSION, IDS_QUALITY_CONTROL_FEA
 use bioprism_ids::{IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION, IDS_MECHANISM_EXPLORATION_FEATURE_ID};
 use bioprism_ids::{IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION, IDS_EXPERIMENT_DESIGN_FEATURE_ID};
 use bioprism_ids::{IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION, IDS_PROTOCOL_SIMULATION_FEATURE_ID};
+use bioprism_ids::{IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION, IDS_LABORATORY_INTEGRATION_FEATURE_ID};
 use bioprism_atlasx::{
     audit as atlasx_audit, browse_with_visibility as atlasx_browse_with_visibility, named_in_scope,
     DebtStatement as AtlasxDebtStatement, Facet as AtlasxFacet, Surface as AtlasxSurface,
@@ -1850,6 +1851,7 @@ impl Server {
             "ids_mechanism_exploration_assurance" => self.ids_mechanism_exploration_assurance(&arguments),
             "ids_experiment_design_workbench" => self.ids_experiment_design_workbench(&arguments),
             "ids_protocol_simulation_workbench" => self.ids_protocol_simulation_workbench(&arguments),
+            "ids_laboratory_integration_workflow_fabric" => self.ids_laboratory_integration_workflow_fabric(&arguments),
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -24972,6 +24974,26 @@ impl Server {
         }))
     }
 
+    fn ids_laboratory_integration_workflow_fabric(&self, arguments: &Value) -> Result<Value, String> {
+        let receipt = crate::research_contracts::operate_ids_laboratory_integration_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": IDS_LABORATORY_INTEGRATION_FEATURE_ID,
+            "contract_version": IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION,
+            "receipt": receipt,
+            "guarantees": [
+                "instrument, action, interlock, emergency-stop, compensation, peer, and evidence states are deterministic and replay-bound",
+                "policy, signed approval, federation quorum, provenance, locality, and no-hardware-effect gates are explicit",
+                "the route emits only an integration preflight and cannot send commands, enroll subjects, or make clinical decisions"
+            ],
+            "limitations": [
+                "the route evaluates caller-supplied instrument and action attestations and does not connect to hardware or telemetry",
+                "a qualified preflight is not a physical execution authorization, instrument safety certification, or clinical advice"
+            ]
+        }))
+    }
+
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -41133,6 +41155,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized ProtocolWorkbenchRequest5 containing protocol stages, scenario faults, peer attestations, batch size, budget, policy, approval, federation, locality, and replay declarations." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "ids_laboratory_integration_workflow_fabric",
+            "description": "Compile federated continual instrument and action attestations into a fail-closed preclinical laboratory-integration preflight. It checks calibration, firmware/provenance, interlocks, emergency stops, compensation, replay, signed approval, policy, quorum, locality, and budgets without sending hardware commands.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized LaboratoryIntegrationRequest6 containing instrument endpoints, actions, peer summaries, workflow identity, safety gates, policy, federation, locality, budget, and replay declarations." }
                 },
                 "required": ["request"]
             }

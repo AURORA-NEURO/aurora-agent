@@ -4403,3 +4403,13 @@ export {
   validateIdsProtocolWorkbenchReport9,
 } from "./research-contracts.js";
 export type { IdsProtocolWorkbenchReport9 } from "./research-contracts.js";
+
+export {
+  IDS_LABORATORY_INTEGRATION_FEATURE_ID,
+  IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION,
+  IDS_LABORATORY_INTEGRATION_INPUT_SCHEMA,
+  IDS_LABORATORY_INTEGRATION_OUTPUT_SCHEMA,
+  idsLaboratoryIntegrationDigest,
+  validateIdsLaboratoryIntegrationReport9,
+} from "./research-contracts.js";
+export type { IdsLaboratoryIntegrationReport9 } from "./research-contracts.js";

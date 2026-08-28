@@ -20,6 +20,7 @@ pub mod quality_control_assurance;
 pub mod mechanism_exploration_assurance;
 pub mod experiment_design_workbench;
 pub mod protocol_simulation_workbench;
+pub mod laboratory_integration_workflow_fabric;
 pub mod throughput_evidence_surveillance_contract_model;
 
 pub use canonical::{python_repr_f64, to_canonical_bytes, to_canonical_string};
@@ -96,6 +97,14 @@ pub use protocol_simulation_workbench::{
     ProtocolWorkbenchReport9, ProtocolWorkbenchRequest5,
     CONTRACT_VERSION as IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION,
     FEATURE_ID as IDS_PROTOCOL_SIMULATION_FEATURE_ID,
+};
+pub use laboratory_integration_workflow_fabric::{
+    integrate_laboratory_workflow, laboratory_integration_manifest, InstrumentEndpoint6,
+    LabAction6, LaboratoryEvidenceState, LaboratoryIntegrationArtifact9,
+    LaboratoryIntegrationError, LaboratoryIntegrationReport9, LaboratoryIntegrationRequest6,
+    LaboratoryPeer6,
+    CONTRACT_VERSION as IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION,
+    FEATURE_ID as IDS_LABORATORY_INTEGRATION_FEATURE_ID,
 };
 pub use throughput_evidence_surveillance_contract_model::{
     model_throughput_evidence_surveillance_contract,

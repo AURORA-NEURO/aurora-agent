@@ -7753,3 +7753,17 @@ __all__ += [
     "simulate_ids_protocol_workbench",
     "idsProtocolSimulationWorkbenchDigest",
 ]
+
+from .ids_laboratory_integration_workflow_fabric import (
+    LaboratoryIntegrationReport9 as IdsLaboratoryIntegrationReport9,
+    laboratory_integration_manifest as ids_laboratory_integration_manifest,
+    integrate_laboratory_workflow as integrate_ids_laboratory_workflow,
+    idsLaboratoryIntegrationDigest,
+)
+
+__all__ += [
+    "IdsLaboratoryIntegrationReport9",
+    "ids_laboratory_integration_manifest",
+    "integrate_ids_laboratory_workflow",
+    "idsLaboratoryIntegrationDigest",
+]

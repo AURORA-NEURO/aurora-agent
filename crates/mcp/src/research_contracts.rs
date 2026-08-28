@@ -546,6 +546,10 @@ use bioprism_ids::{
     simulate_protocol_workbench, ProtocolWorkbenchReport9, ProtocolWorkbenchRequest5,
     IDS_PROTOCOL_SIMULATION_FEATURE_ID,
 };
+use bioprism_ids::{
+    integrate_laboratory_workflow, LaboratoryIntegrationReport9, LaboratoryIntegrationRequest6,
+    IDS_LABORATORY_INTEGRATION_FEATURE_ID,
+};
 use bioprism_worldfactory::{
     simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
     PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
@@ -3164,6 +3168,29 @@ pub fn validate_ids_protocol_simulation_json(value: &Value) -> Result<ProtocolWo
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != IDS_PROTOCOL_SIMULATION_FEATURE_ID {
         return Err("ids protocol-workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_LABORATORY_INTEGRATION_TOOL: &str = "ids_laboratory_integration_workflow_fabric";
+
+pub fn operate_ids_laboratory_integration_json(value: &Value) -> Result<Value, String> {
+    let request: LaboratoryIntegrationRequest6 = serde_json::from_value(
+        value.get("request").cloned().ok_or("request is required")?,
+    )
+    .map_err(|error| format!("invalid ids laboratory-integration request: {error}"))?;
+    let receipt = integrate_laboratory_workflow(&request)
+        .map_err(|error| format!("ids laboratory integration failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids laboratory-integration receipt: {error}"))
+}
+
+pub fn validate_ids_laboratory_integration_json(value: &Value) -> Result<LaboratoryIntegrationReport9, String> {
+    let receipt: LaboratoryIntegrationReport9 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids laboratory-integration receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_LABORATORY_INTEGRATION_FEATURE_ID {
+        return Err("ids laboratory-integration feature id mismatch".into());
     }
     Ok(receipt)
 }
