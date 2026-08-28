@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import sqlite3
 
 import pytest
 
@@ -18,6 +19,7 @@ from prism_sdk import (
     AutonomyPersistenceError,
     AutonomyPolicyError,
     ProviderToolCall,
+    SQLiteAutonomousExecutionSnapshotPersistence,
 )
 
 
@@ -288,6 +290,83 @@ def test_execution_snapshot_persistence_rehydrates_all_domains_and_fences_stale_
     store.value = json.dumps(tampered)
     with pytest.raises(AutonomyPersistenceError):
         AutonomousExecutionPersistenceCoordinator(AutonomousExecutionJournal(tmp_path / "tampered.jsonl"), persistence).restore()
+
+
+def test_sqlite_execution_snapshot_persistence_reopens_and_fences_concurrent_writers(tmp_path) -> None:
+    database = tmp_path / "execution-snapshots.sqlite3"
+    policy = AutonomousExecutionPolicy(max_steps=8, max_tool_calls=4)
+    journal = AutonomousExecutionJournal(tmp_path / "initial.jsonl")
+    controller = AutonomousExecutionController(
+        execution_id="sqlite-execution",
+        domain="operations",
+        capability="observability",
+        risk_class="read_only",
+        policy=policy,
+        journal=journal,
+    )
+    controller.checkpoint(status="paused", reason="sqlite_initial_checkpoint")
+
+    with SQLiteAutonomousExecutionSnapshotPersistence(database) as persistence:
+        coordinator = AutonomousExecutionPersistenceCoordinator(journal, persistence)
+        initial = coordinator.flush()
+        assert persistence.read() == initial
+
+    reopened = SQLiteAutonomousExecutionSnapshotPersistence(database)
+    try:
+        restored_journal = AutonomousExecutionJournal(tmp_path / "reopened.jsonl")
+        restored = AutonomousExecutionPersistenceCoordinator(restored_journal, reopened).restore()
+        assert restored is not None
+        assert restored["snapshot_digest"] == initial["snapshot_digest"]
+        assert restored_journal.verify_integrity()["verified"] is True
+
+        def candidate(name: str) -> dict[str, object]:
+            candidate_journal = AutonomousExecutionJournal(tmp_path / f"{name}.jsonl")
+            candidate_journal.restore(initial)
+            candidate_controller = AutonomousExecutionController(
+                execution_id="sqlite-execution",
+                domain="operations",
+                capability="observability",
+                risk_class="read_only",
+                policy=policy,
+                journal=candidate_journal,
+                resume=True,
+            )
+            candidate_controller.checkpoint(status="paused", reason=name)
+            return candidate_journal.snapshot()
+
+        candidates = (candidate("sqlite-writer-a"), candidate("sqlite-writer-b"))
+    finally:
+        reopened.close()
+
+    writer_a = SQLiteAutonomousExecutionSnapshotPersistence(database)
+    writer_b = SQLiteAutonomousExecutionSnapshotPersistence(database)
+    try:
+        expected = initial["snapshot_digest"]
+
+        def compare_and_swap(args: tuple[SQLiteAutonomousExecutionSnapshotPersistence, dict[str, object]]) -> bool:
+            writer, snapshot = args
+            return writer.write_if_unchanged(expected, snapshot)
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            outcomes = list(workers.map(compare_and_swap, ((writer_a, candidates[0]), (writer_b, candidates[1]))))
+        assert sorted(outcomes) == [False, True]
+        winner = writer_a.read() if outcomes[0] else writer_b.read()
+        assert winner is not None
+        assert winner["snapshot_digest"] == candidates[0 if outcomes[0] else 1]["snapshot_digest"]
+    finally:
+        writer_a.close()
+        writer_b.close()
+
+    with pytest.raises(AutonomyPersistenceError, match="incompatible schema"):
+        connection = sqlite3.connect(database)
+        try:
+            connection.execute(
+                "UPDATE autonomy_execution_snapshot_meta SET value = 'wrong-schema' WHERE key = 'schema'"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        SQLiteAutonomousExecutionSnapshotPersistence(database)
 
 
 def test_runtime_session_enforces_policy_and_journals_read_only_outcomes(tmp_path) -> None:

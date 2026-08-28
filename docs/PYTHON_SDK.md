@@ -50,6 +50,32 @@ tool data. This direct path is intentionally separate from evaluator-driven cros
 and replanning: those APIs keep sequential delayed-credit settlement so concurrent completion
 cannot change bandit updates or trajectory identity.
 
+For a local durable worker, `SQLiteAutonomousExecutionSnapshotPersistence(path)` is a ready
+transactional implementation of the snapshot adapter. It stores one canonical metadata snapshot
+row, uses WAL plus full synchronous commits, and fences `flush()` with an atomic
+`BEGIN IMMEDIATE` compare-and-swap. Multiple worker processes can open the same SQLite file;
+exactly one writer can advance a given expected digest, while stale coordinators receive
+`AutonomyPersistenceError`. Reopening validates the stored digest before the normal JSON snapshot
+and journal-chain validators run. SQLite provides local durability and process fencing only; it
+does not provide tenant isolation, encryption, distributed leases, protected-value storage, or
+external provider/effect reconciliation.
+
+```python
+from prism_sdk import (
+    AutonomousExecutionJournal,
+    AutonomousExecutionPersistenceCoordinator,
+    SQLiteAutonomousExecutionSnapshotPersistence,
+)
+
+persistence = SQLiteAutonomousExecutionSnapshotPersistence(".aurora/execution.sqlite3")
+journal = AutonomousExecutionJournal(".aurora/execution.jsonl")
+coordinator = AutonomousExecutionPersistenceCoordinator(journal, persistence)
+coordinator.restore()
+# Call after each bounded checkpoint or worker handoff.
+coordinator.flush()
+persistence.close()
+```
+
 The artifact registry is available through typed `ArtifactRegistrationRequest`,
 `ArtifactQueryRequest`, `ArtifactGetRequest`, `ArtifactRegistrationReport`, `ArtifactQueryReport`,
 `ArtifactGetReport`, `ArtifactLineageReport`, `ArtifactDomainEvidenceLineageRequest`,

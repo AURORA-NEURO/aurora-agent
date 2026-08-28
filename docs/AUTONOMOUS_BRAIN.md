@@ -5307,6 +5307,33 @@ execution_persistence.restore()
 execution_persistence.flush()
 ```
 
+For a local durable worker or a deployment that already standardizes on SQLite, use
+`SQLiteAutonomousExecutionSnapshotPersistence("state/execution.sqlite3")` directly in place of
+the text-store adapter. It creates a version-fenced metadata table, enables WAL and full
+synchronous commits, and performs each conditional flush inside `BEGIN IMMEDIATE`. Separate
+processes may open the same database file; only one writer can win a given snapshot digest and a
+stale coordinator receives a typed compare-and-swap conflict. Reopening the adapter validates the
+stored snapshot digest before the JSON layer revalidates the complete hash chain. This is durable
+local persistence and multi-process fencing, not a distributed lease service or an encryption
+boundary; tenant identity, protected rehydration, backups, and multi-host placement remain
+deployment-owned.
+
+```python
+from prism_sdk import (
+    AutonomousExecutionJournal,
+    AutonomousExecutionPersistenceCoordinator,
+    SQLiteAutonomousExecutionSnapshotPersistence,
+)
+
+persistence = SQLiteAutonomousExecutionSnapshotPersistence("state/execution.sqlite3")
+journal = AutonomousExecutionJournal("state/worker-journal.jsonl")
+execution_persistence = AutonomousExecutionPersistenceCoordinator(journal, persistence)
+execution_persistence.restore()
+# Flush after each bounded state transition; stale workers fail instead of overwriting state.
+execution_persistence.flush()
+persistence.close()
+```
+
 The TypeScript execution boundary now provides the same portable contract through
 `TransactionalJsonAutonomousExecutionSnapshotPersistence`. It validates the complete event
 chain before reading or writing, serializes overlapping restore/flush calls, and carries the

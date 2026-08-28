@@ -2129,3 +2129,11 @@ result exposes the ceiling as metadata only. Evaluator credit, bandit updates, a
 ordered because their delayed-credit semantics depend on deterministic settlement. Remaining
 deployment work is still caller-owned worker placement, durable result rehydration, and external
 provider/effect reconciliation.
+
+Python execution snapshots now also have a first-class `SQLiteAutonomousExecutionSnapshotPersistence`
+backend. It combines canonical JSON validation with WAL/full-sync SQLite transactions and atomic
+digest compare-and-swap, allowing local multi-process workers to fence stale flushes and reopen
+metadata-only state safely. It does not claim distributed leases, encryption, tenant isolation,
+or external provider/effect truth; those remain deployment integrations. The TypeScript runtime
+continues to consume the portable text-store contract so cross-SDK snapshot semantics remain
+unchanged.

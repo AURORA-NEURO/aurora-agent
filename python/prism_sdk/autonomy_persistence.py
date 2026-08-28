@@ -13,6 +13,7 @@ the caller must rehydrate the task and prompt and explicitly resume with the sam
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from functools import wraps
 import hashlib
@@ -20,6 +21,7 @@ import json
 import math
 import os
 from pathlib import Path
+import sqlite3
 import threading
 import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -34,6 +36,7 @@ AUTONOMY_STATE_SCHEMA = "bioprism-python-autonomous-execution-state/0.1"
 AUTONOMY_EVENT_SCHEMA = "bioprism-python-autonomous-execution-event/0.1"
 AUTONOMY_JOURNAL_SCHEMA = "bioprism-python-autonomous-execution-journal/0.1"
 AUTONOMY_EXECUTION_SNAPSHOT_SCHEMA = "bioprism-python-autonomous-execution-snapshot/0.1"
+SQLITE_AUTONOMY_EXECUTION_SCHEMA = "bioprism-python-autonomous-execution-sqlite/0.1"
 AUTONOMY_EVENT_KINDS = (
     "started",
     "resumed",
@@ -861,6 +864,217 @@ class TransactionalJsonAutonomousExecutionSnapshotPersistence(JsonAutonomousExec
         return self.store.write_if_unchanged(expected_snapshot_digest, encoded)
 
 
+class _SQLiteAutonomousExecutionSnapshotStore:
+    """SQLite text store used by the public execution persistence adapter.
+
+    The JSON validator remains above this store.  SQLite is responsible only for durable
+    serialization and compare-and-swap; it never interprets or broadens the metadata contract.
+    One row is intentionally used so a snapshot replacement is one transaction and stale
+    workers cannot overwrite a newer snapshot after reading it.
+    """
+
+    _META_TABLE = "autonomy_execution_snapshot_meta"
+    _SNAPSHOT_TABLE = "autonomy_execution_snapshots"
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        max_bytes: int,
+        timeout: float,
+        clock: Callable[[], float],
+    ) -> None:
+        if not isinstance(path, (str, os.PathLike)) or not str(path) or "\x00" in str(path):
+            raise AutonomyPersistenceError("SQLite execution persistence path must be non-empty")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES:
+            raise AutonomyPersistenceError("SQLite execution persistence max_bytes is outside its bound")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(float(timeout)) or not 0.1 <= float(timeout) <= 60.0:
+            raise AutonomyPersistenceError("SQLite execution persistence timeout is outside its bound")
+        if not callable(clock):
+            raise AutonomyPersistenceError("SQLite execution persistence clock must be callable")
+        self.path = Path(path)
+        self.max_bytes = max_bytes
+        self.timeout = float(timeout)
+        self._clock = clock
+        self._lock = threading.RLock()
+        self._connection: sqlite3.Connection | None = None
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            connection = sqlite3.connect(
+                str(self.path),
+                isolation_level=None,
+                check_same_thread=False,
+                timeout=self.timeout,
+            )
+            connection.row_factory = sqlite3.Row
+            self._connection = connection
+            self._configure()
+        except AutonomyPersistenceError:
+            self.close()
+            raise
+        except (OSError, sqlite3.Error) as error:
+            self.close()
+            raise AutonomyPersistenceError("SQLite execution persistence could not be opened") from error
+
+    def _configure(self) -> None:
+        connection = self._require_connection()
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=FULL")
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(f"PRAGMA busy_timeout = {int(self.timeout * 1000)}")
+        connection.execute(
+            f"CREATE TABLE IF NOT EXISTS {self._META_TABLE} ("
+            "key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        connection.execute(
+            f"CREATE TABLE IF NOT EXISTS {self._SNAPSHOT_TABLE} ("
+            "slot INTEGER PRIMARY KEY CHECK(slot = 1), "
+            "snapshot_digest TEXT NOT NULL, snapshot_text TEXT NOT NULL, updated_ns INTEGER NOT NULL)"
+        )
+        existing = connection.execute(
+            f"SELECT value FROM {self._META_TABLE} WHERE key = 'schema'"
+        ).fetchone()
+        if existing is None:
+            connection.execute(
+                f"INSERT INTO {self._META_TABLE}(key, value) VALUES('schema', ?)",
+                (SQLITE_AUTONOMY_EXECUTION_SCHEMA,),
+            )
+        elif existing["value"] != SQLITE_AUTONOMY_EXECUTION_SCHEMA:
+            raise AutonomyPersistenceError("SQLite execution persistence has an incompatible schema")
+
+    def _require_connection(self) -> sqlite3.Connection:
+        connection = self._connection
+        if connection is None:
+            raise AutonomyPersistenceError("SQLite execution persistence is closed")
+        return connection
+
+    @contextmanager
+    def _transaction(self) -> Any:
+        with self._lock:
+            connection = self._require_connection()
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.execute("COMMIT")
+            except Exception as error:
+                try:
+                    connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                if isinstance(error, sqlite3.Error):
+                    raise AutonomyPersistenceError("SQLite execution persistence transaction failed") from error
+                raise
+
+    def _snapshot_text_digest(self, value: Any) -> tuple[str, str]:
+        if not isinstance(value, str) or not value or len(value.encode("utf-8")) > self.max_bytes:
+            raise AutonomyPersistenceError("SQLite execution snapshot exceeds its byte bound")
+        try:
+            parsed = json.loads(value)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise AutonomyPersistenceError("SQLite execution snapshot is invalid") from error
+        if not isinstance(parsed, Mapping):
+            raise AutonomyPersistenceError("SQLite execution snapshot must be an object")
+        snapshot_digest = parsed.get("snapshot_digest")
+        _digest("SQLite execution snapshot_digest", snapshot_digest)
+        return value, snapshot_digest
+
+    def _read_locked(self, connection: sqlite3.Connection) -> str | None:
+        row = connection.execute(
+            f"SELECT snapshot_digest, snapshot_text FROM {self._SNAPSHOT_TABLE} WHERE slot = 1"
+        ).fetchone()
+        if row is None:
+            return None
+        value, snapshot_digest = self._snapshot_text_digest(row["snapshot_text"])
+        if row["snapshot_digest"] != snapshot_digest:
+            raise AutonomyPersistenceError("SQLite execution snapshot digest is corrupted")
+        return value
+
+    def _upsert_locked(self, connection: sqlite3.Connection, value: str, snapshot_digest: str) -> None:
+        connection.execute(
+            f"INSERT INTO {self._SNAPSHOT_TABLE}(slot, snapshot_digest, snapshot_text, updated_ns) "
+            "VALUES(1, ?, ?, ?) "
+            "ON CONFLICT(slot) DO UPDATE SET snapshot_digest = excluded.snapshot_digest, "
+            "snapshot_text = excluded.snapshot_text, updated_ns = excluded.updated_ns",
+            (snapshot_digest, value, _now_ns(self._clock)),
+        )
+
+    def read(self) -> str | None:
+        with self._lock:
+            return self._read_locked(self._require_connection())
+
+    def write(self, value: str) -> None:
+        normalized, snapshot_digest = self._snapshot_text_digest(value)
+        with self._transaction() as connection:
+            self._upsert_locked(connection, normalized, snapshot_digest)
+
+    def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+        if expected_snapshot_digest is not None:
+            _digest("SQLite execution expected snapshot_digest", expected_snapshot_digest)
+        normalized, snapshot_digest = self._snapshot_text_digest(value)
+        with self._transaction() as connection:
+            current = self._read_locked(connection)
+            current_digest = None if current is None else json.loads(current)["snapshot_digest"]
+            if current_digest != expected_snapshot_digest:
+                return False
+            self._upsert_locked(connection, normalized, snapshot_digest)
+            return True
+
+    def close(self) -> None:
+        with self._lock:
+            connection, self._connection = self._connection, None
+            if connection is not None:
+                try:
+                    connection.close()
+                except sqlite3.Error as error:
+                    raise AutonomyPersistenceError("SQLite execution persistence could not be closed") from error
+
+
+class SQLiteAutonomousExecutionSnapshotPersistence(TransactionalJsonAutonomousExecutionSnapshotPersistence):
+    """Restart-safe SQLite persistence for metadata-only execution snapshots.
+
+    Each instance owns one SQLite connection for its lifecycle, while every read/write uses a
+    re-entrant process lock and every mutation uses ``BEGIN IMMEDIATE`` plus ``synchronous=FULL``.
+    Multiple instances or worker processes may therefore share a database file: a stale
+    coordinator receives a compare-and-swap conflict instead of overwriting a newer snapshot.
+    SQLite stores only the canonical snapshot text and its digest; the parent JSON layer still
+    rejects task, prompt, provider, credential, tool, effect, and raw evaluator fields.
+    """
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        max_bytes: int = MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES,
+        timeout: float = 5.0,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        store = _SQLiteAutonomousExecutionSnapshotStore(
+            path,
+            max_bytes=max_bytes,
+            timeout=timeout,
+            clock=clock,
+        )
+        try:
+            super().__init__(store, max_bytes=max_bytes)
+        except Exception:
+            store.close()
+            raise
+        self.path = store.path
+
+    def close(self) -> None:
+        store = self.store
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
+
+    def __enter__(self) -> "SQLiteAutonomousExecutionSnapshotPersistence":
+        self.store._require_connection()  # type: ignore[attr-defined]
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
+
+
 class AutonomousExecutionPersistenceCoordinator:
     """Flush and restore a hash-checked execution journal through caller-owned storage."""
 
@@ -1357,6 +1571,7 @@ __all__ = [
     "AUTONOMY_JOURNAL_SCHEMA",
     "AUTONOMY_POLICY_SCHEMA",
     "AUTONOMY_STATE_SCHEMA",
+    "SQLITE_AUTONOMY_EXECUTION_SCHEMA",
     "MAX_AUTONOMY_PROVIDER_FAILOVERS",
     "MAX_AUTONOMY_JOURNAL_SNAPSHOT_BYTES",
     "AutonomousExecutionController",
@@ -1369,6 +1584,7 @@ __all__ = [
     "AutonomyPersistenceError",
     "AutonomyPolicyError",
     "JsonAutonomousExecutionSnapshotPersistence",
+    "SQLiteAutonomousExecutionSnapshotPersistence",
     "TransactionalJsonAutonomousExecutionSnapshotPersistence",
     "validate_autonomous_execution_snapshot",
 ]
