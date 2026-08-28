@@ -14,6 +14,7 @@ the caller must rehydrate the task and prompt and explicitly resume with the sam
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from functools import wraps
 import hashlib
 import json
 import math
@@ -94,6 +95,17 @@ class AutonomyPersistenceError(ArgumentError):
 
 class AutonomyPolicyError(AutonomyPersistenceError):
     """A proposed autonomous action exceeded its caller-owned execution policy."""
+
+
+def _serialized_transition(method: Callable[..., Any]) -> Callable[..., Any]:
+    """Serialize one controller transition while allowing safe nested helper calls."""
+
+    @wraps(method)
+    def transition(self: Any, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return transition
 
 
 class AutonomousExecutionSnapshotTextStore(Protocol):
@@ -900,6 +912,7 @@ class AutonomousExecutionController:
         journal: AutonomousExecutionJournal | None = None,
         resume: bool = False,
     ) -> None:
+        self._lock = threading.RLock()
         self.policy = policy if isinstance(policy, AutonomousExecutionPolicy) else AutonomousExecutionPolicy.from_mapping(policy or {})
         if journal is not None and not isinstance(journal, AutonomousExecutionJournal):
             raise AutonomyPersistenceError("controller journal must be an AutonomousExecutionJournal or None")
@@ -924,6 +937,7 @@ class AutonomousExecutionController:
         )
         self._terminal = False
 
+    @_serialized_transition
     def admit_provider_call(
         self,
         *,
@@ -976,6 +990,7 @@ class AutonomousExecutionController:
                 fields[name] = value
         return self._persist("provider_call", "running", **fields)
 
+    @_serialized_transition
     def record_provider_outcome(
         self,
         *,
@@ -1059,6 +1074,7 @@ class AutonomousExecutionController:
             retryable=retryable,
         )
 
+    @_serialized_transition
     def admit_tool_call(
         self,
         *,
@@ -1105,6 +1121,7 @@ class AutonomousExecutionController:
             cost_units=cost_units,
         )
 
+    @_serialized_transition
     def record_tool_outcome(
         self,
         *,
@@ -1132,6 +1149,7 @@ class AutonomousExecutionController:
         self.state = replace(self.state, last_tool=tool, last_call_id=call_id, last_outcome_digest=outcome_digest, last_event_kind="tool_outcome", status=lifecycle_status)
         return self._persist("tool_outcome", outcome_status, tool=tool, call_id=call_id, outcome_digest=outcome_digest, reason=reason)
 
+    @_serialized_transition
     def record_effect_reconciliation(
         self,
         *,
@@ -1210,6 +1228,7 @@ class AutonomousExecutionController:
             reason=reason,
         )
 
+    @_serialized_transition
     def record_evaluation(
         self,
         *,
@@ -1229,6 +1248,7 @@ class AutonomousExecutionController:
         self.state = replace(self.state, last_evaluation_digest=evaluation_digest, last_event_kind="evaluation", status="evaluated")
         return self._persist("evaluation", "evaluated", evaluator_id=evaluator_id, evaluator_version=evaluator_version, reward=reward, passed=passed, evaluation_digest=evaluation_digest, failure_class=failure_class)
 
+    @_serialized_transition
     def replan(
         self,
         *,
@@ -1261,6 +1281,7 @@ class AutonomousExecutionController:
             attempt=attempt,
         )
 
+    @_serialized_transition
     def checkpoint(self, *, status: str = "paused", reason: str | None = None) -> AutonomousExecutionState:
         self._ensure_active()
         status = _identifier("checkpoint status", status)
@@ -1270,6 +1291,7 @@ class AutonomousExecutionController:
         self.state = replace(self.state, status=status, last_event_kind="checkpoint")
         return self._persist("checkpoint", self.state.status, reason=reason)
 
+    @_serialized_transition
     def complete(self, *, status: str = "completed") -> AutonomousExecutionState:
         self._ensure_active()
         self.state = replace(self.state, status=_identifier("completion status", status), last_event_kind="completed")
@@ -1277,6 +1299,7 @@ class AutonomousExecutionController:
         self._terminal = True
         return self.state
 
+    @_serialized_transition
     def fail(self, *, reason: str, status: str = "failed") -> AutonomousExecutionState:
         if self._terminal or self.state.status in AUTONOMY_TERMINAL_STATUSES:
             raise AutonomyPolicyError("execution is terminal")

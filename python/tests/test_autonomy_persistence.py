@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 
 import pytest
@@ -199,6 +200,42 @@ def test_execution_budget_persists_failovers_and_replans_across_restart(tmp_path
         )
     with pytest.raises(AutonomyPolicyError, match="max_replans"):
         resumed.replan(instruction_digest="d" * 64, reason="second_revision")
+
+
+def test_shared_controller_serializes_concurrent_domain_transitions(tmp_path) -> None:
+    path = tmp_path / "concurrent-execution.jsonl"
+    controller = AutonomousExecutionController(
+        execution_id="concurrent-execution",
+        domain="operations",
+        capability="observability",
+        risk_class="read_only",
+        policy=AutonomousExecutionPolicy(
+            max_steps=16,
+            max_provider_calls=16,
+            max_cost_units=16,
+        ),
+        journal=AutonomousExecutionJournal(path),
+    )
+
+    def admit(index: int) -> int:
+        return controller.admit_provider_call(
+            provider="local",
+            model=f"model-{index}",
+            invocation_kind="parallel_domain_worker",
+            attempt=0,
+            turn=0,
+        ).provider_calls
+
+    with ThreadPoolExecutor(max_workers=8) as workers:
+        observed = list(workers.map(admit, range(16)))
+
+    assert sorted(observed) == list(range(1, 17))
+    assert controller.state.step_index == 16
+    assert controller.state.provider_calls == 16
+    rows = AutonomousExecutionJournal(path).events(execution_id="concurrent-execution")
+    assert len(rows) == 17
+    assert [row["sequence"] for row in rows] == list(range(1, 18))
+    assert len({row["event"]["state"]["provider_calls"] for row in rows}) == 17
 
 
 def test_execution_snapshot_persistence_rehydrates_all_domains_and_fences_stale_writers(tmp_path) -> None:

@@ -1742,6 +1742,12 @@ one failover transition on their first turn and only provider-call budget on lat
 turns. Adversarial and all-domain coverage is included in the SDK test suites; production
 credential resolution, evaluator truth, external effects, and durable storage remain caller-owned.
 
+Shared execution-controller transitions are now linearizable in Python as well as TypeScript.
+Concurrent specialist workers cannot race provider/tool/cost counters or bypass a failover/replan
+ceiling; the lock protects only metadata state and does not add provider, credential, tool, or
+effect authority. Offline coverage exercises concurrent admissions and preserves the existing
+metadata-only restart contract.
+
 Python now closes the cross-SDK control-plane supervision gap. `AutonomousBrainControlPlaneMonitor`
 and its async counterpart build on `BrainControlClient` to provide bounded status fan-out across
 all twelve domains, hash-chain event cursor validation, explicit approval routing, and bounded

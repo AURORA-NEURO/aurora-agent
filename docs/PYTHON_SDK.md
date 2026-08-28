@@ -34,8 +34,11 @@ An evaluator-approved planning transition is recorded with
 bounded reason, attempt index, and incremented replan counter enter the journal. `max_replans`
 is enforced before the transition and is restored with the rest of the execution state. This
 keeps planning guidance transient while making recovery decisions auditable and deterministic.
-The same metadata-only fields are validated by the TypeScript execution controller, preserving
-cross-SDK replay and failure semantics.
+All controller transitions are serialized with a re-entrant lock, so concurrent domain workers
+share one linearizable provider/tool/cost budget; the journal lock alone is not relied on to make
+counter updates safe. The same metadata-only fields and serialized transition contract are
+validated by the TypeScript execution controller, preserving cross-SDK replay and failure
+semantics.
 
 The artifact registry is available through typed `ArtifactRegistrationRequest`,
 `ArtifactQueryRequest`, `ArtifactGetRequest`, `ArtifactRegistrationReport`, `ArtifactQueryReport`,

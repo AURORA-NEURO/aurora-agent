@@ -136,6 +136,26 @@ test("shared execution journals serialize concurrent session starts", async () =
   assert.equal((await journal.verifyIntegrity()).verified, true);
 });
 
+test("execution controller serializes concurrent counter transitions", async () => {
+  const controller = await AutonomousExecutionController.create({
+    executionId: "execution-concurrent-transitions",
+    domain: "operations",
+    capability: "observability",
+    riskClass: "read_only",
+    policy: { max_steps: 16, max_provider_calls: 16, max_cost_units: 16 },
+  });
+  const observed = await Promise.all(Array.from({ length: 16 }, (_, index) => controller.admitProviderCall({
+    provider: "local",
+    model: `model-${index}`,
+    invocationKind: "parallel_domain_worker",
+    attempt: 0,
+    turn: 0,
+  }).then((state) => state.provider_calls)));
+  assert.deepEqual(observed.sort((left, right) => left - right), Array.from({ length: 16 }, (_, index) => index + 1));
+  assert.equal(controller.state.step_index, 16);
+  assert.equal(controller.state.provider_calls, 16);
+});
+
 test("execution journal snapshots restore resumable state through a durable adapter", async () => {
   const policy = { max_steps: 8, max_provider_calls: 4, max_cost_units: 8 };
   const sourceJournal = new InMemoryAutonomousExecutionJournal();

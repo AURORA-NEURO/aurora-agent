@@ -206,6 +206,13 @@ continue only within the reviewed continuation ladder. These counters and decisi
 in metadata-only restart snapshots, making a resumed worker subject to the same ceilings as the
 original process.
 
+When multiple specialist workers share one execution controller, Python serializes each
+admission and lifecycle transition with a re-entrant controller lock, while the journal supplies
+its own append lock. This preserves a single linearizable budget across concurrent domain fan-out;
+the TypeScript controller provides the equivalent queued transition boundary. Concurrency changes
+ordering, not authority: every worker still uses the same reviewed policy, route, provider
+continuation, tool authorization, and external-effect reconciliation rules.
+
 ## Domain operating kits
 
 The SDK also exposes a digest-bound operating kit for every built-in domain. A kit composes the
