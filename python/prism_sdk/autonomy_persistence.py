@@ -835,7 +835,10 @@ class SQLiteAutonomousExecutionJournal(AutonomousExecutionJournal):
             raise AutonomyPersistenceError("SQLite execution journal timeout is outside its bound")
         self.timeout = float(timeout)
         self._connection: sqlite3.Connection | None = None
-        self._sqlite_lock = threading.RLock()
+        # The base journal's inherited readers/snapshot methods use ``_lock``. Reuse the same
+        # re-entrant lock for SQLite mutations so one connection is never read while another
+        # thread is allocating a sequence or committing a restore.
+        self._sqlite_lock = self._lock
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             connection = sqlite3.connect(
