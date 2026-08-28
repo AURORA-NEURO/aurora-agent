@@ -481,8 +481,8 @@ class AutonomousExecutionJournal:
             if previous.status in AUTONOMY_TERMINAL_STATUSES and previous.status != "reconciliation_required":
                 raise AutonomyPersistenceError("terminal execution cannot be resumed")
             resumed = replace(previous, status="resumed", last_event_kind="resumed")
-            self.append({"execution_id": execution_id, "kind": "resumed", "domain": domain, "capability": capability, "risk_class": risk_class, "status": "resumed", "policy_digest": policy.digest, "state": resumed.to_dict()})
-            return replace(resumed, journal_sequence=len(self._read_rows()), checkpoint_digest=content_digest(resumed.to_dict()))
+            receipt = self.append({"execution_id": execution_id, "kind": "resumed", "domain": domain, "capability": capability, "risk_class": risk_class, "status": "resumed", "policy_digest": policy.digest, "state": resumed.to_dict()})
+            return replace(resumed, journal_sequence=receipt["sequence"], checkpoint_digest=receipt["event_digest"])
         initial = AutonomousExecutionState(
             execution_id=execution_id,
             domain=domain,

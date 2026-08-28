@@ -97,6 +97,10 @@ def test_journal_is_restart_safe_hash_chained_and_resume_is_explicit(tmp_path) -
     )
     resumed.complete()
     assert resumed.state.status == "completed"
+    latest = journal.state("execution-1")
+    assert latest is not None
+    assert resumed.state.journal_sequence == latest.journal_sequence
+    assert resumed.state.checkpoint_digest == latest.checkpoint_digest
     with pytest.raises(AutonomyPersistenceError):
         AutonomousExecutionController(
             execution_id="execution-1",
