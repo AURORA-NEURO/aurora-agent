@@ -1018,6 +1018,7 @@ export type {
   AutonomousAutoRunResult,
   AutonomousCrossDomainBlueprint,
   AutonomousCrossDomainChildRun,
+  AutonomousProviderFailureProjection,
   AutonomousCrossDomainExecutionNextAction,
   AutonomousCrossDomainExecutionReceipt,
   AutonomousCrossDomainRunOptions,

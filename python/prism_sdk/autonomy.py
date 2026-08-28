@@ -266,6 +266,7 @@ from .autonomous_provider_evaluation import (
 )
 from .autonomy_provider import AutonomousProviderInvocationReceipt
 from .llm_runtime import (
+    CredentialError,
     CredentialHandle,
     CredentialProvisioner,
     CredentialProvisioningResult,
@@ -13993,6 +13994,64 @@ class AutonomousTaskOrchestrator:
         )
 
     @staticmethod
+    def _provider_failure_result(
+        blueprint: AutonomousTaskBlueprint,
+        *,
+        child_id: str,
+        error: ProviderError | CredentialError,
+        run_id: str | None,
+    ) -> BrainRunResult:
+        """Convert a provider-boundary exception into a safe child result envelope.
+
+        A provider or credential failure is an expected operational outcome for a bounded
+        fan-out, not a reason to lose every sibling result.  Only stable class/transport
+        metadata crosses this boundary.  In particular, ``str(error)`` is never copied because
+        provider implementations and credential stores may include sensitive diagnostics there.
+        ``BrainRunError`` and other programming/configuration errors remain exceptions so an
+        invalid request cannot be disguised as an unavailable child.
+        """
+
+        failure: dict[str, Any] = {
+            "error_class": type(error).__name__,
+            "retryable": bool(getattr(error, "retryable", False)),
+            "circuit_open": bool(getattr(error, "circuit_open", False)),
+            "status_code": getattr(error, "status_code", None),
+            "retention": "metadata_only;provider_error_message_and_payloads_not_retained",
+            "secret_material": "never_returned",
+        }
+        identity = {
+            "schema": "bioprism-python-autonomous-provider-failure/0.1",
+            "child_id": child_id,
+            "plan_digest": blueprint.plan.get("plan_digest"),
+            "error_class": failure["error_class"],
+            "retryable": failure["retryable"],
+            "circuit_open": failure["circuit_open"],
+            "status_code": failure["status_code"],
+        }
+        failure_run_id = run_id or f"cross-child-failure-{content_digest(identity)[:48]}"
+        return BrainRunResult(
+            run_id=failure_run_id,
+            status="provider_failed",
+            selection={
+                "status": "provider_failed",
+                "selected_model": None,
+                "retention": "selection_metadata_only;provider_failure_no_model_payload",
+            },
+            prompt={
+                "prompt_digest": content_digest(blueprint.prompt),
+                "retention": "provider_prompt_not_dispatched;digest_only",
+            },
+            plan={
+                "plan_digest": blueprint.plan.get("plan_digest"),
+                "status": "provider_failed",
+                "retention": "plan_metadata_only",
+            },
+            response=None,
+            outcome_digest=content_digest({**identity, "run_id": failure_run_id}),
+            failure=failure,
+        )
+
+    @staticmethod
     def _cross_domain_output(result: BrainRunResult | BrainToolLoopResult | BrainMissionResult) -> str:
         response = None
         if isinstance(result, BrainRunResult):
@@ -14257,85 +14316,93 @@ class AutonomousTaskOrchestrator:
                     "priority_rank": plan_priority[child_id],
                     "focus": child_id in plan_focus_child_ids,
                 }
-            result = self.run(
-                task=child.spec.task,
-                domain=child.spec.domain,
-                model_candidates=model_candidates,
-                credentials=credentials,
-                capability=child.spec.capability,
-                risk_class=child.spec.risk_class,
-                constraints=child.spec.constraints,
-                desired_outputs=child.spec.desired_outputs,
-                context=child_context,
-                content_parts=normalized_content_parts,
-                prompt_template=prompt_template,
-                prompt_registry=prompt_registry,
-                prompt_selection=prompt_selection,
-                prompt_stage=prompt_stage,
-                prompt_learning_state=prompt_learning_state,
-                prompt_learning_exploration=prompt_learning_exploration,
-                max_steps=child.spec.max_steps,
-                require_json=child.spec.require_json,
-                structured_domain_response=child.spec.structured_domain_response,
-                require_response_review=False,
-                # ``prepare`` stores the generated contract schema in the spec for replay, but
-                # the structured mode owns that schema at the run boundary. Passing it back as
-                # a custom schema would incorrectly trip the mutually-exclusive option guard.
-                response_schema=None if child.spec.structured_domain_response else child.spec.response_schema,
-                execution_mode=child.spec.execution_mode,
-                required_model_capabilities=tuple(
-                    capability
-                    for capability in child.required_capabilities
-                    if capability not in child.profile.required_model_capabilities
-                ),
-                ledger=ledger,
-                memory=memory,
-                memory_query=memory_query,
-                memory_limit=memory_limit,
-                memory_consolidator=memory_consolidator,
-                memory_lesson_resolver=memory_lesson_resolver,
-                memory_lesson_context_resolver=memory_lesson_context_resolver,
-                consolidated_memory_limit=consolidated_memory_limit,
-                retrieve_consolidated_memory=retrieve_consolidated_memory,
-                consolidated_memory_required=consolidated_memory_required,
-                contextual_observations=contextual_observations,
-                input_tokens=input_tokens,
-                requested_output_tokens=requested_output_tokens,
-                max_cost_per_million_tokens=max_cost_per_million_tokens,
-                max_latency_ms=max_latency_ms,
-                min_quality=min_quality,
-                selection_overrides=selection_overrides,
-                bandit_state=bandit_state,
-                approve_provider_call=approve_provider_call,
-                approve_mission_dispatch=approve_mission_dispatch,
-                run_id=self._cross_domain_identity("cross-child", run_id, child_id),
-                max_output_tokens=max_output_tokens,
-                temperature=temperature,
-                idempotency_key=self._cross_domain_identity("cross-key", idempotency_key, child_id),
-                mission_policy=mission_policy,
-                mission_options=mission_options,
-                route_request=route_request,
-                auto_route=auto_route,
-                enforce_route_tools=enforce_route_tools,
-                require_resolved_route=require_resolved_route,
-                 provider_tools=provider_tools,
-                 tool_choice=tool_choice,
-                 max_provider_failovers=max_provider_failovers,
-                 domain_policy_mode=domain_policy_mode,
-                 domain_policy_evidence_ready=domain_policy_evidence_ready,
-                 domain_policy_evaluator_configured=domain_policy_evaluator_configured,
-                 domain_policy_plan_accepted=domain_policy_plan_accepted,
-                 domain_policy_effects_requested=domain_policy_effects_requested,
-                 domain_policy_effects_approved=domain_policy_effects_approved,
-                 tool_loop_options=self._cross_domain_tool_loop_options(
-                    tool_loop_options,
-                    execution_id=self._cross_domain_identity("cross-tool", run_id, child_id),
+            try:
+                result = self.run(
+                    task=child.spec.task,
                     domain=child.spec.domain,
-                ),
-                execution_controller=execution_controller,
-                invocation_observer=invocation_observer,
-                trace_event_callback=trace_event_callback,
-            )
+                    model_candidates=model_candidates,
+                    credentials=credentials,
+                    capability=child.spec.capability,
+                    risk_class=child.spec.risk_class,
+                    constraints=child.spec.constraints,
+                    desired_outputs=child.spec.desired_outputs,
+                    context=child_context,
+                    content_parts=normalized_content_parts,
+                    prompt_template=prompt_template,
+                    prompt_registry=prompt_registry,
+                    prompt_selection=prompt_selection,
+                    prompt_stage=prompt_stage,
+                    prompt_learning_state=prompt_learning_state,
+                    prompt_learning_exploration=prompt_learning_exploration,
+                    max_steps=child.spec.max_steps,
+                    require_json=child.spec.require_json,
+                    structured_domain_response=child.spec.structured_domain_response,
+                    require_response_review=False,
+                    # ``prepare`` stores the generated contract schema in the spec for replay, but
+                    # the structured mode owns that schema at the run boundary. Passing it back as
+                    # a custom schema would incorrectly trip the mutually-exclusive option guard.
+                    response_schema=None if child.spec.structured_domain_response else child.spec.response_schema,
+                    execution_mode=child.spec.execution_mode,
+                    required_model_capabilities=tuple(
+                        capability
+                        for capability in child.required_capabilities
+                        if capability not in child.profile.required_model_capabilities
+                    ),
+                    ledger=ledger,
+                    memory=memory,
+                    memory_query=memory_query,
+                    memory_limit=memory_limit,
+                    memory_consolidator=memory_consolidator,
+                    memory_lesson_resolver=memory_lesson_resolver,
+                    memory_lesson_context_resolver=memory_lesson_context_resolver,
+                    consolidated_memory_limit=consolidated_memory_limit,
+                    retrieve_consolidated_memory=retrieve_consolidated_memory,
+                    consolidated_memory_required=consolidated_memory_required,
+                    contextual_observations=contextual_observations,
+                    input_tokens=input_tokens,
+                    requested_output_tokens=requested_output_tokens,
+                    max_cost_per_million_tokens=max_cost_per_million_tokens,
+                    max_latency_ms=max_latency_ms,
+                    min_quality=min_quality,
+                    selection_overrides=selection_overrides,
+                    bandit_state=bandit_state,
+                    approve_provider_call=approve_provider_call,
+                    approve_mission_dispatch=approve_mission_dispatch,
+                    run_id=self._cross_domain_identity("cross-child", run_id, child_id),
+                    max_output_tokens=max_output_tokens,
+                    temperature=temperature,
+                    idempotency_key=self._cross_domain_identity("cross-key", idempotency_key, child_id),
+                    mission_policy=mission_policy,
+                    mission_options=mission_options,
+                    route_request=route_request,
+                    auto_route=auto_route,
+                    enforce_route_tools=enforce_route_tools,
+                    require_resolved_route=require_resolved_route,
+                    provider_tools=provider_tools,
+                    tool_choice=tool_choice,
+                    max_provider_failovers=max_provider_failovers,
+                    domain_policy_mode=domain_policy_mode,
+                    domain_policy_evidence_ready=domain_policy_evidence_ready,
+                    domain_policy_evaluator_configured=domain_policy_evaluator_configured,
+                    domain_policy_plan_accepted=domain_policy_plan_accepted,
+                    domain_policy_effects_requested=domain_policy_effects_requested,
+                    domain_policy_effects_approved=domain_policy_effects_approved,
+                    tool_loop_options=self._cross_domain_tool_loop_options(
+                        tool_loop_options,
+                        execution_id=self._cross_domain_identity("cross-tool", run_id, child_id),
+                        domain=child.spec.domain,
+                    ),
+                    execution_controller=execution_controller,
+                    invocation_observer=invocation_observer,
+                    trace_event_callback=trace_event_callback,
+                )
+            except (ProviderError, CredentialError) as error:
+                result = self._provider_failure_result(
+                    child,
+                    child_id=child_id,
+                    error=error,
+                    run_id=self._cross_domain_identity("cross-child", run_id, child_id),
+                )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("cross-domain child returned an unsupported result")
             return result
@@ -14375,7 +14442,15 @@ class AutonomousTaskOrchestrator:
                     contradiction_confidence_threshold=float(response_contradiction_confidence_threshold),
                 )
         if not all(complete) and not allow_partial:
-            status = "approval_required" if any(result.status == "approval_required" for result in child_results) else "child_incomplete"
+            status = (
+                "reconciliation_required"
+                if any(result.status == "reconciliation_required" for result in child_results)
+                else "approval_required"
+                if any(result.status == "approval_required" for result in child_results)
+                else "child_failed"
+                if any(result.status == "provider_failed" for result in child_results)
+                else "child_incomplete"
+            )
             return AutonomousCrossDomainResult(
                 status,
                 blueprint,

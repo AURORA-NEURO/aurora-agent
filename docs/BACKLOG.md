@@ -2158,3 +2158,13 @@ preserving the JSONL journal interface and portable snapshot format. This closes
 forking, not task-lease or policy-counter coordination: deployment-owned leases must still fence
 duplicate rehydrated work, and ambiguous provider/effect outcomes still require external
 reconciliation.
+
+Cross-domain provider-failure isolation is now symmetric across Python and TypeScript. A provider
+or credential boundary exception raised by a specialist becomes a bounded metadata-only child
+result, preserving error class/code, retryability, circuit state, and status code while excluding
+exception text, prompts, credentials, provider responses, and wire payloads. Partial fan-out keeps
+healthy siblings available for synthesis; strict fan-out stops with an explicit `child_failed`
+result and no synthesis. Malformed input, programming, and configuration failures still propagate
+as hard failures. This closes the runtime gap between the documented `allow_partial` contract and
+actual provider outages; external retry orchestration, protected raw-result storage, distributed
+leases, and provider reconciliation remain deployment-owned.

@@ -3474,6 +3474,75 @@ def test_cross_domain_opt_in_parallelism_preserves_order_and_waits_for_children(
         )
 
 
+def test_cross_domain_provider_failures_become_redacted_child_results_and_respect_partial_policy():
+    runtime = LLMRuntime()
+
+    def handler(request: ProviderRequest) -> Mapping[str, object]:
+        prompt_text = json.dumps(list(request.messages))
+        if "FAIL_CHILD" in prompt_text:
+            raise ProviderError(
+                "sensitive provider diagnostic must not cross the child boundary",
+                retryable=True,
+                status_code=503,
+            )
+        return {"output_text": "healthy bounded specialist or synthesis output"}
+
+    runtime.register_in_memory_provider("openai", handler)
+    agent = AutonomousAgent(
+        _Workspace(),
+        runtime,
+        model_catalogue=ModelCatalogue(_model()),
+    )
+    partial = agent.run_cross_domain(
+        task="Coordinate a biomedical and neuroscience review with one failing specialist.",
+        subtasks=[
+            {"id": "failing-specialist", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "healthy-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+        ],
+        credentials={},
+        approve_provider_call=True,
+        allow_partial=True,
+        max_parallelism=2,
+    )
+
+    # ``allow_partial`` permits synthesis to complete from the healthy child plus the
+    # redacted failure envelope; the child-level failure remains observable below.
+    assert partial.status == "completed"
+    assert partial.synthesis_result is not None
+    assert partial.synthesis_result.status == "completed_provider_call"
+    assert [result.status for result in partial.child_results] == [
+        "provider_failed",
+        "completed_provider_call",
+    ]
+    failed = partial.child_results[0]
+    assert isinstance(failed, BrainRunResult)
+    assert failed.failure == {
+        "error_class": "ProviderError",
+        "retryable": True,
+        "circuit_open": False,
+        "status_code": 503,
+        "retention": "metadata_only;provider_error_message_and_payloads_not_retained",
+        "secret_material": "never_returned",
+    }
+    public = json.dumps(partial.to_dict())
+    assert "sensitive provider diagnostic" not in public
+
+    blocked = agent.run_cross_domain(
+        task="Coordinate a biomedical and neuroscience review with one failing specialist.",
+        subtasks=[
+            {"id": "failing-specialist", "task": "FAIL_CHILD review the biomedical evidence.", "domain": "biomedical"},
+            {"id": "healthy-specialist", "task": "Review the neuroscience signal limits.", "domain": "neuroscience"},
+        ],
+        credentials={},
+        approve_provider_call=True,
+        allow_partial=False,
+        max_parallelism=1,
+    )
+    assert blocked.status == "child_failed"
+    assert blocked.synthesis_result is None
+    assert blocked.child_results[0].status == "provider_failed"
+
+
 def test_cross_domain_learning_updates_state_between_children_and_synthesis(tmp_path: Path):
     runtime, store, server, thread = _runtime()
     workspace = _Workspace()

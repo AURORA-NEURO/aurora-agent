@@ -2720,3 +2720,54 @@ test("agent activation refreshes keylessly and blocks unapproved custom tool cal
   assert.equal(executions, 1);
   assert.equal(fetchCalls, 0);
 });
+
+test("cross-domain provider failures become redacted child results and respect partial policy", async () => {
+  let calls = 0;
+  const llm = new LLMRuntime({ credentials: new CredentialStore() });
+  llm.registerInMemoryProvider("failure-isolation", (request) => {
+    calls += 1;
+    const promptText = JSON.stringify(request.messages);
+    if (promptText.includes("FAIL_CHILD")) throw new Error("sensitive provider diagnostic must not cross the child boundary");
+    return { text: "healthy bounded specialist or synthesis output" };
+  });
+  const agent = new AutonomousAgent(llm);
+  const model = candidate("failure-isolation", "failure-model", [
+    "reasoning", "coordination", "biomedical", "neuroscience", "science", "structured_output",
+  ]);
+  agent.registerModel(model);
+  const task = "Coordinate a biomedical and neuroscience review with one failing specialist.";
+  const subtasks = [
+    { id: "failing-specialist", domain: "biomedical", task: "FAIL_CHILD review the biomedical evidence." },
+    { id: "healthy-specialist", domain: "neuroscience", task: "Review the neuroscience signal limits." },
+  ];
+
+  const partial = await agent.runCrossDomain(task, {
+    candidates: [model],
+    subtasks,
+    approveProviderCall: true,
+    allowPartial: true,
+    maxParallelChildren: 2,
+  });
+  assert.equal(partial.status, "children_partial");
+  assert.equal(partial.completed_children, 1);
+  assert.equal(partial.synthesis?.status, "completed");
+  assert.deepEqual(partial.child_runs.map((child) => child.result.status), ["child_failed", "completed"]);
+  assert.equal(partial.child_runs[0].result.failure?.error_class, "ProviderRuntimeError");
+  assert.equal(partial.child_runs[0].result.failure?.code, "provider_error");
+  assert.equal(partial.child_runs[0].result.failure?.status_code, null);
+  assert.equal(JSON.stringify(partial).includes("sensitive provider diagnostic"), false);
+  assert.equal(calls, 3, "the failure is isolated while the healthy child and synthesis still run");
+
+  const blocked = await agent.runCrossDomain(task, {
+    candidates: [model],
+    subtasks,
+    approveProviderCall: true,
+    allowPartial: false,
+    synthesize: true,
+    maxParallelChildren: 1,
+  });
+  assert.equal(blocked.status, "child_failed");
+  assert.equal(blocked.synthesis, null);
+  assert.equal(blocked.child_runs.length, 1);
+  assert.equal(blocked.child_runs[0].result.status, "child_failed");
+});

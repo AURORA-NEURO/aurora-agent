@@ -50,6 +50,15 @@ tool data. This direct path is intentionally separate from evaluator-driven cros
 and replanning: those APIs keep sequential delayed-credit settlement so concurrent completion
 cannot change bandit updates or trajectory identity.
 
+Provider and credential boundary failures inside a child are converted into a typed,
+metadata-only `BrainRunResult` with `status="provider_failed"`. It exposes only stable failure
+metadata such as retryability, circuit state, and status code; exception text, request messages,
+credential material, provider responses, and wire payloads are never retained. With
+`allow_partial=True`, healthy siblings and synthesis can proceed and the parent can complete while
+the failed child remains visible. With `allow_partial=False`, dispatch stops and the parent returns
+`child_failed` without synthesis. Programming, malformed-input, and configuration errors remain
+hard failures.
+
 For a local durable worker, `SQLiteAutonomousExecutionSnapshotPersistence(path)` is a ready
 transactional implementation of the snapshot adapter. It stores one canonical metadata snapshot
 row, uses WAL plus full synchronous commits, and fences `flush()` with an atomic

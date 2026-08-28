@@ -1437,6 +1437,10 @@ class BrainRunResult:
     # provider response remains caller-owned; this field contains only value-only evaluation
     # metadata and is omitted from legacy projections when unused.
     response_evaluation: Mapping[str, Any] | None = None
+    # A redacted provider-boundary failure projection used when a parent fan-out contains a
+    # failed child.  The exception message, request, credential, response, and wire payload are
+    # deliberately never retained here.
+    failure: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         custom_prompt = self.prompt.get("autonomous_prompt") is not None
@@ -1477,6 +1481,8 @@ class BrainRunResult:
         }
         if self.response_evaluation is not None:
             result["response_evaluation"] = dict(self.response_evaluation)
+        if self.failure is not None:
+            result["failure"] = dict(self.failure)
         return result
 
 

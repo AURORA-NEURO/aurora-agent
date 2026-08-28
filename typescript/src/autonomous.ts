@@ -1,4 +1,5 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
+import type { ProviderErrorCode } from "./errors.js";
 import { AUTONOMOUS_DOMAIN_NAMES } from "./autonomous-domains.js";
 import type { AutonomousDomainName } from "./autonomous-domains.js";
 import type { AutonomousLaunchAdmissionReport } from "./autonomous-launch-admission.js";
@@ -1124,6 +1125,22 @@ export interface AutonomousCapabilityPlan extends JsonObject {
 
 export type AutonomousRunStatus = "completed" | "route_review_required" | "approval_required" | "policy_review_required" | "policy_blocked" | "reconciliation_required" | "turn_limit_reached" | "abstained" | "cross_domain_partial" | "child_failed" | "response_review_required";
 
+/**
+ * Safe metadata for a provider/credential boundary failure captured inside a parent fan-out.
+ * Error messages and provider payloads are intentionally absent: provider implementations may
+ * include sensitive diagnostics in exception text, and a child failure must be safe to persist
+ * in the parent execution receipt.
+ */
+export interface AutonomousProviderFailureProjection extends JsonObject {
+  error_class: "ProviderRuntimeError";
+  code: ProviderErrorCode;
+  retryable: boolean;
+  status_code: number | null;
+  circuit_open: boolean;
+  retention: "metadata_only;provider_error_message_and_payloads_not_retained";
+  secret_material: "never_returned";
+}
+
 export type AutonomousToolLoopStatus = "completed" | "authorization_required" | "reconciliation_required" | "turn_limit_reached";
 
 export interface AutonomousToolLoopSummary {
@@ -1153,6 +1170,8 @@ export interface AutonomousRunResult {
   prompt?: AutonomousRunPromptProjection | null;
   /** Deterministic value-only response composition signal; never task truth or effect evidence. */
   response_evaluation?: AutonomousDomainResponseEvaluation | null;
+  /** Redacted provider-boundary failure captured by a parent cross-domain fan-out. */
+  failure?: AutonomousProviderFailureProjection | null;
   tool_loop?: AutonomousToolLoopSummary | null;
   cross_domain?: AutonomousCrossDomainRunResult | null;
   /** Optional value-only episodic-memory projection; absent when memory is not configured. */
@@ -1169,6 +1188,48 @@ export interface AutonomousRunResult {
   domain_policy_admission?: AutonomousDomainPolicyAdmission | null;
   learning: "provider_health_feedback_only" | "online_bandit_feedback_available";
   retention: "provider_response_local; value_only_learning_projection";
+}
+
+function providerFailureRunResult(
+  parentRoute: AutonomousRouteProposal,
+  blueprint: AutonomousTaskBlueprint,
+  error: ProviderRuntimeError,
+  learning: AutonomousRunResult["learning"],
+): AutonomousRunResult {
+  const failure: AutonomousProviderFailureProjection = {
+    error_class: "ProviderRuntimeError",
+    code: error.code,
+    retryable: error.retryable,
+    status_code: error.statusCode ?? null,
+    circuit_open: error.circuitOpen,
+    retention: "metadata_only;provider_error_message_and_payloads_not_retained",
+    secret_material: "never_returned",
+  };
+  return {
+    schema: "bioprism-typescript-autonomous-run/0.1",
+    status: "child_failed",
+    route: parentRoute,
+    blueprint,
+    plan_refinement_digest: null,
+    selection: null,
+    response: null,
+    provider_invocations: [],
+    provider_failover: null,
+    continuation_plan: null,
+    prompt: null,
+    response_evaluation: null,
+    tool_loop: null,
+    cross_domain: null,
+    learning_episode_id: null,
+    learning_episode_status: "not_eligible",
+    learning_error_class: null,
+    response_learning_episode_id: null,
+    response_learning_episode_status: "not_eligible",
+    response_learning_error_class: null,
+    learning,
+    failure,
+    retention: "provider_response_local; value_only_learning_projection",
+  };
 }
 
 export interface AutonomousRunPromptProjection extends JsonObject {
@@ -9178,64 +9239,74 @@ export class AutonomousAgent {
       const childId = blueprint.child_ids[index] ?? `child-${index + 1}`;
       const taskMessage = child.prompt.messages.find((message) => message.source_id === "task");
       if (!taskMessage) throw new ProviderRuntimeError(`cross-domain child ${childId} has no bounded task message`);
-      const childResult = await this.run(taskMessage.content, {
-        domain: child.domain_profile.domain,
-        capability: child.selection_context.capability,
-        candidates,
-        credential: options.credential,
-        credentialFor: options.credentialFor,
-        context: [
-          ...(options.context ?? []),
-          ...memory.context,
-          { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}; child id: ${childId}`, required: true, priority: 100 },
-          ...(acceptedPlan ? [{ id: "accepted-cross-domain-plan", content: JSON.stringify({ refinement_digest: acceptedPlan.refinement_digest, child_id: childId, priority_rank: acceptedPlan.priority_child_ids.indexOf(childId), focus: acceptedPlan.focus_child_ids.includes(childId) }), required: true, priority: 95 }] : []),
-        ],
-        promptTemplate: options.promptTemplate,
-        promptRegistry: options.promptRegistry,
-        promptSelection: options.promptSelection,
-        promptStage: options.promptStage,
-        promptLearningState: options.promptLearningState,
-        promptLearningExploration: options.promptLearningExploration,
-        contentParts,
-        retrieveMemory: false,
-        recordMemory: false,
-        hints: [],
-        maxInputTokens: options.maxInputTokens,
-        maxOutputTokens: options.maxOutputTokens,
-        maxCostPerMillionTokens: options.maxCostPerMillionTokens,
-        maxLatencyMs: options.maxLatencyMs,
-        minQuality: options.minQuality,
-        minSelectionConfidence: options.minSelectionConfidence,
-        requireJson: options.requireJson,
-        responseSchema: options.responseSchema,
-        structuredDomainResponse: options.structuredDomainResponse,
-        requireStructuredResponseReview: false,
-        domainPolicyMode: options.domainPolicyMode,
-        domainPolicyEvidenceReady: options.domainPolicyEvidenceReady,
-        domainPolicyEvaluatorConfigured: options.domainPolicyEvaluatorConfigured,
-        domainPolicyPlanAccepted: options.domainPolicyPlanAccepted ?? acceptedPlan !== null,
-        domainPolicyEffectsRequested: options.domainPolicyEffectsRequested,
-        domainPolicyEffectsApproved: options.domainPolicyEffectsApproved,
-        maxToolTurns: options.maxToolTurns,
-        temperature: options.temperature,
-        tools: options.tools,
-        authorizeAndExecute: options.authorizeAndExecute,
-        toolReadOnly: options.toolReadOnly,
-        approveProviderCall: true,
-        approveEffects: options.approveEffects,
-        execution: options.execution,
-        effectBoundary: options.effectBoundary ?? this.effectBoundary,
-        maxTotalCostUnits: undefined,
-        costBudget,
-        executionAttempt: index + 1,
-        maxProviderFailovers: options.maxProviderFailovers,
-        signal: options.signal,
-        observer: options.observer,
-        selectionEventCallback: options.selectionEventCallback,
-        toolSelectionState: options.toolSelectionState,
-        toolSelectionExploration: options.toolSelectionExploration,
-        maxToolRiskClass: options.maxToolRiskClass,
-      });
+      let childResult: AutonomousRunResult;
+      try {
+        childResult = await this.run(taskMessage.content, {
+          domain: child.domain_profile.domain,
+          capability: child.selection_context.capability,
+          candidates,
+          credential: options.credential,
+          credentialFor: options.credentialFor,
+          context: [
+            ...(options.context ?? []),
+            ...memory.context,
+            { id: "cross-domain-parent", content: `Parent route digest: ${route.route_digest}; child id: ${childId}`, required: true, priority: 100 },
+            ...(acceptedPlan ? [{ id: "accepted-cross-domain-plan", content: JSON.stringify({ refinement_digest: acceptedPlan.refinement_digest, child_id: childId, priority_rank: acceptedPlan.priority_child_ids.indexOf(childId), focus: acceptedPlan.focus_child_ids.includes(childId) }), required: true, priority: 95 }] : []),
+          ],
+          promptTemplate: options.promptTemplate,
+          promptRegistry: options.promptRegistry,
+          promptSelection: options.promptSelection,
+          promptStage: options.promptStage,
+          promptLearningState: options.promptLearningState,
+          promptLearningExploration: options.promptLearningExploration,
+          contentParts,
+          retrieveMemory: false,
+          recordMemory: false,
+          hints: [],
+          maxInputTokens: options.maxInputTokens,
+          maxOutputTokens: options.maxOutputTokens,
+          maxCostPerMillionTokens: options.maxCostPerMillionTokens,
+          maxLatencyMs: options.maxLatencyMs,
+          minQuality: options.minQuality,
+          minSelectionConfidence: options.minSelectionConfidence,
+          requireJson: options.requireJson,
+          responseSchema: options.responseSchema,
+          structuredDomainResponse: options.structuredDomainResponse,
+          requireStructuredResponseReview: false,
+          domainPolicyMode: options.domainPolicyMode,
+          domainPolicyEvidenceReady: options.domainPolicyEvidenceReady,
+          domainPolicyEvaluatorConfigured: options.domainPolicyEvaluatorConfigured,
+          domainPolicyPlanAccepted: options.domainPolicyPlanAccepted ?? acceptedPlan !== null,
+          domainPolicyEffectsRequested: options.domainPolicyEffectsRequested,
+          domainPolicyEffectsApproved: options.domainPolicyEffectsApproved,
+          maxToolTurns: options.maxToolTurns,
+          temperature: options.temperature,
+          tools: options.tools,
+          authorizeAndExecute: options.authorizeAndExecute,
+          toolReadOnly: options.toolReadOnly,
+          approveProviderCall: true,
+          approveEffects: options.approveEffects,
+          execution: options.execution,
+          effectBoundary: options.effectBoundary ?? this.effectBoundary,
+          maxTotalCostUnits: undefined,
+          costBudget,
+          executionAttempt: index + 1,
+          maxProviderFailovers: options.maxProviderFailovers,
+          signal: options.signal,
+          observer: options.observer,
+          selectionEventCallback: options.selectionEventCallback,
+          toolSelectionState: options.toolSelectionState,
+          toolSelectionExploration: options.toolSelectionExploration,
+          maxToolRiskClass: options.maxToolRiskClass,
+        });
+      } catch (error) {
+        if (!(error instanceof ProviderRuntimeError)) throw error;
+        // Provider/credential failures are expected operational outcomes for a bounded child.
+        // Convert them to metadata-only results so allowPartial can preserve healthy siblings
+        // and synthesis can explicitly see the omission without receiving an error message or
+        // provider payload. Programming/configuration errors still propagate to the caller.
+        childResult = providerFailureRunResult(route, child, error, learning);
+      }
       const rawOutput = childResult.response?.text ?? (childResult.response?.structured === null || childResult.response?.structured === undefined ? "" : JSON.stringify(childResult.response.structured));
       const boundedOutput = rawOutput.length > 48_000 ? `${rawOutput.slice(0, 48_000)}\n[child output bounded locally]` : rawOutput;
       const output = boundedOutput.trim() || "[child returned no textual or structured output]";
