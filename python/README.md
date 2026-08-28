@@ -781,6 +781,19 @@ the caller has not supplied explicit provider tools, while custom tools remain a
 fallback when no reviewed candidate is available. Missing catalogue entries and activation-gated
 stages are explicit rather than optimistic.
 
+The proposal can also enforce a caller-selected risk ceiling with
+`max_risk_class="read_only" | "reversible_effect" | "external_effect" | "high_impact_effect"`.
+Risk, read-only, approval, allow-list, and learning-disabled checks are separate eligibility
+gates. Each coverage row exposes a bounded `candidate_ranking` with the best eligible choice and
+the highest-priority rejected alternative, plus `selection_rationale` and
+`selection_constraints`. Candidate rows retain only reviewed tool identity, posture, deterministic
+relevance/utility metadata, value-only pull/failure counters, and typed rejection reasons such as
+`risk_budget_exceeded` or `approval_required`; task text, prompts, arguments, outputs, credentials,
+and evaluator prose remain absent. The two-candidate stage window preserves the existing 128 KiB
+all-domain plan bound while making risk-budget decisions auditable. `run()`, automatic workflows,
+and cross-domain child/synthesis blueprints propagate the same ceiling without turning selection
+into authorization.
+
 `AutonomousAgent.execute_capability(...)` is the deterministic application seam for a capability
 already selected by a plan, workflow, queue, or operator. It rechecks the exact registered tool
 schema, domain/stage contract, approval posture, and caller-owned executor, then returns the raw

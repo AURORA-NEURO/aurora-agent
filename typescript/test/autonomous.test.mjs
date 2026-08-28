@@ -980,6 +980,10 @@ test("adaptive tool-arm selection is deterministic, value-only, and bounded acro
   assert.equal(plan.selected_tool_order.length, plan.selected_tool_names.length);
   assert.equal(new Set(plan.coverage.map((row) => row.domain)).size, 12);
   assert.ok(plan.coverage.some((row) => row.selected_arm_id === state.arms[0].arm_id));
+  assert.equal(plan.selection_constraints.max_risk_class, "high_impact_effect");
+  assert.ok(plan.coverage.every((row) => Array.isArray(row.candidate_ranking)));
+  assert.ok(plan.coverage.some((row) => row.candidate_ranking.some((candidate) => candidate.eligible && candidate.rank === 1)));
+  assert.ok(plan.coverage.every((row) => typeof row.selection_rationale === "string"));
   assert.deepEqual(settleAutonomousToolSelectionOutcome(repeatedState, {
     domain: "coding",
     capability: "repository_inspection",
@@ -1019,6 +1023,16 @@ test("adaptive tool-arm selection is deterministic, value-only, and bounded acro
   assert.equal(disabledPlan.selected_tool_names.includes("repository_catalog"), false);
   assert.ok(disabledPlan.coverage.some((row) => row.status === "learning_disabled"));
   assert.ok(disabledPlan.omissions.some((row) => row.reason === "learning_disabled"));
+  const readOnlyPlan = await registry.planForTask("inspect the repository", {
+    domains: ["coding"],
+    maxTools: 128,
+    maxRiskClass: "read_only",
+  });
+  assert.equal(readOnlyPlan.selection_constraints.max_risk_class, "read_only");
+  assert.ok(readOnlyPlan.selected_bindings.every((binding) => binding.risk_class === "read_only"));
+  assert.ok(readOnlyPlan.coverage.some((row) => row.candidate_ranking.some((candidate) => candidate.reason === "risk_budget_exceeded")));
+  assert.doesNotMatch(JSON.stringify(readOnlyPlan), /inspect the repository/);
+  await assert.rejects(() => registry.planForTask("inspect the repository", { domains: ["coding"], maxRiskClass: "unsafe" }), /maxRiskClass is unsupported/);
   assert.throws(() => settleAutonomousToolSelectionOutcome(undefined, {
     domain: "coding",
     capability: "repository_inspection",

@@ -2091,4 +2091,9 @@ tool-selection state. Evaluator-approved domain/capability/tool rewards can be r
 through canonical digest-chained JSON with optional CAS fencing, and the lifecycle includes this
 component when configured. The projection is deliberately metadata-only; raw tool arguments,
 outputs, prompts, tasks, credentials, and evaluator prose remain caller-owned. Future deployment
-work is to bind this adapter to encrypted tenant-scoped storage and operational retention policies.
+Portfolio planning now adds a caller-provided risk ceiling and a bounded, deterministic decision
+audit: each stage retains its best eligible tool plus a prioritized rejected alternative with typed
+reasons for risk, approval, allow-list, read-only, or learning gates. The ceiling propagates through
+direct, automatic, and cross-domain plans in both SDKs without becoming authorization. Remaining
+deployment work is to bind this adapter to encrypted tenant-scoped storage and operational
+retention policies.

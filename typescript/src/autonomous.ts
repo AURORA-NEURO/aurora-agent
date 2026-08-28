@@ -541,6 +541,15 @@ export interface AutonomousDomainToolBinding extends JsonObject {
   secret_material: "never_returned";
 }
 
+/** Ordered risk ceiling used by provider-free tool portfolio selection. */
+export type AutonomousToolRiskClass = AutonomousDomainToolBinding["risk_class"];
+export const AUTONOMOUS_TOOL_RISK_ORDER: readonly AutonomousToolRiskClass[] = [
+  "read_only",
+  "reversible_effect",
+  "external_effect",
+  "high_impact_effect",
+];
+
 /** Metadata-only evidence emitted by the domain adapter boundary; raw arguments/results never enter it. */
 export interface AutonomousDomainToolExecutionReceipt extends JsonObject {
   schema: typeof AUTONOMOUS_DOMAIN_TOOL_REGISTRY_SCHEMA;
@@ -987,13 +996,14 @@ export interface AutonomousDomainToolPlan extends JsonObject {
   secret_material: "never_returned";
 }
 
-export type AutonomousCapabilitySelectionStatus = "selected" | "activation_required" | "catalogue_missing" | "provider_only" | "capacity_limited" | "learning_disabled";
+export type AutonomousCapabilitySelectionStatus = "selected" | "activation_required" | "catalogue_missing" | "provider_only" | "capacity_limited" | "learning_disabled" | "risk_budget_blocked";
 
 /** Shared value-only state for adaptive reviewed-tool selection. */
 export const AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA = "bioprism-autonomous-tool-selection-state/0.1" as const;
 export const AUTONOMOUS_TOOL_SELECTION_POLICY = "stage_coverage_then_capability_then_ucb_value_then_task_relevance_then_read_only_then_name" as const;
 export const MAX_AUTONOMOUS_TOOL_SELECTION_ARMS = 512;
 export const MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS = 4096;
+export const MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE = 2;
 
 export interface AutonomousToolSelectionArm extends JsonObject {
   arm_id: string;
@@ -1053,6 +1063,8 @@ export interface AutonomousCapabilityPlanCoverage extends JsonObject {
   approval_required: boolean;
   selected_arm_id: string | null;
   selection_utility: number | null;
+  candidate_ranking: AutonomousCapabilityCandidateRanking[];
+  selection_rationale: "highest_ranked_eligible_candidate" | "portfolio_reuse_lower_rank_candidate" | "no_reviewed_binding_for_stage" | "no_live_catalogue_binding" | "activation_or_allowlist_required" | "all_candidates_learning_disabled" | "risk_budget_excluded_all_candidates" | "portfolio_capacity_limit";
   status: AutonomousCapabilitySelectionStatus;
 }
 
@@ -1060,7 +1072,27 @@ export interface AutonomousCapabilityPlanOmission extends JsonObject {
   name: string;
   domains: AutonomousDomainName[];
   capability: string;
-  reason: "not_required_for_reviewed_workflow" | "activation_required" | "capacity_limited" | "duplicate_binding" | "learning_disabled";
+  reason: "not_required_for_reviewed_workflow" | "activation_required" | "capacity_limited" | "duplicate_binding" | "learning_disabled" | "risk_budget_limited";
+}
+
+export type AutonomousCapabilityCandidateReason = "eligible" | "not_allowed" | "risk_budget_exceeded" | "read_only_required" | "approval_required" | "learning_disabled";
+
+/** Candidate-level, value-only explanation for one reviewed workflow stage. */
+export interface AutonomousCapabilityCandidateRanking extends JsonObject {
+  tool: string;
+  capability: string;
+  risk_class: AutonomousToolRiskClass;
+  read_only: boolean;
+  approval_required: boolean;
+  eligible: boolean;
+  rank: number | null;
+  requested_capability_match: boolean;
+  stage_capability_match: boolean;
+  selection_utility: number;
+  task_relevance: number;
+  observed_pulls: number;
+  observed_failure_rate: number;
+  reason: AutonomousCapabilityCandidateReason;
 }
 
 /** Deterministic task-to-capability selection; this is a tool portfolio, never authorization. */
@@ -1081,6 +1113,7 @@ export interface AutonomousCapabilityPlan extends JsonObject {
   omissions: AutonomousCapabilityPlanOmission[];
   coverage: AutonomousCapabilityPlanCoverage[];
   selection_learning: JsonObject;
+  selection_constraints: JsonObject;
   selection_policy: typeof AUTONOMOUS_TOOL_SELECTION_POLICY;
   execution: "metadata_only; no_provider_or_tool_calls";
   authorization: "selection_does_not_authorize_tools_or_effects";
@@ -1771,6 +1804,8 @@ export interface AutonomousRunOptions {
   toolSelectionState?: AutonomousToolSelectionState | null;
   /** Deterministic UCB exploration weight for tool-arm ranking. */
   toolSelectionExploration?: number;
+  /** Maximum reviewed tool risk admitted to the provider-visible portfolio. */
+  maxToolRiskClass?: AutonomousToolRiskClass;
   /** Audit records policy posture; strict blocks before provider/tool dispatch until every gate passes. */
   domainPolicyMode?: AutonomousDomainPolicyExecutionMode;
   /** Explicit evidence acceptance required by strict policies before provider invocation. */
@@ -4067,6 +4102,93 @@ function toolSelectionUtility(arm: AutonomousToolSelectionArm | null, totalPulls
   return Number((meanReward - (failureRate * 0.5) - latencyPenalty + explorationBonus).toFixed(12));
 }
 
+function autonomousToolRiskAllowed(riskClass: AutonomousToolRiskClass, maximum: AutonomousToolRiskClass): boolean {
+  return AUTONOMOUS_TOOL_RISK_ORDER.indexOf(riskClass) <= AUTONOMOUS_TOOL_RISK_ORDER.indexOf(maximum);
+}
+
+function capabilityCandidateReason(
+  binding: AutonomousDomainToolBinding,
+  stage: AutonomousWorkflowStage,
+  allowedTools: ReadonlySet<string> | null,
+  readOnlyOnly: boolean,
+  maximumRiskClass: AutonomousToolRiskClass,
+  arm: AutonomousToolSelectionArm | null,
+): AutonomousCapabilityCandidateReason {
+  if (allowedTools !== null && !allowedTools.has(binding.name)) return "not_allowed";
+  if (!autonomousToolRiskAllowed(binding.risk_class, maximumRiskClass)) return "risk_budget_exceeded";
+  if (readOnlyOnly && !binding.read_only || stage.read_only && !binding.read_only) return "read_only_required";
+  if (!stage.approval_required && binding.approval_required) return "approval_required";
+  if (arm?.disabled === true) return "learning_disabled";
+  return "eligible";
+}
+
+function capabilityCandidateRanking(
+  tokens: readonly string[],
+  requestedCapabilities: readonly string[],
+  stage: AutonomousWorkflowStage,
+  bindings: readonly AutonomousDomainToolBinding[],
+  domain: AutonomousDomainName,
+  toolSelectionState: AutonomousToolSelectionState,
+  totalPulls: number,
+  exploration: number,
+  allowedTools: ReadonlySet<string> | null,
+  readOnlyOnly: boolean,
+  maximumRiskClass: AutonomousToolRiskClass,
+): AutonomousCapabilityCandidateRanking[] {
+  const eligible = bindings.filter((binding) => capabilityCandidateReason(
+    binding,
+    stage,
+    allowedTools,
+    readOnlyOnly,
+    maximumRiskClass,
+    toolSelectionArmFor(toolSelectionState, domain, stage, binding),
+  ) === "eligible");
+  const rankByName = new Map(
+    [...eligible].sort((left, right) => compareCapabilityScores(
+      capabilityCandidateScore(tokens, requestedCapabilities, stage, left, domain, toolSelectionState, totalPulls, exploration),
+      capabilityCandidateScore(tokens, requestedCapabilities, stage, right, domain, toolSelectionState, totalPulls, exploration),
+    ) || left.name.localeCompare(right.name)).map((binding, index) => [binding.name, index + 1]),
+  );
+  const rows = [...bindings].map((binding) => {
+    const arm = toolSelectionArmFor(toolSelectionState, domain, stage, binding);
+    const score = capabilityCandidateScore(tokens, requestedCapabilities, stage, binding, domain, toolSelectionState, totalPulls, exploration);
+    const pulls = arm?.pulls ?? 0;
+    return {
+      tool: binding.name,
+      capability: binding.capability,
+      risk_class: binding.risk_class,
+      read_only: binding.read_only,
+      approval_required: binding.approval_required,
+      eligible: rankByName.has(binding.name),
+      rank: rankByName.get(binding.name) ?? null,
+      requested_capability_match: score[0] === 1,
+      stage_capability_match: score[1] === 1,
+      selection_utility: score[2],
+      task_relevance: score[3],
+      observed_pulls: pulls,
+      observed_failure_rate: pulls === 0 ? 0 : Number(((arm?.failures ?? 0) / pulls).toFixed(12)),
+      reason: capabilityCandidateReason(binding, stage, allowedTools, readOnlyOnly, maximumRiskClass, arm),
+    };
+  });
+  const rankedEligible = rows.filter((row) => row.eligible).sort((left, right) => (left.rank! - right.rank!) || left.tool.localeCompare(right.tool));
+  const rejectionPriority: Record<AutonomousCapabilityCandidateReason, number> = {
+    eligible: 99,
+    risk_budget_exceeded: 0,
+    read_only_required: 1,
+    approval_required: 2,
+    not_allowed: 3,
+    learning_disabled: 4,
+  };
+  const rankedRejected = rows.filter((row) => !row.eligible).sort((left, right) => (
+    rejectionPriority[left.reason] - rejectionPriority[right.reason] || left.tool.localeCompare(right.tool)
+  ));
+  if (rankedRejected.length === 0) return rankedEligible.slice(0, MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE);
+  return [
+    ...rankedEligible.slice(0, 1),
+    ...rankedRejected.slice(0, MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE - 1),
+  ].slice(0, MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE);
+}
+
 /** Pure, caller-owned online update for one value-only tool outcome. */
 export function settleAutonomousToolSelectionOutcome(
   state: AutonomousToolSelectionState | null | undefined,
@@ -4413,7 +4535,7 @@ export class AutonomousDomainToolRegistry {
    */
   async planForTask(
     task: string,
-    options: { domains?: readonly string[]; capability?: string; allowedTools?: readonly string[]; maxTools?: number; readOnlyOnly?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; exploration?: number } = {},
+    options: { domains?: readonly string[]; capability?: string; allowedTools?: readonly string[]; maxTools?: number; readOnlyOnly?: boolean; maxRiskClass?: AutonomousToolRiskClass; toolSelectionState?: AutonomousToolSelectionState | null; exploration?: number } = {},
   ): Promise<AutonomousCapabilityPlan> {
     const taskText = boundedText("capability plan task", task, 32_000);
     const domains = options.domains === undefined ? this.profiles.map((profile) => profile.domain) : [...options.domains].map((domain) => boundedIdentifier("capability plan domain", domain) as AutonomousDomainName);
@@ -4424,6 +4546,8 @@ export class AutonomousDomainToolRegistry {
     const requestedCapabilities = options.capability === undefined ? [] : [boundedText("capability plan capability", options.capability, 128)];
     const allowedTools = options.allowedTools === undefined ? null : new Set([...options.allowedTools].map((name) => boundedIdentifier("capability plan allowed tool", name)));
     if (allowedTools && allowedTools.size > 512) throw new ArgumentError("capability plan allowed tools exceed their bound");
+    const maxRiskClass = options.maxRiskClass ?? "high_impact_effect";
+    if (!AUTONOMOUS_TOOL_RISK_ORDER.includes(maxRiskClass)) throw new ArgumentError("capability plan maxRiskClass is unsupported");
     const toolSelectionState = normalizeAutonomousToolSelectionState(options.toolSelectionState);
     const exploration = options.exploration ?? 0.15;
     boundedToolSelectionNumber("capability plan exploration", exploration, 0, 1);
@@ -4451,6 +4575,7 @@ export class AutonomousDomainToolRegistry {
            (options.readOnlyOnly !== true || binding.read_only)
            && (!stage.read_only || binding.read_only)
            && (stage.approval_required || !binding.approval_required)
+           && autonomousToolRiskAllowed(binding.risk_class, maxRiskClass)
            && (allowedTools === null || allowedTools.has(binding.name))
            && !toolSelectionArmFor(toolSelectionState, profile.domain, stage, binding)?.disabled
          ));
@@ -4497,13 +4622,25 @@ export class AutonomousDomainToolRegistry {
           ? "provider_only"
             : row.liveBindings.length === 0
               ? "catalogue_missing"
-              : allowedTools !== null && row.eligible.length === 0
+              : allowedTools !== null && row.eligible.length === 0 && row.liveBindings.every((binding) => !allowedTools.has(binding.name))
                 ? "activation_required"
+                : row.liveBindings.every((binding) => !autonomousToolRiskAllowed(binding.risk_class, maxRiskClass))
+                  ? "risk_budget_blocked"
                 : row.liveBindings.some((binding) => toolSelectionArmFor(toolSelectionState, row.domain, row.stage, binding)?.disabled)
                   ? "learning_disabled"
                 : "capacity_limited";
       const selectedArm = selected ? toolSelectionArmFor(toolSelectionState, row.domain, row.stage, selected) : null;
-      return { domain: row.domain, stage_id: row.stage.id, required_capabilities: [...row.stage.required_capabilities], candidate_tool_names: row.liveBindings.map((binding) => binding.name).sort(), selected_tool: selected?.name ?? null, selected_capability: selected?.capability ?? null, approval_required: selected?.approval_required ?? false, selected_arm_id: selectedArm?.arm_id ?? null, selection_utility: selected ? toolSelectionUtility(selectedArm, totalPulls, exploration) : null, status };
+      const candidateRanking = capabilityCandidateRanking(tokens, requestedCapabilities, row.stage, row.liveBindings, row.domain, toolSelectionState, totalPulls, exploration, allowedTools, options.readOnlyOnly === true, maxRiskClass);
+      const selectedRank = selected === undefined ? null : candidateRanking.find((candidate) => candidate.tool === selected.name)?.rank ?? null;
+      const selectionRationale = selected
+        ? selectedRank === 1 ? "highest_ranked_eligible_candidate" as const : "portfolio_reuse_lower_rank_candidate" as const
+        : status === "provider_only" ? "no_reviewed_binding_for_stage" as const
+          : status === "catalogue_missing" ? "no_live_catalogue_binding" as const
+            : status === "activation_required" ? "activation_or_allowlist_required" as const
+              : status === "learning_disabled" ? "all_candidates_learning_disabled" as const
+                : status === "risk_budget_blocked" ? "risk_budget_excluded_all_candidates" as const
+                  : "portfolio_capacity_limit" as const;
+      return { domain: row.domain, stage_id: row.stage.id, required_capabilities: [...row.stage.required_capabilities], candidate_tool_names: row.liveBindings.map((binding) => binding.name).sort(), selected_tool: selected?.name ?? null, selected_capability: selected?.capability ?? null, approval_required: selected?.approval_required ?? false, selected_arm_id: selectedArm?.arm_id ?? null, selection_utility: selected ? toolSelectionUtility(selectedArm, totalPulls, exploration) : null, candidate_ranking: candidateRanking, selection_rationale: selectionRationale, status };
     });
     const allLiveBindings = selectedProfiles.flatMap((profile) => this.profile(profile.domain).bindings.filter((binding) => this.has(binding.name)));
     const bindingDomains = new Map<string, Set<AutonomousDomainName>>();
@@ -4515,11 +4652,12 @@ export class AutonomousDomainToolRegistry {
     const omissions: AutonomousCapabilityPlanOmission[] = [...bindingByName.keys()].filter((name) => !selectedNames.has(name)).sort().slice(0, 512).map((name) => {
       const binding = bindingByName.get(name)!;
       const disabled = selectedProfiles.some((profile) => profile.workflow.stages.some((stage) => bindingSupportsStage(profile, stage, binding) && toolSelectionArmFor(toolSelectionState, profile.domain, stage, binding)?.disabled));
-      return { name, domains: [...(bindingDomains.get(name) ?? new Set())].sort(), capability: binding.capability, reason: allowedTools !== null && !allowedTools.has(name) ? "activation_required" : disabled ? "learning_disabled" : preferred.has(name) ? "capacity_limited" : "not_required_for_reviewed_workflow" };
+      return { name, domains: [...(bindingDomains.get(name) ?? new Set())].sort(), capability: binding.capability, reason: allowedTools !== null && !allowedTools.has(name) ? "activation_required" : !autonomousToolRiskAllowed(binding.risk_class, maxRiskClass) ? "risk_budget_limited" : disabled ? "learning_disabled" : preferred.has(name) ? "capacity_limited" : "not_required_for_reviewed_workflow" };
     });
     const missingTools = [...new Set(selectedProfiles.flatMap((profile) => this.profile(profile.domain).bindings.filter((binding) => !this.has(binding.name)).map((binding) => binding.name)))].sort();
     const selectionLearning = { schema: AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA, generation: toolSelectionState.generation, state_digest: await digestJson(toolSelectionState), exploration, total_pulls: totalPulls, known_arm_count: toolSelectionState.arms.length, disabled_arm_count: toolSelectionState.arms.filter((arm) => arm.disabled).length, retention: "value_only;tool_arguments_outputs_prompts_and_credentials_never_returned" as const };
-    const descriptor = { schema: AUTONOMOUS_CAPABILITY_PLAN_SCHEMA, task_digest: await digestJson({ task: taskText }), catalogue_digest: this.catalogue.digest, profile_digest: this.digest, domains: [...domains], requested_capabilities: requestedCapabilities, max_tools: maxTools, selected_tool_names: selectedToolNames, selected_tool_order: selectedToolOrder, selected_bindings: selectedBindings, approval_required_tools: selectedBindings.filter((binding) => binding.approval_required).map((binding) => binding.name).sort(), missing_tools: missingTools, omissions, coverage, selection_learning: selectionLearning, selection_policy: AUTONOMOUS_TOOL_SELECTION_POLICY, execution: "metadata_only; no_provider_or_tool_calls" as const, authorization: "selection_does_not_authorize_tools_or_effects" as const, secret_material: "never_returned" as const };
+    const selectionConstraints = { max_risk_class: maxRiskClass, read_only_only: options.readOnlyOnly === true, allowed_tools_digest: allowedTools === null ? null : await digestJson([...allowedTools].sort()), policy: AUTONOMOUS_TOOL_SELECTION_POLICY };
+    const descriptor = { schema: AUTONOMOUS_CAPABILITY_PLAN_SCHEMA, task_digest: await digestJson({ task: taskText }), catalogue_digest: this.catalogue.digest, profile_digest: this.digest, domains: [...domains], requested_capabilities: requestedCapabilities, max_tools: maxTools, selected_tool_names: selectedToolNames, selected_tool_order: selectedToolOrder, selected_bindings: selectedBindings, approval_required_tools: selectedBindings.filter((binding) => binding.approval_required).map((binding) => binding.name).sort(), missing_tools: missingTools, omissions, coverage, selection_learning: selectionLearning, selection_constraints: selectionConstraints, selection_policy: AUTONOMOUS_TOOL_SELECTION_POLICY, execution: "metadata_only; no_provider_or_tool_calls" as const, authorization: "selection_does_not_authorize_tools_or_effects" as const, secret_material: "never_returned" as const };
     return { ...descriptor, plan_digest: await digestJson(descriptor) };
   }
 
@@ -7351,7 +7489,7 @@ export class AutonomousAgent {
     return this.runWithDomainEvidenceCatalogue(task, options);
   }
 
-  async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; minConfidence?: number; minMargin?: number; maxDomains?: number; allowCrossDomain?: boolean; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number } = {}): Promise<AutonomousAutoBlueprint> {
+  async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; minConfidence?: number; minMargin?: number; maxDomains?: number; allowCrossDomain?: boolean; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number; maxToolRiskClass?: AutonomousToolRiskClass } = {}): Promise<AutonomousAutoBlueprint> {
     const taskText = boundedText("autonomous task", task, 32_000);
     const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, minConfidence: options.minConfidence, minMargin: options.minMargin, maxDomains: options.maxDomains, allowCrossDomain: options.allowCrossDomain });
     if (route.abstained || !route.primary_domain) return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: null, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
@@ -7362,7 +7500,7 @@ export class AutonomousAgent {
     const profile = await profileFor(route.primary_domain);
     const capabilityRoute = routeAutonomousCapability(taskText, profile.domain, options.capability === undefined ? {} : { explicitCapability: options.capability });
     const effectiveCapability = options.capability ?? capabilityRoute.selected_capability ?? undefined;
-    const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], effectiveCapability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration);
+    const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], effectiveCapability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration, options.maxToolRiskClass);
     const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: effectiveCapability, capabilityRoute, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames, structuredDomainResponse: options.structuredDomainResponse });
     return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, capability_route: capabilityRoute, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
   }
@@ -7454,6 +7592,7 @@ export class AutonomousAgent {
       structuredDomainResponse: runOptions.structuredDomainResponse,
       toolSelectionState: runOptions.toolSelectionState,
       toolSelectionExploration: runOptions.toolSelectionExploration,
+      maxToolRiskClass: runOptions.maxToolRiskClass,
     });
     if (route.abstained || !route.primary_domain || (!envelope.blueprint && !envelope.cross_domain_blueprint)) {
       return {
@@ -8078,6 +8217,7 @@ export class AutonomousAgent {
       hints: options.hints,
       subtasks: options.subtasks,
       structuredDomainResponse: options.structuredDomainResponse,
+      maxToolRiskClass: options.maxToolRiskClass,
     });
     if (route.abstained || !route.primary_domain || (!envelope.blueprint && !envelope.cross_domain_blueprint)) {
       return { schema: AUTONOMOUS_PLAN_AND_RUN_SCHEMA, status: "route_review_required", route, semantic_route: semanticRoute, blueprint: envelope, plan_refinement: null, result: null, retention: "provider_response_local;plan_proposal_value_only;execution_result_caller_owned", authorization: "planning_acceptance_and_provider_invocation_require_separate_explicit_approval" };
@@ -8140,7 +8280,7 @@ export class AutonomousAgent {
   private async buildCrossDomainBlueprint(
     taskText: string,
     route: AutonomousRouteProposal,
-    options: { capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number } = {},
+    options: { capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number; maxToolRiskClass?: AutonomousToolRiskClass } = {},
   ): Promise<AutonomousCrossDomainBlueprint> {
     const selectedDomains = route.selected_domains.slice(0, AUTONOMOUS_CROSS_DOMAIN_MAX_CHILDREN);
     if (selectedDomains.length < 2) throw new ProviderRuntimeError("cross-domain blueprint requires at least two routed domains");
@@ -8175,7 +8315,7 @@ export class AutonomousAgent {
         { id: "cross-domain-parent", content: `Parent route digest: ${parentDigest}; child id: ${id}`, required: true, priority: 100 },
         ...(subtask.context ?? []),
       ];
-      const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(childTask, [subtask.domain], effectiveCapability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration);
+      const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(childTask, [subtask.domain], effectiveCapability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration, options.maxToolRiskClass);
       const child = await buildTaskBlueprint(profile, childTask, {
         capability: effectiveCapability,
         capabilityRoute,
@@ -8200,7 +8340,7 @@ export class AutonomousAgent {
       },
     ];
     const synthesisTask = `Synthesize the domain analyses for: ${taskText}`;
-    const synthesisTools = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(synthesisTask, [...selectedDomains, "cross_domain"], options.capability ?? synthesisProfile.default_capability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration);
+    const synthesisTools = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(synthesisTask, [...selectedDomains, "cross_domain"], options.capability ?? synthesisProfile.default_capability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration, options.maxToolRiskClass);
     const synthesis = await buildTaskBlueprint(synthesisProfile, synthesisTask, {
       capability: options.capability ?? synthesisProfile.default_capability,
       routeDigest: route.route_digest,
@@ -8766,7 +8906,7 @@ export class AutonomousAgent {
       if (!options.learning) return withSemanticRoute;
       return { ...withSemanticRoute, ...(await this.prepareDirectLearning(withSemanticRoute, route, { ...options, memoryEpisodeId: memoryProjection?.recorded_episode_id ?? null })) };
     };
-    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: route, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints, minConfidence: options.minConfidence, minMargin: options.minMargin, maxDomains: options.maxDomains, allowCrossDomain: options.allowCrossDomain, structuredDomainResponse: options.structuredDomainResponse, toolSelectionState: options.toolSelectionState, toolSelectionExploration: options.toolSelectionExploration });
+    const blueprintEnvelope = await this.blueprint(taskText, { domain: route.primary_domain, routeOverride: route, capability: options.capability, context: [...(options.context ?? []), ...memory.context], maxInputTokens: options.maxInputTokens, tools: options.tools?.map((tool) => tool.name), hints: options.hints, minConfidence: options.minConfidence, minMargin: options.minMargin, maxDomains: options.maxDomains, allowCrossDomain: options.allowCrossDomain, structuredDomainResponse: options.structuredDomainResponse, toolSelectionState: options.toolSelectionState, toolSelectionExploration: options.toolSelectionExploration, maxToolRiskClass: options.maxToolRiskClass });
     let blueprint = blueprintEnvelope.blueprint;
     if (!blueprint) return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status: "route_review_required", route, blueprint: null, plan_refinement_digest: null, selection: null, response: null, tool_loop: null, cross_domain: null, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     if (memory.projection?.consolidated_retrieval_digest !== null && memory.projection?.consolidated_retrieval_digest !== undefined) {
@@ -8987,6 +9127,7 @@ export class AutonomousAgent {
       structuredDomainResponse: options.structuredDomainResponse,
       toolSelectionState: options.toolSelectionState,
       toolSelectionExploration: options.toolSelectionExploration,
+      maxToolRiskClass: options.maxToolRiskClass,
     });
     for (const [index, child] of blueprint.child_blueprints.entries()) {
       assertAutonomousTaskDecisionAllowsProvider(child.task_decision, `cross-domain child ${index + 1}`);
@@ -9089,6 +9230,7 @@ export class AutonomousAgent {
         selectionEventCallback: options.selectionEventCallback,
         toolSelectionState: options.toolSelectionState,
         toolSelectionExploration: options.toolSelectionExploration,
+        maxToolRiskClass: options.maxToolRiskClass,
       });
       const rawOutput = childResult.response?.text ?? (childResult.response?.structured === null || childResult.response?.structured === undefined ? "" : JSON.stringify(childResult.response.structured));
       const boundedOutput = rawOutput.length > 48_000 ? `${rawOutput.slice(0, 48_000)}\n[child output bounded locally]` : rawOutput;
@@ -9232,6 +9374,7 @@ export class AutonomousAgent {
       selectionEventCallback: options.selectionEventCallback,
       toolSelectionState: options.toolSelectionState,
       toolSelectionExploration: options.toolSelectionExploration,
+      maxToolRiskClass: options.maxToolRiskClass,
     });
     if (options.learning && synthesis.status === "completed") {
       const episodeId = `cross:${route.task_digest}:synthesis`;
@@ -9560,11 +9703,11 @@ export class AutonomousAgent {
     return this.toolSelectionConfigured ? this.toolSelectionStateValue : undefined;
   }
 
-  private async liveToolNamesForTask(task: string, domains: readonly AutonomousDomainName[], capability?: string, toolSelectionState?: AutonomousToolSelectionState | null, exploration?: number): Promise<string[]> {
+  private async liveToolNamesForTask(task: string, domains: readonly AutonomousDomainName[], capability?: string, toolSelectionState?: AutonomousToolSelectionState | null, exploration?: number, maxRiskClass?: AutonomousToolRiskClass): Promise<string[]> {
     const registry = await this.ensureToolRegistry();
     if (!registry) return [];
     const gate = this.activationToolGate();
-    const plan = await registry.planForTask(task, { domains, capability, allowedTools: gate === null ? undefined : [...gate], toolSelectionState, exploration });
+    const plan = await registry.planForTask(task, { domains, capability, allowedTools: gate === null ? undefined : [...gate], toolSelectionState, exploration, maxRiskClass });
     return this.filterActivatedToolNames(plan.selected_tool_order);
   }
 

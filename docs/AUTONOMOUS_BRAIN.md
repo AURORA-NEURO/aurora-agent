@@ -12479,3 +12479,16 @@ paths, so coding, browser, data, science, biomedical, neuroscience, operations, 
 multi-agent, multimodal, cross-domain, and evaluation workflows share one governed adaptation
 contract without sharing task payloads. A stale writer or tampered snapshot fails closed before
 the restored state can influence planning.
+
+Tool portfolio planning now emits a bounded decision audit and accepts a caller-owned maximum risk
+class. `maxRiskClass` / `max_risk_class` is an eligibility ceiling ordered from `read_only` through
+`high_impact_effect`; it is evaluated independently from read-only mode, activation allow-lists,
+stage approval requirements, and learned-arm disablement. Each workflow-stage coverage row retains
+the best eligible candidate plus the highest-priority rejected alternative, with stable rank,
+relevance/utility, value-only pull/failure counters, reviewed posture, and a typed rejection reason.
+The row also records whether the winner was the highest-ranked eligible candidate, reused for
+portfolio capacity, or excluded by a specific gate. This makes an autonomous choice inspectable
+without exposing task text, prompts, arguments, outputs, credentials, evaluator prose, or granting
+execution authority. The two-candidate per-stage bound keeps all-domain plans under the existing
+128 KiB contract, and the ceiling propagates through single-domain, automatic, and cross-domain
+child/synthesis blueprints in both SDKs.

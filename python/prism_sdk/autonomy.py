@@ -437,8 +437,10 @@ AUTONOMOUS_CAPABILITY_PLAN_SCHEMA = "bioprism-python-autonomous-capability-plan/
 AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA = "bioprism-python-autonomous-capability-portfolio/0.1"
 AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA = "bioprism-autonomous-tool-selection-state/0.1"
 AUTONOMOUS_TOOL_SELECTION_POLICY = "stage_coverage_then_capability_then_ucb_value_then_task_relevance_then_read_only_then_name"
+AUTONOMOUS_TOOL_RISK_ORDER = ("read_only", "reversible_effect", "external_effect", "high_impact_effect")
 MAX_AUTONOMOUS_TOOL_SELECTION_ARMS = 512
 MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS = 4096
+MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE = 2
 AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA = "bioprism-python-autonomous-workflow-stage-plan/0.1"
 AUTONOMOUS_CAPABILITY_PLAN_STATUSES = (
     "ready",
@@ -746,6 +748,107 @@ def _tool_selection_utility(arm: Mapping[str, Any] | None, total_pulls: int, exp
     latency_penalty = 0.0 if latency is None else min(float(latency) / 10_000, 1.0) * 0.1
     exploration_bonus = exploration * math.sqrt(math.log(total_pulls + 2) / (pulls + 1))
     return round(mean_reward - (failure_rate * 0.5) - latency_penalty + exploration_bonus, 12)
+
+
+def _tool_risk_allowed(risk_class: str, maximum: str) -> bool:
+    return risk_class in AUTONOMOUS_TOOL_RISK_ORDER and maximum in AUTONOMOUS_TOOL_RISK_ORDER and AUTONOMOUS_TOOL_RISK_ORDER.index(risk_class) <= AUTONOMOUS_TOOL_RISK_ORDER.index(maximum)
+
+
+def _portfolio_candidate_reason(
+    binding: AutonomousDomainToolBinding,
+    stage: "AutonomousWorkflowStage",
+    caller_allowed: set[str] | None,
+    read_only_only: bool,
+    maximum_risk_class: str,
+    arm: Mapping[str, Any] | None,
+) -> str:
+    if caller_allowed is not None and binding.name not in caller_allowed:
+        return "not_allowed"
+    if not _tool_risk_allowed(binding.risk_class, maximum_risk_class):
+        return "risk_budget_exceeded"
+    if (read_only_only and not binding.read_only) or (stage.read_only and not binding.read_only):
+        return "read_only_required"
+    if not stage.approval_required and binding.approval_required:
+        return "approval_required"
+    if arm is not None and bool(arm.get("disabled", False)):
+        return "learning_disabled"
+    return "eligible"
+
+
+def _portfolio_candidate_ranking(
+    tokens: Sequence[str],
+    requested_capabilities: Sequence[str],
+    stage: "AutonomousWorkflowStage",
+    bindings: Sequence[AutonomousDomainToolBinding],
+    domain: str,
+    tool_selection_state: Mapping[str, Any],
+    total_pulls: int,
+    exploration: float,
+    caller_allowed: set[str] | None,
+    read_only_only: bool,
+    maximum_risk_class: str,
+) -> list[dict[str, Any]]:
+    def reason_for(binding: AutonomousDomainToolBinding) -> str:
+        return _portfolio_candidate_reason(
+            binding,
+            stage,
+            caller_allowed,
+            read_only_only,
+            maximum_risk_class,
+            _tool_selection_arm_for(tool_selection_state, domain, stage, binding),
+        )
+
+    eligible = [binding for binding in bindings if reason_for(binding) == "eligible"]
+    ranked = sorted(
+        eligible,
+        key=lambda binding: _portfolio_score_key(
+            _portfolio_score(tokens, requested_capabilities, stage, binding, domain, tool_selection_state, total_pulls, exploration),
+            binding.name,
+        ),
+    )
+    rank_by_name = {binding.name: index + 1 for index, binding in enumerate(ranked)}
+    rows: list[dict[str, Any]] = []
+    for binding in bindings:
+        arm = _tool_selection_arm_for(tool_selection_state, domain, stage, binding)
+        score = _portfolio_score(tokens, requested_capabilities, stage, binding, domain, tool_selection_state, total_pulls, exploration)
+        pulls = int(arm["pulls"]) if arm is not None else 0
+        rows.append({
+            "tool": binding.name,
+            "capability": binding.capability,
+            "risk_class": binding.risk_class,
+            "read_only": binding.read_only,
+            "approval_required": binding.approval_required,
+            "eligible": binding.name in rank_by_name,
+            "rank": rank_by_name.get(binding.name),
+            "requested_capability_match": score[0] == 1,
+            "stage_capability_match": score[1] == 1,
+            "selection_utility": score[2],
+            "task_relevance": score[3],
+            "observed_pulls": pulls,
+            "observed_failure_rate": 0 if pulls == 0 else round(int(arm["failures"]) / pulls, 12),
+            "reason": reason_for(binding),
+        })
+    ranked_eligible = sorted(
+        (row for row in rows if row["eligible"]),
+        key=lambda row: (row["rank"], row["tool"]),
+    )
+    rejection_priority = {
+        "risk_budget_exceeded": 0,
+        "read_only_required": 1,
+        "approval_required": 2,
+        "not_allowed": 3,
+        "learning_disabled": 4,
+    }
+    ranked_rejected = sorted(
+        (row for row in rows if not row["eligible"]),
+        key=lambda row: (rejection_priority[row["reason"]], row["tool"]),
+    )
+    if not ranked_rejected:
+        return ranked_eligible[:MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE]
+    return (
+        ranked_eligible[:1]
+        + ranked_rejected[:MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE - 1]
+    )[:MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE]
 
 
 def settle_autonomous_tool_selection_outcome(
@@ -18040,6 +18143,7 @@ class AutonomousAgent:
         allowed_tools: Sequence[str] | None = None,
         max_tools: int = 32,
         read_only_only: bool = False,
+        max_risk_class: str | None = None,
         tool_learning_state: Mapping[str, Any] | None = None,
         exploration: float = 0.15,
     ) -> dict[str, Any]:
@@ -18071,6 +18175,9 @@ class AutonomousAgent:
             raise BrainRunError(
                 f"capability portfolio max_tools must be between 1 and {MAX_AUTONOMOUS_CAPABILITY_PORTFOLIO_TOOLS}"
             )
+        maximum_risk_class = "high_impact_effect" if max_risk_class is None else max_risk_class
+        if maximum_risk_class not in AUTONOMOUS_TOOL_RISK_ORDER:
+            raise BrainRunError("capability portfolio max_risk_class is unsupported")
         tool_learning_state = normalize_autonomous_tool_selection_state(tool_learning_state)
         exploration = float(_tool_selection_number("capability portfolio exploration", exploration, 0, 1))
         total_pulls = sum(int(arm["pulls"]) for arm in tool_learning_state["arms"])
@@ -18128,6 +18235,9 @@ class AutonomousAgent:
                     binding
                     for binding in live_bindings
                     if (not read_only_only or binding.read_only)
+                    and (not stage.read_only or binding.read_only)
+                    and (stage.approval_required or not binding.approval_required)
+                    and _tool_risk_allowed(binding.risk_class, maximum_risk_class)
                     and (effective_allowed is None or binding.name in effective_allowed)
                     and not bool((_tool_selection_arm_for(tool_learning_state, domain, stage, binding) or {}).get("disabled", False))
                 ]
@@ -18215,13 +18325,46 @@ class AutonomousAgent:
                 status = "provider_only"
             elif not row["live_bindings"]:
                 status = "catalogue_missing"
-            elif effective_allowed is not None and not row["eligible"]:
+            elif effective_allowed is not None and not row["eligible"] and all(binding.name not in effective_allowed for binding in row["live_bindings"]):
                 status = "activation_required"
+            elif row["live_bindings"] and all(not _tool_risk_allowed(binding.risk_class, maximum_risk_class) for binding in row["live_bindings"]):
+                status = "risk_budget_blocked"
             elif any(bool((_tool_selection_arm_for(tool_learning_state, row["domain"], row["stage"], binding) or {}).get("disabled", False)) for binding in row["live_bindings"]):
                 status = "learning_disabled"
             else:
                 status = "capacity_limited"
             selected_arm = None if selected is None else _tool_selection_arm_for(tool_learning_state, row["domain"], row["stage"], selected)
+            candidate_ranking = _portfolio_candidate_ranking(
+                tokens,
+                requested_capabilities,
+                row["stage"],
+                row["live_bindings"],
+                row["domain"],
+                tool_learning_state,
+                total_pulls,
+                exploration,
+                effective_allowed,
+                read_only_only,
+                maximum_risk_class,
+            )
+            selected_rank = None if selected is None else next((candidate["rank"] for candidate in candidate_ranking if candidate["tool"] == selected.name), None)
+            rationale = (
+                "highest_ranked_eligible_candidate"
+                if selected is not None and selected_rank == 1
+                else "portfolio_reuse_lower_rank_candidate"
+                if selected is not None
+                else "no_reviewed_binding_for_stage"
+                if status == "provider_only"
+                else "no_live_catalogue_binding"
+                if status == "catalogue_missing"
+                else "activation_or_allowlist_required"
+                if status == "activation_required"
+                else "all_candidates_learning_disabled"
+                if status == "learning_disabled"
+                else "risk_budget_excluded_all_candidates"
+                if status == "risk_budget_blocked"
+                else "portfolio_capacity_limit"
+            )
             coverage.append(
                 {
                     "domain": row["domain"],
@@ -18233,6 +18376,8 @@ class AutonomousAgent:
                     "approval_required": False if selected is None else selected.approval_required,
                     "selected_arm_id": None if selected_arm is None else selected_arm["arm_id"],
                     "selection_utility": None if selected is None else _tool_selection_utility(selected_arm, total_pulls, exploration),
+                    "candidate_ranking": candidate_ranking,
+                    "selection_rationale": rationale,
                     "status": status,
                 }
             )
@@ -18263,11 +18408,15 @@ class AutonomousAgent:
                 "activation_required"
                 if effective_allowed is not None and name not in effective_allowed
                 else (
+                    "risk_budget_limited"
+                    if not _tool_risk_allowed(binding.risk_class, maximum_risk_class)
+                    else (
                     "learning_disabled"
                     if disabled
                     else "capacity_limited"
                     if name in preferred
                     else "not_required_for_reviewed_workflow"
+                    )
                 )
             )
             omissions.append(
@@ -18312,6 +18461,12 @@ class AutonomousAgent:
                 "known_arm_count": len(tool_learning_state["arms"]),
                 "disabled_arm_count": sum(int(arm["disabled"]) for arm in tool_learning_state["arms"]),
                 "retention": "value_only;tool_arguments_outputs_prompts_and_credentials_never_returned",
+            },
+            "selection_constraints": {
+                "max_risk_class": maximum_risk_class,
+                "read_only_only": read_only_only,
+                "allowed_tools_digest": None if caller_allowed is None else content_digest(sorted(caller_allowed)),
+                "policy": AUTONOMOUS_TOOL_SELECTION_POLICY,
             },
             "selection_policy": AUTONOMOUS_TOOL_SELECTION_POLICY,
             "execution": "metadata_only; no_provider_or_tool_calls",
@@ -21925,6 +22080,7 @@ class AutonomousAgent:
         if tool_learning_state is None and self._tool_selection_configured:
             tool_learning_state = self.tool_selection_state
         tool_selection_exploration = resolved_options.pop("tool_selection_exploration", resolved_options.pop("toolSelectionExploration", 0.15))
+        max_tool_risk_class = resolved_options.pop("max_tool_risk_class", resolved_options.pop("maxToolRiskClass", None))
         if capability_focus is not None:
             capability_focus = _identifier("capability focus", capability_focus)
             if not tool_domains:
@@ -21979,6 +22135,7 @@ class AutonomousAgent:
                     capability=capability_focus,
                     tool_learning_state=tool_learning_state,
                     exploration=tool_selection_exploration,
+                    max_risk_class=max_tool_risk_class,
                 )
                 selected_names = set(portfolio_packet["selected_tool_names"])
                 # A caller-owned binding may intentionally describe a capability that is not
@@ -26984,8 +27141,10 @@ __all__ = [
     "AUTONOMOUS_CAPABILITY_PORTFOLIO_SCHEMA",
     "AUTONOMOUS_TOOL_SELECTION_STATE_SCHEMA",
     "AUTONOMOUS_TOOL_SELECTION_POLICY",
+    "AUTONOMOUS_TOOL_RISK_ORDER",
     "MAX_AUTONOMOUS_TOOL_SELECTION_ARMS",
     "MAX_AUTONOMOUS_TOOL_SELECTION_CREDITS",
+    "MAX_AUTONOMOUS_TOOL_SELECTION_CANDIDATES_PER_STAGE",
     "AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA",
     "AUTONOMOUS_CAPABILITY_PLAN_STATUSES",
     "MAX_AUTONOMOUS_CAPABILITY_CONTRACTS",

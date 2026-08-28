@@ -333,6 +333,10 @@ def test_adaptive_tool_arm_selection_is_deterministic_value_only_and_all_domain_
     assert len(portfolio["selected_tool_order"]) == len(portfolio["selected_tool_names"])
     assert {row["domain"] for row in portfolio["coverage"]} == set(AUTONOMOUS_DOMAINS)
     assert any(row["selected_arm_id"] == state["arms"][0]["arm_id"] for row in portfolio["coverage"])
+    assert portfolio["selection_constraints"]["max_risk_class"] == "high_impact_effect"
+    assert all(isinstance(row["candidate_ranking"], list) for row in portfolio["coverage"])
+    assert any(any(candidate["eligible"] and candidate["rank"] == 1 for candidate in row["candidate_ranking"]) for row in portfolio["coverage"])
+    assert all(isinstance(row["selection_rationale"], str) for row in portfolio["coverage"])
     replayed = settle_autonomous_tool_selection_outcome(
         state,
         domain="coding",
@@ -390,6 +394,17 @@ def test_adaptive_tool_arm_selection_is_deterministic_value_only_and_all_domain_
     assert "repository_catalog" not in disabled_portfolio["selected_tool_names"]
     assert any(row["status"] == "learning_disabled" for row in disabled_portfolio["coverage"])
     assert any(row["reason"] == "learning_disabled" for row in disabled_portfolio["omissions"])
+    read_only_portfolio = agent.capability_portfolio(
+        "inspect the repository",
+        domains=("coding",),
+        max_tools=128,
+        max_risk_class="read_only",
+    )
+    assert read_only_portfolio["selection_constraints"]["max_risk_class"] == "read_only"
+    assert all(binding["risk_class"] == "read_only" for binding in read_only_portfolio["selected_bindings"])
+    assert any(any(candidate["reason"] == "risk_budget_exceeded" for candidate in row["candidate_ranking"]) for row in read_only_portfolio["coverage"])
+    with pytest.raises(BrainRunError, match="max_risk_class is unsupported"):
+        agent.capability_portfolio("inspect the repository", domains=("coding",), max_risk_class="unsafe")
     with pytest.raises(BrainRunError, match="tool-selection learning contract"):
         settle_autonomous_tool_selection_outcome(
             None,

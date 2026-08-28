@@ -409,6 +409,18 @@ instead of being silently treated as an available capability. The plan is sealed
 `bioprism-typescript-autonomous-capability-plan/0.1` and explicitly states that it made no
 provider or tool calls.
 
+Selection is now an explainable risk-bounded decision, not just a list of names. Pass
+`maxRiskClass: "read_only" | "reversible_effect" | "external_effect" | "high_impact_effect"`
+to make the caller's risk ceiling an eligibility gate; `readOnlyOnly` and `allowedTools` remain
+independent narrowing constraints. Every coverage row includes `selection_rationale`, the
+effective `selection_constraints`, and a bounded `candidate_ranking` containing the best eligible
+choice plus the highest-priority rejected alternative. Candidates expose only reviewed identity,
+risk/read-only/approval posture, task-relevance score, value-only pull/failure counters, and a
+typed reason such as `risk_budget_exceeded`, `approval_required`, or `learning_disabled`. The
+ranking is metadata-only and bounded to two candidates per workflow stage so all-domain plans
+remain within the existing size ceiling. The same ceiling is propagated through single-domain,
+automatic, cross-domain child, and synthesis blueprints; it never authorizes a tool or effect.
+
 ### Stage-bound adapter execution and evidence
 
 The live adapter path is stricter than portfolio selection. A workflow executor constructs an
