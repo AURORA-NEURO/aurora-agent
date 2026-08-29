@@ -2240,3 +2240,20 @@ transport status and update online learning only from caller-declared evidence.
 The facade also forwards capability journal restore/flush operations for restart recovery. Supply
 caller-owned persistence and rehydrate raw values only at the explicit replay boundary; the SDK
 does not persist arguments, results, prompts, credentials, or evaluator payloads.
+
+### Coordinated persistence through `AutonomousBrainFacade`
+
+Applications that use the high-level facade can keep startup and shutdown orchestration at the
+same boundary as routing and execution. `restorePersistedState()` restores the configured model
+inventory, health, activation, selection-promotion, evaluator-calibration, memory, learning,
+prompt-learning, capability-journal, decision-cycle, and execution coordinators in the reviewed
+dependency order. `flushPersistedState()` uses the reverse order so replay barriers and execution
+checkpoints are finalized before adaptive state is committed. Both methods accept the same
+caller-owned stores and `requireAll`/`strict`/`continueOnError` controls as the underlying agent.
+
+Each call returns a digest-bound, metadata-only component report. Missing coordinators are visible
+as `unconfigured`; strict mode raises `AutonomousAgentPersistenceLifecycleError` with the partial
+report attached, and no report includes tasks, prompts, provider responses, credentials, tool
+arguments, evidence contents, or raw exception messages. The facade does not add cross-store
+atomicity: CAS, crash recovery between component writes, and coordination with deployment-owned
+identity or approval state remain explicit application responsibilities.

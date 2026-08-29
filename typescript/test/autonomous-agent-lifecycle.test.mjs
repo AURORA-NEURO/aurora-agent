@@ -5,6 +5,7 @@ import {
   AUTONOMOUS_AGENT_LIFECYCLE_FLUSH_ORDER,
   AUTONOMOUS_AGENT_LIFECYCLE_RESTORE_ORDER,
   AutonomousAgent,
+  AutonomousBrainFacade,
   AutonomousAgentPersistenceLifecycleCoordinator,
   AutonomousAgentPersistenceLifecycleError,
   AutonomousCapabilityActivationStore,
@@ -173,6 +174,53 @@ test("high-level agent lifecycle composes model inventory restart and flush with
   assert.equal(flushed.components[11].status, "flushed");
   assert.equal(flushed.components[11].snapshot_digest, snapshot.inventory_digest);
   assert.doesNotMatch(JSON.stringify(restored), /credentials|lifecycle-model/);
+});
+
+test("brain facade exposes coordinated restart lifecycle and preserves strict redacted reports", async () => {
+  const llm = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  llm.registerInMemoryProvider("offline", () => "unused", {
+    discoverModels: async () => ({
+      data: [{
+        id: "facade-lifecycle-model",
+        active: true,
+        context_window: 16_000,
+        max_output_tokens: 1_000,
+        capabilities: ["reasoning", "structured_output", "code", "web", "data", "science", "biomedical", "operations", "enterprise", "coordination", "multimodal", "evaluation"],
+      }],
+    }),
+  });
+  const store = persistence();
+  const source = new AutonomousAgent(llm);
+  await source.refreshModelInventory([{
+    provider: "offline",
+    defaults: { context_window_tokens: 16_000, max_output_tokens: 1_000, quality: 0.8, latency_ms: 20, cost_per_million_tokens: 0, reliability: 0.9 },
+  }], { persistence: store, refreshId: "facade-lifecycle-inventory" });
+  const brain = new AutonomousBrainFacade({ agent: source });
+
+  const flushed = await brain.flushPersistedState({ modelInventoryPersistence: store, strict: false });
+  const flushedInventory = flushed.components.find((component) => component.component_id === "model_inventory");
+  assert.equal(flushedInventory?.status, "flushed");
+  assert.equal(flushed.next_action, "bind_unconfigured_persistence_or_accept_partial_lifecycle");
+  assert.doesNotMatch(JSON.stringify(flushed), /facade-lifecycle-model|offline-fixture-secret|provider-payload/);
+
+  const restarted = new AutonomousAgent(llm);
+  const restartedBrain = new AutonomousBrainFacade({ agent: restarted });
+  const restored = await restartedBrain.restorePersistedState({ modelInventoryPersistence: store, strict: false });
+  const restoredInventory = restored.components.find((component) => component.component_id === "model_inventory");
+  assert.equal(restoredInventory?.status, "restored");
+  assert.equal(restarted.models()[0].model, "facade-lifecycle-model");
+
+  await assert.rejects(
+    () => restartedBrain.restorePersistedState({ modelInventoryPersistence: store, requireAll: true }),
+    (error) => {
+      assert.ok(error instanceof AutonomousAgentPersistenceLifecycleError);
+      assert.equal(error.report.failed_component_id, "runtime_health");
+      assert.equal(error.report.components[0].status, "restored");
+      assert.equal(error.report.components[1].status, "unconfigured");
+      assert.doesNotMatch(JSON.stringify(error.report), /facade-lifecycle-model|offline-fixture-secret|provider-payload/);
+      return true;
+    },
+  );
 });
 
 test("high-level agent lifecycle carries capability and execution restart barriers", async () => {

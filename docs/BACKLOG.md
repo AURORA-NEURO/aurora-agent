@@ -1,5 +1,13 @@
 # Remaining backlog
 
+The TypeScript `AutonomousBrainFacade` now exposes the coordinated persistence lifecycle already
+implemented by `AutonomousAgent`: typed `restorePersistedState()` and `flushPersistedState()`
+forward caller-owned stores, deterministic dependency ordering, strict failure reports, and
+metadata-only restart evidence. The public package barrel also exports the facade's recent
+acquisition, integrity, capability-learning, and lifecycle type aliases; applications no longer
+need an internal-module import to type these controls. This increment does not claim cross-store
+atomicity, distributed CAS, credential persistence, or deployment-owned startup authorization.
+
 The TypeScript `AutonomousBrainFacade` now closes its integrity-aware acquisition seam. It
 exposes provider-free information planning/replanning, transient claim-integrity assessment and
 reassessment, digest-validated bridge and request binding, reviewed source execution, launch

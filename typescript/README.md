@@ -2644,3 +2644,10 @@ receipts. Settle quality explicitly with `evaluateCapabilityExecution(s)`,
 `evaluateToolReceipts()`, or `evaluateProviderReceipts()`; no transport result becomes a reward
 without evaluator evidence. Capability journal restore/flush methods preserve the same
 caller-owned restart boundary.
+
+The same application boundary exposes coordinated lifecycle calls:
+`restorePersistedState()` and `flushPersistedState()`. They forward the exact agent's
+caller-owned stores through deterministic restore/flush ordering and return a redacted
+component report; strict failures retain the typed lifecycle error and report. TypeScript
+consumers can import the lifecycle option/report aliases from the package barrel, so startup and
+shutdown code does not need to reach into internal agent types.

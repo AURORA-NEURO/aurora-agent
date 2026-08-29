@@ -12733,6 +12733,13 @@ caller-owned. Reports therefore say `per_component_cas_only` instead of claiming
 durability. Component projections retain no task text, prompts, provider payloads, credentials,
 evidence, tool arguments, effects, or raw exception messages.
 
+The TypeScript `AutonomousBrainFacade` now exposes this complete lifecycle directly through
+`restorePersistedState()` and `flushPersistedState()`, including the typed store and strictness
+options. This keeps an application from reaching through the facade to the underlying agent for
+startup or shutdown. The wrapper is intentionally transparent: it reuses the agent's exact
+coordinator, preserves deterministic ordering and redacted failure reports, and does not infer
+that an unconfigured store is durable merely because execution is otherwise ready.
+
 ## Claim-integrity fusion and next-action planning
 
 Evidence acquisition and evidence truth are intentionally separate from the autonomous decision

@@ -113,6 +113,10 @@ import {
 import type { AutonomousMemorySnapshot } from "./autonomous-memory.js";
 import type { AutonomousModelHealthSnapshot } from "./autonomous-control.js";
 import type {
+  AutonomousAgentPersistenceLifecycleOptions,
+  AutonomousAgentPersistenceLifecycleReport,
+} from "./autonomous-agent-lifecycle.js";
+import type {
   AutonomousWorkflowPortfolioAdmission,
   AutonomousWorkflowPortfolioAdmissionOptions,
 } from "./autonomous-workflow-portfolio-admission.js";
@@ -935,6 +939,11 @@ export type AutonomousBrainToolLearningOptions = Parameters<AutonomousAgent["eva
 export type AutonomousBrainToolLearningResult = Awaited<ReturnType<AutonomousAgent["evaluateToolReceipts"]>>;
 export type AutonomousBrainProviderLearningOptions = Parameters<AutonomousAgent["evaluateProviderReceipts"]>[0];
 export type AutonomousBrainProviderLearningResult = Awaited<ReturnType<AutonomousAgent["evaluateProviderReceipts"]>>;
+/** Caller-owned stores and strictness controls for the coordinated restart lifecycle. */
+export type AutonomousBrainPersistenceLifecycleOptions = AutonomousAgentPersistenceLifecycleOptions;
+export type AutonomousBrainPersistenceLifecycleRestoreOptions = Parameters<AutonomousAgent["restorePersistedState"]>[0];
+export type AutonomousBrainPersistenceLifecycleFlushOptions = Parameters<AutonomousAgent["flushPersistedState"]>[0];
+export type AutonomousBrainPersistenceLifecycleReport = AutonomousAgentPersistenceLifecycleReport;
 
 export interface AutonomousBrainBatchItem {
   index: number;
@@ -4004,6 +4013,27 @@ export class AutonomousBrainFacade {
     options: AutonomousBrainProviderLearningOptions,
   ): Promise<AutonomousBrainProviderLearningResult> {
     return this.agent.evaluateProviderReceipts(options);
+  }
+
+  /**
+   * Restore every configured metadata coordinator through the facade's exact agent.
+   *
+   * The lifecycle remains explicit and caller-owned: stores, CAS behavior, and the choice of
+   * strictness stay in the embedding application. The returned report is metadata-only and is
+   * safe to use as a startup audit; it never contains tasks, prompts, credentials, provider
+   * payloads, tool values, or evidence contents.
+   */
+  async restorePersistedState(
+    options: AutonomousBrainPersistenceLifecycleRestoreOptions = {},
+  ): Promise<AutonomousBrainPersistenceLifecycleReport> {
+    return this.agent.restorePersistedState(options);
+  }
+
+  /** Flush every configured metadata coordinator in the reviewed reverse dependency order. */
+  async flushPersistedState(
+    options: AutonomousBrainPersistenceLifecycleFlushOptions = {},
+  ): Promise<AutonomousBrainPersistenceLifecycleReport> {
+    return this.agent.flushPersistedState(options);
   }
 
   /** Project a portfolio-wide admission image before provider/tool/source dispatch. */
