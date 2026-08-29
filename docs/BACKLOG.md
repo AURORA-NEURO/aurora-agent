@@ -18,6 +18,14 @@ synthesis gates available at the same application boundary as execution and acqu
 continues to keep truth, evaluator authority, provider credentials, learning settlement, and
 external effects outside the facade's automatic authority.
 
+The TypeScript `AutonomousBrainFacade` now exposes the reviewed capability plane and its learning
+loop: single and batch capability execution, exact tool-call dispatch, launch-admission variants,
+metadata-only capability/tool receipts, explicit capability/tool/provider evaluator settlement, and
+capability journal restore/flush. All twelve domains share the same workflow-context and launch
+scope checks. This closes another application composition seam without turning adapter success into
+truth or reward; activation, effect approval, evaluator authority, persistence, credentials, and
+external reconciliation remain explicit deployment boundaries.
+
 The provider runtime now enforces one terminal boundary across both SDKs. A stream that ends
 without a `done` event is rejected as an `invalid_response`, post-terminal events are refused,
 and provider finish frames plus `[DONE]` sentinels are normalized without duplicate completion.

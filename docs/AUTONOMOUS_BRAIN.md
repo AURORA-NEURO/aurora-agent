@@ -13553,3 +13553,28 @@ confidence as next actions. `validateCrossDomainResponseAssessment()` checks a p
 assessment drift. The facade therefore has an explicit final path from autonomous output to
 claim-bound reliance and cross-domain synthesis review, while provider invocation, evaluator
 authority, source truth, learning settlement, and external effects remain separate gates.
+
+### Capability execution and evaluator-driven adaptation at the facade
+
+The application facade now reaches the reviewed capability plane through
+`executeCapability()`, `executeCapabilityBatch()`, and `executeToolCalls()`. Capability requests
+carry an exact workflow context, stage, tool identity, argument digest, input/subject digests,
+and optional replay identity; the adapter may return a transient value, but the durable record
+retains only bounded status, output/evidence digests, observations, timing, effect identity, and
+limitations. Registration, activation, tool allowlists, effect approval, idempotency, and
+uncertain-effect reconciliation remain enforced by the lower runtime.
+
+The matching `...WithLaunchAdmission()` methods derive the requested domain from the capability
+workflow context or explicit tool-call scope and authorize it immediately before dispatch. Batch
+admission deduplicates domains and fails before the agent runtime can create a receipt. This keeps
+capability work aligned with the same provider-free launch record used by provider, connector,
+workflow, portfolio, and evidence execution.
+
+`capabilityExecutionEvidence()` and `toolExecutionEvidence()` expose metadata-only receipts for
+caller-owned review. `evaluateCapabilityExecution()`/`evaluateCapabilityExecutions()` and
+`evaluateToolReceipts()` accept explicit evaluator evidence and update the bounded model/tool
+bandits only from evaluator output; transport success, output presence, and adapter status never
+become reward automatically. `evaluateProviderReceipts()` provides the parallel provider-quality
+settlement boundary. Capability journal restore/flush methods are also available from the facade,
+but persistence is still caller-owned and raw arguments, results, prompts, credentials, and
+evaluator payloads never enter the serialized projection.

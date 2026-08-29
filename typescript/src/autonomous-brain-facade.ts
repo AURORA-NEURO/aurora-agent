@@ -916,6 +916,25 @@ export type AutonomousBrainCrossDomainResponseAlignmentInput = AutonomousCrossDo
 export type AutonomousBrainCrossDomainResponseAssessment = AutonomousCrossDomainResponseAssessment;
 export type AutonomousBrainCrossDomainResponseAssessmentOptions = Parameters<AutonomousAgent["assessCrossDomainResponses"]>[1];
 export type AutonomousBrainCrossDomainResponseReplayOptions = Parameters<typeof replayAutonomousCrossDomainResponseAssessment>[2];
+/** Capability/tool execution contracts retained at the facade without exposing raw values. */
+export type AutonomousBrainToolCall = Parameters<AutonomousAgent["executeToolCalls"]>[0][number];
+export type AutonomousBrainToolCallOptions = Parameters<AutonomousAgent["executeToolCalls"]>[1];
+export type AutonomousBrainToolResult = Awaited<ReturnType<AutonomousAgent["executeToolCalls"]>>[number];
+export type AutonomousBrainCapabilityExecutionRequest = Parameters<AutonomousAgent["executeCapability"]>[0];
+export type AutonomousBrainCapabilityExecutionOptions = Parameters<AutonomousAgent["executeCapability"]>[1];
+export type AutonomousBrainCapabilityExecutionResult = Awaited<ReturnType<AutonomousAgent["executeCapability"]>>;
+export type AutonomousBrainCapabilityBatchOptions = Parameters<AutonomousAgent["executeCapabilityBatch"]>[1];
+export type AutonomousBrainCapabilityBatchResult = Awaited<ReturnType<AutonomousAgent["executeCapabilityBatch"]>>;
+export type AutonomousBrainCapabilityExecutionRecord = ReturnType<AutonomousAgent["capabilityExecutionEvidence"]>[number];
+export type AutonomousBrainCapabilityLearningOptions = Parameters<AutonomousAgent["evaluateCapabilityExecution"]>[1];
+export type AutonomousBrainCapabilityLearningResult = Awaited<ReturnType<AutonomousAgent["evaluateCapabilityExecution"]>>;
+export type AutonomousBrainCapabilityLearningBatchOptions = Parameters<AutonomousAgent["evaluateCapabilityExecutions"]>[1];
+export type AutonomousBrainCapabilityLearningBatchResult = Awaited<ReturnType<AutonomousAgent["evaluateCapabilityExecutions"]>>;
+export type AutonomousBrainToolExecutionReceipt = ReturnType<AutonomousAgent["toolExecutionEvidence"]>[number];
+export type AutonomousBrainToolLearningOptions = Parameters<AutonomousAgent["evaluateToolReceipts"]>[0];
+export type AutonomousBrainToolLearningResult = Awaited<ReturnType<AutonomousAgent["evaluateToolReceipts"]>>;
+export type AutonomousBrainProviderLearningOptions = Parameters<AutonomousAgent["evaluateProviderReceipts"]>[0];
+export type AutonomousBrainProviderLearningResult = Awaited<ReturnType<AutonomousAgent["evaluateProviderReceipts"]>>;
 
 export interface AutonomousBrainBatchItem {
   index: number;
@@ -1362,6 +1381,26 @@ function claimIntegrityAcquisitionDomains(bridge: AutonomousClaimIntegrityAcquis
   const verified = validateAutonomousClaimIntegrityAcquisitionBridge(bridge);
   if (verified.acquisitionPlan === null || verified.acquisitionPlan.selectedDomains.length < 1) throw new ArgumentError("integrity acquisition bridge has no executable plan");
   return [...verified.acquisitionPlan.selectedDomains];
+}
+
+function capabilityRequestDomains(requests: readonly unknown[]): AutonomousDomainName[] {
+  if (!Array.isArray(requests) || requests.length < 1 || requests.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError("autonomous brain capability requests are outside their bound");
+  const domains: AutonomousDomainName[] = [];
+  for (const [index, request] of requests.entries()) {
+    if (!isObject(request) || !isObject(request.workflow_context)) throw new ArgumentError(`autonomous brain capability request ${index} is missing workflow context`);
+    const domain = request.workflow_context.domain;
+    if (typeof domain !== "string" || !AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError(`autonomous brain capability request ${index} contains an unsupported domain`);
+    domains.push(domain as AutonomousDomainName);
+  }
+  return [...new Set(domains)];
+}
+
+function toolCallDomains(domains: readonly string[]): AutonomousDomainName[] {
+  if (!Array.isArray(domains)) throw new ArgumentError("autonomous brain tool call domains must be an array");
+  return domains.map((domain, index) => {
+    if (typeof domain !== "string" || !AUTONOMOUS_DOMAIN_NAMES.includes(domain as AutonomousDomainName)) throw new ArgumentError(`autonomous brain tool call domain ${index} is unsupported`);
+    return domain as AutonomousDomainName;
+  });
 }
 
 function composeSelectionCallbacks(...callbacks: readonly (AutonomousModelSelectionTraceEventCallback | undefined)[]): AutonomousModelSelectionTraceEventCallback | undefined {
@@ -3856,6 +3895,115 @@ export class AutonomousBrainFacade {
     options: AutonomousBrainCrossDomainResponseReplayOptions = {},
   ): AutonomousBrainCrossDomainResponseAssessment {
     return replayAutonomousCrossDomainResponseAssessment(responses, expected, options);
+  }
+
+  /** Execute already-bound tool calls through the agent's activation, approval, and effect boundary. */
+  async executeToolCalls(
+    calls: readonly AutonomousBrainToolCall[],
+    options: AutonomousBrainToolCallOptions,
+  ): Promise<AutonomousBrainToolResult[]> {
+    return this.agent.executeToolCalls(calls, options);
+  }
+
+  /** Execute tool calls only after every declared domain passes the provider-free launch gate. */
+  async executeToolCallsWithLaunchAdmission(
+    calls: readonly AutonomousBrainToolCall[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainToolCallOptions,
+  ): Promise<AutonomousBrainToolResult[]> {
+    authorizeAutonomousLaunchDomains(admission, toolCallDomains(options.domains));
+    return this.executeToolCalls(calls, options);
+  }
+
+  /** Execute one reviewed capability with a transient value and metadata-only replay record. */
+  async executeCapability(
+    request: AutonomousBrainCapabilityExecutionRequest,
+    options: AutonomousBrainCapabilityExecutionOptions = {},
+  ): Promise<AutonomousBrainCapabilityExecutionResult> {
+    return this.agent.executeCapability(request, options);
+  }
+
+  /** Execute a capability only after its workflow-context domain passes launch admission. */
+  async executeCapabilityWithLaunchAdmission(
+    request: AutonomousBrainCapabilityExecutionRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainCapabilityExecutionOptions = {},
+  ): Promise<AutonomousBrainCapabilityExecutionResult> {
+    authorizeAutonomousLaunchDomains(admission, capabilityRequestDomains([request]));
+    return this.executeCapability(request, options);
+  }
+
+  /** Execute an ordered capability batch while preserving explicit failure omissions. */
+  async executeCapabilityBatch(
+    requests: readonly AutonomousBrainCapabilityExecutionRequest[],
+    options: AutonomousBrainCapabilityBatchOptions = {},
+  ): Promise<AutonomousBrainCapabilityBatchResult> {
+    return this.agent.executeCapabilityBatch(requests, options);
+  }
+
+  /** Execute a capability batch only after its complete domain scope passes launch admission. */
+  async executeCapabilityBatchWithLaunchAdmission(
+    requests: readonly AutonomousBrainCapabilityExecutionRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainCapabilityBatchOptions = {},
+  ): Promise<AutonomousBrainCapabilityBatchResult> {
+    authorizeAutonomousLaunchDomains(admission, capabilityRequestDomains(requests));
+    return this.executeCapabilityBatch(requests, options);
+  }
+
+  /** Return metadata-only capability records; raw arguments and adapter values stay transient. */
+  capabilityExecutionEvidence(): AutonomousBrainCapabilityExecutionRecord[] {
+    return this.agent.capabilityExecutionEvidence();
+  }
+
+  /** Restore capability replay metadata through the agent's caller-owned journal. */
+  async restoreCapabilityJournal(): Promise<Awaited<ReturnType<AutonomousAgent["restoreCapabilityJournal"]>>> {
+    return this.agent.restoreCapabilityJournal();
+  }
+
+  /** Restore durable capability metadata and reopen the local replay barrier. */
+  async restoreCapabilityJournalPersistence(): Promise<Record<string, unknown>> {
+    return this.agent.restoreCapabilityJournalPersistence();
+  }
+
+  /** Flush capability replay metadata without returning journal entries or raw values. */
+  async flushCapabilityJournalPersistence(): Promise<Record<string, unknown>> {
+    return this.agent.flushCapabilityJournalPersistence();
+  }
+
+  /** Evaluate one capability result using caller-declared evidence and settle its model/tool arm. */
+  async evaluateCapabilityExecution(
+    result: Parameters<AutonomousAgent["evaluateCapabilityExecution"]>[0],
+    options: AutonomousBrainCapabilityLearningOptions,
+  ): Promise<AutonomousBrainCapabilityLearningResult> {
+    return this.agent.evaluateCapabilityExecution(result, options);
+  }
+
+  /** Evaluate a capability batch in input order and settle explicit value-only learning credit. */
+  async evaluateCapabilityExecutions(
+    results: Parameters<AutonomousAgent["evaluateCapabilityExecutions"]>[0],
+    options: AutonomousBrainCapabilityLearningBatchOptions,
+  ): Promise<AutonomousBrainCapabilityLearningBatchResult> {
+    return this.agent.evaluateCapabilityExecutions(results, options);
+  }
+
+  /** Return metadata-only tool receipts from the activated domain-tool runtime. */
+  toolExecutionEvidence(): AutonomousBrainToolExecutionReceipt[] {
+    return this.agent.toolExecutionEvidence();
+  }
+
+  /** Evaluate tool receipts through an explicit evaluator before updating adaptive tool selection. */
+  async evaluateToolReceipts(
+    options: AutonomousBrainToolLearningOptions,
+  ): Promise<AutonomousBrainToolLearningResult> {
+    return this.agent.evaluateToolReceipts(options);
+  }
+
+  /** Evaluate provider invocation receipts without inferring task quality from transport success. */
+  async evaluateProviderReceipts(
+    options: AutonomousBrainProviderLearningOptions,
+  ): Promise<AutonomousBrainProviderLearningResult> {
+    return this.agent.evaluateProviderReceipts(options);
   }
 
   /** Project a portfolio-wide admission image before provider/tool/source dispatch. */

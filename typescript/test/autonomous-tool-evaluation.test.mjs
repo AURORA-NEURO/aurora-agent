@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   AutonomousAgent,
+  AutonomousBrainFacade,
   AutonomousDomainToolRegistry,
   AutonomousToolOutcomeEvaluator,
   CredentialStore,
@@ -25,6 +26,7 @@ test("evaluated tool receipts advance idempotent value-only bandits across every
     toolCatalogue: await ToolCatalogue.fromDefinitions(definitions),
     toolExecutor: async () => rawValue,
   });
+  const brain = new AutonomousBrainFacade({ agent });
   const registry = await AutonomousDomainToolRegistry.create(await ToolCatalogue.fromDefinitions(definitions));
   for (const profile of profiles) {
     const plan = await registry.planForTask(`evaluate a reviewed ${profile.domain} capability`, {
@@ -35,7 +37,7 @@ test("evaluated tool receipts advance idempotent value-only bandits across every
     assert.ok(selected?.selected_tool, `${profile.domain} must have a selected tool`);
     const stage = profile.workflow.stages.find((candidate) => candidate.id === selected.stage_id);
     assert.ok(stage, `${profile.domain} must have a selected stage`);
-    await agent.executeCapability({
+    await brain.executeCapability({
       call_id: `evaluate-${profile.domain}`,
       tool: selected.selected_tool,
       arguments: {},
@@ -51,7 +53,7 @@ test("evaluated tool receipts advance idempotent value-only bandits across every
     });
   }
 
-  const receipts = agent.toolExecutionEvidence();
+  const receipts = brain.toolExecutionEvidence();
   assert.equal(receipts.length, profiles.length);
   assert.ok(receipts.every((receipt) => typeof receipt.call_id === "string"));
   const callbackInputs = [];
@@ -73,7 +75,7 @@ test("evaluated tool receipts advance idempotent value-only bandits across every
     },
   });
   const evidence = Object.fromEntries(receipts.map((receipt) => [receipt.call_id, { quality_gate: "passed" }]));
-  const settled = await agent.evaluateToolReceipts({ evaluator, receipts, evidence });
+  const settled = await brain.evaluateToolReceipts({ evaluator, receipts, evidence });
   assert.equal(settled.status, "completed");
   assert.equal(settled.receipts, profiles.length);
   assert.equal(settled.evaluations.length, profiles.length);
@@ -84,7 +86,7 @@ test("evaluated tool receipts advance idempotent value-only bandits across every
   assert.equal(settled.next_tool_selection_state.credited_outcomes.length, profiles.length);
   assert.doesNotMatch(JSON.stringify(settled), /private_result|must never reach the evaluator/);
 
-  const replayed = await agent.evaluateToolReceipts({
+  const replayed = await brain.evaluateToolReceipts({
     evaluator,
     receipts,
     evidence,
@@ -93,6 +95,73 @@ test("evaluated tool receipts advance idempotent value-only bandits across every
   assert.equal(replayed.evaluations.every((evaluation) => evaluation.idempotent_replay), true);
   assert.deepEqual(replayed.next_tool_selection_state, settled.next_tool_selection_state);
   assert.equal(replayed.learning_digest, settled.learning_digest);
+});
+
+test("brain facade launch admission stops capability dispatch before the agent boundary", async () => {
+  const profile = (await builtinAutonomousDomainProfiles()).find((item) => item.domain === "coding");
+  const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }));
+  const brain = new AutonomousBrainFacade({ agent });
+  const held = brain.admitLaunchPreflight(await brain.launchPreflight(), { decision: "hold" });
+  await assert.rejects(() => brain.executeCapabilityWithLaunchAdmission({
+    call_id: "held-capability",
+    tool: "not-dispatched",
+    arguments: {},
+    workflow_context: {
+      domain: profile.domain,
+      workflow_id: profile.workflow.workflow_id,
+      workflow_digest: profile.workflow.workflow_digest,
+      stage_id: profile.workflow.stages[0].id,
+    },
+    input_digest: "a".repeat(64),
+  }, held), /launch admission is not approved/);
+  await assert.rejects(() => brain.executeCapabilityBatchWithLaunchAdmission([{
+    call_id: "held-capability-batch",
+    tool: "not-dispatched",
+    arguments: {},
+    workflow_context: {
+      domain: profile.domain,
+      workflow_id: profile.workflow.workflow_id,
+      workflow_digest: profile.workflow.workflow_digest,
+      stage_id: profile.workflow.stages[0].id,
+    },
+    input_digest: "b".repeat(64),
+  }], held), /launch admission is not approved/);
+  await assert.rejects(() => brain.executeToolCallsWithLaunchAdmission([], held, { domains: ["coding"] }), /launch admission is not approved/);
+  assert.deepEqual(brain.capabilityExecutionEvidence(), []);
+});
+
+test("brain facade preserves ordered capability batches and transient values", async () => {
+  const profile = (await builtinAutonomousDomainProfiles()).find((item) => item.domain === "coding");
+  const binding = profile.tool_profile.bindings.find((row) => row.name === "conformance_run");
+  const catalogue = await ToolCatalogue.fromDefinitions([{ name: binding.name, description: binding.name, inputSchema: { type: "object", additionalProperties: true } }]);
+  let executions = 0;
+  const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }), {
+    toolCatalogue: catalogue,
+    toolExecutor: async () => { executions += 1; return { private_batch_value: `value-${executions}` }; },
+  });
+  const brain = new AutonomousBrainFacade({ agent });
+  const request = (index) => ({
+    call_id: `facade-batch-${index}`,
+    tool: binding.name,
+    arguments: {},
+    workflow_context: {
+      domain: profile.domain,
+      workflow_id: profile.workflow.workflow_id,
+      workflow_digest: profile.workflow.workflow_digest,
+      stage_id: "scope",
+    },
+    input_digest: "c".repeat(64),
+    execution_id: `facade-execution-${index}`,
+  });
+  const batch = await brain.executeCapabilityBatch([request(1), request(2)], { approveEffects: true });
+  assert.equal(batch.status, "completed");
+  assert.equal(batch.completed_count, 2);
+  assert.equal(batch.items.length, 2);
+  assert.equal(batch.items.every((item) => item.result?.record.status === "completed"), true);
+  assert.equal(executions, 2);
+  assert.equal(batch.items[0].result.value.private_batch_value, "value-1");
+  assert.doesNotMatch(JSON.stringify(batch.items.map((item) => item.result?.record)), /private_batch_value|value-1|value-2/);
+  assert.equal(brain.capabilityExecutionEvidence().length, 2);
 });
 
 test("tool receipt evaluation fails closed on ambiguity, unsafe evidence, and invalid evaluator decisions", async () => {

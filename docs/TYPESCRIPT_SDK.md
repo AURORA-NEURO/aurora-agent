@@ -2220,3 +2220,23 @@ sealed projection, while `replayCrossDomainResponseAssessment()` reruns the gate
 caller-owned response set and refuses digest drift. Complete response rows still require explicit
 alignment and synthesis policy when configured; transport success alone never authorizes
 synthesis or claim reliance.
+
+### Capability execution and adaptive receipt evaluation
+
+The high-level facade exposes reviewed capability dispatch through `executeCapability()`,
+`executeCapabilityBatch()`, and `executeToolCalls()`. These methods reuse activation, catalogue,
+stage-contract, effect-approval, idempotency, and uncertain-effect boundaries from
+`AutonomousAgent`. The returned capability value remains transient; its record is a bounded
+metadata projection with request, workflow, tool, output, evidence, timing, and failure digests.
+
+Use `executeCapabilityWithLaunchAdmission()` or the batch/tool-call variants when deployment
+admission must be checked before dispatch. The wrapper derives capability domains from the
+workflow context and validates explicit tool-call domains, so a malformed or held admission stops
+before a receipt or adapter call. `capabilityExecutionEvidence()` and `toolExecutionEvidence()`
+are safe review projections. `evaluateCapabilityExecution()`/`evaluateCapabilityExecutions()`,
+`evaluateToolReceipts()`, and `evaluateProviderReceipts()` keep evaluator quality separate from
+transport status and update online learning only from caller-declared evidence.
+
+The facade also forwards capability journal restore/flush operations for restart recovery. Supply
+caller-owned persistence and rehydrate raw values only at the explicit replay boundary; the SDK
+does not persist arguments, results, prompts, credentials, or evaluator payloads.

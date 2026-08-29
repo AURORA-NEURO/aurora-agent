@@ -2636,3 +2636,11 @@ Use `validateOutcomeIntegrity()` after rehydration. For fan-out responses, call
 `assessCrossDomainResponses()`, then persist and replay the returned alignment gate with
 `validateCrossDomainResponseAssessment()` and `replayCrossDomainResponseAssessment()` before
 synthesis. These methods retain metadata only and never infer truth from provider success.
+
+The facade also exposes reviewed capability/tool dispatch and learning: use
+`executeCapability()`/`executeCapabilityBatch()` or `executeToolCalls()`, their launch-admitted
+variants, then `capabilityExecutionEvidence()` or `toolExecutionEvidence()` for metadata-only
+receipts. Settle quality explicitly with `evaluateCapabilityExecution(s)`,
+`evaluateToolReceipts()`, or `evaluateProviderReceipts()`; no transport result becomes a reward
+without evaluator evidence. Capability journal restore/flush methods preserve the same
+caller-owned restart boundary.
