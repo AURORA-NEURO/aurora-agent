@@ -315,6 +315,7 @@ export const AUTONOMOUS_BRAIN_TRACED_AUTO_CYCLE_BATCH_SCHEMA = "bioprism-typescr
 export const AUTONOMOUS_BRAIN_TRACED_AUTO_REPLAN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-traced-auto-replan-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_TRACE_REGISTRY_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-trace-registry-controller/0.1" as const;
 export const AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-run-analytics-controller/0.1" as const;
+export const AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-run-observability-controller/0.1" as const;
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
 export const AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomous-brain-execution-policy/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-brain-auto-execution/0.1" as const;
@@ -1235,6 +1236,60 @@ export interface AutonomousBrainRunAnalyticsIntegrity extends JsonObject {
   retention: AutonomousRunAnalyticsLedgerSummary["retention"];
   authority: AutonomousRunAnalyticsLedgerSummary["authority"];
   secret_material: AutonomousRunAnalyticsLedgerSummary["secret_material"];
+}
+
+export type AutonomousBrainRunObservabilityControllerStatus =
+  | "empty"
+  | "restored"
+  | "flushed"
+  | "published_and_analyzed"
+  | "source_snapshot_failed"
+  | "trace_publication_failed"
+  | "analytics_failed"
+  | "persistence_partial";
+
+/** Existing facade-bound controllers composed by the application lifecycle supervisor. */
+export interface AutonomousBrainRunObservabilityControllerOptions {
+  traceRegistry: AutonomousBrainTraceRegistryController;
+  runAnalytics: AutonomousBrainRunAnalyticsController;
+}
+
+/** Operator-safe projection of both metadata-only stores and their shared lifecycle state. */
+export interface AutonomousBrainRunObservabilityControllerProjection extends JsonObject {
+  schema: typeof AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA;
+  status: AutonomousBrainRunObservabilityControllerStatus;
+  ready: boolean;
+  persisted: boolean;
+  trace_registry: AutonomousBrainTraceRegistryControllerProjection | null;
+  run_analytics: AutonomousBrainRunAnalyticsControllerProjection | null;
+  last_run_id: string | null;
+  last_source_snapshot_digest: string | null;
+}
+
+export interface AutonomousBrainRunObservabilityRestoreRun extends JsonObject {
+  controller: AutonomousBrainRunObservabilityControllerProjection;
+}
+
+export interface AutonomousBrainRunObservabilityFlushRun extends JsonObject {
+  controller: AutonomousBrainRunObservabilityControllerProjection;
+  persisted: boolean;
+  persistence_errors: Array<{ scope: "trace_registry" | "run_analytics"; error_class: string; failure_code: string }>;
+}
+
+export interface AutonomousBrainRunObservabilityError extends JsonObject {
+  scope: "source_snapshot" | "trace_publication" | "trace_persistence" | "analytics" | "analytics_persistence";
+  error_class: string;
+  failure_code: string;
+}
+
+/** One shared-snapshot run with independent trace and analytics outcomes. */
+export interface AutonomousBrainRunObservabilityRun extends JsonObject {
+  controller: AutonomousBrainRunObservabilityControllerProjection;
+  run_id: string;
+  source_snapshot_digest: string | null;
+  trace_registry: AutonomousBrainTraceRegistryPublicationRun | null;
+  run_analytics: AutonomousBrainRunAnalyticsAnalysisRun | null;
+  errors: AutonomousBrainRunObservabilityError[];
 }
 
 /** Options for the keyless readiness audit exposed at the application boundary. */
@@ -2729,6 +2784,19 @@ export class AutonomousBrainFacade {
   ): AutonomousBrainRunAnalyticsController {
     if (!isObject(options) || !(options.ledger instanceof AutonomousRunAnalyticsLedger) || !(options.persistence instanceof JsonAutonomousRunAnalyticsLedgerPersistence)) throw new ArgumentError("autonomous brain run analytics controller options are malformed");
     return new AutonomousBrainRunAnalyticsController(this, options.ledger, options.persistence);
+  }
+
+  /**
+   * Compose trace publication and longitudinal analytics into one restart-safe application
+   * boundary. The supervisor coordinates only metadata projections; it cannot execute a task,
+   * invoke a provider, access credentials, or retry an external effect.
+   */
+  createRunObservabilityController(
+    options: AutonomousBrainRunObservabilityControllerOptions,
+  ): AutonomousBrainRunObservabilityController {
+    if (!isObject(options) || !(options.traceRegistry instanceof AutonomousBrainTraceRegistryController) || !(options.runAnalytics instanceof AutonomousBrainRunAnalyticsController)) throw new ArgumentError("autonomous brain run observability controller options are malformed");
+    if (options.traceRegistry.brain !== this || options.runAnalytics.brain !== this) throw new ArgumentError("autonomous brain run observability controllers must belong to the same facade");
+    return new AutonomousBrainRunObservabilityController(this, options.traceRegistry, options.runAnalytics);
   }
 
   /**
@@ -7221,6 +7289,15 @@ export class AutonomousBrainTraceRegistryController {
     }
   }
 
+  /**
+   * Publish an already-captured snapshot without reading the source journal a second time.
+   * This is used by coordinated application lifecycles to keep registry and analytics digests
+   * bound to one source snapshot.
+   */
+  async publishSnapshot(snapshot: unknown, runId: string): Promise<AutonomousBrainTraceRegistryPublicationRun> {
+    return this.publish({ snapshot: () => snapshot } as AutonomousRunTraceStore, runId);
+  }
+
   /** Import a validated trace snapshot, then persist the resulting retention projection. */
   async importSnapshot(raw: unknown): Promise<AutonomousBrainTraceRegistryImportRun> {
     this.requireRestored();
@@ -7459,6 +7536,203 @@ export class AutonomousBrainRunAnalyticsController {
       retention: summary.retention,
       authority: summary.authority,
       secret_material: summary.secret_material,
+    };
+  }
+}
+
+/**
+ * Coordinate the application lifecycle for trace indexing and longitudinal run analytics.
+ *
+ * The source journal is read exactly once per coordinated publication. Both consumers receive
+ * that same verified snapshot, so an append racing with a second read cannot produce a registry
+ * record whose digest differs from the analytics report. The two persistence adapters remain
+ * independent: a failure in one is surfaced as a bounded partial outcome and never causes the
+ * completed provider task to be replayed.
+ */
+export class AutonomousBrainRunObservabilityController {
+  private busy = false;
+  private restored = false;
+  private persisted = false;
+  private lastRunId: string | null = null;
+  private lastSourceSnapshotDigest: string | null = null;
+  private lastTraceProjection: AutonomousBrainTraceRegistryControllerProjection | null = null;
+  private lastAnalyticsProjection: AutonomousBrainRunAnalyticsControllerProjection | null = null;
+
+  constructor(
+    readonly brain: AutonomousBrainFacade,
+    readonly traceRegistry: AutonomousBrainTraceRegistryController,
+    readonly runAnalytics: AutonomousBrainRunAnalyticsController,
+  ) {
+    if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain run observability controller requires an AutonomousBrainFacade");
+    if (!(traceRegistry instanceof AutonomousBrainTraceRegistryController) || !(runAnalytics instanceof AutonomousBrainRunAnalyticsController)) throw new ArgumentError("autonomous brain run observability controller requires facade-bound metadata controllers");
+    if (traceRegistry.brain !== brain || runAnalytics.brain !== brain) throw new ArgumentError("autonomous brain run observability controllers must belong to the same facade");
+  }
+
+  private requireRestored(): void {
+    if (!this.restored) throw new ArgumentError("autonomous brain run observability controller must restore before use");
+  }
+
+  private requireIdle(): void {
+    if (this.busy) throw new ArgumentError("autonomous brain run observability controller already has an operation in progress");
+  }
+
+  private projection(
+    status: AutonomousBrainRunObservabilityControllerStatus,
+    traceRegistry: AutonomousBrainTraceRegistryControllerProjection | null = this.lastTraceProjection,
+    runAnalytics: AutonomousBrainRunAnalyticsControllerProjection | null = this.lastAnalyticsProjection,
+  ): AutonomousBrainRunObservabilityControllerProjection {
+    return {
+      schema: AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA,
+      status,
+      ready: this.restored,
+      persisted: this.persisted,
+      trace_registry: traceRegistry === null ? null : structuredClone(traceRegistry),
+      run_analytics: runAnalytics === null ? null : structuredClone(runAnalytics),
+      last_run_id: this.lastRunId,
+      last_source_snapshot_digest: this.lastSourceSnapshotDigest,
+    };
+  }
+
+  /** Restore both metadata projections before exposing the coordinated lifecycle. */
+  async restore(): Promise<AutonomousBrainRunObservabilityRestoreRun> {
+    this.requireIdle();
+    this.busy = true;
+    try {
+      this.restored = false;
+      const traceRegistry = await this.traceRegistry.restore();
+      const runAnalytics = await this.runAnalytics.restore();
+      this.lastTraceProjection = traceRegistry;
+      this.lastAnalyticsProjection = runAnalytics;
+      this.persisted = traceRegistry.persisted && runAnalytics.persisted;
+      this.restored = true;
+      const status = traceRegistry.status === "empty" && runAnalytics.status === "empty" ? "empty" : "restored";
+      return { controller: this.projection(status, traceRegistry, runAnalytics) };
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Flush each store independently and report exactly which persistence boundary failed. */
+  async flush(): Promise<AutonomousBrainRunObservabilityFlushRun> {
+    this.requireRestored();
+    this.requireIdle();
+    this.busy = true;
+    const persistenceErrors: AutonomousBrainRunObservabilityFlushRun["persistence_errors"] = [];
+    try {
+      let traceRegistry = this.lastTraceProjection;
+      let runAnalytics = this.lastAnalyticsProjection;
+      try {
+        traceRegistry = await this.traceRegistry.flush();
+        this.lastTraceProjection = traceRegistry;
+      } catch (error) {
+        const failure = errorProjection(error);
+        persistenceErrors.push({ scope: "trace_registry", ...failure });
+      }
+      try {
+        runAnalytics = await this.runAnalytics.flush();
+        this.lastAnalyticsProjection = runAnalytics;
+      } catch (error) {
+        const failure = errorProjection(error);
+        persistenceErrors.push({ scope: "run_analytics", ...failure });
+      }
+      this.persisted = persistenceErrors.length === 0;
+      return {
+        controller: this.projection(persistenceErrors.length === 0 ? "flushed" : "persistence_partial", traceRegistry, runAnalytics),
+        persisted: this.persisted,
+        persistence_errors: persistenceErrors,
+      };
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /**
+   * Publish and analyze one immutable source snapshot. The trace store is intentionally read
+   * once; the registry controller's snapshot-only path prevents a second, potentially newer
+   * journal read from drifting away from the report digest.
+   */
+  async publishAndAnalyze(
+    traceStore: AutonomousRunTraceStore,
+    runId: string,
+    options: { policy?: Partial<AutonomousRunTraceAnalyticsPolicy>; ingestedAt?: number } = {},
+  ): Promise<AutonomousBrainRunObservabilityRun> {
+    this.requireRestored();
+    this.requireIdle();
+    if (!traceStore || typeof traceStore.snapshot !== "function") throw new ArgumentError("autonomous brain run observability publication requires a trace store");
+    this.busy = true;
+    const errors: AutonomousBrainRunObservabilityError[] = [];
+    let sourceSnapshotDigest: string | null = null;
+    let traceOutcome: AutonomousBrainTraceRegistryPublicationRun | null = null;
+    let analyticsOutcome: AutonomousBrainRunAnalyticsAnalysisRun | null = null;
+    try {
+      let sourceSnapshot: unknown;
+      try {
+        sourceSnapshot = await traceStore.snapshot();
+        if (isObject(sourceSnapshot) && typeof sourceSnapshot.snapshot_digest === "string" && /^[0-9a-f]{64}$/.test(sourceSnapshot.snapshot_digest)) sourceSnapshotDigest = sourceSnapshot.snapshot_digest;
+      } catch (error) {
+        errors.push({ scope: "source_snapshot", ...errorProjection(error) });
+        return {
+          controller: this.projection("source_snapshot_failed"),
+          run_id: runId,
+          source_snapshot_digest: sourceSnapshotDigest,
+          trace_registry: null,
+          run_analytics: null,
+          errors,
+        };
+      }
+
+      traceOutcome = await this.traceRegistry.publishSnapshot(sourceSnapshot, runId);
+      this.lastTraceProjection = traceOutcome.controller;
+      if (traceOutcome.publication.status === "failed") {
+        errors.push({
+          scope: "trace_publication",
+          error_class: traceOutcome.publication.error_class ?? "AutonomousRunTraceRegistryPublicationError",
+          failure_code: traceOutcome.publication.failure_code ?? "trace_registry_publication_failed",
+        });
+      } else if (traceOutcome.persistence_error !== null) {
+        errors.push({ scope: "trace_persistence", ...traceOutcome.persistence_error });
+      }
+
+      try {
+        analyticsOutcome = await this.runAnalytics.analyzeAndIngest(sourceSnapshot, options);
+        this.lastAnalyticsProjection = analyticsOutcome.controller;
+        if (analyticsOutcome.persistence_error !== null) errors.push({ scope: "analytics_persistence", ...analyticsOutcome.persistence_error });
+      } catch (error) {
+        errors.push({ scope: "analytics", ...errorProjection(error) });
+      }
+      this.lastRunId = runId;
+      this.lastSourceSnapshotDigest = sourceSnapshotDigest;
+      this.persisted = traceOutcome.persisted && analyticsOutcome?.persisted === true;
+      const status: AutonomousBrainRunObservabilityControllerStatus = traceOutcome.publication.status === "failed"
+        ? "trace_publication_failed"
+        : analyticsOutcome === null
+          ? "analytics_failed"
+          : errors.length > 0 && (traceOutcome.persisted === false || analyticsOutcome.persisted === false)
+            ? "persistence_partial"
+            : errors.length > 0
+              ? "analytics_failed"
+              : "published_and_analyzed";
+      return {
+        controller: this.projection(status, traceOutcome.controller, analyticsOutcome?.controller ?? this.lastAnalyticsProjection),
+        run_id: runId,
+        source_snapshot_digest: sourceSnapshotDigest,
+        trace_registry: traceOutcome,
+        run_analytics: analyticsOutcome,
+        errors,
+      };
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Revalidate both metadata stores and return their digest-bound integrity projections. */
+  verifyIntegrity(): { verified: true; trace_registry: AutonomousRunTraceRegistryIntegrity; run_analytics: AutonomousBrainRunAnalyticsIntegrity } {
+    this.requireRestored();
+    this.requireIdle();
+    return {
+      verified: true,
+      trace_registry: this.traceRegistry.verifyIntegrity(),
+      run_analytics: this.runAnalytics.verifyIntegrity(),
     };
   }
 }

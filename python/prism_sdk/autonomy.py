@@ -244,6 +244,8 @@ from .autonomous_run_analytics_ledger import (
     AutonomousRunAnalyticsLedgerPolicy,
 )
 from .autonomous_run_analytics_controller import AutonomousRunAnalyticsController
+from .autonomous_run_trace_registry_controller import AutonomousRunTraceRegistryController
+from .autonomous_run_observability_controller import AutonomousRunObservabilityController
 from .autonomous_decision_persistence import (
     AutonomousDecisionCycle,
     AutonomousDecisionCyclePersistenceCoordinator,
@@ -25883,6 +25885,28 @@ class AutonomousAgent:
 
         return AutonomousRunAnalyticsController(self, ledger, persistence)
 
+    def create_trace_registry_controller(
+        self,
+        registry: Any,
+        persistence: Any,
+    ) -> AutonomousRunTraceRegistryController:
+        """Bind the metadata-only trace registry to this agent's application lifecycle.
+
+        The controller is restore-before-read and persistence-aware. It does not authorize
+        provider calls, replay a run, or retain source values.
+        """
+
+        return AutonomousRunTraceRegistryController(self, registry, persistence)
+
+    def create_run_observability_controller(
+        self,
+        trace_registry: AutonomousRunTraceRegistryController,
+        run_analytics: AutonomousRunAnalyticsController,
+    ) -> AutonomousRunObservabilityController:
+        """Coordinate one source snapshot across trace indexing and longitudinal analytics."""
+
+        return AutonomousRunObservabilityController(self, trace_registry, run_analytics)
+
     def run_cross_domain_with_trace(
         self,
         *,
@@ -29731,6 +29755,8 @@ __all__ = [
     "AutonomousLearningResult",
     "AutonomousAgent",
     "AutonomousRunAnalyticsController",
+    "AutonomousRunTraceRegistryController",
+    "AutonomousRunObservabilityController",
     "AutonomousWorkflowCheckpoint",
     "AutonomousWorkflowExecutionReceipt",
     "AutonomousWorkflowEvaluator",

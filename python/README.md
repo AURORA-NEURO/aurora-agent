@@ -92,6 +92,11 @@ create an `AutonomousRunAnalyticsLedger` and bind it with
 accepted/duplicate/conflict results, persists through caller-owned JSON/CAS storage, and returns
 persistence failures separately from in-memory acceptance. Its summaries cover all twelve domains,
 observed providers, and provider/model pairs while retaining no task text, prompts, responses,
+tool payloads, credentials, or effect values. For an application worker that needs both operator
+indexing and analytics, `agent.create_trace_registry_controller(...)` plus
+`agent.create_run_observability_controller(...)` provide restore-before-read lifecycle,
+single-snapshot publication/analysis, explicit partial-persistence outcomes, and restart-safe
+all-domain projections without replaying the run.
 evidence, tool payloads, credentials, or cost claims.
 
 For provider-backed evidence, `AutonomousConnectorRegistry` and `AutonomousConnectorRuntime`

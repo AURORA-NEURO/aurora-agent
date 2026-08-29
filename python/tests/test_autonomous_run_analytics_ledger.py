@@ -10,6 +10,10 @@ from prism_sdk import (
     AutonomousAgent,
     AutonomousRunAnalyticsLedger,
     AutonomousRunAnalyticsController,
+    AutonomousRunTraceRegistryController,
+    AutonomousRunObservabilityController,
+    AutonomousRunTraceRegistry,
+    TransactionalJsonAutonomousRunTraceRegistryPersistence,
     AutonomousRunAnalyticsLedgerPersistenceCoordinator,
     AutonomousRunAnalyticsLedgerPolicy,
     InMemoryAutonomousRunTraceStore,
@@ -237,3 +241,107 @@ def test_agent_analytics_controller_is_restart_safe_and_persistence_explicit() -
     assert failed.persisted is False
     assert failed.controller.status == "persistence_failed"
     assert failing.summary().report_count == 1
+
+
+def test_agent_coordinates_one_trace_snapshot_across_registry_and_analytics() -> None:
+    source = InMemoryAutonomousRunTraceStore(clock=lambda: 8_000)
+    session = AutonomousRunTraceSession(
+        source,
+        run_id="facade-observability-all-domains",
+        task_digest="1" * 64,
+        domains=tuple(AUTONOMOUS_DOMAIN_NAMES),
+    )
+    session.started()
+    session.record(
+        phase="provider_invocation_finished",
+        status="running",
+        provider="offline",
+        model="offline-model",
+        input_tokens=8,
+        output_tokens=6,
+        tool_count=4,
+    )
+    session.complete(status="completed")
+
+    agent = AutonomousAgent.__new__(AutonomousAgent)
+    trace_store = _TransactionalTextStore()
+    analytics_store = _TransactionalTextStore()
+    trace_registry = agent.create_trace_registry_controller(
+        AutonomousRunTraceRegistry({"max_runs": 16, "max_events": 128, "max_bytes": 250_000}),
+        TransactionalJsonAutonomousRunTraceRegistryPersistence(trace_store, max_bytes=250_000),
+    )
+    run_analytics = agent.create_run_analytics_controller(
+        AutonomousRunAnalyticsLedger(),
+        TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(analytics_store),
+    )
+    observability = agent.create_run_observability_controller(trace_registry, run_analytics)
+    with pytest.raises(ArgumentError, match="must restore before use"):
+        observability.verify_integrity()
+    assert observability.restore().controller.status == "empty"
+
+    reads = 0
+
+    class _SingleReadSource:
+        def snapshot(self):
+            nonlocal reads
+            reads += 1
+            return source.snapshot()
+
+    run = observability.publish_and_analyze(
+        _SingleReadSource(),
+        "facade-observability-all-domains",
+        ingested_at=9_000,
+    )
+    assert reads == 1
+    assert run.errors == ()
+    assert run.controller.status == "published_and_analyzed"
+    assert run.trace_registry is not None and run.trace_registry.publication.status == "published"
+    assert run.run_analytics is not None and run.run_analytics.ingest.status == "accepted"
+    assert run.source_snapshot_digest == run.trace_registry.publication.source_snapshot_digest
+    assert run.source_snapshot_digest == run.run_analytics.report.source_snapshot_digest
+    assert run.controller.persisted is True
+    assert trace_registry.query({"domain": "neuroscience"}).total_matches == 1
+    assert len([row for row in run_analytics.summary().domains if row.observed]) == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert observability.verify_integrity()["verified"] is True
+    wire = run.to_dict()
+    assert "private task" not in str(wire)
+    assert "offline provider output" not in str(wire) and "sk-" not in str(wire)
+
+    restored_trace = agent.create_trace_registry_controller(
+        AutonomousRunTraceRegistry({"max_runs": 16, "max_events": 128, "max_bytes": 250_000}),
+        TransactionalJsonAutonomousRunTraceRegistryPersistence(trace_store, max_bytes=250_000),
+    )
+    restored_analytics = agent.create_run_analytics_controller(
+        AutonomousRunAnalyticsLedger(),
+        TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(analytics_store),
+    )
+    restarted = agent.create_run_observability_controller(restored_trace, restored_analytics)
+    restored = restarted.restore()
+    assert restored.controller.status == "restored"
+    assert restored.controller.persisted is True
+    assert restored.controller.trace_registry is not None and restored.controller.trace_registry.runs == 1
+    assert restored.controller.run_analytics is not None and restored.controller.run_analytics.summary.report_count == 1
+
+    class _FailingStore:
+        def read(self):
+            return None
+
+        def write(self, _value):
+            raise RuntimeError("analytics persistence unavailable")
+
+    partial = agent.create_run_observability_controller(
+        agent.create_trace_registry_controller(
+            AutonomousRunTraceRegistry({"max_runs": 16, "max_events": 128, "max_bytes": 250_000}),
+            TransactionalJsonAutonomousRunTraceRegistryPersistence(_TransactionalTextStore(), max_bytes=250_000),
+        ),
+        agent.create_run_analytics_controller(
+            AutonomousRunAnalyticsLedger(),
+            JsonAutonomousRunAnalyticsLedgerPersistence(_FailingStore()),
+        ),
+    )
+    partial.restore()
+    failed = partial.publish_and_analyze(source, "facade-observability-all-domains")
+    assert failed.controller.status == "persistence_partial"
+    assert failed.trace_registry is not None and failed.trace_registry.persisted is True
+    assert failed.run_analytics is not None and failed.run_analytics.persisted is False
+    assert any(error["scope"] == "analytics_persistence" for error in failed.errors)

@@ -7,6 +7,7 @@ import {
   AutonomousBrainFacade,
   AutonomousBrainTraceRegistryController,
   AutonomousBrainRunAnalyticsController,
+  AutonomousBrainRunObservabilityController,
   AutonomousBrainBatchJobController,
   AutonomousBrainBatchProtectedRehydrator,
   AutonomousBrainAutoBatchProtectedRehydrator,
@@ -2894,4 +2895,93 @@ test("brain facade owns a restart-safe longitudinal analytics ledger across ever
   assert.equal(failedFlush.controller.status, "persistence_failed");
   assert.equal(failingController.summary().report_count, 1);
   assert.equal(failingController.verifyIntegrity().verified, true);
+});
+
+test("brain facade coordinates one trace snapshot across registry and analytics", async () => {
+  const brain = new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime()) });
+  const source = new InMemoryAutonomousRunTraceStore({ clock: (() => { let now = 8_000; return () => now++; })() });
+  const session = new AutonomousRunTraceSession(source, {
+    run_id: "facade-observability-all-domains",
+    task_digest: "1".repeat(64),
+    domains: [...AUTONOMOUS_DOMAIN_NAMES],
+  });
+  await session.started();
+  await session.record({ phase: "plan_compiled", status: "running", plan_digest: "2".repeat(64) });
+  await session.record({ phase: "provider_invocation_finished", status: "running", provider: "offline", model: "offline-model", input_tokens: 8, output_tokens: 6, tool_count: 4 });
+  await session.complete({ status: "completed", route_digest: "3".repeat(64), plan_digest: "2".repeat(64) });
+
+  const traceStore = transactionalTextStore();
+  const analyticsStore = transactionalTextStore();
+  const traceRegistry = brain.createTraceRegistryController({
+    registry: new AutonomousRunTraceRegistry({ max_runs: 16, max_events: 128, max_bytes: 250_000 }),
+    persistence: new TransactionalJsonAutonomousRunTraceRegistryPersistence(traceStore, { maxBytes: 250_000 }),
+  });
+  const runAnalytics = brain.createRunAnalyticsController({
+    ledger: new AutonomousRunAnalyticsLedger(),
+    persistence: new TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(analyticsStore),
+  });
+  const observability = brain.createRunObservabilityController({ traceRegistry, runAnalytics });
+  assert.throws(() => observability.verifyIntegrity(), /must restore before use/);
+  const restored = await observability.restore();
+  assert.equal(restored.controller.ready, true);
+  assert.equal(restored.controller.status, "empty");
+
+  let snapshotReads = 0;
+  const singleReadSource = {
+    snapshot: async () => {
+      snapshotReads += 1;
+      return source.snapshot();
+    },
+  };
+  const run = await observability.publishAndAnalyze(singleReadSource, "facade-observability-all-domains", { ingestedAt: 9_000 });
+  assert.equal(snapshotReads, 1);
+  assert.equal(run.errors.length, 0);
+  assert.equal(run.controller.status, "published_and_analyzed");
+  assert.equal(run.trace_registry?.publication.status, "published");
+  assert.equal(run.run_analytics?.ingest.status, "accepted");
+  assert.equal(run.source_snapshot_digest, run.trace_registry?.publication.source_snapshot_digest);
+  assert.equal(run.source_snapshot_digest, run.run_analytics?.report.source_snapshot_digest);
+  assert.equal(run.controller.persisted, true);
+  assert.equal(traceRegistry.query({ domain: "neuroscience" }).total_matches, 1);
+  assert.equal(runAnalytics.summary().domains.filter((row) => row.observed).length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.deepEqual(observability.verifyIntegrity(), {
+    verified: true,
+    trace_registry: traceRegistry.verifyIntegrity(),
+    run_analytics: runAnalytics.verifyIntegrity(),
+  });
+  assert.doesNotMatch(JSON.stringify(run), /private task|offline provider output|sk-[A-Za-z0-9]/i);
+
+  const restoredObservability = brain.createRunObservabilityController({
+    traceRegistry: brain.createTraceRegistryController({
+      registry: new AutonomousRunTraceRegistry({ max_runs: 16, max_events: 128, max_bytes: 250_000 }),
+      persistence: new TransactionalJsonAutonomousRunTraceRegistryPersistence(traceStore, { maxBytes: 250_000 }),
+    }),
+    runAnalytics: brain.createRunAnalyticsController({
+      ledger: new AutonomousRunAnalyticsLedger(),
+      persistence: new TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(analyticsStore),
+    }),
+  });
+  const restarted = await restoredObservability.restore();
+  assert.equal(restarted.controller.status, "restored");
+  assert.equal(restarted.controller.persisted, true);
+  assert.equal(restarted.controller.trace_registry?.runs, 1);
+  assert.equal(restarted.controller.run_analytics?.summary.report_count, 1);
+
+  const failingAnalytics = brain.createRunObservabilityController({
+    traceRegistry: brain.createTraceRegistryController({
+      registry: new AutonomousRunTraceRegistry({ max_runs: 16, max_events: 128, max_bytes: 250_000 }),
+      persistence: new TransactionalJsonAutonomousRunTraceRegistryPersistence(transactionalTextStore(), { maxBytes: 250_000 }),
+    }),
+    runAnalytics: brain.createRunAnalyticsController({
+      ledger: new AutonomousRunAnalyticsLedger(),
+      persistence: new JsonAutonomousRunAnalyticsLedgerPersistence({ read: () => null, write: () => { throw new Error("analytics persistence unavailable"); } }),
+    }),
+  });
+  await failingAnalytics.restore();
+  const partial = await failingAnalytics.publishAndAnalyze(source, "facade-observability-all-domains");
+  assert.equal(partial.controller.status, "persistence_partial");
+  assert.equal(partial.trace_registry?.persisted, true);
+  assert.equal(partial.run_analytics?.persisted, false);
+  assert.equal(partial.errors.some((error) => error.scope === "analytics_persistence"), true);
+  assert.equal(partial.run_analytics?.ingest.status, "accepted");
 });

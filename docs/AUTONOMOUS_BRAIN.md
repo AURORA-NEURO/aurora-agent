@@ -10704,6 +10704,24 @@ deterministic ordering, generation/predecessor lineage, accepted-versus-evicted 
 the outer snapshot digest before changing live state. Transactional persistence fences stale
 workers with the previous snapshot digest.
 
+### Coordinated run observability lifecycle
+
+The TypeScript facade's `createRunObservabilityController()` and Python agent's
+`create_run_observability_controller()` compose the trace registry and analytics controllers for
+an application worker or operator service. `restore()` must complete
+for both stores before reads or publication are allowed. `publishAndAnalyze(traceStore, runId)`
+captures the source journal once, sends that immutable snapshot to both consumers, and returns
+the registry publication plus digest-bound analytics report together. This makes
+`source_snapshot_digest` an explicit join key and prevents a second read from analyzing a newer
+append than the one indexed for operators.
+
+The stores remain separate persistence boundaries. A registry failure, analytics failure, or
+single-store CAS/write failure is returned in a bounded outcome with a scope and failure code;
+the other successful outcome is retained in memory and the original autonomous run is never
+replayed. The controller is observational only: it cannot invoke a provider, open credentials,
+execute tools, or authorize an external effect. Its projections retain only metadata, digests,
+counts, domains, provider/model identifiers, and explicit persistence posture.
+
 The summary emits all twelve configured domain rows even when no report measured a domain, along
 with observed provider and `provider/model` dimensions. Counts and means are additive/weighted;
 `latency_p50_ms` and `latency_p95_ms` remain `null` because quantiles cannot be reconstructed from

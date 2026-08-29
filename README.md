@@ -99,6 +99,10 @@ retain validated reports through the bounded `AutonomousRunAnalyticsLedger` with
 restore and optional CAS persistence. TypeScript and Python application facades also provide
 restore-before-read analytics controllers that analyze verified traces, persist accepted reports,
 classify duplicates/conflicts, and expose safe all-domain rollups. See the [analytics section](docs/AUTONOMOUS_BRAIN.md#conservative-run-trace-analytics).
+The TypeScript facade and Python agent also provide a run-observability controller, which restores
+and flushes both projections and coordinates publication plus analysis from one source snapshot
+so registry and analytics digests cannot drift during an append race. Partial persistence is
+reported explicitly and never retriggers execution.
 
 ## Status
 
