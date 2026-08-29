@@ -1,5 +1,15 @@
 # Remaining backlog
 
+The TypeScript contextual-selector bridge now preserves the complete value-only selection contract
+across the remote boundary. Caller-supplied global observations reach the base selector as
+fallback history, contextual observations retain overlay precedence, and remote ranking rows are
+validated against the exact local candidate catalogue before any provider dispatch. Optional base
+scores, exploration bonuses, and observed-pulls evidence survive the runtime projection for audit
+and replay. All twelve built-in domains exercise the forwarding path, while adversarial coverage
+rejects unknown remote model rows without contacting a provider. This closes a data-loss and
+authority-boundary gap; the bridge remains provider-free and does not make remote selection an
+authorization to invoke.
+
 The TypeScript local online learner now composes model metadata and evaluator feedback instead of
 discarding the canonical utility after eligibility filtering. Each eligible arm receives a
 deterministic four-pull prior from quality, reliability, cost, and latency; request-supplied

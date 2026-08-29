@@ -4173,7 +4173,24 @@ function selectorRankingProjection(value: unknown, fallback: AutonomousModelRank
     if (!isObject(row) || typeof row.provider !== "string" || !row.provider.trim() || typeof row.model !== "string" || !row.model.trim() || typeof row.score !== "number" || !Number.isFinite(row.score) || typeof row.eligible !== "boolean" || !Array.isArray(row.reasons) || row.reasons.length > 64 || row.reasons.some((reason) => typeof reason !== "string" || !reason.trim())) {
       throw new ProviderRuntimeError("autonomous model selector returned a malformed ranking row");
     }
-    return { provider: row.provider, model: row.model, score: row.score, eligible: row.eligible, reasons: [...row.reasons] };
+    const optionalMetric = (name: string): number | undefined => {
+      const metric = row[name];
+      if (metric === undefined || metric === null) return undefined;
+      if (typeof metric !== "number" || !Number.isFinite(metric)) throw new ProviderRuntimeError(`autonomous model selector returned an invalid ${name}`);
+      return metric;
+    };
+    const observedPulls = row.observed_pulls;
+    if (observedPulls !== undefined && observedPulls !== null && (typeof observedPulls !== "number" || !Number.isSafeInteger(observedPulls) || observedPulls < 0)) throw new ProviderRuntimeError("autonomous model selector returned invalid observed_pulls");
+    return {
+      provider: row.provider,
+      model: row.model,
+      score: row.score,
+      eligible: row.eligible,
+      reasons: [...row.reasons],
+      ...(row.base_score === undefined || row.base_score === null ? {} : { base_score: optionalMetric("base_score") }),
+      ...(row.exploration_bonus === undefined || row.exploration_bonus === null ? {} : { exploration_bonus: optionalMetric("exploration_bonus") }),
+      ...(observedPulls === undefined || observedPulls === null ? {} : { observed_pulls: observedPulls }),
+    };
   });
 }
 

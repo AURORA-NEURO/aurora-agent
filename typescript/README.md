@@ -609,6 +609,16 @@ reasons in the metadata-only ranking. A confidence floor is evaluated against th
 decision, so a learned promotion can resolve a tied cold-start prior while an actually ambiguous
 post-learning decision still abstains.
 
+When `AutonomousRuntime` uses the Rust/Python contextual selector bridge, the request's global
+`selectionObservations` are forwarded into the base value-only selection request as fallback
+history; contextual callback observations remain a higher-precedence overlay. The bridge validates
+the returned ranking against the exact locally registered `provider/model` candidates, rejects
+unknown or duplicate rows and malformed score components before invocation, and preserves the
+remote base score, exploration bonus, and observed-pulls evidence in the local decision receipt.
+This keeps the control plane advisory: local capability, health, capacity, credential, approval,
+and exact-arm gates still decide whether a provider can run, and no prompt, response, credential,
+or API key is retained or sent through the learning bridge.
+
 For ambiguous or novel intake, `semanticRouteAutonomousTask()` adds an explicit provider-assisted
 classification pass. It sends the private task only through the caller's approved local provider,
 asks for structured domain scores against the reviewed twelve-domain catalogue, and maps the

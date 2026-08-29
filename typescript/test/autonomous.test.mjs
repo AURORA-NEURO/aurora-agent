@@ -2306,6 +2306,101 @@ test("contextual selector bridge sends only model and health metadata to the con
   assert.equal(received.base.models[0].authorization, undefined);
 });
 
+test("contextual selector forwards global observations and preserves remote ranking across every domain", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const capabilities = [...new Set(profiles.flatMap((profile) => profile.required_model_capabilities))];
+  const received = [];
+  const apiClient = {
+    async brainModelSelectContextual(args) {
+      received.push(args);
+      return {
+        ok: true,
+        mcp: {
+          result: {
+            structuredContent: {
+              selection: {
+                selected_model_id: "remote/model-b",
+                selection_status: "selected",
+                selection_confidence: 0.8,
+                ranking: [
+                  { model_id: "remote/model-b", eligible: true, reasons: ["global_history"], base_score: 0.75, exploration_bonus: 0.05, score: 0.8, observed_pulls: 8 },
+                  { model_id: "remote/model-a", eligible: true, reasons: ["static_prior"], base_score: 0.4, exploration_bonus: 0.1, score: 0.5, observed_pulls: 0 },
+                ],
+              },
+            },
+          },
+        },
+      };
+    },
+  };
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "remote contextual answer" }, finish_reason: "stop" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("remote", "https://remote.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { apiClient });
+  agent.registerModel(candidate("remote", "model-a", capabilities));
+  agent.registerModel(candidate("remote", "model-b", capabilities));
+  const observation = { arm_id: "remote/model-b", pulls: 8, reward_sum: 7.2, failures: 0 };
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await agent.run(`Run a bounded ${domain} task through contextual selection.`, {
+      domain,
+      approveProviderCall: true,
+      selectionObservations: [observation],
+    });
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.selection.selected_model.model, "model-b", domain);
+    assert.equal(result.selection.selection_confidence, 0.8, domain);
+    assert.deepEqual(result.selection.ranking.map((row) => row.model), ["model-b", "model-a"], domain);
+    assert.equal(result.selection.ranking[0].observed_pulls, 8, domain);
+  }
+
+  assert.equal(received.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  for (const [index, args] of received.entries()) {
+    assert.equal(args.context.domain, AUTONOMOUS_DOMAIN_NAMES[index]);
+    assert.deepEqual(args.base.observations, [observation], AUTONOMOUS_DOMAIN_NAMES[index]);
+    assert.equal(args.base.observations[0].arm_id, "remote/model-b", AUTONOMOUS_DOMAIN_NAMES[index]);
+  }
+});
+
+test("contextual selector rejects an unknown remote ranking row before provider dispatch", async () => {
+  let providerCalls = 0;
+  const apiClient = {
+    async brainModelSelectContextual() {
+      return {
+        ok: true,
+        mcp: {
+          result: {
+            structuredContent: {
+              selection: {
+                selected_model_id: "remote/known",
+                selection_status: "selected",
+                ranking: [{ model_id: "remote/not-registered", eligible: true, reasons: [], score: 1 }],
+              },
+            },
+          },
+        },
+      };
+    },
+  };
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      providerCalls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: "must not dispatch" }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("remote", "https://remote.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm, { apiClient });
+  agent.registerModel(candidate("remote", "known"));
+  await assert.rejects(
+    agent.run("Reject a malformed contextual selection.", { domain: "coding", approveProviderCall: true }),
+    /unknown model/,
+  );
+  assert.equal(providerCalls, 0);
+});
+
 test("contextual selector abstains on an ambiguous model-only id without dispatch", async () => {
   let calls = 0;
   const apiClient = {

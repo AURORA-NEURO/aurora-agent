@@ -262,6 +262,7 @@ import {
   type AutonomousCostBudgetSnapshot,
   type AutonomousModelCandidate,
   type AutonomousModelObservation,
+  type AutonomousModelRanking,
   type AutonomousSelectionWeights,
   normalizeAutonomousSelectionWeights,
   normalizeAutonomousModelObservations,
@@ -5596,6 +5597,50 @@ function cloneBanditState(state: BrainBanditState): BrainBanditState {
   return { schema: typeof state.schema === "string" ? state.schema : "bioprism-brain-bandit-state/0.1", generation: state.generation ?? 0, policy: state.policy ? { ...state.policy } : undefined, arms: state.arms.map((arm) => ({ ...arm })), credited_outcomes: (state.credited_outcomes ?? []).map((receipt) => ({ ...receipt })), ...(contextualStates.length ? { contextual_states: contextualStates.map((contextState) => ({ ...contextState, context: { ...contextState.context }, arms: contextState.arms.map((arm) => ({ ...arm })) })) } : {}) };
 }
 
+/**
+ * Preserve the control-plane's value-only model ranking at the provider boundary.
+ *
+ * The MCP response is remote input even when it comes from the project's own Rust server. Keep
+ * the selected identity bound to the exact local candidate catalogue and reject malformed or
+ * unknown rows before the runtime can expose them as an execution decision. Optional score
+ * components are retained because they are useful for audits, but they never authorize a model.
+ */
+function contextualSelectionRanking(value: unknown, candidates: readonly AutonomousModelCandidate[]): AutonomousModelRanking[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 128) throw new ProviderRuntimeError("contextual brain selector returned a malformed ranking");
+  const candidateById = new Map(candidates.map((candidate) => [`${candidate.provider}/${candidate.model}`, candidate]));
+  const seen = new Set<string>();
+  return value.map((raw, index) => {
+    if (!isObject(raw) || typeof raw.model_id !== "string" || !raw.model_id.trim() || typeof raw.score !== "number" || !Number.isFinite(raw.score) || typeof raw.eligible !== "boolean" || !Array.isArray(raw.reasons) || raw.reasons.length > 64 || raw.reasons.some((reason) => typeof reason !== "string" || !reason.trim())) {
+      throw new ProviderRuntimeError(`contextual brain selector returned a malformed ranking row ${index}`);
+    }
+    const modelId = raw.model_id;
+    const candidate = candidateById.get(modelId);
+    if (!candidate) throw new ProviderRuntimeError(`contextual brain selector returned an unknown model ${modelId}`);
+    if (seen.has(modelId)) throw new ProviderRuntimeError(`contextual brain selector returned duplicate model ${modelId}`);
+    seen.add(modelId);
+    const optionalMetric = (name: string): number | undefined => {
+      const metric = raw[name];
+      if (metric === undefined) return undefined;
+      if (typeof metric !== "number" || !Number.isFinite(metric)) throw new ProviderRuntimeError(`contextual brain selector returned an invalid ${name}`);
+      return metric;
+    };
+    const observedPullsRaw = raw.observed_pulls;
+    const observedPulls = observedPullsRaw === undefined || observedPullsRaw === null ? undefined : observedPullsRaw;
+    if (observedPulls !== undefined && (typeof observedPulls !== "number" || !Number.isSafeInteger(observedPulls) || observedPulls < 0)) throw new ProviderRuntimeError("contextual brain selector returned invalid observed_pulls");
+    return {
+      provider: candidate.provider,
+      model: candidate.model,
+      score: raw.score,
+      eligible: raw.eligible,
+      reasons: [...raw.reasons],
+      ...(raw.base_score === undefined ? {} : { base_score: optionalMetric("base_score") }),
+      ...(raw.exploration_bonus === undefined ? {} : { exploration_bonus: optionalMetric("exploration_bonus") }),
+      ...(observedPulls === undefined ? {} : { observed_pulls: observedPulls }),
+    };
+  });
+}
+
 /** Adapt the TypeScript runtime to the value-only Rust/Python contextual selector. */
 export function contextualSelector(client: ApiClient, options: { requestOptions?: Parameters<ApiClient["brainModelSelectContextual"]>[1]; observations?: (request: AutonomousSelectionRequest) => Array<{ context_digest: string; arm_id: string; pulls?: number; reward_sum?: number; failures?: number; disabled?: boolean }> } = {}): AutonomousModelSelector {
   if (!client || typeof client.brainModelSelectContextual !== "function") throw new ArgumentError("contextual selector requires an ApiClient");
@@ -5624,6 +5669,16 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
       min_quality: request.min_quality ?? null,
       min_selection_confidence: request.min_selection_confidence ?? null,
       models,
+      // `selectionObservations` are the caller's global value-only history. They must remain in
+      // the base request so the remote contextual selector can use them as a cold-start fallback
+      // for domains without exact contextual evidence.
+      observations: (request.observations ?? []).map((observation) => ({
+        arm_id: observation.arm_id,
+        pulls: observation.pulls,
+        reward_sum: observation.reward_sum,
+        failures: observation.failures,
+        ...(observation.disabled === undefined ? {} : { disabled: observation.disabled }),
+      })),
       provider_health: Object.fromEntries(Object.entries(request.provider_health).map(([provider, health]) => [provider, { registered: true, circuit: health.circuit, credential_ready: health.credential_ready, eligible: health.eligible, attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms }] as [string, BrainProviderHealth])),
       model_health: Object.fromEntries(Object.entries(request.model_health).map(([arm, health]) => [arm, { attempts: health.attempts, successes: health.successes, failures: health.failures, success_rate: health.success_rate, mean_latency_ms: health.mean_latency_ms, last_latency_ms: health.last_latency_ms, circuit: health.circuit }])),
     };
@@ -5640,7 +5695,7 @@ export function contextualSelector(client: ApiClient, options: { requestOptions?
     return {
       selected_model: selected ? { provider: selected.provider, model: selected.model } : null,
       strategy: "caller_selector",
-      ranking: [],
+      ranking: contextualSelectionRanking(selection.ranking, request.candidates),
       abstention_reason: selected ? null : matches.length > 1 ? "contextual selector returned an ambiguous model id" : selection.selection_status || "contextual selector abstained",
       selection_confidence: typeof selection.selection_confidence === "number" ? selection.selection_confidence : undefined,
       min_selection_confidence: typeof selection.min_selection_confidence === "number" ? selection.min_selection_confidence : request.min_selection_confidence ?? null,
