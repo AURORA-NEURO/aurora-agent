@@ -63,17 +63,17 @@ pub mod effect;
 pub mod error;
 pub mod fork;
 pub mod host;
-pub mod interpretation_assurance;
 pub mod orchestrator;
 pub mod provider;
-pub mod replay_audit;
 pub mod research_run;
+pub mod replay_audit;
+pub mod workflow_execution;
+pub mod workflow_batch;
 pub mod sandbox;
 pub mod seam;
 pub mod secret;
 pub mod tape;
-pub mod workflow_batch;
-pub mod workflow_execution;
+pub mod context_compilation_contract;
 
 pub use budget::{
     Accounting, BudgetController, BudgetPlan, BudgetWarning, ChargeStatus, Limit, RuntimeResource,
@@ -89,45 +89,47 @@ pub use fork::{
     OBSERVABLE_STATE_VERSION,
 };
 pub use host::{EffectSource, Host, RecordingHost, ReplayHost};
-pub use interpretation_assurance::{
-    assure_interpretation, interpretation_assurance_manifest, EvidenceBackedResult4,
-    InterpretationArtifact7, InterpretationAssuranceError, InterpretationCandidate4,
-    InterpretationEvidenceState, InteractiveInterpretation7,
-    CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
-    FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
-};
 pub use orchestrator::{
-    AggregationPolicy, AttemptId, AttemptRecord, LifecycleEvent, RetryClass, RunState, Termination,
-    TerminationReason, Trial, TrialId,
+    AggregationPolicy, AttemptId, AttemptRecord, LifecycleEvent, RetryClass, RunState,
+    Termination, TerminationReason, Trial, TrialId,
 };
 pub use provider::{
     Artifact, Capabilities, ContainerProvider, ExecutionPlan, ExecutorProvider, InProcessProvider,
     StateHandle, SubprocessProvider,
 };
-pub use replay_audit::{
-    audit_replay, replay_audit_manifest, ReplayAuditError, ReplayAuditReceipt, ReplayAuditRequest,
-    ReplayAuditStatus,
+pub use context_compilation_contract::{
+    capability_manifest as context_compilation_capability_manifest,
+    compile as compile_context_contract,
+    compile_json as compile_context_contract_json,
+    CertifiedDecisionSection, ContextContractError, ContextContractReceipt, DecisionQuery,
+    FactBinding, CONTRACT_VERSION as CONTEXT_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_CONTRACT_FEATURE_ID, INPUT_SCHEMA as CONTEXT_CONTRACT_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as CONTEXT_CONTRACT_OUTPUT_SCHEMA,
 };
 pub use research_run::{
     ResearchExecutionSession, ResearchReplayBundle, ResearchRuntimeError,
     FEATURE_CONTRACT_VERSION as RESEARCH_FEATURE_CONTRACT_VERSION,
     FEATURE_ID as RESEARCH_FEATURE_ID,
 };
-pub use sandbox::{Fault, FileChange, InProcessWorld};
-pub use seam::{Clock, ExternalActions, Network, Randomness, Sandbox};
-pub use secret::{Capability, SecretBroker, SecretRef};
-pub use tape::{
-    Artifacts, Checkpoint, RestorationDeclaration, TapeEntry, TapeLineage, WorldTape,
-    MAX_TAPE_CHECKPOINTS, MAX_TAPE_ENTRIES, MAX_TAPE_JSON_BYTES,
-};
-pub use workflow_batch::{
-    execute_workflow_batch, workflow_batch_manifest, WorkflowBatchDisposition, WorkflowBatchEntry,
-    WorkflowBatchError, WorkflowBatchMode, WorkflowBatchReceipt, WorkflowBatchRequest,
-    FEATURE_ID as WORKFLOW_BATCH_FEATURE_ID, FEATURE_VERSION as WORKFLOW_BATCH_FEATURE_VERSION,
+pub use replay_audit::{
+    audit_replay, replay_audit_manifest, ReplayAuditError, ReplayAuditRequest,
+    ReplayAuditReceipt, ReplayAuditStatus,
 };
 pub use workflow_execution::{
     execute_workflow, workflow_execution_manifest, WorkflowAction, WorkflowExecutionError,
     WorkflowExecutionMode, WorkflowExecutionReceipt, WorkflowExecutionRequest,
     WorkflowExecutionStatus, FEATURE_CONTRACT_VERSION as WORKFLOW_EXECUTION_FEATURE_VERSION,
     FEATURE_ID as WORKFLOW_EXECUTION_FEATURE_ID,
+};
+pub use workflow_batch::{
+    execute_workflow_batch, workflow_batch_manifest, WorkflowBatchDisposition,
+    WorkflowBatchEntry, WorkflowBatchError, WorkflowBatchMode, WorkflowBatchReceipt,
+    WorkflowBatchRequest, FEATURE_ID as WORKFLOW_BATCH_FEATURE_ID,
+    FEATURE_VERSION as WORKFLOW_BATCH_FEATURE_VERSION,
+};
+pub use sandbox::{Fault, FileChange, InProcessWorld};
+pub use seam::{Clock, ExternalActions, Network, Randomness, Sandbox};
+pub use secret::{Capability, SecretBroker, SecretRef};
+pub use tape::{
+    Artifacts, Checkpoint, RestorationDeclaration, TapeEntry, TapeLineage, WorldTape,
 };

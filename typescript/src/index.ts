@@ -922,6 +922,32 @@ export {
   THROUGHPUT_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
   brainThroughputContextCompilationFederatedControlPlaneReceiptDigest,
   validateBrainThroughputContextCompilationFederatedControlPlaneReceipt,
+  FEDERATED_CONTINUAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+  FEDERATED_CONTINUAL_CONTEXT_COMPILATION_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
+  brainFederatedContinualContextCompilationFederatedControlPlaneReceiptDigest,
+  validateBrainFederatedContinualContextCompilationFederatedControlPlaneReceipt,
+  LOCAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
+  LOCAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+  brainLocalKnowledgeRepresentationInferenceEngineReceiptDigest,
+  validateBrainLocalKnowledgeRepresentationInferenceEngineReceipt,
+  MULTIMODAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
+  MULTIMODAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+  brainMultimodalKnowledgeRepresentationInferenceEngineReceiptDigest,
+  validateBrainMultimodalKnowledgeRepresentationInferenceEngineReceipt,
+  THROUGHPUT_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
+  THROUGHPUT_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+  brainThroughputKnowledgeRepresentationInferenceEngineReceiptDigest,
+  validateBrainThroughputKnowledgeRepresentationInferenceEngineReceipt,
+  FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_FEATURE_ID,
+  FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_INFERENCE_ENGINE_CONTRACT_VERSION,
+  brainFederatedContinualKnowledgeRepresentationInferenceEngineReceiptDigest,
+  validateBrainFederatedContinualKnowledgeRepresentationInferenceEngineReceipt,
+} from "./research-contracts.js";
+export {
+  LOCAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+  LOCAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainLocalKnowledgeRepresentationContractModelReceiptDigest,
+  validateBrainLocalKnowledgeRepresentationContractModelReceipt,
 } from "./research-contracts.js";
 export type { EvidenceOmission, EvidenceReceipt, EvidenceState, PolicyDecision, PolicyReceipt, ReleaseReview, ResearchIngestionBundle, ExperimentDesignPlan, ProtocolSimulationReport, ProtocolSimulationReceipt, ReplicationReport, QualityControlReceipt, QualityDriftReceipt, DesignFrontierReceipt, BatchAdmissionReceipt, WorkflowBatchReceipt, ResearchReleaseBatchReceipt, FederatedEvaluationReceipt, QualifiedResourceSet, ResourceDiscoveryContractReceipt, SignedResearchObjectReceipt, ReleaseHarnessReceipt, ProtocolAssuranceReceipt, FederatedMultimodalAssuranceReceipt, FederatedKnowledgeGatewayReceipt, FederatedLensAssuranceReceipt, LabSemanticParityReceipt, FederatedRetrievalAssuranceReceipt, FederatedContinualRetrievalReceipt, RetrievalSourceUpdate, ContextCompilationAssuranceReceipt, KnowledgeRepresentationAssuranceReceipt, ResourceControlPlaneReceipt, WeaveLangReleaseAssuranceReceipt, MechanismControlPlaneReceipt, MechanismGatewayReceipt, EvidenceSurveillanceReceipt, RetrievalSynthesisReceipt, AdapterContextCompilationReceipt, KnowledgeWorkflowReceipt, ResourceWorkbenchReceipt, IngestionGatewayReceipt, QualityEnvelopeReceipt, ExperimentDesignReceipt, InstrumentMeshReceipt, ComputationalExecutionReceipt, AnalysisPortfolioReceipt, InterpretationAssuranceReceipt, ReplicationAssuranceReceipt, ReleaseAssuranceReceipt, DeterminismGatewayReceipt, ProvenanceAssuranceReceipt, PolicyGatewayReceipt, FederationWorkflowReceipt, ReliabilityCopilotReceipt, InteroperabilityGatewayReceipt, EvaluationAssuranceReceipt, ResearchWorkbenchReceipt, ContractFrontierReceipt, LimitationClosureReceipt, AdapterCompositionReceipt, AdapterSemanticParityReceipt, ScaleFrontierReceipt, AdversarialRecoveryReceipt, FederatedCommonsReceipt, BoundedEvolutionReceipt, EvolutionIdentityReceipt, EvolutionAssuranceReceipt, InterpretationPlaneReceipt, KnowledgeGatewayReceipt, OracleCapabilityManifestReceipt, FederatedMultimodalIngestionReceipt, QualityAssuranceReceipt, MechanismControlReceipt, EvidenceWorkbenchReceipt, ResearchContextReceipt, ReplayAuditReceipt, WorkflowExecutionReceipt, EvaluationCardReceipt, ResearchReleaseReceipt, InstrumentPreflightReceipt, HarmonizedResearchObject, QualifiedAnalysisResult, ProtocolMatrixReceipt, MultimodalReplicationReport } from "./research-contracts.js";
 export type { AnalysisControlReceipt } from "./research-contracts.js";
@@ -934,6 +960,51 @@ export type { BrainFederatedContinualContextCompilationAssuranceReceipt } from "
 export type { BrainLocalContextCompilationFederatedControlPlaneReceipt } from "./research-contracts.js";
 export type { BrainMultimodalContextCompilationFederatedControlPlaneReceipt } from "./research-contracts.js";
 export type { BrainThroughputContextCompilationFederatedControlPlaneReceipt } from "./research-contracts.js";
+export type { BrainFederatedContinualContextCompilationFederatedControlPlaneReceipt } from "./research-contracts.js";
+export type { BrainLocalKnowledgeRepresentationInferenceEngineReceipt } from "./research-contracts.js";
+export type { BrainMultimodalKnowledgeRepresentationInferenceEngineReceipt } from "./research-contracts.js";
+export type { BrainThroughputKnowledgeRepresentationInferenceEngineReceipt } from "./research-contracts.js";
+export type { BrainFederatedContinualKnowledgeRepresentationInferenceEngineReceipt } from "./research-contracts.js";
+export type { BrainLocalKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
+export {
+  MULTIMODAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+  MULTIMODAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainMultimodalKnowledgeRepresentationContractModelReceiptDigest,
+  validateBrainMultimodalKnowledgeRepresentationContractModelReceipt,
+} from "./research-contracts.js";
+export type { BrainMultimodalKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
+export {
+  ORACLEX_PUBLICATION_RELEASE_FEATURE_ID,
+  ORACLEX_PUBLICATION_RELEASE_CONTRACT_VERSION,
+  ORACLEX_PUBLICATION_RELEASE_INPUT_SCHEMA,
+  ORACLEX_PUBLICATION_RELEASE_OUTPUT_SCHEMA,
+  oraclexPublicationReleaseReceiptDigest,
+  validateOraclexPublicationReleaseReceipt,
+} from "./research-contracts.js";
+export type { OraclexPublicationReleaseReceipt } from "./research-contracts.js";
+export {
+  INTERWEAVE_FRONTIER_CONTROL_FEATURE_ID,
+  INTERWEAVE_FRONTIER_CONTROL_CONTRACT_VERSION,
+  INTERWEAVE_FRONTIER_CONTROL_INPUT_SCHEMA,
+  INTERWEAVE_FRONTIER_CONTROL_OUTPUT_SCHEMA,
+  interweaveFrontierControlReceiptDigest,
+  validateInterweaveFrontierControlReceipt,
+} from "./research-contracts.js";
+export type { InterweaveFrontierControlReceipt } from "./research-contracts.js";
+export {
+  THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+  THROUGHPUT_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainThroughputKnowledgeRepresentationContractModelReceiptDigest,
+  validateBrainThroughputKnowledgeRepresentationContractModelReceipt,
+} from "./research-contracts.js";
+export type { BrainThroughputKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
+export {
+  FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
+  FEDERATED_CONTINUAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
+  brainFederatedContinualKnowledgeRepresentationContractModelReceiptDigest,
+  validateBrainFederatedContinualKnowledgeRepresentationContractModelReceipt,
+} from "./research-contracts.js";
+export type { BrainFederatedContinualKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
 export type { BrainFederatedContextCompilationReceipt } from "./research-contracts.js";
 export type { BrainContextOmissionAdjudicationReceipt } from "./research-contracts.js";
 export type { BrainContextReleaseAdmissionReceipt } from "./research-contracts.js";
@@ -3405,33 +3476,208 @@ export {
 } from "./autonomous-memory.js";
 
 export {
-  LOCAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_FEATURE_ID,
-  LOCAL_KNOWLEDGE_REPRESENTATION_CONTRACT_MODEL_CONTRACT_VERSION,
-  brainLocalKnowledgeRepresentationContractModelReceiptDigest,
-  validateBrainLocalKnowledgeRepresentationContractModelReceipt,
+  CLI_FEDERATED_RETRIEVAL_FEATURE_ID,
+  CLI_FEDERATED_RETRIEVAL_CONTRACT_VERSION,
+  CLI_FEDERATED_RETRIEVAL_INPUT_SCHEMA,
+  CLI_FEDERATED_RETRIEVAL_OUTPUT_SCHEMA,
+  validateCliFederatedRetrievalAssuranceReceipt,
+  cliFederatedRetrievalAssuranceReceiptDigest,
 } from "./research-contracts.js";
-export type { BrainLocalKnowledgeRepresentationContractModelReceipt } from "./research-contracts.js";
+export type { CliFederatedRetrievalAssuranceReceipt } from "./research-contracts.js";
+
 export {
+  CLI_PROTOCOL_SIMULATION_ASSURANCE_FEATURE_ID,
+  CLI_PROTOCOL_SIMULATION_ASSURANCE_CONTRACT_VERSION,
+  CLI_PROTOCOL_SIMULATION_ASSURANCE_INPUT_SCHEMA,
+  CLI_PROTOCOL_SIMULATION_ASSURANCE_OUTPUT_SCHEMA,
+  cliProtocolSimulationAssuranceReceiptDigest,
+  validateCliProtocolSimulationAssuranceReceipt,
+} from "./research-contracts.js";
+export type { CliProtocolSimulationAssuranceReceipt } from "./research-contracts.js";
+export {
+  FEDERATED_MECHANISM_CONTROL_FEATURE_ID,
+  FEDERATED_MECHANISM_CONTROL_VERSION,
+  FEDERATED_MECHANISM_CONTROL_INPUT_SCHEMA,
+  FEDERATED_MECHANISM_CONTROL_OUTPUT_SCHEMA,
+  federatedMechanismReceiptDigest,
+  validateFederatedMechanismReceipt,
+} from "./research-contracts.js";
+export type { FederatedMechanismReceipt } from "./research-contracts.js";
+export {
+  MEGAFACTORY_MECHANISM_EXPLORATION_FEATURE_ID,
+  MEGAFACTORY_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+  MEGAFACTORY_MECHANISM_EXPLORATION_INPUT_SCHEMA,
+  MEGAFACTORY_MECHANISM_EXPLORATION_OUTPUT_SCHEMA,
+  megafactoryMechanismExplorationReceiptDigest,
+  validateMegafactoryMechanismExplorationReceipt,
+} from "./research-contracts.js";
+export type { MegafactoryMechanismExplorationReceipt } from "./research-contracts.js";
+export {
+  FEDERATED_ANALYSIS_ASSURANCE_FEATURE_ID,
+  FEDERATED_ANALYSIS_ASSURANCE_CONTRACT_VERSION,
+  FEDERATED_ANALYSIS_ASSURANCE_INPUT_SCHEMA,
+  FEDERATED_ANALYSIS_ASSURANCE_OUTPUT_SCHEMA,
+  federatedAnalysisReceiptDigest,
+  validateFederatedAnalysisReceipt,
+} from "./research-contracts.js";
+export type { FederatedAnalysisReceipt } from "./research-contracts.js";
+
+export {
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_CONTRACT_VERSION,
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_INPUT_SCHEMA,
+  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_OUTPUT_SCHEMA,
+  conformanceContextCompilationFederatedControlReceiptDigest,
+  validateConformanceContextCompilationFederatedControlReceipt,
+} from "./research-contracts.js";
+export type { ConformanceContextCompilationFederatedControlReceipt } from "./research-contracts.js";
+
+export {
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_CONTRACT_VERSION,
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_INPUT_SCHEMA,
+  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_OUTPUT_SCHEMA,
+  servicesFederatedPublicationReleaseInferenceReceiptDigest,
+  validateServicesFederatedPublicationReleaseInferenceReceipt,
+} from "./research-contracts.js";
+export type { ServicesFederatedPublicationReleaseInferenceReceipt } from "./research-contracts.js";
+export {
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID,
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_CONTRACT_VERSION,
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_INPUT_SCHEMA,
+  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_OUTPUT_SCHEMA,
+  mutationKnowledgeFederatedReceiptDigest,
+  validateMutationKnowledgeFederatedReceipt,
+} from "./research-contracts.js";
+export type { MutationKnowledgeFederatedReceipt } from "./research-contracts.js";
+
+export {
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceInferenceEngineReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterMultimodalEvidenceSurveillanceInferenceEngineReceiptDigest,
+  validateAdapterMultimodalEvidenceSurveillanceInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterThroughputEvidenceSurveillanceInferenceEngineReceiptDigest,
+  validateAdapterThroughputEvidenceSurveillanceInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterFederatedEvidenceSurveillanceInferenceEngineReceiptDigest,
+  validateAdapterFederatedEvidenceSurveillanceInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedEvidenceSurveillanceInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceContractModelReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterMultimodalEvidenceSurveillanceContractModelReceiptDigest,
+  validateAdapterMultimodalEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterThroughputEvidenceSurveillanceContractModelReceiptDigest,
+  validateAdapterThroughputEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterFederatedContinualEvidenceSurveillanceContractModelReceiptDigest,
+  validateAdapterFederatedContinualEvidenceSurveillanceContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualEvidenceSurveillanceContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterLocalEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateAdapterLocalEvidenceSurveillanceResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterMultimodalEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateAdapterMultimodalEvidenceSurveillanceResearchCopilotReceipt,
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterThroughputEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateAdapterThroughputEvidenceSurveillanceResearchCopilotReceipt,
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterFederatedContinualEvidenceSurveillanceResearchCopilotReceiptDigest,
+  validateAdapterFederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
   ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
   ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
   adapterLocalEvidenceSurveillanceWorkflowFabricReceiptDigest,
   validateAdapterLocalEvidenceSurveillanceWorkflowFabricReceipt,
-} from "./research-contracts.js";
-export type { AdapterLocalEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
-export {
   ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
   ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
   adapterMultimodalEvidenceSurveillanceWorkflowFabricReceiptDigest,
   validateAdapterMultimodalEvidenceSurveillanceWorkflowFabricReceipt,
 } from "./research-contracts.js";
+export type { AdapterMultimodalEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export type { AdapterThroughputEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export type { AdapterFederatedContinualEvidenceSurveillanceResearchCopilotReceipt } from "./research-contracts.js";
+export type { AdapterLocalEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
 export type { AdapterMultimodalEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
-export {
-  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
-  ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
-  adapterThroughputEvidenceSurveillanceWorkflowFabricReceiptDigest,
-  validateAdapterThroughputEvidenceSurveillanceWorkflowFabricReceipt,
-} from "./research-contracts.js";
 export type { AdapterThroughputEvidenceSurveillanceWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_INPUT_SCHEMA,
+  CLI_RETRIEVAL_SYNTHESIS_ASSURANCE_OUTPUT_SCHEMA,
+  cliRetrievalSynthesisAssuranceReceiptDigest,
+  validateCliRetrievalSynthesisAssuranceReceipt,
+} from "./research-contracts.js";
+export type { CliRetrievalEvidenceCandidate, CliRetrievalSynthesisAssuranceReceipt } from "./research-contracts.js";
+export {
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_FEATURE_ID,
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_CONTRACT_VERSION,
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_INPUT_SCHEMA,
+  API_MULTIMODAL_INTERPRETATION_WORKFLOW_OUTPUT_SCHEMA,
+  apiMultimodalInterpretationWorkflowReceiptDigest,
+  validateApiMultimodalInterpretationWorkflowReceipt,
+} from "./research-contracts.js";
+export type { ApiInterpretationStudy, ApiMultimodalInterpretationWorkflowReceipt } from "./research-contracts.js";
+export {
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_FEATURE_ID,
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_CONTRACT_VERSION,
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_INPUT_SCHEMA,
+  POLICY_FEDERATED_COMMONS_INTEROPERABILITY_OUTPUT_SCHEMA,
+  policyFederatedCommonsEnvelopeDigest,
+  validatePolicyFederatedCommonsEnvelope,
+} from "./research-contracts.js";
+export type { PolicyFederationArtifactCandidate, PolicyFederatedCommonsEnvelope } from "./research-contracts.js";
+export {
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_INPUT_SCHEMA,
+  CLI_COMPUTATIONAL_EXECUTION_ASSURANCE_OUTPUT_SCHEMA,
+  cliComputationalExecutionAssuranceReceiptDigest,
+  validateCliComputationalExecutionAssuranceReceipt,
+} from "./research-contracts.js";
+export type { CliExecutionNode, CliComputationalExecutionAssuranceReceipt } from "./research-contracts.js";
 export {
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
   ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
@@ -3460,6 +3706,160 @@ export {
   validateAdapterThroughputEvidenceSurveillanceResearchWorkbenchReceipt,
 } from "./research-contracts.js";
 export type { AdapterThroughputEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterFederatedContinualEvidenceSurveillanceResearchWorkbenchReceiptDigest,
+  validateAdapterFederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisInferenceEngineReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisContractModelReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisResearchCopilotReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterMultimodalRetrievalSynthesisResearchCopilotReceiptDigest,
+  validateAdapterMultimodalRetrievalSynthesisResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterThroughputRetrievalSynthesisResearchCopilotReceiptDigest,
+  validateAdapterThroughputRetrievalSynthesisResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
+  adapterFederatedContinualRetrievalSynthesisResearchCopilotReceiptDigest,
+  validateAdapterFederatedContinualRetrievalSynthesisResearchCopilotReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisResearchCopilotReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisWorkflowFabricReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterMultimodalRetrievalSynthesisWorkflowFabricReceiptDigest,
+  validateAdapterMultimodalRetrievalSynthesisWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterThroughputRetrievalSynthesisWorkflowFabricReceiptDigest,
+  validateAdapterThroughputRetrievalSynthesisWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+  ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
+  adapterFederatedContinualRetrievalSynthesisWorkflowFabricReceiptDigest,
+  validateAdapterFederatedContinualRetrievalSynthesisWorkflowFabricReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisWorkflowFabricReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterLocalRetrievalSynthesisResearchWorkbenchReceiptDigest,
+  validateAdapterLocalRetrievalSynthesisResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+  adapterMultimodalRetrievalSynthesisResearchWorkbenchReceiptDigest,
+  validateAdapterMultimodalRetrievalSynthesisResearchWorkbenchReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export { ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION, adapterThroughputRetrievalSynthesisResearchWorkbenchReceiptDigest, validateAdapterThroughputRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export { ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION, adapterFederatedContinualRetrievalSynthesisResearchWorkbenchReceiptDigest, validateAdapterFederatedContinualRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisResearchWorkbenchReceipt } from "./research-contracts.js";
+export { ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, adapterLocalRetrievalSynthesisInteroperabilityGatewayReceiptDigest, validateAdapterLocalRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export { ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, adapterMultimodalRetrievalSynthesisInteroperabilityGatewayReceiptDigest, validateAdapterMultimodalRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export { ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, adapterThroughputRetrievalSynthesisInteroperabilityGatewayReceiptDigest, validateAdapterThroughputRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export { ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION, adapterFederatedContinualRetrievalSynthesisInteroperabilityGatewayReceiptDigest, validateAdapterFederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt } from "./research-contracts.js";
+export { ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterLocalRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterLocalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export { ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterMultimodalRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterMultimodalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export { ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterThroughputRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterThroughputRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export { ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION, adapterFederatedContinualRetrievalSynthesisAssuranceHarnessReceiptDigest, validateAdapterFederatedContinualRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export type { AdapterFederatedContinualRetrievalSynthesisAssuranceHarnessReceipt } from "./research-contracts.js";
+export { ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION, adapterLocalRetrievalSynthesisFederatedControlPlaneReceiptDigest, validateAdapterLocalRetrievalSynthesisFederatedControlPlaneReceipt } from "./research-contracts.js";
+export { ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION, adapterMultimodalRetrievalSynthesisFederatedControlPlaneReceiptDigest, validateAdapterMultimodalRetrievalSynthesisFederatedControlPlaneReceipt } from "./research-contracts.js";
+export { ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION, adapterThroughputRetrievalSynthesisFederatedControlPlaneReceiptDigest, validateAdapterThroughputRetrievalSynthesisFederatedControlPlaneReceipt } from "./research-contracts.js";
+export { ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION, adapterFederatedContinualRetrievalSynthesisFederatedControlPlaneReceiptDigest, validateAdapterFederatedContinualRetrievalSynthesisFederatedControlPlaneReceipt } from "./research-contracts.js";
+export { FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID, FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_CONTRACT_VERSION, foundationMechanismExplorationAssuranceReceiptDigest, validateFoundationMechanismExplorationAssuranceReceipt } from "./research-contracts.js";
+export { INFLUENCE_FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID, INFLUENCE_FEDERATED_CONTINUAL_INTERPRETATION_CONTRACT_VERSION, INFLUENCE_FEDERATED_CONTINUAL_INTERPRETATION_INPUT_SCHEMA, INFLUENCE_FEDERATED_CONTINUAL_INTERPRETATION_OUTPUT_SCHEMA, influenceFederatedContinualInterpretationReceiptDigest, validateInfluenceFederatedContinualInterpretationReceipt } from "./research-contracts.js";
+export type { InfluenceFederatedContinualInterpretationReceipt } from "./research-contracts.js";
+export type { AdapterLocalRetrievalSynthesisFederatedControlPlaneReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterMultimodalRetrievalSynthesisInferenceEngineReceiptDigest,
+  validateAdapterMultimodalRetrievalSynthesisInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterMultimodalRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterThroughputRetrievalSynthesisInferenceEngineReceiptDigest,
+  validateAdapterThroughputRetrievalSynthesisInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterThroughputRetrievalSynthesisContractModelReceiptDigest,
+  validateAdapterThroughputRetrievalSynthesisContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterThroughputRetrievalSynthesisContractModelReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+  ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
+  adapterFederatedRetrievalSynthesisInferenceEngineReceiptDigest,
+  validateAdapterFederatedRetrievalSynthesisInferenceEngineReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedRetrievalSynthesisInferenceEngineReceipt } from "./research-contracts.js";
+export {
+  ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+  ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
+  adapterFederatedRetrievalSynthesisContractModelReceiptDigest,
+  validateAdapterFederatedRetrievalSynthesisContractModelReceipt,
+} from "./research-contracts.js";
+export type { AdapterFederatedRetrievalSynthesisContractModelReceipt } from "./research-contracts.js";
 export {
   AUTONOMOUS_GOAL_EVENT_SCHEMA,
   AUTONOMOUS_GOAL_MAX_BLOCKERS,
@@ -3558,35 +3958,271 @@ export type {
 } from "./autonomous-memory.js";
 
 export {
-  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,
-  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_CONTRACT_VERSION,
-  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_INPUT_SCHEMA,
-  CONFORMANCE_CONTEXT_COMPILATION_FEDERATED_CONTROL_OUTPUT_SCHEMA,
-  conformanceContextCompilationFederatedControlReceiptDigest,
-  validateConformanceContextCompilationFederatedControlReceipt,
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_FEATURE_ID,
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_CONTRACT_VERSION,
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_INPUT_SCHEMA,
+  FIBER_FEDERATED_PROTOCOL_SIMULATION_OUTPUT_SCHEMA,
+  fiberFederatedProtocolSimulationReceiptDigest,
+  validateFiberFederatedProtocolSimulationReceipt,
 } from "./research-contracts.js";
-export type {
-  ConformanceContextCompilationFederatedControlReceipt,
+export type { FiberFederatedProtocolSimulationReceipt } from "./research-contracts.js";
+export {
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_FEATURE_ID,
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_CONTRACT_VERSION,
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_INPUT_SCHEMA,
+  FIBER_FEDERATED_EXECUTION_INTEROPERABILITY_OUTPUT_SCHEMA,
+  fiberFederatedExecutionInteroperabilityEnvelopeDigest,
+  validateFiberFederatedExecutionInteroperabilityEnvelope,
 } from "./research-contracts.js";
+export type { FiberFederatedExecutionInteroperabilityEnvelope } from "./research-contracts.js";
+export {
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_FEATURE_ID,
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
+  INTERWEAVE_FEDERATED_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
+  interweaveFederatedDependencyCompositionReceiptDigest,
+  validateInterweaveFederatedDependencyCompositionReceipt,
+} from "./research-contracts.js";
+export type { InterweaveFederatedDependencyCompositionReceipt } from "./research-contracts.js";
+export {
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_FEATURE_ID,
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_CONTRACT_VERSION,
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_INPUT_SCHEMA,
+  EXAMPLES_STATISTICAL_ANALYSIS_WORKFLOW_OUTPUT_SCHEMA,
+  examplesStatisticalAnalysisWorkflowRunDigest,
+  validateExamplesStatisticalAnalysisWorkflowRun,
+} from "./research-contracts.js";
+export type { ExamplesStatisticalAnalysisWorkflowRun } from "./research-contracts.js";
+export {
+  CLI_QUALITY_CONTROL_WORKFLOW_FEATURE_ID,
+  CLI_QUALITY_CONTROL_WORKFLOW_CONTRACT_VERSION,
+  CLI_QUALITY_CONTROL_WORKFLOW_INPUT_SCHEMA,
+  CLI_QUALITY_CONTROL_WORKFLOW_OUTPUT_SCHEMA,
+  cliQualityControlWorkflowRunDigest,
+  validateCliQualityControlWorkflowRun,
+} from "./research-contracts.js";
+export type { CliQualityControlWorkflowRun } from "./research-contracts.js";
 
 export {
-  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
-  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_CONTRACT_VERSION,
-  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_INPUT_SCHEMA,
-  SERVICES_FEDERATED_PUBLICATION_RELEASE_INFERENCE_OUTPUT_SCHEMA,
-  servicesFederatedPublicationReleaseInferenceReceiptDigest,
-  validateServicesFederatedPublicationReleaseInferenceReceipt,
+  BIOEVALX_MECHANISM_ASSURANCE_FEATURE_ID,
+  BIOEVALX_MECHANISM_ASSURANCE_CONTRACT_VERSION,
+  BIOEVALX_MECHANISM_ASSURANCE_INPUT_SCHEMA,
+  BIOEVALX_MECHANISM_ASSURANCE_OUTPUT_SCHEMA,
+  bioevalxMechanismAssuranceReportDigest,
+  validateBioevalxMechanismAssuranceReport,
 } from "./research-contracts.js";
-export type { ServicesFederatedPublicationReleaseInferenceReceipt } from "./research-contracts.js";
+export type { BioevalxMechanismAssuranceReport } from "./research-contracts.js";
+
 export {
-  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID,
-  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_CONTRACT_VERSION,
-  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_INPUT_SCHEMA,
-  MUTATION_KNOWLEDGE_FEDERATED_CONTROL_OUTPUT_SCHEMA,
-  mutationKnowledgeFederatedReceiptDigest,
-  validateMutationKnowledgeFederatedReceipt,
+  HUBAPI_CONTEXT_ASSURANCE_FEATURE_ID,
+  HUBAPI_CONTEXT_ASSURANCE_CONTRACT_VERSION,
+  HUBAPI_CONTEXT_ASSURANCE_INPUT_SCHEMA,
+  HUBAPI_CONTEXT_ASSURANCE_OUTPUT_SCHEMA,
+  hubapiContextAssuranceReportDigest,
+  validateHubapiContextAssuranceReport,
 } from "./research-contracts.js";
-export type { MutationKnowledgeFederatedReceipt } from "./research-contracts.js";
+export type { HubapiContextAssuranceReport } from "./research-contracts.js";
+
+export {
+  CLI_INTERPRETATION_GATEWAY_FEATURE_ID,
+  CLI_INTERPRETATION_GATEWAY_CONTRACT_VERSION,
+  CLI_INTERPRETATION_GATEWAY_INPUT_SCHEMA,
+  CLI_INTERPRETATION_GATEWAY_OUTPUT_SCHEMA,
+  cliInterpretationGatewayEnvelopeDigest,
+  validateCliInterpretationGatewayEnvelope,
+} from "./research-contracts.js";
+export type { CliInterpretationGatewayEnvelope } from "./research-contracts.js";
+
+export {
+  SAFETY_EVIDENCE_SURVEILLANCE_FEATURE_ID,
+  SAFETY_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+  SAFETY_EVIDENCE_SURVEILLANCE_INPUT_SCHEMA,
+  SAFETY_EVIDENCE_SURVEILLANCE_OUTPUT_SCHEMA,
+  safetyEvidenceSurveillanceSetDigest,
+  validateSafetyEvidenceSurveillanceSet,
+} from "./research-contracts.js";
+export type { SafetyQualifiedEvidenceSet } from "./research-contracts.js";
+
+export {
+  CLI_MECHANISM_CONTROL_FEATURE_ID,
+  CLI_MECHANISM_CONTROL_CONTRACT_VERSION,
+  CLI_MECHANISM_CONTROL_INPUT_SCHEMA,
+  CLI_MECHANISM_CONTROL_OUTPUT_SCHEMA,
+  cliMechanismPortfolioDigest,
+  validateCliMechanismPortfolio,
+} from "./research-contracts.js";
+export type { CliMechanismPortfolio } from "./research-contracts.js";
+
+export {
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION,
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_INPUT_SCHEMA,
+  CLI_EXPERIMENT_DESIGN_ASSURANCE_OUTPUT_SCHEMA,
+  cliExperimentDesignAssuranceDigest,
+  validateCliExperimentDesignAssurance,
+} from "./research-contracts.js";
+export type { CliExperimentDesignAssurance } from "./research-contracts.js";
+
+export {
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_FEATURE_ID,
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_CONTRACT_VERSION,
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_INPUT_SCHEMA,
+  ORACLE_EXPERIMENT_DESIGN_COPILOT_OUTPUT_SCHEMA,
+  oracleExperimentDesignCopilotDigest,
+  validateOracleExperimentDesignCopilot,
+} from "./research-contracts.js";
+export type { OracleExperimentDesignCopilotReceipt } from "./research-contracts.js";
+
+export {
+  ORACLE_CONTEXT_FEDERATION_FEATURE_ID,
+  ORACLE_CONTEXT_FEDERATION_CONTRACT_VERSION,
+  ORACLE_CONTEXT_FEDERATION_INPUT_SCHEMA,
+  ORACLE_CONTEXT_FEDERATION_OUTPUT_SCHEMA,
+  oracleContextFederationDigest,
+  validateOracleContextFederationEnvelope,
+} from "./research-contracts.js";
+export type { OracleContextFederationEnvelope } from "./research-contracts.js";
+
+export {
+  OBLIGATION_EVIDENCE_GATEWAY_FEATURE_ID,
+  OBLIGATION_EVIDENCE_GATEWAY_CONTRACT_VERSION,
+  OBLIGATION_EVIDENCE_GATEWAY_INPUT_SCHEMA,
+  OBLIGATION_EVIDENCE_GATEWAY_OUTPUT_SCHEMA,
+  obligationEvidenceGatewayDigest,
+  validateObligationEvidenceGatewaySet,
+} from "./research-contracts.js";
+export type { ObligationQualifiedEvidenceSet } from "./research-contracts.js";
+
+export {
+  BIOIR_LABORATORY_CONTROL_FEATURE_ID,
+  BIOIR_LABORATORY_CONTROL_CONTRACT_VERSION,
+  BIOIR_LABORATORY_CONTROL_INPUT_SCHEMA,
+  BIOIR_LABORATORY_CONTROL_OUTPUT_SCHEMA,
+  bioirLaboratoryControlDigest,
+  validateBioirInstrumentActionReceipt,
+} from "./research-contracts.js";
+export type { BioirInstrumentActionReceipt } from "./research-contracts.js";
+
+export {
+  BIOLANG_CONTRACT_FRONTIER_FEATURE_ID,
+  BIOLANG_CONTRACT_FRONTIER_CONTRACT_VERSION,
+  BIOLANG_CONTRACT_FRONTIER_INPUT_SCHEMA,
+  BIOLANG_CONTRACT_FRONTIER_OUTPUT_SCHEMA,
+  biolangContractFrontierDigest,
+  validateBiolangCapabilityManifest,
+} from "./research-contracts.js";
+export type { BiolangCapabilityManifest } from "./research-contracts.js";
+
+export {
+  IDS_THROUGHPUT_EVIDENCE_FEATURE_ID,
+  IDS_THROUGHPUT_EVIDENCE_CONTRACT_VERSION,
+  IDS_THROUGHPUT_EVIDENCE_INPUT_SCHEMA,
+  IDS_THROUGHPUT_EVIDENCE_OUTPUT_SCHEMA,
+  idsThroughputEvidenceSurveillanceDigest,
+  validateIdsEvidenceSurveillanceContractReceipt,
+} from "./research-contracts.js";
+export type { IdsEvidenceSurveillanceContractReceipt } from "./research-contracts.js";
+
+export {
+  BIOIR_PERFORMANCE_RELIABILITY_FEATURE_ID,
+  BIOIR_PERFORMANCE_RELIABILITY_CONTRACT_VERSION,
+  BIOIR_PERFORMANCE_RELIABILITY_INPUT_SCHEMA,
+  BIOIR_PERFORMANCE_RELIABILITY_OUTPUT_SCHEMA,
+  bioirPerformanceReliabilityDigest,
+  validateBioirReliableCapabilityResult,
+} from "./research-contracts.js";
+export type { BioirReliableCapabilityResult } from "./research-contracts.js";
+
+export {
+  BASELINE_INTERPRETATION_ASSURANCE_FEATURE_ID,
+  BASELINE_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+  BASELINE_INTERPRETATION_ASSURANCE_INPUT_SCHEMA,
+  BASELINE_INTERPRETATION_ASSURANCE_OUTPUT_SCHEMA,
+  baselineInterpretationAssuranceDigest,
+  validateBaselineInterpretationAssuranceReceipt,
+} from "./research-contracts.js";
+export type { BaselineInterpretationAssuranceReceipt } from "./research-contracts.js";
+
+export {
+  IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
+  IDS_RESOURCE_INTEROPERABILITY_CONTRACT_VERSION,
+  IDS_RESOURCE_INTEROPERABILITY_INPUT_SCHEMA,
+  IDS_RESOURCE_INTEROPERABILITY_OUTPUT_SCHEMA,
+  IDS_RESOURCE_INTEROPERABILITY_CONTENT_TYPE,
+  idsResourceInteroperabilityDigest,
+  validateIdsQualifiedResourceSet6,
+} from "./research-contracts.js";
+export type { IdsQualifiedResourceSet6 } from "./research-contracts.js";
+
+export {
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_CONTRACT_VERSION,
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_INPUT_SCHEMA,
+  GOVERNANCE_FEDERATED_CONTINUAL_INTERPRETATION_OUTPUT_SCHEMA,
+  governanceFederatedInterpretationDigest,
+  validateGovernanceFederatedInterpretationReceipt,
+} from "./research-contracts.js";
+export type { GovernanceFederatedInterpretationReceipt } from "./research-contracts.js";
+
+export {
+  METRICS_EXPERIMENT_DESIGN_FEATURE_ID,
+  METRICS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
+  METRICS_EXPERIMENT_DESIGN_INPUT_SCHEMA,
+  METRICS_EXPERIMENT_DESIGN_OUTPUT_SCHEMA,
+  metricsExperimentDesignDigest,
+  validateMetricsExecutableExperimentDesign,
+} from "./research-contracts.js";
+export type { MetricsExecutableExperimentDesign } from "./research-contracts.js";
+
+export {
+  BIOETHICS_DEPENDENCY_COMPOSITION_FEATURE_ID,
+  BIOETHICS_DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
+  BIOETHICS_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
+  BIOETHICS_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
+  bioethicsDependencyCompositionDigest,
+  validateBioethicsCompositionReceipt,
+} from "./research-contracts.js";
+export type { BioethicsCompositionReceipt } from "./research-contracts.js";
+
+export {
+  FIBER_MECHANISM_CONTRACT_MODEL_FEATURE_ID,
+  FIBER_MECHANISM_CONTRACT_MODEL_CONTRACT_VERSION,
+  FIBER_MECHANISM_CONTRACT_MODEL_INPUT_SCHEMA,
+  FIBER_MECHANISM_CONTRACT_MODEL_OUTPUT_SCHEMA,
+  fiberMechanismContractDigest,
+  validateFiberMechanismPortfolioContract,
+} from "./research-contracts.js";
+export type { FiberMechanismPortfolioContract } from "./research-contracts.js";
+
+export {
+  BIOETHICS_CONTRACT_FRONTIER_FEATURE_ID,
+  BIOETHICS_CONTRACT_FRONTIER_CONTRACT_VERSION,
+  BIOETHICS_CONTRACT_FRONTIER_INPUT_SCHEMA,
+  BIOETHICS_CONTRACT_FRONTIER_OUTPUT_SCHEMA,
+  bioethicsContractFrontierDigest,
+  validateBioethicsCapabilityManifestResult,
+} from "./research-contracts.js";
+export type { BioethicsCapabilityManifestResult } from "./research-contracts.js";
+
+export {
+  OPS_REPLICATION_NEGATIVE_RESULTS_FEATURE_ID,
+  OPS_REPLICATION_NEGATIVE_RESULTS_CONTRACT_VERSION,
+  OPS_REPLICATION_NEGATIVE_RESULTS_INPUT_SCHEMA,
+  OPS_REPLICATION_NEGATIVE_RESULTS_OUTPUT_SCHEMA,
+  opsReplicationDigest,
+  validateOpsReplicationRecord,
+} from "./research-contracts.js";
+export type { OpsReplicationRecord } from "./research-contracts.js";
+
+export {
+  FIBER_SEMANTIC_PARITY_FEATURE_ID,
+  FIBER_SEMANTIC_PARITY_CONTRACT_VERSION,
+  FIBER_SEMANTIC_PARITY_INPUT_SCHEMA,
+  FIBER_SEMANTIC_PARITY_OUTPUT_SCHEMA,
+  fiberSemanticParityDigest,
+  validateFiberParityWitness,
+} from "./research-contracts.js";
+export type { FiberParityWitness } from "./research-contracts.js";
 
 export {
   LAB_FEDERATED_RETRIEVAL_SYNTHESIS_FEATURE_ID,
@@ -3619,15 +4255,201 @@ export {
 export type { BundleEvidenceSynthesis } from "./research-contracts.js";
 
 export {
-  RUNTIME_INTERPRETATION_ASSURANCE_FEATURE_ID,
-  RUNTIME_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
-  RUNTIME_INTERPRETATION_ASSURANCE_INPUT_SCHEMA,
-  RUNTIME_INTERPRETATION_ASSURANCE_OUTPUT_SCHEMA,
-  runtimeInteractiveInterpretation7Digest,
-  validateRuntimeInteractiveInterpretation7,
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_FEATURE_ID,
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_CONTRACT_VERSION,
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_INPUT_SCHEMA,
+  MCP_MULTIMODAL_INGESTION_ASSURANCE_OUTPUT_SCHEMA,
+  mcpMultimodalIngestionAssuranceDigest,
+  validateMcpMultimodalIngestionReceipt,
 } from "./research-contracts.js";
-export type {
-  RuntimeInterpretationCandidate4,
-  RuntimeEvidenceBackedResult4,
-  RuntimeInteractiveInterpretation7,
+export type { McpMultimodalIngestionReceipt } from "./research-contracts.js";
+
+export {
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_INPUT_SCHEMA,
+  WEAVELANG_COMPUTATIONAL_EXECUTION_ASSURANCE_OUTPUT_SCHEMA,
+  weavelangComputationalExecutionAssuranceDigest,
+  validateWeavelangExecutionRunReceipt,
 } from "./research-contracts.js";
+export type { WeavelangExecutionRunReceipt } from "./research-contracts.js";
+
+export {
+  MCP_KNOWLEDGE_REPRESENTATION_CONTRACT_FEATURE_ID,
+  MCP_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+  MCP_KNOWLEDGE_REPRESENTATION_INPUT_SCHEMA,
+  MCP_KNOWLEDGE_REPRESENTATION_OUTPUT_SCHEMA,
+  mcpKnowledgeRepresentationDigest,
+  validateMcpTypedKnowledgeWorldReceipt,
+} from "./research-contracts.js";
+export type { McpTypedKnowledgeWorldReceipt } from "./research-contracts.js";
+
+export {
+  REGISTRY_SCALE_FRONTIER_FEATURE_ID,
+  REGISTRY_SCALE_FRONTIER_CONTRACT_VERSION,
+  REGISTRY_SCALE_FRONTIER_INPUT_SCHEMA,
+  REGISTRY_SCALE_FRONTIER_OUTPUT_SCHEMA,
+  registryScaleFrontierDigest,
+  validateRegistryCapacityReport,
+} from "./research-contracts.js";
+export type { RegistryCapacityReport } from "./research-contracts.js";
+
+export {
+  ORACLEX_CONTEXT_COMPILATION_FEATURE_ID,
+  ORACLEX_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  ORACLEX_CONTEXT_COMPILATION_INPUT_SCHEMA,
+  ORACLEX_CONTEXT_COMPILATION_OUTPUT_SCHEMA,
+  oraclexContextCompilationDigest,
+  validateOraclexCertifiedDecisionSection,
+} from "./research-contracts.js";
+export type { OraclexCertifiedDecisionSection } from "./research-contracts.js";
+
+export {
+  REGISTRY_KNOWLEDGE_ASSURANCE_FEATURE_ID,
+  REGISTRY_KNOWLEDGE_ASSURANCE_CONTRACT_VERSION,
+  REGISTRY_KNOWLEDGE_ASSURANCE_INPUT_SCHEMA,
+  REGISTRY_KNOWLEDGE_ASSURANCE_OUTPUT_SCHEMA,
+  registryKnowledgeAssuranceDigest,
+  validateRegistryTypedKnowledgeWorld,
+} from "./research-contracts.js";
+export type { RegistryTypedKnowledgeWorld } from "./research-contracts.js";
+
+export {
+  OPS_CONTEXT_COMPILATION_CONTROL_FEATURE_ID,
+  OPS_CONTEXT_COMPILATION_CONTROL_CONTRACT_VERSION,
+  OPS_CONTEXT_COMPILATION_CONTROL_INPUT_SCHEMA,
+  OPS_CONTEXT_COMPILATION_CONTROL_OUTPUT_SCHEMA,
+  opsContextCompilationControlDigest,
+  validateOpsCertifiedDecisionSection,
+} from "./research-contracts.js";
+export type { OpsCertifiedDecisionSection } from "./research-contracts.js";
+
+export {
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+  EPISTEMIC_RETRIEVAL_SYNTHESIS_OUTPUT_SCHEMA,
+  epistemicRetrievalSynthesisDigest,
+  validateEpistemicEvidenceSynthesis8,
+} from "./research-contracts.js";
+export type { EpistemicEvidenceSynthesis8 } from "./research-contracts.js";
+
+export {
+  IDS_CONTEXT_COMPILATION_FEATURE_ID,
+  IDS_CONTEXT_COMPILATION_CONTRACT_VERSION,
+  IDS_CONTEXT_COMPILATION_INPUT_SCHEMA,
+  IDS_CONTEXT_COMPILATION_OUTPUT_SCHEMA,
+  idsContextCompilationDigest,
+  validateIdsCertifiedDecisionSection1,
+} from "./research-contracts.js";
+export type { IdsCertifiedDecisionSection1 } from "./research-contracts.js";
+
+export {
+  IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+  IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
+  IDS_KNOWLEDGE_REPRESENTATION_INPUT_SCHEMA,
+  IDS_KNOWLEDGE_REPRESENTATION_OUTPUT_SCHEMA,
+  idsKnowledgeRepresentationDigest,
+  validateIdsTypedKnowledgeWorld7,
+} from "./research-contracts.js";
+export type { IdsTypedKnowledgeWorld7 } from "./research-contracts.js";
+
+export {
+  IDS_MULTIMODAL_INGESTION_FEATURE_ID,
+  IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION,
+  IDS_MULTIMODAL_INGESTION_INPUT_SCHEMA,
+  IDS_MULTIMODAL_INGESTION_OUTPUT_SCHEMA,
+  idsMultimodalIngestionDigest,
+  validateIdsHarmonizedResearchObject8,
+} from "./research-contracts.js";
+export type { IdsHarmonizedResearchObject8 } from "./research-contracts.js";
+
+export {
+  IDS_QUALITY_CONTROL_FEATURE_ID,
+  IDS_QUALITY_CONTROL_CONTRACT_VERSION,
+  IDS_QUALITY_CONTROL_INPUT_SCHEMA,
+  IDS_QUALITY_CONTROL_OUTPUT_SCHEMA,
+  idsQualityControlDigest,
+  validateIdsQualityControlReport8,
+} from "./research-contracts.js";
+export type { IdsQualityControlReport8 } from "./research-contracts.js";
+
+export {
+  IDS_MECHANISM_EXPLORATION_FEATURE_ID,
+  IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+  IDS_MECHANISM_EXPLORATION_INPUT_SCHEMA,
+  IDS_MECHANISM_EXPLORATION_OUTPUT_SCHEMA,
+  idsMechanismExplorationDigest,
+  validateIdsMechanismPortfolio7,
+} from "./research-contracts.js";
+export type { IdsMechanismPortfolio7 } from "./research-contracts.js";
+
+export {
+  IDS_EXPERIMENT_DESIGN_FEATURE_ID,
+  IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
+  IDS_EXPERIMENT_DESIGN_INPUT_SCHEMA,
+  IDS_EXPERIMENT_DESIGN_OUTPUT_SCHEMA,
+  idsExperimentDesignDigest,
+  validateIdsDesignFrontier8,
+} from "./research-contracts.js";
+export type { IdsDesignFrontier8 } from "./research-contracts.js";
+
+export {
+  IDS_PROTOCOL_SIMULATION_FEATURE_ID,
+  IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION,
+  IDS_PROTOCOL_SIMULATION_INPUT_SCHEMA,
+  IDS_PROTOCOL_SIMULATION_OUTPUT_SCHEMA,
+  idsProtocolSimulationWorkbenchDigest,
+  validateIdsProtocolWorkbenchReport9,
+} from "./research-contracts.js";
+export type { IdsProtocolWorkbenchReport9 } from "./research-contracts.js";
+
+export {
+  IDS_LABORATORY_INTEGRATION_FEATURE_ID,
+  IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION,
+  IDS_LABORATORY_INTEGRATION_INPUT_SCHEMA,
+  IDS_LABORATORY_INTEGRATION_OUTPUT_SCHEMA,
+  idsLaboratoryIntegrationDigest,
+  validateIdsLaboratoryIntegrationReport9,
+} from "./research-contracts.js";
+export type { IdsLaboratoryIntegrationReport9 } from "./research-contracts.js";
+
+export {
+  IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
+  IDS_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+  IDS_COMPUTATIONAL_EXECUTION_INPUT_SCHEMA,
+  IDS_COMPUTATIONAL_EXECUTION_OUTPUT_SCHEMA,
+  idsComputationalExecutionDigest,
+  validateIdsComputationalExecutionReport9,
+} from "./research-contracts.js";
+export type { IdsComputationalExecutionReport9 } from "./research-contracts.js";
+
+export {
+  IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID,
+  IDS_STATISTICAL_CAUSAL_ML_CONTRACT_VERSION,
+  IDS_STATISTICAL_CAUSAL_ML_INPUT_SCHEMA,
+  IDS_STATISTICAL_CAUSAL_ML_OUTPUT_SCHEMA,
+  idsStatisticalCausalMlDigest,
+  validateIdsQualifiedAnalysisResult10,
+} from "./research-contracts.js";
+export type { IdsQualifiedAnalysisResult10 } from "./research-contracts.js";
+
+export {
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_INPUT_SCHEMA,
+  IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_OUTPUT_SCHEMA,
+  idsRetrievalSynthesisAssuranceDigest,
+  validateIdsEvidenceSynthesis11,
+} from "./research-contracts.js";
+export type { IdsEvidenceSynthesis11 } from "./research-contracts.js";
+
+export {
+  IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID,
+  IDS_REPLICATION_INTEROPERABILITY_CONTRACT_VERSION,
+  IDS_REPLICATION_INTEROPERABILITY_INPUT_SCHEMA,
+  IDS_REPLICATION_INTEROPERABILITY_OUTPUT_SCHEMA,
+  idsReplicationInteroperabilityDigest,
+  validateIdsReplicationRecord9,
+} from "./research-contracts.js";
+export type { IdsReplicationRecord9 } from "./research-contracts.js";

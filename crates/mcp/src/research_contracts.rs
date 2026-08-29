@@ -35,8 +35,24 @@ use bioprism_adapter::{
     EVALUATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_adapter::{
+    assure_federated_continual_retrieval_synthesis,
+    FederatedContinualRetrievalSynthesisAssuranceHarnessReceipt,
+    FederatedContinualRetrievalSynthesisAssuranceHarnessRequest,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
+};
+use bioprism_adapter::{
     assure_interpretation, EvidenceBackedResult, InterpretationAssuranceReceipt,
     INTERPRETATION_ASSURANCE_FEATURE_ID,
+};
+use bioprism_adapter::{
+    assure_local_retrieval_synthesis, LocalRetrievalSynthesisAssuranceHarnessReceipt,
+    LocalRetrievalSynthesisAssuranceHarnessRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
+};
+use bioprism_adapter::{
+    assure_multimodal_retrieval_synthesis, MultimodalRetrievalSynthesisAssuranceHarnessReceipt,
+    MultimodalRetrievalSynthesisAssuranceHarnessRequest,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
 };
 use bioprism_adapter::{
     assure_provenance, ArtifactAndDerivation, ProvenanceAssuranceError, SignedProvenanceEnvelope,
@@ -49,6 +65,11 @@ use bioprism_adapter::{
 use bioprism_adapter::{
     assure_replication, ReplicationAssuranceReceipt, ReplicationAssuranceRequest,
     REPLICATION_ASSURANCE_FEATURE_ID,
+};
+use bioprism_adapter::{
+    assure_throughput_retrieval_synthesis, ThroughputRetrievalSynthesisAssuranceHarnessReceipt,
+    ThroughputRetrievalSynthesisAssuranceHarnessRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
 };
 use bioprism_adapter::{
     close_adapter_limitations, AdapterClosureReceipt, LimitationClosureError,
@@ -106,8 +127,32 @@ use bioprism_adapter::{
     NegotiatedIntegration, INTEROPERABILITY_GATEWAY_FEATURE_ID,
 };
 use bioprism_adapter::{
+    operate_federated_continual_retrieval_synthesis_federated_control_plane,
+    FederatedContinualRetrievalSynthesisFederatedControlPlaneReceipt,
+    FederatedContinualRetrievalSynthesisFederatedControlPlaneRequest,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+use bioprism_adapter::{
+    operate_local_retrieval_synthesis_federated_control_plane,
+    LocalRetrievalSynthesisFederatedControlPlaneReceipt,
+    LocalRetrievalSynthesisFederatedControlPlaneRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+use bioprism_adapter::{
     operate_mechanism_control_plane, MechanismControlPlaneReceipt, MechanismControlPlaneRequest,
     MECHANISM_CONTROL_PLANE_FEATURE_ID,
+};
+use bioprism_adapter::{
+    operate_multimodal_retrieval_synthesis_federated_control_plane,
+    MultimodalRetrievalSynthesisFederatedControlPlaneReceipt,
+    MultimodalRetrievalSynthesisFederatedControlPlaneRequest,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
+};
+use bioprism_adapter::{
+    operate_throughput_retrieval_synthesis_federated_control_plane,
+    ThroughputRetrievalSynthesisFederatedControlPlaneReceipt,
+    ThroughputRetrievalSynthesisFederatedControlPlaneRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
 };
 use bioprism_adapter::{
     plan_adapter_scale_frontier, ScaleFrontierError, ScaleFrontierReceipt, ScaleFrontierRequest,
@@ -126,28 +171,22 @@ use bioprism_adapter::{
     AdversarialRecoveryRequest, ADVERSARIAL_RECOVERY_FEATURE_ID,
 };
 use bioprism_adapter::{
-    run_evidence_surveillance, EvidenceFeedRequest, EvidenceSurveillanceReceipt,
-    EVIDENCE_SURVEILLANCE_FEATURE_ID,
+    render_federated_continual_evidence_surveillance_research_workbench,
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest,
+    ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 use bioprism_adapter::{
-    schedule_local_evidence_surveillance_workflow,
-    LocalEvidenceSurveillanceWorkflowReceipt,
-    ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+    render_federated_continual_retrieval_synthesis_interoperability_gateway,
+    FederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt,
+    FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
 };
 use bioprism_adapter::{
-    schedule_multimodal_evidence_surveillance_workflow,
-    MultimodalEvidenceSurveillanceWorkflowReceipt,
-    ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
-};
-use bioprism_adapter::{
-    schedule_throughput_evidence_surveillance_workflow,
-    ThroughputEvidenceSurveillanceWorkflowReceipt,
-    ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
-};
-use bioprism_adapter::{
-    schedule_federated_continual_evidence_surveillance_workflow,
-    FederatedContinualEvidenceSurveillanceWorkflowReceipt,
-    ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+    render_federated_continual_retrieval_synthesis_research_workbench,
+    FederatedContinualRetrievalSynthesisResearchWorkbenchReceipt,
+    FederatedContinualRetrievalSynthesisResearchWorkbenchRequest,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 use bioprism_adapter::{
     render_local_evidence_surveillance_research_workbench,
@@ -156,16 +195,79 @@ use bioprism_adapter::{
     ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 use bioprism_adapter::{
+    render_local_retrieval_synthesis_interoperability_gateway,
+    LocalRetrievalSynthesisInteroperabilityGatewayReceipt,
+    LocalRetrievalSynthesisInteroperabilityGatewayRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+use bioprism_adapter::{
+    render_local_retrieval_synthesis_research_workbench,
+    LocalRetrievalSynthesisResearchWorkbenchReceipt,
+    LocalRetrievalSynthesisResearchWorkbenchRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+use bioprism_adapter::{
     render_multimodal_evidence_surveillance_research_workbench,
     MultimodalEvidenceSurveillanceResearchWorkbenchReceipt,
     MultimodalEvidenceSurveillanceResearchWorkbenchRequest,
     ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 use bioprism_adapter::{
+    render_multimodal_retrieval_synthesis_interoperability_gateway,
+    MultimodalRetrievalSynthesisInteroperabilityGatewayReceipt,
+    MultimodalRetrievalSynthesisInteroperabilityGatewayRequest,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+use bioprism_adapter::{
+    render_multimodal_retrieval_synthesis_research_workbench,
+    MultimodalRetrievalSynthesisResearchWorkbenchReceipt,
+    MultimodalRetrievalSynthesisResearchWorkbenchRequest,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+use bioprism_adapter::{
     render_throughput_evidence_surveillance_research_workbench,
     ThroughputEvidenceSurveillanceResearchWorkbenchReceipt,
     ThroughputEvidenceSurveillanceResearchWorkbenchRequest,
     ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+use bioprism_adapter::{
+    render_throughput_retrieval_synthesis_interoperability_gateway,
+    ThroughputRetrievalSynthesisInteroperabilityGatewayReceipt,
+    ThroughputRetrievalSynthesisInteroperabilityGatewayRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
+};
+use bioprism_adapter::{
+    render_throughput_retrieval_synthesis_research_workbench,
+    ThroughputRetrievalSynthesisResearchWorkbenchReceipt,
+    ThroughputRetrievalSynthesisResearchWorkbenchRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_evidence_surveillance, EvidenceFeedRequest, EvidenceSurveillanceReceipt,
+    EVIDENCE_SURVEILLANCE_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_federated_continual_evidence_surveillance_research_copilot,
+    FederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
+    ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_federated_continual_retrieval_synthesis_research_copilot,
+    FederatedContinualRetrievalSynthesisResearchCopilotReceipt,
+    FederatedContinualRetrievalSynthesisResearchCopilotRequest,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_federated_retrieval_synthesis_contract_model,
+    FederatedRetrievalSynthesisContractModelReceipt,
+    FederatedRetrievalSynthesisContractModelRequest,
+    ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_federated_retrieval_synthesis_inference_engine,
+    FederatedRetrievalSynthesisInferenceEngineReceipt,
+    FederatedRetrievalSynthesisInferenceEngineRequest,
+    ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
 };
 use bioprism_adapter::{
     run_ingestion_gateway, IngestionGatewayReceipt, IngestionGatewayRequest,
@@ -176,20 +278,133 @@ use bioprism_adapter::{
     KNOWLEDGE_WORKFLOW_FEATURE_ID,
 };
 use bioprism_adapter::{
+    run_local_evidence_surveillance_research_copilot,
+    LocalEvidenceSurveillanceResearchCopilotReceipt,
+    ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_local_retrieval_synthesis_contract_model, LocalRetrievalSynthesisContractModelReceipt,
+    LocalRetrievalSynthesisContractModelRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_local_retrieval_synthesis_inference_engine, LocalRetrievalSynthesisInferenceEngineReceipt,
+    LocalRetrievalSynthesisInferenceEngineRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_local_retrieval_synthesis_research_copilot, LocalRetrievalSynthesisResearchCopilotReceipt,
+    LocalRetrievalSynthesisResearchCopilotRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_multimodal_evidence_surveillance_research_copilot,
+    MultimodalEvidenceSurveillanceResearchCopilotReceipt,
+    ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_multimodal_retrieval_synthesis_inference_engine,
+    MultimodalRetrievalSynthesisInferenceEngineReceipt,
+    MultimodalRetrievalSynthesisInferenceEngineRequest,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_multimodal_retrieval_synthesis_research_copilot,
+    MultimodalRetrievalSynthesisResearchCopilotReceipt,
+    MultimodalRetrievalSynthesisResearchCopilotRequest,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_throughput_evidence_surveillance_research_copilot,
+    ThroughputEvidenceSurveillanceResearchCopilotReceipt,
+    ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_throughput_retrieval_synthesis_contract_model,
+    ThroughputRetrievalSynthesisContractModelReceipt,
+    ThroughputRetrievalSynthesisContractModelRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_throughput_retrieval_synthesis_inference_engine,
+    ThroughputRetrievalSynthesisInferenceEngineReceipt,
+    ThroughputRetrievalSynthesisInferenceEngineRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
+};
+use bioprism_adapter::{
+    run_throughput_retrieval_synthesis_research_copilot,
+    ThroughputRetrievalSynthesisResearchCopilotReceipt,
+    ThroughputRetrievalSynthesisResearchCopilotRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
+};
+use bioprism_adapter::{
+    schedule_federated_continual_evidence_surveillance_workflow,
+    FederatedContinualEvidenceSurveillanceWorkflowReceipt,
+    ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+use bioprism_adapter::{
+    schedule_federated_continual_retrieval_synthesis_workflow,
+    FederatedContinualRetrievalSynthesisWorkflowReceipt,
+    FederatedContinualRetrievalSynthesisWorkflowRequest,
+    ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+};
+use bioprism_adapter::{
     schedule_federation_workflow, FederationRequest, FederationWorkflowReceipt,
     FEDERATION_WORKFLOW_FEATURE_ID,
+};
+use bioprism_adapter::{
+    schedule_local_evidence_surveillance_workflow, LocalEvidenceSurveillanceWorkflowReceipt,
+    ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+use bioprism_adapter::{
+    schedule_local_retrieval_synthesis_workflow, LocalRetrievalSynthesisWorkflowReceipt,
+    LocalRetrievalSynthesisWorkflowRequest,
+    ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+};
+use bioprism_adapter::{
+    schedule_multimodal_evidence_surveillance_workflow,
+    MultimodalEvidenceSurveillanceWorkflowReceipt,
+    ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+use bioprism_adapter::{
+    schedule_multimodal_retrieval_synthesis_workflow, MultimodalRetrievalSynthesisWorkflowReceipt,
+    MultimodalRetrievalSynthesisWorkflowRequest,
+    ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
+};
+use bioprism_adapter::{
+    schedule_throughput_evidence_surveillance_workflow,
+    ThroughputEvidenceSurveillanceWorkflowReceipt,
+    ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+use bioprism_adapter::{
+    schedule_throughput_retrieval_synthesis_workflow, ThroughputRetrievalSynthesisWorkflowReceipt,
+    ThroughputRetrievalSynthesisWorkflowRequest,
+    ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
 };
 use bioprism_adapter::{
     simulate_protocol_draft, ProtocolDraft, ProtocolSimulationReceipt,
     PROTOCOL_SIMULATION_FEATURE_ID,
 };
 use bioprism_atlashub::{
+    operate_replication_control, ClaimAndProtocol1, PeerReplicationSummary4,
+    ReplicationObservation4, ReplicationRecord8, REPLICATION_CONTROL_FEATURE_ID,
+};
+use bioprism_atlashub::{
     synthesize_federated_continuum, FederatedContinualRetrievalReceipt,
     FederatedContinualRetrievalRequest, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
+};
+use bioprism_conformance::context_compilation_federated_control_plane::{
+    operate_context_compilation_federated_control, ContextCompilationFederatedControlReceipt,
+    ContextCompilationFederatedControlRequest,
+    FEATURE_ID as CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,
 };
 use bioprism_devplat::{
     assure_context_compilation, ContextCompilationAssuranceReceipt,
     ContextCompilationAssuranceRequest, CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
+use bioprism_epistemic::{
+    operate_retrieval_synthesis, EvidenceSynthesis8, PeerSynthesisSummary4, RetrievalCandidate4,
+    ScopedRetrievalQuery3, RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
 };
 use bioprism_evalengine::{
     compile_evaluation_card, evaluate_federated_evaluation, evaluate_multimodal_replication,
@@ -210,21 +425,80 @@ use bioprism_fiber::{
     FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID,
     RESOURCE_WORKBENCH_FEATURE_ID as FIBER_RESOURCE_WORKBENCH_FEATURE_ID,
 };
-use bioprism_foundation::{EvidenceReceipt, PolicyReceipt};
-use bioprism_conformance::context_compilation_federated_control_plane::{
-    operate_context_compilation_federated_control,
-    ContextCompilationFederatedControlReceipt,
-    ContextCompilationFederatedControlRequest,
-    FEATURE_ID as CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,
+use bioprism_foundation::{
+    assure_mechanism_exploration, EvidenceReceipt, MechanismExplorationAssuranceReceipt,
+    MechanismExplorationAssuranceRequest, PolicyReceipt,
+    FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
 };
-use bioprism_mutation::knowledge_representation_federated_control_plane::{
-    operate_mutation_knowledge_federated_control, MutationKnowledgeFederatedReceipt,
-    MutationKnowledgeFederatedControlRequest,
-    FEATURE_ID as MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID,
+use bioprism_governance::federated_continual_interpretation_assurance::{
+    assure_federated_continual_interpretations, FederatedContinualInterpretationAssuranceReport,
+    FederatedContinualInterpretationAssuranceRequest,
+    FEATURE_ID as GOVERNANCE_FEDERATED_INTERPRETATION_FEATURE_ID,
 };
 use bioprism_governance::{
     compile_signed_research_object, SignedResearchObject, ValidatedResearchRun,
     RESEARCH_RELEASE_CONTRACT_FEATURE_ID,
+};
+use bioprism_ids::{
+    assure_mechanism_exploration as assure_ids_mechanism_exploration, MechanismCandidate4,
+    MechanismPortfolio7, MechanismQuestion2, PeerMechanismSummary4,
+    IDS_MECHANISM_EXPLORATION_FEATURE_ID,
+};
+use bioprism_ids::{
+    assure_quality_control, QualityControlBatch4, QualityControlReport8, QualityObservation4,
+    IDS_QUALITY_CONTROL_FEATURE_ID,
+};
+use bioprism_ids::{
+    assure_retrieval_synthesis, EvidenceSynthesis11, RetrievalSynthesisAssuranceError,
+    ScopedRetrievalQuery6, IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
+};
+use bioprism_ids::{
+    compile_computational_execution, ComputationalExecutionReport9, ComputationalExecutionRequest6,
+    IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
+};
+use bioprism_ids::{
+    compile_statistical_causal_ml, AnalysisCopilotRequest7, QualifiedAnalysisResult10,
+    IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID,
+};
+use bioprism_ids::{
+    design_experiment, DesignCandidate4, DesignFrontier8, ExperimentDesignRequest4,
+    IDS_EXPERIMENT_DESIGN_FEATURE_ID,
+};
+use bioprism_ids::{
+    integrate_laboratory_workflow, LaboratoryIntegrationReport9, LaboratoryIntegrationRequest6,
+    IDS_LABORATORY_INTEGRATION_FEATURE_ID,
+};
+use bioprism_ids::{
+    interoperate_replication, ClaimAndProtocol7Request, ReplicationInteroperabilityError,
+    ReplicationRecord9, IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID,
+};
+use bioprism_ids::{
+    interoperate_resources, PeerResourceSummary4, QualifiedResourceSet6, ResourceEndpoint4,
+    ResourceNeed4, IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
+};
+use bioprism_ids::{
+    operate_context_compilation, CertifiedDecisionSection1, ContextFact4, ContextPeer4,
+    DecisionQuery4, IDS_CONTEXT_COMPILATION_FEATURE_ID,
+};
+use bioprism_ids::{
+    operate_knowledge_representation, KnowledgeClaim4, KnowledgePeer4, ScopedKnowledgeClaims4,
+    TypedKnowledgeWorld7, IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+};
+use bioprism_ids::{
+    operate_multimodal_ingestion, HarmonizedResearchObject8, ModalityObservation4,
+    MultimodalIngestionRequest4, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
+};
+use bioprism_ids::{
+    simulate_protocol_workbench, ProtocolWorkbenchReport9, ProtocolWorkbenchRequest5,
+    IDS_PROTOCOL_SIMULATION_FEATURE_ID,
+};
+use bioprism_influence::{
+    run_federated_continual_interpretation, EvidenceBackedResult4, FederatedInterpretationError,
+    InteractiveInterpretation, FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
+};
+use bioprism_interweave::interweave_contract_frontier_federated_control_plane::{
+    feature_id as INTERWEAVE_FRONTIER_FEATURE_ID, operate_interweave_frontier,
+    InterweaveControlPlaneRequest, InterweaveControlReceipt,
 };
 use bioprism_lab::{
     evaluate_design_frontier, evaluate_semantic_parity, instrument_preflight,
@@ -238,6 +512,16 @@ use bioprism_lens::{
     assure_federated_lens, FederatedLensAssuranceReceipt, FederatedLensAssuranceRequest,
     FEDERATED_LENS_ASSURANCE_FEATURE_ID,
 };
+use bioprism_megafactory::{
+    operate_mechanism_exploration_control, FederatedMechanismControlRequest,
+    FederatedMechanismReceipt,
+    MEGAFACTORY_MECHANISM_EXPLORATION_FEATURE_ID as MEGAFACTORY_MECHANISM_FEATURE_ID,
+};
+use bioprism_mutation::knowledge_representation_federated_control_plane::{
+    operate_mutation_knowledge_federated_control, MutationKnowledgeFederatedControlRequest,
+    MutationKnowledgeFederatedReceipt,
+    FEATURE_ID as MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID,
+};
 use bioprism_obligation::{
     assess_release_harness, ReleaseHarnessReceipt, ReleaseHarnessRequest,
     RELEASE_HARNESS_FEATURE_ID,
@@ -245,6 +529,10 @@ use bioprism_obligation::{
 use bioprism_ops::{
     assure_knowledge_representation, KnowledgeRepresentationAssuranceReceipt,
     KnowledgeRepresentationAssuranceRequest, KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+};
+use bioprism_oraclex::publication_release_contract_model::{
+    compile_publication_release, feature_id as PUBLICATION_RELEASE_FEATURE_ID,
+    PublicationReleaseReceipt, PublicationReleaseRequest,
 };
 use bioprism_policy::{
     admit_autonomy_batch, BatchAdmissionReceipt, BatchAdmissionRequest, AUTONOMY_BATCH_FEATURE_ID,
@@ -258,11 +546,9 @@ use bioprism_routing::{
     FederatedMultimodalAssuranceRequest, FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID,
 };
 use bioprism_runtime::{
-    assure_interpretation as assure_runtime_interpretation, execute_workflow, execute_workflow_batch, EvidenceBackedResult4,
-    InteractiveInterpretation7, WorkflowBatchReceipt, WorkflowBatchRequest,
-    WorkflowExecutionReceipt, WorkflowExecutionRequest,
-    INTERPRETATION_ASSURANCE_FEATURE_ID as RUNTIME_INTERPRETATION_ASSURANCE_FEATURE_ID,
-    WORKFLOW_BATCH_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID,
+    execute_workflow, execute_workflow_batch, WorkflowBatchReceipt, WorkflowBatchRequest,
+    WorkflowExecutionReceipt, WorkflowExecutionRequest, WORKFLOW_BATCH_FEATURE_ID,
+    WORKFLOW_EXECUTION_FEATURE_ID,
 };
 use bioprism_services::{
     infer_federated_publication_release, FederatedPublicationReleaseInferenceReceipt,
@@ -282,17 +568,21 @@ use bioprism_weavelang::{
     assure_weavelang_release, WeaveLangReleaseAssuranceReceipt, WeaveLangReleaseAssuranceRequest,
     WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID,
 };
+use bioprism_worldfactory::{
+    simulate_protocol, ProtocolDraft4, ProtocolSimulationReport8,
+    PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
+};
 use serde_json::Value;
 
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
 pub const RESEARCH_COMPILE_TOOL: &str = "aurora_research_compile_evidence";
 pub const WORKFLOW_EXECUTION_TOOL: &str = "runtime_workflow_execute";
-pub const RUNTIME_INTERPRETATION_ASSURANCE_TOOL: &str = "runtime_interpretation_assurance";
 pub const EVALUATION_OBSERVABILITY_TOOL: &str = "evaluation_observability_card";
 pub const FEDERATED_EVALUATION_TOOL: &str = "federated_evaluation_consensus";
 pub const RESEARCH_RELEASE_VALIDATE_TOOL: &str = "research_release_validate";
 pub const RESEARCH_RELEASE_BATCH_VALIDATE_TOOL: &str = "research_release_batch_validate";
-pub const FEDERATED_PUBLICATION_RELEASE_INFERENCE_TOOL: &str = "federated_publication_release_inference";
+pub const FEDERATED_PUBLICATION_RELEASE_INFERENCE_TOOL: &str =
+    "federated_publication_release_inference";
 pub const INSTRUMENT_PREFLIGHT_TOOL: &str = "instrument_preflight";
 pub const MULTIMODAL_HARMONIZATION_TOOL: &str = "multimodal_harmonize";
 pub const ANALYSIS_QUALIFICATION_TOOL: &str = "analysis_qualify";
@@ -321,14 +611,97 @@ pub const WEAVELANG_RELEASE_ASSURANCE_TOOL: &str = "weavelang_release_assurance"
 pub const MECHANISM_CONTROL_PLANE_TOOL: &str = "federated_mechanism_control_plane";
 pub const MECHANISM_GATEWAY_TOOL: &str = "federated_mechanism_gateway";
 pub const EVIDENCE_SURVEILLANCE_TOOL: &str = "evidence_surveillance_copilot";
-pub const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str = "adapter_local_evidence_surveillance_workflow_fabric";
-pub const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str = "adapter_multimodal_evidence_surveillance_workflow_fabric";
-pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str = "adapter_throughput_evidence_surveillance_workflow_fabric";
-pub const ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str = "adapter_federated_continual_evidence_surveillance_workflow_fabric";
-pub const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str = "adapter_local_evidence_surveillance_research_workbench";
-pub const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str = "adapter_multimodal_evidence_surveillance_research_workbench";
-pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str = "adapter_throughput_evidence_surveillance_research_workbench";
+pub const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str =
+    "adapter_local_evidence_surveillance_research_copilot";
+pub const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str =
+    "adapter_multimodal_evidence_surveillance_research_copilot";
+pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str =
+    "adapter_throughput_evidence_surveillance_research_copilot";
+pub const ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_TOOL: &str =
+    "adapter_federated_continual_evidence_surveillance_research_copilot";
+pub const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str =
+    "adapter_local_evidence_surveillance_workflow_fabric";
+pub const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str =
+    "adapter_multimodal_evidence_surveillance_workflow_fabric";
+pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str =
+    "adapter_throughput_evidence_surveillance_workflow_fabric";
+pub const ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_TOOL: &str =
+    "adapter_federated_continual_evidence_surveillance_workflow_fabric";
+pub const ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str =
+    "adapter_local_evidence_surveillance_research_workbench";
+pub const ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str =
+    "adapter_multimodal_evidence_surveillance_research_workbench";
+pub const ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str =
+    "adapter_throughput_evidence_surveillance_research_workbench";
+pub const ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_TOOL: &str =
+    "adapter_federated_continual_evidence_surveillance_research_workbench";
 pub const RETRIEVAL_SYNTHESIS_TOOL: &str = "multimodal_retrieval_synthesis";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str =
+    "adapter_local_retrieval_synthesis_inference_engine";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str =
+    "adapter_local_retrieval_synthesis_contract_model";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_TOOL: &str =
+    "adapter_local_retrieval_synthesis_research_copilot";
+pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_TOOL: &str =
+    "adapter_multimodal_retrieval_synthesis_research_copilot";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_TOOL: &str =
+    "adapter_throughput_retrieval_synthesis_research_copilot";
+pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_TOOL: &str =
+    "adapter_federated_continual_retrieval_synthesis_research_copilot";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str =
+    "adapter_local_retrieval_synthesis_workflow_fabric";
+pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str =
+    "adapter_multimodal_retrieval_synthesis_workflow_fabric";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str =
+    "adapter_throughput_retrieval_synthesis_workflow_fabric";
+pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_TOOL: &str =
+    "adapter_federated_continual_retrieval_synthesis_workflow_fabric";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_TOOL: &str =
+    "adapter_local_retrieval_synthesis_research_workbench";
+pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_TOOL: &str =
+    "adapter_multimodal_retrieval_synthesis_research_workbench";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_TOOL: &str =
+    "adapter_throughput_retrieval_synthesis_research_workbench";
+pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_TOOL: &str =
+    "adapter_federated_continual_retrieval_synthesis_research_workbench";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_TOOL: &str =
+    "adapter_local_retrieval_synthesis_interoperability_gateway";
+pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_TOOL: &str =
+    "adapter_multimodal_retrieval_synthesis_interoperability_gateway";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_TOOL: &str =
+    "adapter_throughput_retrieval_synthesis_interoperability_gateway";
+pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_TOOL: &str =
+    "adapter_federated_continual_retrieval_synthesis_interoperability_gateway";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str =
+    "adapter_local_retrieval_synthesis_assurance_harness";
+pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str =
+    "adapter_multimodal_retrieval_synthesis_assurance_harness";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str =
+    "adapter_throughput_retrieval_synthesis_assurance_harness";
+pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_TOOL: &str =
+    "adapter_federated_continual_retrieval_synthesis_assurance_harness";
+pub const ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str =
+    "adapter_local_retrieval_synthesis_federated_control_plane";
+pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str =
+    "adapter_multimodal_retrieval_synthesis_federated_control_plane";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str =
+    "adapter_throughput_retrieval_synthesis_federated_control_plane";
+pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_TOOL: &str =
+    "adapter_federated_continual_retrieval_synthesis_federated_control_plane";
+pub const FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_TOOL: &str =
+    "foundation_mechanism_exploration_assurance";
+pub const ORACLEX_PUBLICATION_RELEASE_TOOL: &str = "oraclex_publication_release";
+pub const INTERWEAVE_FRONTIER_CONTROL_TOOL: &str = "interweave_frontier_control";
+pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str =
+    "adapter_multimodal_retrieval_synthesis_inference_engine";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str =
+    "adapter_throughput_retrieval_synthesis_inference_engine";
+pub const ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str =
+    "adapter_throughput_retrieval_synthesis_contract_model";
+pub const ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str =
+    "adapter_federated_retrieval_synthesis_inference_engine";
+pub const ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_TOOL: &str =
+    "adapter_federated_retrieval_synthesis_contract_model";
 pub const ADAPTER_CONTEXT_COMPILATION_TOOL: &str = "adapter_context_compilation_assurance";
 pub const KNOWLEDGE_WORKFLOW_TOOL: &str = "multimodal_knowledge_workflow";
 pub const ADAPTER_RESOURCE_WORKBENCH_TOOL: &str = "adapter_resource_workbench";
@@ -460,10 +833,12 @@ pub fn validate_research_release_batch_receipt_json(
 }
 
 pub fn run_federated_publication_release_inference_json(value: &Value) -> Result<Value, String> {
-    let request: FederatedPublicationReleaseInferenceRequest = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid federated publication-release inference request: {error}"))?;
-    let receipt = infer_federated_publication_release(&request)
-        .map_err(|error| error.to_string())?;
+    let request: FederatedPublicationReleaseInferenceRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated publication-release inference request: {error}")
+        })?;
+    let receipt =
+        infer_federated_publication_release(&request).map_err(|error| error.to_string())?;
     serde_json::to_value(receipt).map_err(|error| {
         format!("cannot serialize federated publication-release inference receipt: {error}")
     })
@@ -472,8 +847,10 @@ pub fn run_federated_publication_release_inference_json(value: &Value) -> Result
 pub fn validate_federated_publication_release_inference_json(
     value: &Value,
 ) -> Result<FederatedPublicationReleaseInferenceReceipt, String> {
-    let receipt: FederatedPublicationReleaseInferenceReceipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid federated publication-release inference receipt: {error}"))?;
+    let receipt: FederatedPublicationReleaseInferenceReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated publication-release inference receipt: {error}")
+        })?;
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID {
         return Err("federated publication-release inference feature id mismatch".into());
@@ -507,6 +884,88 @@ pub fn harmonize_multimodal_json(value: &Value) -> Result<Value, String> {
     let object = harmonize_multimodal(&request).map_err(|error| error.to_string())?;
     serde_json::to_value(object)
         .map_err(|error| format!("cannot serialize harmonized research object: {error}"))
+}
+
+/// MCP transport wrapper for the federated continual multimodal-ingestion assurance harness.
+/// The domain implementation lives in `multimodal_ingestion_assurance`; this adapter keeps the
+/// JSON boundary consistent with the other research contracts exposed by this crate.
+pub fn assure_multimodal_ingestion_assurance_json(value: &Value) -> Result<Value, String> {
+    crate::multimodal_ingestion_assurance::assure_multimodal_ingestion_json(value)
+}
+
+pub fn validate_multimodal_ingestion_assurance_json(
+    value: &Value,
+) -> Result<crate::multimodal_ingestion_assurance::HarmonizedResearchObjectReceipt, String> {
+    crate::multimodal_ingestion_assurance::validate_multimodal_ingestion_json(value)
+}
+
+pub fn assure_weavelang_computational_execution_json(value: &Value) -> Result<Value, String> {
+    bioprism_weavelang::assure_computational_execution_json(value)
+}
+
+pub fn validate_weavelang_computational_execution_json(
+    value: &Value,
+) -> Result<bioprism_weavelang::ExecutionRunReceipt, String> {
+    bioprism_weavelang::validate_computational_execution_json(value)
+}
+
+pub fn model_mcp_knowledge_representation_contract_json(value: &Value) -> Result<Value, String> {
+    crate::knowledge_representation_contract_model::model_knowledge_representation_contract_json(
+        value,
+    )
+}
+
+pub fn validate_mcp_knowledge_representation_contract_json(
+    value: &Value,
+) -> Result<crate::knowledge_representation_contract_model::TypedKnowledgeWorldReceipt, String> {
+    crate::knowledge_representation_contract_model::validate_knowledge_representation_contract_json(
+        value,
+    )
+}
+
+/// MCP transport wrapper for the registry multimodal scale-frontier assurance harness.
+/// The registry implementation remains the source of truth; this adapter only owns the
+/// serialized transport boundary and keeps validation behavior identical across callers.
+pub fn assure_registry_scale_frontier_json(value: &Value) -> Result<Value, String> {
+    bioprism_registry::assure_registry_scale_frontier_json(value)
+}
+
+pub fn validate_registry_scale_frontier_json(
+    value: &Value,
+) -> Result<bioprism_registry::RegistryCapacityReport, String> {
+    bioprism_registry::validate_registry_scale_frontier_json(value)
+}
+
+/// MCP transport wrapper for the federated continual context-compilation research copilot.
+pub fn compile_oraclex_context_json(value: &Value) -> Result<Value, String> {
+    bioprism_oraclex::context_compilation_research_copilot::compile_context_json(value)
+}
+
+pub fn validate_oraclex_context_json(
+    value: &Value,
+) -> Result<bioprism_oraclex::context_compilation_research_copilot::CertifiedDecisionSection, String>
+{
+    bioprism_oraclex::context_compilation_research_copilot::validate_context_json(value)
+}
+
+pub fn assure_registry_knowledge_representation_json(value: &Value) -> Result<Value, String> {
+    bioprism_registry::assure_knowledge_representation_json(value)
+}
+
+pub fn validate_registry_knowledge_representation_json(
+    value: &Value,
+) -> Result<bioprism_registry::TypedKnowledgeWorld, String> {
+    bioprism_registry::validate_knowledge_representation_json(value)
+}
+
+pub fn operate_ops_context_compilation_json(value: &Value) -> Result<Value, String> {
+    bioprism_ops::operate_context_compilation_json(value)
+}
+
+pub fn validate_ops_context_compilation_json(
+    value: &Value,
+) -> Result<bioprism_ops::ContextCompilationDecisionSection, String> {
+    bioprism_ops::validate_context_compilation_json(value)
 }
 
 pub fn validate_harmonized_research_object_json(
@@ -645,26 +1104,6 @@ pub fn execute_workflow_batch_json(value: &Value) -> Result<Value, String> {
     let receipt = execute_workflow_batch(&request).map_err(|error| error.to_string())?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize workflow batch receipt: {error}"))
-}
-
-pub fn runtime_interpretation_assurance_json(value: &Value) -> Result<Value, String> {
-    let request: EvidenceBackedResult4 = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid runtime interpretation request: {error}"))?;
-    let receipt = assure_runtime_interpretation(&request).map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt)
-        .map_err(|error| format!("cannot serialize runtime interpretation receipt: {error}"))
-}
-
-pub fn validate_runtime_interpretation_assurance_json(
-    value: &Value,
-) -> Result<InteractiveInterpretation7, String> {
-    let receipt: InteractiveInterpretation7 = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid runtime interpretation receipt: {error}"))?;
-    receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != RUNTIME_INTERPRETATION_ASSURANCE_FEATURE_ID {
-        return Err("runtime interpretation feature id mismatch".into());
-    }
-    Ok(receipt)
 }
 
 pub fn validate_workflow_batch_receipt_json(value: &Value) -> Result<WorkflowBatchReceipt, String> {
@@ -1004,6 +1443,27 @@ pub fn validate_mechanism_control_plane_json(
     Ok(receipt)
 }
 
+pub fn operate_megafactory_mechanism_exploration_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedMechanismControlRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid megafactory mechanism exploration request: {error}"))?;
+    let receipt =
+        operate_mechanism_exploration_control(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize megafactory mechanism receipt: {error}"))
+}
+
+pub fn validate_megafactory_mechanism_exploration_json(
+    value: &Value,
+) -> Result<FederatedMechanismReceipt, String> {
+    let receipt: FederatedMechanismReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid megafactory mechanism receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != MEGAFACTORY_MECHANISM_FEATURE_ID {
+        return Err("megafactory mechanism feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
 pub fn admit_mechanism_gateway_json(value: &Value) -> Result<Value, String> {
     let request: MechanismGatewayRequest = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid mechanism gateway request: {error}"))?;
@@ -1030,6 +1490,29 @@ pub fn run_evidence_surveillance_json(value: &Value) -> Result<Value, String> {
         .map_err(|error| format!("cannot serialize evidence surveillance receipt: {error}"))
 }
 
+pub fn run_local_evidence_surveillance_research_copilot_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid research copilot request: {error}"))?;
+    let receipt = run_local_evidence_surveillance_research_copilot(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize research copilot receipt: {error}"))
+}
+
+pub fn validate_local_evidence_surveillance_research_copilot_json(
+    value: &Value,
+) -> Result<LocalEvidenceSurveillanceResearchCopilotReceipt, String> {
+    let receipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid research copilot receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID {
+        return Err("research copilot feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
 pub fn validate_evidence_surveillance_json(
     value: &Value,
 ) -> Result<EvidenceSurveillanceReceipt, String> {
@@ -1042,90 +1525,28 @@ pub fn validate_evidence_surveillance_json(
     Ok(receipt)
 }
 
-pub fn run_local_evidence_surveillance_workflow_fabric_json(value: &Value) -> Result<Value, String> {
+pub fn run_multimodal_evidence_surveillance_research_copilot_json(
+    value: &Value,
+) -> Result<Value, String> {
     let request = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid local evidence workflow request: {error}"))?;
-    let receipt = schedule_local_evidence_surveillance_workflow(&request)
+        .map_err(|error| format!("invalid multimodal research copilot request: {error}"))?;
+    let receipt = run_multimodal_evidence_surveillance_research_copilot(&request)
         .map_err(|error| error.to_string())?;
     serde_json::to_value(receipt)
-        .map_err(|error| format!("cannot serialize local evidence workflow receipt: {error}"))
+        .map_err(|error| format!("cannot serialize multimodal research copilot receipt: {error}"))
 }
 
-pub fn validate_local_evidence_surveillance_workflow_fabric_json(
+pub fn validate_multimodal_evidence_surveillance_research_copilot_json(
     value: &Value,
-) -> Result<LocalEvidenceSurveillanceWorkflowReceipt, String> {
-    let receipt: LocalEvidenceSurveillanceWorkflowReceipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid local evidence workflow receipt: {error}"))?;
+) -> Result<MultimodalEvidenceSurveillanceResearchCopilotReceipt, String> {
+    let receipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid multimodal research copilot receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID {
-        return Err("local evidence workflow feature id mismatch".into());
+    if receipt.feature_id != ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID {
+        return Err("multimodal research copilot feature id mismatch".into());
     }
     Ok(receipt)
 }
-
-pub fn run_multimodal_evidence_surveillance_workflow_fabric_json(value: &Value) -> Result<Value, String> {
-    let request = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid multimodal evidence workflow request: {error}"))?;
-    let receipt = schedule_multimodal_evidence_surveillance_workflow(&request)
-        .map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt)
-        .map_err(|error| format!("cannot serialize multimodal evidence workflow receipt: {error}"))
-}
-
-pub fn validate_multimodal_evidence_surveillance_workflow_fabric_json(
-    value: &Value,
-) -> Result<MultimodalEvidenceSurveillanceWorkflowReceipt, String> {
-    let receipt: MultimodalEvidenceSurveillanceWorkflowReceipt = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid multimodal evidence workflow receipt: {error}"))?;
-    receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID {
-        return Err("multimodal evidence workflow feature id mismatch".into());
-    }
-    Ok(receipt)
-}
-
-pub fn run_throughput_evidence_surveillance_workflow_fabric_json(value: &Value) -> Result<Value, String> {
-    let request = serde_json::from_value(value.clone()).map_err(|error| format!("invalid throughput evidence workflow request: {error}"))?;
-    let receipt = schedule_throughput_evidence_surveillance_workflow(&request).map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize throughput evidence workflow receipt: {error}"))
-}
-
-pub fn validate_throughput_evidence_surveillance_workflow_fabric_json(value: &Value) -> Result<ThroughputEvidenceSurveillanceWorkflowReceipt, String> {
-    let receipt: ThroughputEvidenceSurveillanceWorkflowReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid throughput evidence workflow receipt: {error}"))?;
-    receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID { return Err("throughput evidence workflow feature id mismatch".into()); }
-    Ok(receipt)
-}
-
-pub fn run_federated_continual_evidence_surveillance_workflow_fabric_json(value: &Value) -> Result<Value, String> {
-    let request = serde_json::from_value(value.clone()).map_err(|error| format!("invalid federated continual evidence workflow request: {error}"))?;
-    let receipt = schedule_federated_continual_evidence_surveillance_workflow(&request).map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize federated continual evidence workflow receipt: {error}"))
-}
-
-pub fn validate_federated_continual_evidence_surveillance_workflow_fabric_json(value: &Value) -> Result<FederatedContinualEvidenceSurveillanceWorkflowReceipt, String> {
-    let receipt: FederatedContinualEvidenceSurveillanceWorkflowReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid federated continual evidence workflow receipt: {error}"))?;
-    receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID { return Err("federated continual evidence workflow feature id mismatch".into()); }
-    Ok(receipt)
-}
-
-pub fn run_local_evidence_surveillance_research_workbench_json(value: &Value) -> Result<Value, String> {
-    let request: LocalEvidenceSurveillanceResearchWorkbenchRequest = serde_json::from_value(value.clone()).map_err(|error| format!("invalid local evidence workbench request: {error}"))?;
-    let receipt = render_local_evidence_surveillance_research_workbench(&request).map_err(|error| error.to_string())?;
-    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize local evidence workbench receipt: {error}"))
-}
-
-pub fn validate_local_evidence_surveillance_research_workbench_json(value: &Value) -> Result<LocalEvidenceSurveillanceResearchWorkbenchReceipt, String> {
-    let receipt: LocalEvidenceSurveillanceResearchWorkbenchReceipt = serde_json::from_value(value.clone()).map_err(|error| format!("invalid local evidence workbench receipt: {error}"))?;
-    receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID { return Err("local evidence workbench feature id mismatch".into()); }
-    Ok(receipt)
-}
-pub fn run_multimodal_evidence_surveillance_research_workbench_json(value: &Value) -> Result<Value, String> { let request: MultimodalEvidenceSurveillanceResearchWorkbenchRequest = serde_json::from_value(value.clone()).map_err(|e| format!("invalid multimodal evidence workbench request: {e}"))?; let receipt = render_multimodal_evidence_surveillance_research_workbench(&request).map_err(|e| e.to_string())?; serde_json::to_value(receipt).map_err(|e| format!("cannot serialize multimodal evidence workbench receipt: {e}")) }
-pub fn validate_multimodal_evidence_surveillance_research_workbench_json(value: &Value) -> Result<MultimodalEvidenceSurveillanceResearchWorkbenchReceipt, String> { let receipt: MultimodalEvidenceSurveillanceResearchWorkbenchReceipt = serde_json::from_value(value.clone()).map_err(|e| format!("invalid multimodal evidence workbench receipt: {e}"))?; receipt.validate().map_err(|e| e.to_string())?; if receipt.feature_id != ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID { return Err("multimodal evidence workbench feature id mismatch".into()); } Ok(receipt) }
-pub fn run_throughput_evidence_surveillance_research_workbench_json(value: &Value) -> Result<Value, String> { let request: ThroughputEvidenceSurveillanceResearchWorkbenchRequest = serde_json::from_value(value.clone()).map_err(|e| format!("invalid throughput evidence workbench request: {e}"))?; let receipt = render_throughput_evidence_surveillance_research_workbench(&request).map_err(|e| e.to_string())?; serde_json::to_value(receipt).map_err(|e| format!("cannot serialize throughput evidence workbench receipt: {e}")) }
-pub fn validate_throughput_evidence_surveillance_research_workbench_json(value: &Value) -> Result<ThroughputEvidenceSurveillanceResearchWorkbenchReceipt, String> { let receipt: ThroughputEvidenceSurveillanceResearchWorkbenchReceipt = serde_json::from_value(value.clone()).map_err(|e| format!("invalid throughput evidence workbench receipt: {e}"))?; receipt.validate().map_err(|e| e.to_string())?; if receipt.feature_id != ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID { return Err("throughput evidence workbench feature id mismatch".into()); } Ok(receipt) }
 
 pub fn compile_evidence_synthesis_json(value: &Value) -> Result<Value, String> {
     let request: EvidenceSynthesisRequest = serde_json::from_value(value.clone())
@@ -1147,6 +1568,940 @@ pub fn validate_evidence_synthesis_json(
     Ok(receipt)
 }
 
+pub fn run_local_retrieval_synthesis_inference_engine_json(value: &Value) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisInferenceEngineRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid local retrieval synthesis engine request: {error}")
+        })?;
+    let receipt = run_local_retrieval_synthesis_inference_engine(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize local retrieval synthesis engine receipt: {error}")
+    })
+}
+
+pub fn validate_local_retrieval_synthesis_inference_engine_json(
+    value: &Value,
+) -> Result<LocalRetrievalSynthesisInferenceEngineReceipt, String> {
+    let receipt: LocalRetrievalSynthesisInferenceEngineReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid local retrieval synthesis engine receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID {
+        return Err("local retrieval synthesis engine feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_contract_model_json(value: &Value) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisContractModelRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local retrieval contract model request: {error}"))?;
+    let receipt = run_local_retrieval_synthesis_contract_model(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize local retrieval contract model receipt: {error}")
+    })
+}
+
+pub fn validate_local_retrieval_synthesis_contract_model_json(
+    value: &Value,
+) -> Result<LocalRetrievalSynthesisContractModelReceipt, String> {
+    let receipt: LocalRetrievalSynthesisContractModelReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local retrieval contract model receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID {
+        return Err("local retrieval contract model feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_research_copilot_json(value: &Value) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisResearchCopilotRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid local retrieval research copilot request: {error}")
+        })?;
+    let receipt = run_local_retrieval_synthesis_research_copilot(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize local retrieval research copilot receipt: {error}")
+    })
+}
+
+pub fn validate_local_retrieval_synthesis_research_copilot_json(
+    value: &Value,
+) -> Result<LocalRetrievalSynthesisResearchCopilotReceipt, String> {
+    let receipt: LocalRetrievalSynthesisResearchCopilotReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid local retrieval research copilot receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID {
+        return Err("local retrieval research copilot feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_retrieval_synthesis_research_copilot_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: MultimodalRetrievalSynthesisResearchCopilotRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid multimodal retrieval research copilot request: {error}")
+        })?;
+    let receipt = run_multimodal_retrieval_synthesis_research_copilot(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize multimodal retrieval research copilot receipt: {error}")
+    })
+}
+
+pub fn validate_multimodal_retrieval_synthesis_research_copilot_json(
+    value: &Value,
+) -> Result<MultimodalRetrievalSynthesisResearchCopilotReceipt, String> {
+    let receipt: MultimodalRetrievalSynthesisResearchCopilotReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid multimodal retrieval research copilot receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID {
+        return Err("multimodal retrieval research copilot feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_research_copilot_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisResearchCopilotRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid throughput retrieval research copilot request: {error}")
+        })?;
+    let receipt = run_throughput_retrieval_synthesis_research_copilot(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize throughput retrieval research copilot receipt: {error}")
+    })
+}
+
+pub fn validate_throughput_retrieval_synthesis_research_copilot_json(
+    value: &Value,
+) -> Result<ThroughputRetrievalSynthesisResearchCopilotReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisResearchCopilotReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid throughput retrieval research copilot receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID {
+        return Err("throughput retrieval research copilot feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_continual_retrieval_synthesis_research_copilot_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FederatedContinualRetrievalSynthesisResearchCopilotRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual retrieval research copilot request: {error}")
+        })?;
+    let receipt = run_federated_continual_retrieval_synthesis_research_copilot(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated continual retrieval research copilot receipt: {error}")
+    })
+}
+
+pub fn validate_federated_continual_retrieval_synthesis_research_copilot_json(
+    value: &Value,
+) -> Result<FederatedContinualRetrievalSynthesisResearchCopilotReceipt, String> {
+    let receipt: FederatedContinualRetrievalSynthesisResearchCopilotReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual retrieval research copilot receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID
+    {
+        return Err("federated continual retrieval research copilot feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_workflow_json(value: &Value) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisWorkflowRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid local retrieval workflow request: {error}"))?;
+    let receipt =
+        schedule_local_retrieval_synthesis_workflow(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize local retrieval workflow receipt: {error}"))
+}
+
+pub fn validate_local_retrieval_synthesis_workflow_json(
+    value: &Value,
+) -> Result<LocalRetrievalSynthesisWorkflowReceipt, String> {
+    let receipt: LocalRetrievalSynthesisWorkflowReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid local retrieval workflow receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID {
+        return Err("local retrieval workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_retrieval_synthesis_workflow_json(value: &Value) -> Result<Value, String> {
+    let request: MultimodalRetrievalSynthesisWorkflowRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid multimodal retrieval workflow request: {error}"))?;
+    let receipt = schedule_multimodal_retrieval_synthesis_workflow(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize multimodal retrieval workflow receipt: {error}"))
+}
+
+pub fn validate_multimodal_retrieval_synthesis_workflow_json(
+    value: &Value,
+) -> Result<MultimodalRetrievalSynthesisWorkflowReceipt, String> {
+    let receipt: MultimodalRetrievalSynthesisWorkflowReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid multimodal retrieval workflow receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID {
+        return Err("multimodal retrieval workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_workflow_json(value: &Value) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisWorkflowRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid throughput retrieval workflow request: {error}"))?;
+    let receipt = schedule_throughput_retrieval_synthesis_workflow(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize throughput retrieval workflow receipt: {error}"))
+}
+
+pub fn validate_throughput_retrieval_synthesis_workflow_json(
+    value: &Value,
+) -> Result<ThroughputRetrievalSynthesisWorkflowReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisWorkflowReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid throughput retrieval workflow receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID {
+        return Err("throughput retrieval workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_continual_retrieval_synthesis_workflow_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FederatedContinualRetrievalSynthesisWorkflowRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual retrieval workflow request: {error}")
+        })?;
+    let receipt = schedule_federated_continual_retrieval_synthesis_workflow(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated continual retrieval workflow receipt: {error}")
+    })
+}
+
+pub fn validate_federated_continual_retrieval_synthesis_workflow_json(
+    value: &Value,
+) -> Result<FederatedContinualRetrievalSynthesisWorkflowReceipt, String> {
+    let receipt: FederatedContinualRetrievalSynthesisWorkflowReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual retrieval workflow receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID
+    {
+        return Err("federated continual retrieval workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_research_workbench_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisResearchWorkbenchRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local retrieval workbench request: {error}"))?;
+    let receipt = render_local_retrieval_synthesis_research_workbench(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize local retrieval workbench receipt: {error}"))
+}
+
+pub fn validate_local_retrieval_synthesis_research_workbench_json(
+    value: &Value,
+) -> Result<LocalRetrievalSynthesisResearchWorkbenchReceipt, String> {
+    let receipt: LocalRetrievalSynthesisResearchWorkbenchReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local retrieval workbench receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID {
+        return Err("local retrieval workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_retrieval_synthesis_research_workbench_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: MultimodalRetrievalSynthesisResearchWorkbenchRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid multimodal retrieval workbench request: {error}"))?;
+    let receipt = render_multimodal_retrieval_synthesis_research_workbench(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize multimodal retrieval workbench receipt: {error}")
+    })
+}
+
+pub fn validate_multimodal_retrieval_synthesis_research_workbench_json(
+    value: &Value,
+) -> Result<MultimodalRetrievalSynthesisResearchWorkbenchReceipt, String> {
+    let receipt: MultimodalRetrievalSynthesisResearchWorkbenchReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid multimodal retrieval workbench receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID {
+        return Err("multimodal retrieval workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_research_workbench_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisResearchWorkbenchRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid throughput retrieval workbench request: {error}"))?;
+    let receipt = render_throughput_retrieval_synthesis_research_workbench(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize throughput retrieval workbench receipt: {error}")
+    })
+}
+pub fn validate_throughput_retrieval_synthesis_research_workbench_json(
+    value: &Value,
+) -> Result<ThroughputRetrievalSynthesisResearchWorkbenchReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisResearchWorkbenchReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid throughput retrieval workbench receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID {
+        return Err("throughput retrieval workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_continual_retrieval_synthesis_research_workbench_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FederatedContinualRetrievalSynthesisResearchWorkbenchRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual retrieval workbench request: {error}")
+        })?;
+    let receipt = render_federated_continual_retrieval_synthesis_research_workbench(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated continual retrieval workbench receipt: {error}")
+    })
+}
+pub fn validate_federated_continual_retrieval_synthesis_research_workbench_json(
+    value: &Value,
+) -> Result<FederatedContinualRetrievalSynthesisResearchWorkbenchReceipt, String> {
+    let receipt: FederatedContinualRetrievalSynthesisResearchWorkbenchReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual retrieval workbench receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID
+    {
+        return Err("federated continual retrieval workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_interoperability_gateway_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisInteroperabilityGatewayRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid local retrieval interoperability request: {error}")
+        })?;
+    let receipt = render_local_retrieval_synthesis_interoperability_gateway(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize local retrieval interoperability receipt: {error}")
+    })
+}
+pub fn validate_local_retrieval_synthesis_interoperability_gateway_json(
+    value: &Value,
+) -> Result<LocalRetrievalSynthesisInteroperabilityGatewayReceipt, String> {
+    let receipt: LocalRetrievalSynthesisInteroperabilityGatewayReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid local retrieval interoperability receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID {
+        return Err("local retrieval interoperability feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_retrieval_synthesis_interoperability_gateway_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: MultimodalRetrievalSynthesisInteroperabilityGatewayRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid multimodal retrieval interoperability request: {error}")
+        })?;
+    let receipt = render_multimodal_retrieval_synthesis_interoperability_gateway(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize multimodal retrieval interoperability receipt: {error}")
+    })
+}
+pub fn validate_multimodal_retrieval_synthesis_interoperability_gateway_json(
+    value: &Value,
+) -> Result<MultimodalRetrievalSynthesisInteroperabilityGatewayReceipt, String> {
+    let receipt: MultimodalRetrievalSynthesisInteroperabilityGatewayReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid multimodal retrieval interoperability receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID
+    {
+        return Err("multimodal retrieval interoperability feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_interoperability_gateway_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisInteroperabilityGatewayRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid throughput retrieval interoperability request: {error}")
+        })?;
+    let receipt = render_throughput_retrieval_synthesis_interoperability_gateway(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize throughput retrieval interoperability receipt: {error}")
+    })
+}
+pub fn validate_throughput_retrieval_synthesis_interoperability_gateway_json(
+    value: &Value,
+) -> Result<ThroughputRetrievalSynthesisInteroperabilityGatewayReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisInteroperabilityGatewayReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid throughput retrieval interoperability receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID
+    {
+        return Err("throughput retrieval interoperability feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_continual_retrieval_synthesis_interoperability_gateway_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual retrieval interoperability request: {error}")
+        })?;
+    let receipt = render_federated_continual_retrieval_synthesis_interoperability_gateway(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated continual retrieval interoperability receipt: {error}")
+    })
+}
+pub fn validate_federated_continual_retrieval_synthesis_interoperability_gateway_json(
+    value: &Value,
+) -> Result<FederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt, String> {
+    let receipt: FederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual retrieval interoperability receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID
+    {
+        return Err("federated continual retrieval interoperability feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_assurance_harness_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisAssuranceHarnessRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local retrieval assurance request: {error}"))?;
+    let receipt = assure_local_retrieval_synthesis(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize local retrieval assurance receipt: {error}"))
+}
+pub fn validate_local_retrieval_synthesis_assurance_harness_json(
+    value: &Value,
+) -> Result<LocalRetrievalSynthesisAssuranceHarnessReceipt, String> {
+    let receipt: LocalRetrievalSynthesisAssuranceHarnessReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local retrieval assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID {
+        return Err("local retrieval assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_retrieval_synthesis_assurance_harness_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: MultimodalRetrievalSynthesisAssuranceHarnessRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid multimodal retrieval assurance request: {error}"))?;
+    let receipt =
+        assure_multimodal_retrieval_synthesis(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize multimodal retrieval assurance receipt: {error}")
+    })
+}
+pub fn validate_multimodal_retrieval_synthesis_assurance_harness_json(
+    value: &Value,
+) -> Result<MultimodalRetrievalSynthesisAssuranceHarnessReceipt, String> {
+    let receipt: MultimodalRetrievalSynthesisAssuranceHarnessReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid multimodal retrieval assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID {
+        return Err("multimodal retrieval assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_assurance_harness_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisAssuranceHarnessRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid throughput retrieval assurance request: {error}"))?;
+    let receipt =
+        assure_throughput_retrieval_synthesis(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize throughput retrieval assurance receipt: {error}")
+    })
+}
+pub fn validate_throughput_retrieval_synthesis_assurance_harness_json(
+    value: &Value,
+) -> Result<ThroughputRetrievalSynthesisAssuranceHarnessReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisAssuranceHarnessReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid throughput retrieval assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID {
+        return Err("throughput retrieval assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_continual_retrieval_synthesis_assurance_harness_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FederatedContinualRetrievalSynthesisAssuranceHarnessRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual retrieval assurance request: {error}")
+        })?;
+    let receipt = assure_federated_continual_retrieval_synthesis(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated continual retrieval assurance receipt: {error}")
+    })
+}
+pub fn validate_federated_continual_retrieval_synthesis_assurance_harness_json(
+    value: &Value,
+) -> Result<FederatedContinualRetrievalSynthesisAssuranceHarnessReceipt, String> {
+    let receipt: FederatedContinualRetrievalSynthesisAssuranceHarnessReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated continual retrieval assurance receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID
+    {
+        return Err("federated continual retrieval assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_retrieval_synthesis_federated_control_plane_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: LocalRetrievalSynthesisFederatedControlPlaneRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local retrieval control-plane request: {error}"))?;
+    let receipt = operate_local_retrieval_synthesis_federated_control_plane(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize local retrieval control-plane receipt: {error}"))
+}
+pub fn validate_local_retrieval_synthesis_federated_control_plane_json(
+    value: &Value,
+) -> Result<LocalRetrievalSynthesisFederatedControlPlaneReceipt, String> {
+    let receipt: LocalRetrievalSynthesisFederatedControlPlaneReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local retrieval control-plane receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID {
+        return Err("local retrieval control-plane feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_retrieval_synthesis_federated_control_plane_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: MultimodalRetrievalSynthesisFederatedControlPlaneRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid multimodal retrieval control-plane request: {error}")
+        })?;
+    let receipt = operate_multimodal_retrieval_synthesis_federated_control_plane(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize multimodal retrieval control-plane receipt: {error}")
+    })
+}
+pub fn validate_multimodal_retrieval_synthesis_federated_control_plane_json(
+    value: &Value,
+) -> Result<MultimodalRetrievalSynthesisFederatedControlPlaneReceipt, String> {
+    let receipt: MultimodalRetrievalSynthesisFederatedControlPlaneReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid multimodal retrieval control-plane receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID
+    {
+        return Err("multimodal retrieval control-plane feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_federated_control_plane_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisFederatedControlPlaneRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid throughput retrieval control-plane request: {error}")
+        })?;
+    let receipt = operate_throughput_retrieval_synthesis_federated_control_plane(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize throughput retrieval control-plane receipt: {error}")
+    })
+}
+pub fn validate_throughput_retrieval_synthesis_federated_control_plane_json(
+    value: &Value,
+) -> Result<ThroughputRetrievalSynthesisFederatedControlPlaneReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisFederatedControlPlaneReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid throughput retrieval control-plane receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID
+    {
+        return Err("throughput retrieval control-plane feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_continual_retrieval_synthesis_federated_control_plane_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FederatedContinualRetrievalSynthesisFederatedControlPlaneRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid continual retrieval control-plane request: {error}")
+        })?;
+    let receipt = operate_federated_continual_retrieval_synthesis_federated_control_plane(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize continual retrieval control-plane receipt: {error}")
+    })
+}
+pub fn validate_federated_continual_retrieval_synthesis_federated_control_plane_json(
+    value: &Value,
+) -> Result<FederatedContinualRetrievalSynthesisFederatedControlPlaneReceipt, String> {
+    let receipt: FederatedContinualRetrievalSynthesisFederatedControlPlaneReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid continual retrieval control-plane receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID
+    {
+        return Err("continual retrieval control-plane feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_foundation_mechanism_exploration_assurance_json(value: &Value) -> Result<Value, String> {
+    let request: MechanismExplorationAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid foundation mechanism assurance request: {error}"))?;
+    let receipt = assure_mechanism_exploration(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize foundation mechanism assurance receipt: {error}")
+    })
+}
+pub fn validate_foundation_mechanism_exploration_assurance_json(
+    value: &Value,
+) -> Result<MechanismExplorationAssuranceReceipt, String> {
+    let receipt: MechanismExplorationAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid foundation mechanism assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID {
+        return Err("foundation mechanism assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+pub fn run_oraclex_publication_release_json(value: &Value) -> Result<Value, String> {
+    let request: PublicationReleaseRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid oraclex publication release request: {error}"))?;
+    let receipt = compile_publication_release(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize oraclex publication release receipt: {error}"))
+}
+
+pub fn run_interweave_frontier_control_json(value: &Value) -> Result<Value, String> {
+    let request: InterweaveControlPlaneRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid interweave frontier control request: {error}"))?;
+    let receipt = operate_interweave_frontier(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize interweave frontier control receipt: {error}"))
+}
+
+pub fn validate_interweave_frontier_control_json(
+    value: &Value,
+) -> Result<InterweaveControlReceipt, String> {
+    let receipt: InterweaveControlReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid interweave frontier control receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != INTERWEAVE_FRONTIER_FEATURE_ID {
+        return Err("interweave frontier control feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+pub fn validate_oraclex_publication_release_json(
+    value: &Value,
+) -> Result<PublicationReleaseReceipt, String> {
+    let receipt: PublicationReleaseReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid oraclex publication release receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != PUBLICATION_RELEASE_FEATURE_ID {
+        return Err("oraclex publication release feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_continual_interpretation_json(value: &Value) -> Result<Value, String> {
+    let request: EvidenceBackedResult4 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated continual interpretation request: {error}"))?;
+    let receipt = run_federated_continual_interpretation(&request)
+        .map_err(|error: FederatedInterpretationError| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated continual interpretation receipt: {error}")
+    })
+}
+
+pub fn validate_federated_continual_interpretation_json(
+    value: &Value,
+) -> Result<InteractiveInterpretation, String> {
+    let receipt: InteractiveInterpretation = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid federated continual interpretation receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID {
+        return Err("federated continual interpretation feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_retrieval_synthesis_inference_engine_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: MultimodalRetrievalSynthesisInferenceEngineRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid multimodal retrieval synthesis engine request: {error}")
+        })?;
+    let receipt = run_multimodal_retrieval_synthesis_inference_engine(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize multimodal retrieval synthesis engine receipt: {error}")
+    })
+}
+
+pub fn validate_multimodal_retrieval_synthesis_inference_engine_json(
+    value: &Value,
+) -> Result<MultimodalRetrievalSynthesisInferenceEngineReceipt, String> {
+    let receipt: MultimodalRetrievalSynthesisInferenceEngineReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid multimodal retrieval synthesis engine receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID {
+        return Err("multimodal retrieval synthesis engine feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_inference_engine_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisInferenceEngineRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid throughput retrieval synthesis engine request: {error}")
+        })?;
+    let receipt = run_throughput_retrieval_synthesis_inference_engine(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize throughput retrieval synthesis engine receipt: {error}")
+    })
+}
+
+pub fn validate_throughput_retrieval_synthesis_inference_engine_json(
+    value: &Value,
+) -> Result<ThroughputRetrievalSynthesisInferenceEngineReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisInferenceEngineReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid throughput retrieval synthesis engine receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID {
+        return Err("throughput retrieval synthesis engine feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_retrieval_synthesis_contract_model_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: ThroughputRetrievalSynthesisContractModelRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid throughput retrieval contract model request: {error}")
+        })?;
+    let receipt = run_throughput_retrieval_synthesis_contract_model(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize throughput retrieval contract model receipt: {error}")
+    })
+}
+
+pub fn validate_throughput_retrieval_synthesis_contract_model_json(
+    value: &Value,
+) -> Result<ThroughputRetrievalSynthesisContractModelReceipt, String> {
+    let receipt: ThroughputRetrievalSynthesisContractModelReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid throughput retrieval contract model receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID {
+        return Err("throughput retrieval contract model feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_retrieval_synthesis_inference_engine_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FederatedRetrievalSynthesisInferenceEngineRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated retrieval synthesis engine request: {error}")
+        })?;
+    let receipt = run_federated_retrieval_synthesis_inference_engine(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated retrieval synthesis engine receipt: {error}")
+    })
+}
+
+pub fn validate_federated_retrieval_synthesis_inference_engine_json(
+    value: &Value,
+) -> Result<FederatedRetrievalSynthesisInferenceEngineReceipt, String> {
+    let receipt: FederatedRetrievalSynthesisInferenceEngineReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated retrieval synthesis engine receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID {
+        return Err("federated retrieval synthesis engine feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_retrieval_synthesis_contract_model_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FederatedRetrievalSynthesisContractModelRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated retrieval contract model request: {error}")
+        })?;
+    let receipt = run_federated_retrieval_synthesis_contract_model(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated retrieval contract model receipt: {error}")
+    })
+}
+
+pub fn validate_federated_retrieval_synthesis_contract_model_json(
+    value: &Value,
+) -> Result<FederatedRetrievalSynthesisContractModelReceipt, String> {
+    let receipt: FederatedRetrievalSynthesisContractModelReceipt =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid federated retrieval contract model receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID {
+        return Err("federated retrieval contract model feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_evidence_surveillance_research_copilot_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid throughput research copilot request: {error}"))?;
+    let receipt = run_throughput_evidence_surveillance_research_copilot(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize throughput research copilot receipt: {error}"))
+}
+
+pub fn validate_throughput_evidence_surveillance_research_copilot_json(
+    value: &Value,
+) -> Result<ThroughputEvidenceSurveillanceResearchCopilotReceipt, String> {
+    let receipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid throughput research copilot receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID {
+        return Err("throughput research copilot feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
 pub fn assure_adapter_context_compilation_json(value: &Value) -> Result<Value, String> {
     let request: ContextCompilationRequest = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid adapter context compilation request: {error}"))?;
@@ -1154,6 +2509,34 @@ pub fn assure_adapter_context_compilation_json(value: &Value) -> Result<Value, S
         assure_adapter_context_compilation(&request).map_err(|error| error.to_string())?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize adapter context compilation receipt: {error}"))
+}
+
+pub fn run_federated_continual_evidence_surveillance_research_copilot_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request = serde_json::from_value(value.clone()).map_err(|error| {
+        format!("invalid federated continual research copilot request: {error}")
+    })?;
+    let receipt = run_federated_continual_evidence_surveillance_research_copilot(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated continual research copilot receipt: {error}")
+    })
+}
+
+pub fn validate_federated_continual_evidence_surveillance_research_copilot_json(
+    value: &Value,
+) -> Result<FederatedContinualEvidenceSurveillanceResearchCopilotReceipt, String> {
+    let receipt = serde_json::from_value(value.clone()).map_err(|error| {
+        format!("invalid federated continual research copilot receipt: {error}")
+    })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID
+    {
+        return Err("federated continual research copilot feature id mismatch".into());
+    }
+    Ok(receipt)
 }
 
 pub fn validate_adapter_context_compilation_json(
@@ -1164,6 +2547,204 @@ pub fn validate_adapter_context_compilation_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != CONTEXT_COMPILATION_FEATURE_ID {
         return Err("adapter context compilation feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_evidence_surveillance_workflow_fabric_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid local evidence workflow request: {error}"))?;
+    let receipt = schedule_local_evidence_surveillance_workflow(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize local evidence workflow receipt: {error}"))
+}
+
+pub fn validate_local_evidence_surveillance_workflow_fabric_json(
+    value: &Value,
+) -> Result<LocalEvidenceSurveillanceWorkflowReceipt, String> {
+    let receipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid local evidence workflow receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID {
+        return Err("local evidence workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_evidence_surveillance_workflow_fabric_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid multimodal evidence workflow request: {error}"))?;
+    let receipt = schedule_multimodal_evidence_surveillance_workflow(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize multimodal evidence workflow receipt: {error}"))
+}
+
+pub fn validate_multimodal_evidence_surveillance_workflow_fabric_json(
+    value: &Value,
+) -> Result<MultimodalEvidenceSurveillanceWorkflowReceipt, String> {
+    let receipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid multimodal evidence workflow receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID {
+        return Err("multimodal evidence workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_throughput_evidence_surveillance_workflow_fabric_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid throughput evidence workflow request: {error}"))?;
+    let receipt = schedule_throughput_evidence_surveillance_workflow(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize throughput evidence workflow receipt: {error}"))
+}
+
+pub fn validate_throughput_evidence_surveillance_workflow_fabric_json(
+    value: &Value,
+) -> Result<ThroughputEvidenceSurveillanceWorkflowReceipt, String> {
+    let receipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid throughput evidence workflow receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID {
+        return Err("throughput evidence workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_federated_continual_evidence_surveillance_workflow_fabric_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request = serde_json::from_value(value.clone()).map_err(|error| {
+        format!("invalid federated continual evidence workflow request: {error}")
+    })?;
+    let receipt = schedule_federated_continual_evidence_surveillance_workflow(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize federated continual evidence workflow receipt: {error}")
+    })
+}
+
+pub fn validate_federated_continual_evidence_surveillance_workflow_fabric_json(
+    value: &Value,
+) -> Result<FederatedContinualEvidenceSurveillanceWorkflowReceipt, String> {
+    let receipt = serde_json::from_value(value.clone()).map_err(|error| {
+        format!("invalid federated continual evidence workflow receipt: {error}")
+    })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID
+    {
+        return Err("federated continual evidence workflow feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_local_evidence_surveillance_research_workbench_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: LocalEvidenceSurveillanceResearchWorkbenchRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local evidence workbench request: {error}"))?;
+    let receipt = render_local_evidence_surveillance_research_workbench(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize local evidence workbench receipt: {error}"))
+}
+
+pub fn validate_local_evidence_surveillance_research_workbench_json(
+    value: &Value,
+) -> Result<LocalEvidenceSurveillanceResearchWorkbenchReceipt, String> {
+    let receipt: LocalEvidenceSurveillanceResearchWorkbenchReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid local evidence workbench receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID {
+        return Err("local evidence workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn run_multimodal_evidence_surveillance_research_workbench_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: MultimodalEvidenceSurveillanceResearchWorkbenchRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid multimodal evidence workbench request: {error}"))?;
+    let receipt = render_multimodal_evidence_surveillance_research_workbench(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize multimodal evidence workbench receipt: {error}"))
+}
+
+pub fn validate_multimodal_evidence_surveillance_research_workbench_json(
+    value: &Value,
+) -> Result<MultimodalEvidenceSurveillanceResearchWorkbenchReceipt, String> {
+    let receipt: MultimodalEvidenceSurveillanceResearchWorkbenchReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid multimodal evidence workbench receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID
+    {
+        return Err("multimodal evidence workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+pub fn run_throughput_evidence_surveillance_research_workbench_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: ThroughputEvidenceSurveillanceResearchWorkbenchRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|e| format!("invalid throughput evidence workbench request: {e}"))?;
+    let receipt = render_throughput_evidence_surveillance_research_workbench(&request)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|e| format!("cannot serialize throughput evidence workbench receipt: {e}"))
+}
+pub fn validate_throughput_evidence_surveillance_research_workbench_json(
+    value: &Value,
+) -> Result<ThroughputEvidenceSurveillanceResearchWorkbenchReceipt, String> {
+    let receipt: ThroughputEvidenceSurveillanceResearchWorkbenchReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|e| format!("invalid throughput evidence workbench receipt: {e}"))?;
+    receipt.validate().map_err(|e| e.to_string())?;
+    if receipt.feature_id != ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID
+    {
+        return Err("throughput evidence workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+pub fn run_federated_continual_evidence_surveillance_research_workbench_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|e| format!("invalid federated continual evidence workbench request: {e}"))?;
+    let receipt = render_federated_continual_evidence_surveillance_research_workbench(&request)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_value(receipt).map_err(|e| {
+        format!("cannot serialize federated continual evidence workbench receipt: {e}")
+    })
+}
+pub fn validate_federated_continual_evidence_surveillance_research_workbench_json(
+    value: &Value,
+) -> Result<FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt, String> {
+    let receipt: FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt =
+        serde_json::from_value(value.clone())
+            .map_err(|e| format!("invalid federated continual evidence workbench receipt: {e}"))?;
+    receipt.validate().map_err(|e| e.to_string())?;
+    if receipt.feature_id
+        != ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID
+    {
+        return Err("federated continual evidence workbench feature id mismatch".into());
     }
     Ok(receipt)
 }
@@ -1376,6 +2957,34 @@ pub fn validate_interpretation_assurance_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != INTERPRETATION_ASSURANCE_FEATURE_ID {
         return Err("interpretation assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub fn assure_governance_federated_continual_interpretation_json(
+    value: &Value,
+) -> Result<Value, String> {
+    let request: FederatedContinualInterpretationAssuranceRequest =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid governance federated interpretation request: {error}")
+        })?;
+    let receipt =
+        assure_federated_continual_interpretations(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize governance federated interpretation receipt: {error}")
+    })
+}
+
+pub fn validate_governance_federated_continual_interpretation_json(
+    value: &Value,
+) -> Result<FederatedContinualInterpretationAssuranceReport, String> {
+    let receipt: FederatedContinualInterpretationAssuranceReport =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            format!("invalid governance federated interpretation receipt: {error}")
+        })?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != GOVERNANCE_FEDERATED_INTERPRETATION_FEATURE_ID {
+        return Err("governance federated interpretation feature id mismatch".into());
     }
     Ok(receipt)
 }
@@ -1773,7 +3382,8 @@ pub fn validate_bounded_evolution_assurance_json(
     Ok(receipt)
 }
 
-pub const CONTEXT_COMPILATION_FEDERATED_CONTROL_TOOL: &str = "conformance_context_compilation_federated_control";
+pub const CONTEXT_COMPILATION_FEDERATED_CONTROL_TOOL: &str =
+    "conformance_context_compilation_federated_control";
 
 pub fn run_context_compilation_federated_control_json(value: &Value) -> Result<Value, String> {
     let request: ContextCompilationFederatedControlRequest = serde_json::from_value(value.clone())
@@ -1799,8 +3409,9 @@ pub fn validate_context_compilation_federated_control_json(
 pub const MUTATION_KNOWLEDGE_FEDERATED_CONTROL_TOOL: &str = "mutation_knowledge_federated_control";
 
 pub fn run_mutation_knowledge_federated_control_json(value: &Value) -> Result<Value, String> {
-    let request: MutationKnowledgeFederatedControlRequest = serde_json::from_value(value.clone())
-        .map_err(|error| format!("invalid mutation knowledge federation request: {error}"))?;
+    let request: MutationKnowledgeFederatedControlRequest =
+        serde_json::from_value(value.clone())
+            .map_err(|error| format!("invalid mutation knowledge federation request: {error}"))?;
     let receipt = operate_mutation_knowledge_federated_control(&request)
         .map_err(|error| error.to_string())?;
     serde_json::to_value(receipt)
@@ -1815,6 +3426,494 @@ pub fn validate_mutation_knowledge_federated_control_json(
     receipt.validate().map_err(|error| error.to_string())?;
     if receipt.feature_id != MUTATION_KNOWLEDGE_FEDERATED_CONTROL_FEATURE_ID {
         return Err("mutation knowledge federation feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_RESOURCE_INTEROPERABILITY_TOOL: &str =
+    "ids_federated_resource_discovery_interoperability";
+
+pub fn interoperate_ids_resources_json(value: &Value) -> Result<Value, String> {
+    let request: ResourceNeed4 = serde_json::from_value(
+        value
+            .get("request")
+            .cloned()
+            .unwrap_or_else(|| value.clone()),
+    )
+    .map_err(|error| format!("invalid ids resource interoperability request: {error}"))?;
+    let endpoints: Vec<ResourceEndpoint4> = serde_json::from_value(
+        value
+            .get("endpoints")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    )
+    .map_err(|error| format!("invalid ids resource endpoints: {error}"))?;
+    let peers: Vec<PeerResourceSummary4> = serde_json::from_value(
+        value
+            .get("peers")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    )
+    .map_err(|error| format!("invalid ids resource peers: {error}"))?;
+    let receipt = interoperate_resources(&request, &endpoints, &peers)
+        .map_err(|error| format!("ids resource interoperability failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids resource interoperability receipt: {error}"))
+}
+
+pub fn validate_ids_resource_interoperability_json(
+    value: &Value,
+) -> Result<QualifiedResourceSet6, String> {
+    let receipt: QualifiedResourceSet6 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids resource interoperability receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID {
+        return Err("ids resource interoperability feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const WORLDFACTORY_PROTOCOL_SIMULATION_TOOL: &str =
+    "worldfactory_protocol_simulation_federated_control_plane";
+
+pub fn simulate_worldfactory_protocol_json(value: &Value) -> Result<Value, String> {
+    let draft: ProtocolDraft4 = serde_json::from_value(
+        value
+            .get("request")
+            .cloned()
+            .unwrap_or_else(|| value.clone()),
+    )
+    .map_err(|error| format!("invalid worldfactory protocol simulation request: {error}"))?;
+    let receipt = simulate_protocol(&draft)
+        .map_err(|error| format!("worldfactory protocol simulation failed: {error}"))?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize worldfactory protocol simulation receipt: {error}")
+    })
+}
+
+pub fn validate_worldfactory_protocol_simulation_json(
+    value: &Value,
+) -> Result<ProtocolSimulationReport8, String> {
+    let receipt: ProtocolSimulationReport8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid worldfactory protocol simulation receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID {
+        return Err("worldfactory protocol simulation feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const ATLASHUB_REPLICATION_CONTROL_TOOL: &str =
+    "atlashub_replication_negative_results_federated_control_plane";
+
+pub fn operate_atlashub_replication_control_json(value: &Value) -> Result<Value, String> {
+    let request_id = value
+        .get("request_id")
+        .and_then(Value::as_str)
+        .ok_or("request_id is required")?;
+    let claim: ClaimAndProtocol1 =
+        serde_json::from_value(value.get("claim").cloned().ok_or("claim is required")?)
+            .map_err(|error| format!("invalid atlashub replication claim: {error}"))?;
+    let observations: Vec<ReplicationObservation4> = serde_json::from_value(
+        value
+            .get("observations")
+            .cloned()
+            .ok_or("observations are required")?,
+    )
+    .map_err(|error| format!("invalid atlashub replication observations: {error}"))?;
+    let peers: Vec<PeerReplicationSummary4> =
+        serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+            .map_err(|error| format!("invalid atlashub replication peers: {error}"))?;
+    let receipt = operate_replication_control(request_id, &claim, &observations, &peers)
+        .map_err(|error| format!("atlashub replication control failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize atlashub replication receipt: {error}"))
+}
+
+pub fn validate_atlashub_replication_control_json(
+    value: &Value,
+) -> Result<ReplicationRecord8, String> {
+    let receipt: ReplicationRecord8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid atlashub replication receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != REPLICATION_CONTROL_FEATURE_ID {
+        return Err("atlashub replication feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const EPISTEMIC_RETRIEVAL_SYNTHESIS_TOOL: &str =
+    "epistemic_retrieval_synthesis_federated_control_plane";
+
+pub fn operate_epistemic_retrieval_synthesis_json(value: &Value) -> Result<Value, String> {
+    let request: ScopedRetrievalQuery3 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid epistemic retrieval synthesis request: {error}"))?;
+    let candidates: Vec<RetrievalCandidate4> = serde_json::from_value(
+        value
+            .get("candidates")
+            .cloned()
+            .ok_or("candidates are required")?,
+    )
+    .map_err(|error| format!("invalid epistemic retrieval candidates: {error}"))?;
+    let peers: Vec<PeerSynthesisSummary4> =
+        serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+            .map_err(|error| format!("invalid epistemic retrieval peers: {error}"))?;
+    let receipt = operate_retrieval_synthesis(&request, &candidates, &peers)
+        .map_err(|error| format!("epistemic retrieval synthesis failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize epistemic retrieval synthesis receipt: {error}"))
+}
+
+pub fn validate_epistemic_retrieval_synthesis_json(
+    value: &Value,
+) -> Result<EvidenceSynthesis8, String> {
+    let receipt: EvidenceSynthesis8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid epistemic retrieval synthesis receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID {
+        return Err("epistemic retrieval synthesis feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_CONTEXT_COMPILATION_TOOL: &str = "ids_context_compilation_federated_control_plane";
+
+pub fn operate_ids_context_compilation_json(value: &Value) -> Result<Value, String> {
+    let request: DecisionQuery4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids context compilation request: {error}"))?;
+    let facts: Vec<ContextFact4> =
+        serde_json::from_value(value.get("facts").cloned().ok_or("facts are required")?)
+            .map_err(|error| format!("invalid ids context facts: {error}"))?;
+    let peers: Vec<ContextPeer4> =
+        serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+            .map_err(|error| format!("invalid ids context peers: {error}"))?;
+    let receipt = operate_context_compilation(&request, &facts, &peers)
+        .map_err(|error| format!("ids context compilation failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids context receipt: {error}"))
+}
+
+pub fn validate_ids_context_compilation_json(
+    value: &Value,
+) -> Result<CertifiedDecisionSection1, String> {
+    let receipt: CertifiedDecisionSection1 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids context receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_CONTEXT_COMPILATION_FEATURE_ID {
+        return Err("ids context compilation feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_KNOWLEDGE_REPRESENTATION_TOOL: &str =
+    "ids_knowledge_representation_federated_control_plane";
+
+pub fn operate_ids_knowledge_representation_json(value: &Value) -> Result<Value, String> {
+    let request: ScopedKnowledgeClaims4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids knowledge request: {error}"))?;
+    let claims: Vec<KnowledgeClaim4> =
+        serde_json::from_value(value.get("claims").cloned().ok_or("claims are required")?)
+            .map_err(|error| format!("invalid ids knowledge claims: {error}"))?;
+    let peers: Vec<KnowledgePeer4> =
+        serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+            .map_err(|error| format!("invalid ids knowledge peers: {error}"))?;
+    let receipt = operate_knowledge_representation(&request, &claims, &peers)
+        .map_err(|error| format!("ids knowledge representation failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids knowledge receipt: {error}"))
+}
+
+pub fn validate_ids_knowledge_representation_json(
+    value: &Value,
+) -> Result<TypedKnowledgeWorld7, String> {
+    let receipt: TypedKnowledgeWorld7 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids knowledge receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID {
+        return Err("ids knowledge representation feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_MULTIMODAL_INGESTION_TOOL: &str = "ids_multimodal_ingestion_research_copilot";
+
+pub fn operate_ids_multimodal_ingestion_json(value: &Value) -> Result<Value, String> {
+    let request: MultimodalIngestionRequest4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids multimodal ingestion request: {error}"))?;
+    let observations: Vec<ModalityObservation4> = serde_json::from_value(
+        value
+            .get("observations")
+            .cloned()
+            .ok_or("observations are required")?,
+    )
+    .map_err(|error| format!("invalid ids modality observations: {error}"))?;
+    let receipt = operate_multimodal_ingestion(&request, &observations)
+        .map_err(|error| format!("ids multimodal ingestion failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids ingestion receipt: {error}"))
+}
+
+pub fn validate_ids_multimodal_ingestion_json(
+    value: &Value,
+) -> Result<HarmonizedResearchObject8, String> {
+    let receipt: HarmonizedResearchObject8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids ingestion receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_MULTIMODAL_INGESTION_FEATURE_ID {
+        return Err("ids multimodal ingestion feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_QUALITY_CONTROL_TOOL: &str = "ids_quality_control_assurance";
+
+pub fn operate_ids_quality_control_json(value: &Value) -> Result<Value, String> {
+    let request: QualityControlBatch4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids quality request: {error}"))?;
+    let observations: Vec<QualityObservation4> = serde_json::from_value(
+        value
+            .get("observations")
+            .cloned()
+            .ok_or("observations are required")?,
+    )
+    .map_err(|error| format!("invalid ids quality observations: {error}"))?;
+    let receipt = assure_quality_control(&request, &observations)
+        .map_err(|error| format!("ids quality control failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids quality receipt: {error}"))
+}
+
+pub fn validate_ids_quality_control_json(value: &Value) -> Result<QualityControlReport8, String> {
+    let receipt: QualityControlReport8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids quality receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_QUALITY_CONTROL_FEATURE_ID {
+        return Err("ids quality-control feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_MECHANISM_EXPLORATION_TOOL: &str = "ids_mechanism_exploration_assurance";
+
+pub fn operate_ids_mechanism_exploration_json(value: &Value) -> Result<Value, String> {
+    let request: MechanismQuestion2 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids mechanism request: {error}"))?;
+    let candidates: Vec<MechanismCandidate4> = serde_json::from_value(
+        value
+            .get("candidates")
+            .cloned()
+            .ok_or("candidates are required")?,
+    )
+    .map_err(|error| format!("invalid ids mechanism candidates: {error}"))?;
+    let peers: Vec<PeerMechanismSummary4> =
+        serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+            .map_err(|error| format!("invalid ids mechanism peers: {error}"))?;
+    let receipt = assure_ids_mechanism_exploration(&request, &candidates, &peers)
+        .map_err(|error| format!("ids mechanism exploration failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids mechanism receipt: {error}"))
+}
+
+pub fn validate_ids_mechanism_exploration_json(
+    value: &Value,
+) -> Result<MechanismPortfolio7, String> {
+    let receipt: MechanismPortfolio7 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids mechanism receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_MECHANISM_EXPLORATION_FEATURE_ID {
+        return Err("ids mechanism feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_EXPERIMENT_DESIGN_TOOL: &str = "ids_experiment_design_workbench";
+
+pub fn operate_ids_experiment_design_json(value: &Value) -> Result<Value, String> {
+    let request: ExperimentDesignRequest4 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids experiment-design request: {error}"))?;
+    let candidates: Vec<DesignCandidate4> = serde_json::from_value(
+        value
+            .get("candidates")
+            .cloned()
+            .ok_or("candidates are required")?,
+    )
+    .map_err(|error| format!("invalid ids experiment-design candidates: {error}"))?;
+    let receipt = design_experiment(&request, &candidates)
+        .map_err(|error| format!("ids experiment design failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids experiment-design receipt: {error}"))
+}
+
+pub fn validate_ids_experiment_design_json(value: &Value) -> Result<DesignFrontier8, String> {
+    let receipt: DesignFrontier8 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids experiment-design receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_EXPERIMENT_DESIGN_FEATURE_ID {
+        return Err("ids experiment-design feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_PROTOCOL_SIMULATION_TOOL: &str = "ids_protocol_simulation_workbench";
+
+pub fn operate_ids_protocol_simulation_json(value: &Value) -> Result<Value, String> {
+    let request: ProtocolWorkbenchRequest5 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids protocol-workbench request: {error}"))?;
+    let receipt = simulate_protocol_workbench(&request)
+        .map_err(|error| format!("ids protocol simulation failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids protocol-workbench receipt: {error}"))
+}
+
+pub fn validate_ids_protocol_simulation_json(
+    value: &Value,
+) -> Result<ProtocolWorkbenchReport9, String> {
+    let receipt: ProtocolWorkbenchReport9 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids protocol-workbench receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_PROTOCOL_SIMULATION_FEATURE_ID {
+        return Err("ids protocol-workbench feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_LABORATORY_INTEGRATION_TOOL: &str = "ids_laboratory_integration_workflow_fabric";
+
+pub fn operate_ids_laboratory_integration_json(value: &Value) -> Result<Value, String> {
+    let request: LaboratoryIntegrationRequest6 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids laboratory-integration request: {error}"))?;
+    let receipt = integrate_laboratory_workflow(&request)
+        .map_err(|error| format!("ids laboratory integration failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids laboratory-integration receipt: {error}"))
+}
+
+pub fn validate_ids_laboratory_integration_json(
+    value: &Value,
+) -> Result<LaboratoryIntegrationReport9, String> {
+    let receipt: LaboratoryIntegrationReport9 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids laboratory-integration receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_LABORATORY_INTEGRATION_FEATURE_ID {
+        return Err("ids laboratory-integration feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_COMPUTATIONAL_EXECUTION_TOOL: &str = "ids_computational_execution_workbench";
+
+pub fn operate_ids_computational_execution_json(value: &Value) -> Result<Value, String> {
+    let request: ComputationalExecutionRequest6 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids computational-execution request: {error}"))?;
+    let receipt = compile_computational_execution(&request)
+        .map_err(|error| format!("ids computational execution failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids computational-execution receipt: {error}"))
+}
+
+pub fn validate_ids_computational_execution_json(
+    value: &Value,
+) -> Result<ComputationalExecutionReport9, String> {
+    let receipt: ComputationalExecutionReport9 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids computational-execution receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID {
+        return Err("ids computational-execution feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_STATISTICAL_CAUSAL_ML_TOOL: &str = "ids_statistical_causal_ml_research_copilot";
+
+pub fn operate_ids_statistical_causal_ml_json(value: &Value) -> Result<Value, String> {
+    let request: AnalysisCopilotRequest7 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| format!("invalid ids statistical-causal-ML request: {error}"))?;
+    let receipt = compile_statistical_causal_ml(&request)
+        .map_err(|error| format!("ids statistical-causal-ML analysis failed: {error}"))?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize ids statistical-causal-ML receipt: {error}"))
+}
+
+pub fn validate_ids_statistical_causal_ml_json(
+    value: &Value,
+) -> Result<QualifiedAnalysisResult10, String> {
+    let receipt: QualifiedAnalysisResult10 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids statistical-causal-ML receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID {
+        return Err("ids statistical-causal-ML feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_TOOL: &str =
+    "ids_retrieval_synthesis_assurance_harness";
+
+pub fn operate_ids_retrieval_synthesis_assurance_json(value: &Value) -> Result<Value, String> {
+    let request: ScopedRetrievalQuery6 =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid ids retrieval-synthesis assurance request: {error}")
+            })?;
+    let receipt = assure_retrieval_synthesis(&request).map_err(
+        |error: RetrievalSynthesisAssuranceError| {
+            format!("ids retrieval-synthesis assurance failed: {error}")
+        },
+    )?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize ids retrieval-synthesis assurance receipt: {error}")
+    })
+}
+
+pub fn validate_ids_retrieval_synthesis_assurance_json(
+    value: &Value,
+) -> Result<EvidenceSynthesis11, String> {
+    let receipt: EvidenceSynthesis11 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids retrieval-synthesis assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID {
+        return Err("ids retrieval-synthesis assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
+
+pub const IDS_REPLICATION_INTEROPERABILITY_TOOL: &str =
+    "ids_replication_negative_results_interoperability_gateway";
+
+pub fn operate_ids_replication_interoperability_json(value: &Value) -> Result<Value, String> {
+    let request: ClaimAndProtocol7Request =
+        serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+            .map_err(|error| {
+                format!("invalid ids replication interoperability request: {error}")
+            })?;
+    let receipt =
+        interoperate_replication(&request).map_err(|error: ReplicationInteroperabilityError| {
+            format!("ids replication interoperability failed: {error}")
+        })?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize ids replication interoperability receipt: {error}")
+    })
+}
+
+pub fn validate_ids_replication_interoperability_json(
+    value: &Value,
+) -> Result<ReplicationRecord9, String> {
+    let receipt: ReplicationRecord9 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid ids replication interoperability receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID {
+        return Err("ids replication interoperability feature id mismatch".into());
     }
     Ok(receipt)
 }
