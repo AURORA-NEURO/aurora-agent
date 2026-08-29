@@ -8,6 +8,8 @@ import {
   AutonomousBrainBatchJobController,
   AutonomousBrainBatchProtectedRehydrator,
   AutonomousBrainAutoBatchProtectedRehydrator,
+  AutonomousBrainAutoCycleBatchProtectedRehydrator,
+  AutonomousBrainAutoReplanBatchProtectedRehydrator,
   InMemoryAutonomousBrainBatchCheckpointStore,
   AutonomousBrainPlan,
   AutonomousCapabilityActivation,
@@ -2169,6 +2171,46 @@ test("brain batch protected receipts cover every built-in domain and fail closed
   assert.deepEqual(resolved.map((value) => value.domain), [...AUTONOMOUS_DOMAIN_NAMES]);
   receipts.set(0, { ...receipts.get(0), request_digest: "0".repeat(64) });
   await assert.rejects(rehydrator.resolve(contexts[0]), /request_digest/);
+});
+
+test("automatic cycle protected rehydrators keep cycle and replan receipts mode-fenced", async () => {
+  const values = new Map();
+  const receipts = new Map();
+  const boundary = new AutonomousProtectedRehydrationBoundary(
+    new AutonomousProtectedRehydrationContext({ tenantId: "cycle-tenant", actorId: "cycle-worker", sessionId: "cycle-session", authorizationDigest: "c".repeat(64) }),
+    (reference) => values.get(reference.value_digest),
+    { authorizer: () => true, clock: () => 400 },
+  );
+  const contexts = AUTONOMOUS_DOMAIN_NAMES.map((domain, index) => {
+    const requestDigest = `${(index + 4) % 10}`.repeat(64);
+    const taskDigest = `${(index + 5) % 10}`.repeat(64);
+    const cycle = { status: "completed", route: { task_digest: taskDigest }, domain };
+    const replan = { status: "completed", route: { task_digest: taskDigest }, domain, replan: true };
+    const cycleDigest = protectedValueDigest(cycle);
+    const replanDigest = protectedValueDigest(replan);
+    values.set(cycleDigest, cycle);
+    values.set(replanDigest, replan);
+    const base = { job_id: "automatic-cycle-protected", index, request_digest: requestDigest, task_digest: taskDigest };
+    receipts.set(`automatic_cycle:${index}`, { ...base, mode: "automatic_cycle", expected_result_digest: `${(index + 6) % 10}`.repeat(64), domain, value_digest: cycleDigest });
+    receipts.set(`automatic_replan:${index}`, { ...base, mode: "automatic_replan", expected_result_digest: `${(index + 7) % 10}`.repeat(64), domain, value_digest: replanDigest });
+    return { ...base, mode: "automatic_cycle", expected_result_digest: receipts.get(`automatic_cycle:${index}`).expected_result_digest };
+  });
+  const adapter = new AutonomousProtectedRehydrationAdapter(boundary);
+  const cycleRehydrator = new AutonomousBrainAutoCycleBatchProtectedRehydrator({
+    adapter,
+    receiptResolver: (context) => receipts.get(`automatic_cycle:${context.index}`),
+  });
+  const replanRehydrator = new AutonomousBrainAutoReplanBatchProtectedRehydrator({
+    adapter,
+    receiptResolver: (context) => receipts.get(`automatic_replan:${context.index}`),
+  });
+  const cycles = await Promise.all(contexts.map((context) => cycleRehydrator.resolve(context)));
+  assert.deepEqual(cycles.map((value) => value.domain), [...AUTONOMOUS_DOMAIN_NAMES]);
+  const replans = await Promise.all(contexts.map((context) => replanRehydrator.resolve({ ...context, mode: "automatic_replan", expected_result_digest: receipts.get(`automatic_replan:${context.index}`).expected_result_digest })));
+  assert.deepEqual(replans.map((value) => value.domain), [...AUTONOMOUS_DOMAIN_NAMES]);
+  await assert.rejects(replanRehydrator.resolve(contexts[0]), /automatic_replan/);
+  receipts.set("automatic_cycle:0", { ...receipts.get("automatic_cycle:0"), request_digest: "0".repeat(64) });
+  await assert.rejects(cycleRehydrator.resolve(contexts[0]), /request_digest/);
 });
 
 test("brain facade exposes a keyless readiness and activation lifecycle for onboarding", async () => {

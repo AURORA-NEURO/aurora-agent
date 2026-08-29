@@ -39,8 +39,11 @@ automatic-cycle or automatic-replan mode, every request/result digest, bounded c
 policy-set digest; restart callers must rehydrate settled cycle results and the facade verifies
 route task identity and result digests before skipping provider work. Launch-admitted trace/resume
 variants union and re-review the full provider-free route scope before rehydration or dispatch.
-Durable checkpoint stores, trace composition, and protected receipt adapters remain separate
-application integration work rather than implicit SDK persistence.
+Typed protected receipt adapters now cover both cycle checkpoint modes as well: each adapter fences
+the exact `automatic_cycle` or `automatic_replan` identity before releasing a transient result, and
+cannot be substituted for direct or ordinary automatic batch rehydration. Durable checkpoint
+stores and application-specific receipt issuance remain caller-owned rather than implicit SDK
+persistence.
 
 The safe TypeScript `AutonomousBrainFacade` now owns the provider-free task-clarification loop
 already available on the lower-level agent. It can derive a bounded questionnaire for every

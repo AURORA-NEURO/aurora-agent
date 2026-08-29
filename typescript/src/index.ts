@@ -2188,6 +2188,8 @@ export {
   AutonomousBrainBatchJobController,
   AutonomousBrainBatchProtectedRehydrator,
   AutonomousBrainAutoBatchProtectedRehydrator,
+  AutonomousBrainAutoCycleBatchProtectedRehydrator,
+  AutonomousBrainAutoReplanBatchProtectedRehydrator,
   InMemoryAutonomousBrainBatchCheckpointStore,
   createAutonomousBrainFacade,
 } from "./autonomous-brain-facade.js";

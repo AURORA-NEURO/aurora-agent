@@ -807,6 +807,11 @@ skipping that item, and a checkpoint from direct or ordinary automatic execution
 cycle/replan mode boundary. `policyDigest` is available for deployments that need an additional
 caller-owned identity for opaque evaluator or learning callback implementations. Launch-admitted
 trace/resume variants re-check the full provider-free route union before rehydration or dispatch.
+Protected stores can use `AutonomousBrainAutoCycleBatchProtectedRehydrator` or
+`AutonomousBrainAutoReplanBatchProtectedRehydrator`; each requires the matching checkpoint mode
+and verifies the complete job/index/request/task/result identity before asking the caller-owned
+protected boundary to release a transient value. The adapters are deliberately not interchangeable
+with direct or ordinary automatic batch rehydrators.
 
 ```typescript
 const batch = await brain.executeAutoReplanCycleBatch(requests, {
