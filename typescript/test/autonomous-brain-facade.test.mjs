@@ -6,6 +6,7 @@ import {
   AutonomousAgent,
   AutonomousBrainFacade,
   AutonomousBrainTraceRegistryController,
+  AutonomousBrainRunAnalyticsController,
   AutonomousBrainBatchJobController,
   AutonomousBrainBatchProtectedRehydrator,
   AutonomousBrainAutoBatchProtectedRehydrator,
@@ -36,6 +37,9 @@ import {
   AutonomousRunTraceRegistry,
   AutonomousRunTraceSession,
   TransactionalJsonAutonomousRunTraceRegistryPersistence,
+  AutonomousRunAnalyticsLedger,
+  JsonAutonomousRunAnalyticsLedgerPersistence,
+  TransactionalJsonAutonomousRunAnalyticsLedgerPersistence,
   InMemoryAutonomousWorkflowCheckpointStore,
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
@@ -2817,4 +2821,77 @@ test("brain facade owns a restart-safe metadata trace registry across every doma
   assert.equal(failedPublication.publication.status, "failed");
   assert.equal(failedPublication.controller.status, "publication_failed");
   assert.equal(restoredController.verifyIntegrity().verified, true);
+});
+
+test("brain facade owns a restart-safe longitudinal analytics ledger across every domain", async () => {
+  const brain = new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime()) });
+  const source = new InMemoryAutonomousRunTraceStore({ clock: (() => { let now = 5_000; return () => now++; })() });
+  const session = new AutonomousRunTraceSession(source, {
+    run_id: "facade-analytics-all-domains",
+    task_digest: "d".repeat(64),
+    domains: [...AUTONOMOUS_DOMAIN_NAMES],
+  });
+  await session.started();
+  await session.record({ phase: "plan_compiled", status: "running", plan_digest: "e".repeat(64) });
+  await session.record({ phase: "provider_invocation_finished", status: "running", provider: "offline", model: "offline-model", input_tokens: 7, output_tokens: 5, tool_count: 3 });
+  await session.complete({ status: "completed", route_digest: "f".repeat(64), plan_digest: "e".repeat(64) });
+
+  const persistedStore = transactionalTextStore();
+  const ledger = new AutonomousRunAnalyticsLedger({ clock: () => 6_000 });
+  const controller = brain.createRunAnalyticsController({
+    ledger,
+    persistence: new TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(persistedStore),
+  });
+  assert.throws(() => controller.summary(), /must restore before use/);
+  assert.equal((await controller.restore()).status, "empty");
+
+  const analyzed = await controller.analyzeAndIngest(await source.snapshot(), { ingestedAt: 7_000 });
+  assert.equal(analyzed.ingest.status, "accepted");
+  assert.equal(analyzed.persisted, true);
+  assert.equal(analyzed.controller.status, "ingested");
+  assert.equal(analyzed.report.run_count, 1);
+  assert.equal(controller.summary().report_count, 1);
+  assert.equal(controller.summary().domains.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const row = controller.summary().domains.find((candidate) => candidate.identity === domain);
+    assert.equal(row?.observed, true, domain);
+    assert.equal(row?.run_count, 1, domain);
+  }
+  assert.equal(controller.summary().providers.find((row) => row.identity === "offline")?.provider_invocations, 1);
+  assert.equal(controller.summary().models.find((row) => row.identity === "offline/offline-model")?.provider_invocations, 1);
+  assert.equal(controller.history({ limit: 1 })[0].report.report_digest, analyzed.report.report_digest);
+  assert.equal(controller.verifyIntegrity().verified, true);
+  assert.doesNotMatch(JSON.stringify(controller.snapshot()), /private task|offline provider output|sk-[A-Za-z0-9]/i);
+
+  const duplicate = await controller.ingest(analyzed.report, { ingestedAt: 99_999 });
+  assert.equal(duplicate.ingest.status, "duplicate");
+  assert.equal(duplicate.persisted, true);
+  assert.equal(controller.summary().report_count, 1);
+
+  const restoredLedger = new AutonomousRunAnalyticsLedger();
+  const restoredController = new AutonomousBrainRunAnalyticsController(
+    brain,
+    restoredLedger,
+    new TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(persistedStore),
+  );
+  const restored = await restoredController.restore();
+  assert.equal(restored.status, "restored");
+  assert.equal(restored.persisted, true);
+  assert.equal(restored.summary.report_count, 1);
+  assert.equal(restoredController.summary().domains.length, AUTONOMOUS_DOMAIN_NAMES.length);
+
+  const failingController = brain.createRunAnalyticsController({
+    ledger: new AutonomousRunAnalyticsLedger(),
+    persistence: new JsonAutonomousRunAnalyticsLedgerPersistence({
+      read: () => null,
+      write: () => { throw new Error("analytics persistence unavailable"); },
+    }),
+  });
+  await failingController.restore();
+  const failedFlush = await failingController.ingest(analyzed.report);
+  assert.equal(failedFlush.ingest.status, "accepted");
+  assert.equal(failedFlush.persisted, false);
+  assert.equal(failedFlush.controller.status, "persistence_failed");
+  assert.equal(failingController.summary().report_count, 1);
+  assert.equal(failingController.verifyIntegrity().verified, true);
 });

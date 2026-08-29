@@ -826,6 +826,18 @@ in-memory success separately from persistence success, so a failed observability
 mistaken for a provider or task failure. Its projection contains only run counts, sequence/digest
 metadata, retention policy, and bounded lifecycle fields.
 
+For longitudinal operator analytics, `brain.createRunAnalyticsController()` binds an
+`AutonomousRunAnalyticsLedger` to JSON/CAS persistence and requires `restore()` before reads or
+ingestion. `analyzeAndIngest()` validates a trace snapshot, creates a digest-bound report, and
+retains only the report; `ingest()` accepts an already-verified report and returns explicit
+`accepted`, `duplicate`, or `conflict` outcomes. Accepted reports are flushed through the
+caller-owned persistence adapter, while a failed flush is returned as `persistence_failed`
+without pretending the provider or task failed. `summary()`, `history()`, `snapshot()`, and
+`verifyIntegrity()` expose bounded all-domain, provider, and `provider/model` rollups with
+terminal coverage, failure and latency observations, alert counts, retention, authority, and
+secret-material markers. Task text, prompts, responses, evidence, tool payloads, credentials,
+and cost claims remain outside this ledger.
+
 ```typescript
 const batch = await brain.executeAutoReplanCycleBatch(requests, {
   maxParallelism: 4,

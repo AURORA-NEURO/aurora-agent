@@ -2192,6 +2192,14 @@ caller-owned tenant authorization, durable placement/backup, alert routing, eval
 settlement, provider billing, and external health sources without weakening the value-free
 boundary.
 
+The TypeScript facade now also exposes `createRunAnalyticsController()`, which composes the
+verified trace analytics function with the bounded longitudinal ledger. It requires restore before
+reads or ingestion, persists accepted reports through caller-owned JSON/CAS storage, classifies
+duplicates and source conflicts explicitly, and separates in-memory acceptance from persistence
+failure. Summary/history/snapshot/integrity projections retain only all-domain/provider/model
+metadata; prompts, responses, evidence, tool payloads, credentials, and cost claims remain out of
+the ledger.
+
 The Python SDK now closes the corresponding effect-safety gap. `AutonomousEffectBoundary` gives
 approved non-read-only domain tools a deterministic effect identity, caller-visible idempotency
 key, hash-chained `prepared`/`dispatching`/`dispatched` markers, conservative uncertain-failure
