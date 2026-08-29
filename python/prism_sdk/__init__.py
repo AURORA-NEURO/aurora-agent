@@ -2003,8 +2003,11 @@ from .autonomous_run_trace_registry_controller import (
     AutonomousRunTraceRegistryController,
 )
 from .autonomous_run_observability_controller import (
+    AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA,
     AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA,
     AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_STATUSES,
+    AutonomousBrainRunObservabilityAlert,
+    AutonomousBrainRunObservabilityAlertDelivery,
     AutonomousBrainRunObservabilityControllerProjection,
     AutonomousBrainRunObservabilityFlushRun,
     AutonomousBrainRunObservabilityRestoreRun,
@@ -8335,7 +8338,10 @@ __all__ = [
     "AutonomousBrainTraceRegistryPublicationRun",
     "AutonomousRunTraceRegistryController",
     "AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA",
+    "AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA",
     "AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_STATUSES",
+    "AutonomousBrainRunObservabilityAlert",
+    "AutonomousBrainRunObservabilityAlertDelivery",
     "AutonomousBrainRunObservabilityControllerProjection",
     "AutonomousBrainRunObservabilityFlushRun",
     "AutonomousBrainRunObservabilityRestoreRun",

@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Any, Iterator, Mapping
 
-from .autonomous_run_analytics import AutonomousRunTraceAnalyticsPolicy
+from .authoring import content_digest
+from .autonomous_run_analytics import (
+    AUTONOMOUS_RUN_TRACE_ANALYTICS_RETENTION,
+    AutonomousRunTraceAnalyticsPolicy,
+)
 from .autonomous_run_analytics_controller import (
     AutonomousBrainRunAnalyticsAnalysisRun,
     AutonomousBrainRunAnalyticsControllerProjection,
@@ -28,6 +32,7 @@ from .errors import ArgumentError
 
 
 AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA = "bioprism-python-autonomous-brain-run-observability-controller/0.1"
+AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA = "bioprism-python-autonomous-brain-run-observability-alert/0.1"
 AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_STATUSES = (
     "empty",
     "restored",
@@ -36,6 +41,7 @@ AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_STATUSES = (
     "source_snapshot_failed",
     "trace_publication_failed",
     "analytics_failed",
+    "alert_delivery_failed",
     "persistence_partial",
 )
 
@@ -79,6 +85,71 @@ class AutonomousBrainRunObservabilityControllerProjection:
 
 
 @dataclass(frozen=True, slots=True)
+class AutonomousBrainRunObservabilityAlert:
+    schema: str
+    alert_id: str
+    source_snapshot_digest: str
+    report_digest: str
+    code: str
+    severity: str
+    scope: str
+    identity: str
+    detail: str
+    observed_value: float | int | None
+    threshold: float | int | None
+    retention: str
+    secret_material: str
+
+    def __post_init__(self) -> None:
+        if self.schema != AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA:
+            raise ArgumentError("autonomous brain run observability alert schema is invalid")
+        for name, value in (("alert_id", self.alert_id), ("source_snapshot_digest", self.source_snapshot_digest), ("report_digest", self.report_digest)):
+            if not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+                raise ArgumentError(f"autonomous brain run observability alert {name} is invalid")
+        if self.retention != AUTONOMOUS_RUN_TRACE_ANALYTICS_RETENTION or self.secret_material != "never_returned":
+            raise ArgumentError("autonomous brain run observability alert retention markers are invalid")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "alert_id": self.alert_id,
+            "source_snapshot_digest": self.source_snapshot_digest,
+            "report_digest": self.report_digest,
+            "code": self.code,
+            "severity": self.severity,
+            "scope": self.scope,
+            "identity": self.identity,
+            "detail": self.detail,
+            "observed_value": self.observed_value,
+            "threshold": self.threshold,
+            "retention": self.retention,
+            "secret_material": self.secret_material,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousBrainRunObservabilityAlertDelivery:
+    status: str
+    attempted: int
+    delivered: int
+    error: Mapping[str, str] | None
+
+    def __post_init__(self) -> None:
+        if self.status not in {"not_configured", "not_needed", "delivered", "failed"}:
+            raise ArgumentError("autonomous brain run observability alert delivery status is invalid")
+        if isinstance(self.attempted, bool) or not isinstance(self.attempted, int) or self.attempted < 0 or isinstance(self.delivered, bool) or not isinstance(self.delivered, int) or not 0 <= self.delivered <= self.attempted:
+            raise ArgumentError("autonomous brain run observability alert delivery counts are invalid")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "attempted": self.attempted,
+            "delivered": self.delivered,
+            "error": None if self.error is None else dict(self.error),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class AutonomousBrainRunObservabilityRestoreRun:
     controller: AutonomousBrainRunObservabilityControllerProjection
 
@@ -107,6 +178,7 @@ class AutonomousBrainRunObservabilityRun:
     source_snapshot_digest: str | None
     trace_registry: AutonomousBrainTraceRegistryPublicationRun | None
     run_analytics: AutonomousBrainRunAnalyticsAnalysisRun | None
+    alert_delivery: AutonomousBrainRunObservabilityAlertDelivery
     errors: tuple[Mapping[str, str], ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -116,6 +188,7 @@ class AutonomousBrainRunObservabilityRun:
             "source_snapshot_digest": self.source_snapshot_digest,
             "trace_registry": None if self.trace_registry is None else self.trace_registry.to_dict(),
             "run_analytics": None if self.run_analytics is None else self.run_analytics.to_dict(),
+            "alert_delivery": self.alert_delivery.to_dict(),
             "errors": [dict(error) for error in self.errors],
         }
 
@@ -128,6 +201,7 @@ class AutonomousRunObservabilityController:
         agent: Any,
         trace_registry: AutonomousRunTraceRegistryController,
         run_analytics: AutonomousRunAnalyticsController,
+        alert_sink: Any | None = None,
     ) -> None:
         if agent is None:
             raise ArgumentError("autonomous run observability controller requires an AutonomousAgent")
@@ -135,9 +209,12 @@ class AutonomousRunObservabilityController:
             raise ArgumentError("autonomous run observability controller requires metadata controllers")
         if trace_registry.agent is not agent or run_analytics.agent is not agent:
             raise ArgumentError("autonomous run observability controllers must belong to the same agent")
+        if alert_sink is not None and not callable(getattr(alert_sink, "publish", None)):
+            raise ArgumentError("autonomous run observability alert sink is malformed")
         self.agent = agent
         self.trace_registry = trace_registry
         self.run_analytics = run_analytics
+        self.alert_sink = alert_sink
         self._lock = RLock()
         self._busy = False
         self._restored = False
@@ -211,6 +288,42 @@ class AutonomousRunObservabilityController:
                 tuple(errors),
             )
 
+    def _deliver_alerts(self, report: Any | None) -> AutonomousBrainRunObservabilityAlertDelivery:
+        if self.alert_sink is None:
+            return AutonomousBrainRunObservabilityAlertDelivery("not_configured", 0, 0, None)
+        if report is None or not report.alerts:
+            return AutonomousBrainRunObservabilityAlertDelivery("not_needed", 0, 0, None)
+        events: list[AutonomousBrainRunObservabilityAlert] = []
+        for alert in report.alerts:
+            identity = {
+                "source_snapshot_digest": report.source_snapshot_digest,
+                "report_digest": report.report_digest,
+                "code": alert.code,
+                "severity": alert.severity,
+                "scope": alert.scope,
+                "identity": alert.identity,
+            }
+            events.append(AutonomousBrainRunObservabilityAlert(
+                schema=AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA,
+                alert_id=content_digest(identity),
+                source_snapshot_digest=report.source_snapshot_digest,
+                report_digest=report.report_digest,
+                code=alert.code,
+                severity=alert.severity,
+                scope=alert.scope,
+                identity=alert.identity,
+                detail=alert.detail,
+                observed_value=alert.observed_value,
+                threshold=alert.threshold,
+                retention=AUTONOMOUS_RUN_TRACE_ANALYTICS_RETENTION,
+                secret_material="never_returned",
+            ))
+        try:
+            self.alert_sink.publish(tuple(events))
+        except Exception as error:
+            return AutonomousBrainRunObservabilityAlertDelivery("failed", len(events), 0, _error_projection(error))
+        return AutonomousBrainRunObservabilityAlertDelivery("delivered", len(events), len(events), None)
+
     def publish_and_analyze(
         self,
         trace_store: Any,
@@ -238,7 +351,8 @@ class AutonomousRunObservabilityController:
             except Exception as error:
                 errors.append({"scope": "source_snapshot", **_error_projection(error)})
                 return AutonomousBrainRunObservabilityRun(
-                    self._projection("source_snapshot_failed"), run_id, source_snapshot_digest, None, None, tuple(errors)
+                    self._projection("source_snapshot_failed"), run_id, source_snapshot_digest, None, None,
+                    AutonomousBrainRunObservabilityAlertDelivery("not_needed", 0, 0, None), tuple(errors)
                 )
 
             trace_outcome = self.trace_registry.publish_snapshot(source, run_id)
@@ -260,6 +374,9 @@ class AutonomousRunObservabilityController:
             except Exception as error:
                 errors.append({"scope": "analytics", **_error_projection(error)})
 
+            alert_delivery = self._deliver_alerts(analytics_outcome.report if analytics_outcome is not None else None)
+            if alert_delivery.error is not None:
+                errors.append({"scope": "alert_delivery", **dict(alert_delivery.error)})
             self._last_run_id = run_id
             self._last_source_snapshot_digest = source_snapshot_digest
             self._persisted = trace_outcome.persisted and analytics_outcome is not None and analytics_outcome.persisted
@@ -267,6 +384,8 @@ class AutonomousRunObservabilityController:
                 status = "trace_publication_failed"
             elif analytics_outcome is None:
                 status = "analytics_failed"
+            elif alert_delivery.status == "failed":
+                status = "alert_delivery_failed"
             elif errors and (not trace_outcome.persisted or not analytics_outcome.persisted):
                 status = "persistence_partial"
             elif errors:
@@ -279,6 +398,7 @@ class AutonomousRunObservabilityController:
                 source_snapshot_digest,
                 trace_outcome,
                 analytics_outcome,
+                alert_delivery,
                 tuple(errors),
             )
 
@@ -293,8 +413,11 @@ class AutonomousRunObservabilityController:
 
 __all__ = [
     "AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA",
+    "AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA",
     "AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_STATUSES",
     "AutonomousBrainRunObservabilityControllerProjection",
+    "AutonomousBrainRunObservabilityAlert",
+    "AutonomousBrainRunObservabilityAlertDelivery",
     "AutonomousBrainRunObservabilityRestoreRun",
     "AutonomousBrainRunObservabilityFlushRun",
     "AutonomousBrainRunObservabilityRun",

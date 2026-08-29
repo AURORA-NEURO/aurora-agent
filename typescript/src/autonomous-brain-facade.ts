@@ -126,7 +126,9 @@ import {
   type AutonomousRunTraceRegistrySnapshot,
 } from "./autonomous-run-trace-registry.js";
 import {
+  AUTONOMOUS_RUN_TRACE_ANALYTICS_RETENTION,
   analyzeAutonomousRunTrace,
+  type AutonomousRunTraceAnalyticsAlert,
   validateAutonomousRunTraceAnalyticsReport,
   type AutonomousRunTraceAnalyticsPolicy,
   type AutonomousRunTraceAnalyticsReport,
@@ -316,6 +318,7 @@ export const AUTONOMOUS_BRAIN_TRACED_AUTO_REPLAN_BATCH_SCHEMA = "bioprism-typesc
 export const AUTONOMOUS_BRAIN_TRACE_REGISTRY_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-trace-registry-controller/0.1" as const;
 export const AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-run-analytics-controller/0.1" as const;
 export const AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-run-observability-controller/0.1" as const;
+export const AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA = "bioprism-typescript-autonomous-brain-run-observability-alert/0.1" as const;
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
 export const AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomous-brain-execution-policy/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-brain-auto-execution/0.1" as const;
@@ -1246,12 +1249,43 @@ export type AutonomousBrainRunObservabilityControllerStatus =
   | "source_snapshot_failed"
   | "trace_publication_failed"
   | "analytics_failed"
+  | "alert_delivery_failed"
   | "persistence_partial";
 
 /** Existing facade-bound controllers composed by the application lifecycle supervisor. */
 export interface AutonomousBrainRunObservabilityControllerOptions {
   traceRegistry: AutonomousBrainTraceRegistryController;
   runAnalytics: AutonomousBrainRunAnalyticsController;
+  alertSink?: AutonomousBrainRunObservabilityAlertSink;
+}
+
+/** Caller-owned metadata sink; it must use `alert_id` as its downstream idempotency key. */
+export interface AutonomousBrainRunObservabilityAlertSink {
+  publish(events: readonly AutonomousBrainRunObservabilityAlert[]): Promise<void> | void;
+}
+
+/** Redacted alert envelope derived only from the verified analytics report. */
+export interface AutonomousBrainRunObservabilityAlert extends JsonObject {
+  schema: typeof AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA;
+  alert_id: string;
+  source_snapshot_digest: string;
+  report_digest: string;
+  code: AutonomousRunTraceAnalyticsAlert["code"];
+  severity: AutonomousRunTraceAnalyticsAlert["severity"];
+  scope: AutonomousRunTraceAnalyticsAlert["scope"];
+  identity: AutonomousRunTraceAnalyticsAlert["identity"];
+  detail: AutonomousRunTraceAnalyticsAlert["detail"];
+  observed_value: number | null;
+  threshold: number | null;
+  retention: typeof AUTONOMOUS_RUN_TRACE_ANALYTICS_RETENTION;
+  secret_material: "never_returned";
+}
+
+export interface AutonomousBrainRunObservabilityAlertDelivery extends JsonObject {
+  status: "not_configured" | "not_needed" | "delivered" | "failed";
+  attempted: number;
+  delivered: number;
+  error: { error_class: string; failure_code: string } | null;
 }
 
 /** Operator-safe projection of both metadata-only stores and their shared lifecycle state. */
@@ -1277,7 +1311,7 @@ export interface AutonomousBrainRunObservabilityFlushRun extends JsonObject {
 }
 
 export interface AutonomousBrainRunObservabilityError extends JsonObject {
-  scope: "source_snapshot" | "trace_publication" | "trace_persistence" | "analytics" | "analytics_persistence";
+  scope: "source_snapshot" | "trace_publication" | "trace_persistence" | "analytics" | "analytics_persistence" | "alert_delivery";
   error_class: string;
   failure_code: string;
 }
@@ -1289,6 +1323,7 @@ export interface AutonomousBrainRunObservabilityRun extends JsonObject {
   source_snapshot_digest: string | null;
   trace_registry: AutonomousBrainTraceRegistryPublicationRun | null;
   run_analytics: AutonomousBrainRunAnalyticsAnalysisRun | null;
+  alert_delivery: AutonomousBrainRunObservabilityAlertDelivery;
   errors: AutonomousBrainRunObservabilityError[];
 }
 
@@ -2796,7 +2831,7 @@ export class AutonomousBrainFacade {
   ): AutonomousBrainRunObservabilityController {
     if (!isObject(options) || !(options.traceRegistry instanceof AutonomousBrainTraceRegistryController) || !(options.runAnalytics instanceof AutonomousBrainRunAnalyticsController)) throw new ArgumentError("autonomous brain run observability controller options are malformed");
     if (options.traceRegistry.brain !== this || options.runAnalytics.brain !== this) throw new ArgumentError("autonomous brain run observability controllers must belong to the same facade");
-    return new AutonomousBrainRunObservabilityController(this, options.traceRegistry, options.runAnalytics);
+    return new AutonomousBrainRunObservabilityController(this, options.traceRegistry, options.runAnalytics, options.alertSink);
   }
 
   /**
@@ -7562,10 +7597,12 @@ export class AutonomousBrainRunObservabilityController {
     readonly brain: AutonomousBrainFacade,
     readonly traceRegistry: AutonomousBrainTraceRegistryController,
     readonly runAnalytics: AutonomousBrainRunAnalyticsController,
+    readonly alertSink?: AutonomousBrainRunObservabilityAlertSink,
   ) {
     if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain run observability controller requires an AutonomousBrainFacade");
     if (!(traceRegistry instanceof AutonomousBrainTraceRegistryController) || !(runAnalytics instanceof AutonomousBrainRunAnalyticsController)) throw new ArgumentError("autonomous brain run observability controller requires facade-bound metadata controllers");
     if (traceRegistry.brain !== brain || runAnalytics.brain !== brain) throw new ArgumentError("autonomous brain run observability controllers must belong to the same facade");
+    if (alertSink !== undefined && (!isObject(alertSink) || typeof alertSink.publish !== "function")) throw new ArgumentError("autonomous brain run observability alert sink is malformed");
   }
 
   private requireRestored(): void {
@@ -7591,6 +7628,35 @@ export class AutonomousBrainRunObservabilityController {
       last_run_id: this.lastRunId,
       last_source_snapshot_digest: this.lastSourceSnapshotDigest,
     };
+  }
+
+  private async deliverAlerts(report: AutonomousRunTraceAnalyticsReport | null): Promise<AutonomousBrainRunObservabilityAlertDelivery> {
+    if (this.alertSink === undefined) return { status: "not_configured", attempted: 0, delivered: 0, error: null };
+    if (report === null || report.alerts.length === 0) return { status: "not_needed", attempted: 0, delivered: 0, error: null };
+    const events: AutonomousBrainRunObservabilityAlert[] = report.alerts.map((alert) => {
+      const identity = { source_snapshot_digest: report.source_snapshot_digest, report_digest: report.report_digest, code: alert.code, severity: alert.severity, scope: alert.scope, identity: alert.identity };
+      return {
+        schema: AUTONOMOUS_BRAIN_RUN_OBSERVABILITY_ALERT_SCHEMA,
+        alert_id: digestJsonSync(identity),
+        source_snapshot_digest: report.source_snapshot_digest,
+        report_digest: report.report_digest,
+        code: alert.code,
+        severity: alert.severity,
+        scope: alert.scope,
+        identity: alert.identity,
+        detail: alert.detail,
+        observed_value: alert.observed_value,
+        threshold: alert.threshold,
+        retention: AUTONOMOUS_RUN_TRACE_ANALYTICS_RETENTION,
+        secret_material: "never_returned",
+      };
+    });
+    try {
+      await this.alertSink.publish(events);
+      return { status: "delivered", attempted: events.length, delivered: events.length, error: null };
+    } catch (error) {
+      return { status: "failed", attempted: events.length, delivered: 0, error: errorProjection(error) };
+    }
   }
 
   /** Restore both metadata projections before exposing the coordinated lifecycle. */
@@ -7678,6 +7744,7 @@ export class AutonomousBrainRunObservabilityController {
           source_snapshot_digest: sourceSnapshotDigest,
           trace_registry: null,
           run_analytics: null,
+          alert_delivery: { status: "not_needed", attempted: 0, delivered: 0, error: null },
           errors,
         };
       }
@@ -7701,14 +7768,18 @@ export class AutonomousBrainRunObservabilityController {
       } catch (error) {
         errors.push({ scope: "analytics", ...errorProjection(error) });
       }
+      const alertDelivery = await this.deliverAlerts(analyticsOutcome?.report ?? null);
+      if (alertDelivery.error !== null) errors.push({ scope: "alert_delivery", ...alertDelivery.error });
       this.lastRunId = runId;
       this.lastSourceSnapshotDigest = sourceSnapshotDigest;
       this.persisted = traceOutcome.persisted && analyticsOutcome?.persisted === true;
       const status: AutonomousBrainRunObservabilityControllerStatus = traceOutcome.publication.status === "failed"
-        ? "trace_publication_failed"
-        : analyticsOutcome === null
-          ? "analytics_failed"
-          : errors.length > 0 && (traceOutcome.persisted === false || analyticsOutcome.persisted === false)
+          ? "trace_publication_failed"
+          : analyticsOutcome === null
+            ? "analytics_failed"
+            : alertDelivery.status === "failed"
+              ? "alert_delivery_failed"
+            : errors.length > 0 && (traceOutcome.persisted === false || analyticsOutcome.persisted === false)
             ? "persistence_partial"
             : errors.length > 0
               ? "analytics_failed"
@@ -7719,6 +7790,7 @@ export class AutonomousBrainRunObservabilityController {
         source_snapshot_digest: sourceSnapshotDigest,
         trace_registry: traceOutcome,
         run_analytics: analyticsOutcome,
+        alert_delivery: alertDelivery,
         errors,
       };
     } finally {

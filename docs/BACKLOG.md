@@ -2188,9 +2188,11 @@ retained-window deduplication/conflict classification, all-domain/provider/model
 eviction accounting, digest-verified restore, canonical JSON persistence, and optional CAS
 fencing in both SDKs. It still does not become an evaluator, provider-health oracle, billing
 ledger, or alert delivery service. Remaining deployment work is to connect the ledger to
-caller-owned tenant authorization, durable placement/backup, alert routing, evaluator
-settlement, provider billing, and external health sources without weakening the value-free
-boundary.
+caller-owned tenant authorization, durable placement/backup, evaluator settlement, provider
+billing, and external health sources without weakening the value-free boundary. The new
+run-observability controllers close the alert-routing seam as a caller-owned, digest-keyed sink:
+delivery remains explicitly at-least-once and downstream idempotency is keyed by the emitted
+`alert_id`; exactly-once notification is not claimed by the SDK.
 
 The TypeScript facade now also exposes `createRunAnalyticsController()`, which composes the
 verified trace analytics function with the bounded longitudinal ledger. It requires restore before

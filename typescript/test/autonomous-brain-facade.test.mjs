@@ -2988,4 +2988,50 @@ test("brain facade coordinates one trace snapshot across registry and analytics"
     failingAnalytics.publishAndAnalyze(source, "untrusted run id"),
     /bounded identifier/,
   );
+
+  const alertEvents = [];
+  const alertSource = new InMemoryAutonomousRunTraceStore({ clock: (() => { let now = 10_000; return () => now++; })() });
+  const alertSession = new AutonomousRunTraceSession(alertSource, {
+    run_id: "facade-observability-alert",
+    task_digest: "4".repeat(64),
+    domains: ["coding"],
+  });
+  await alertSession.started();
+  await alertSession.complete({ status: "completed" });
+  const routedAlerts = brain.createRunObservabilityController({
+    traceRegistry: brain.createTraceRegistryController({
+      registry: new AutonomousRunTraceRegistry({ max_runs: 16, max_events: 128, max_bytes: 250_000 }),
+      persistence: new TransactionalJsonAutonomousRunTraceRegistryPersistence(transactionalTextStore(), { maxBytes: 250_000 }),
+    }),
+    runAnalytics: brain.createRunAnalyticsController({
+      ledger: new AutonomousRunAnalyticsLedger(),
+      persistence: new TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(transactionalTextStore()),
+    }),
+    alertSink: { publish: (events) => { alertEvents.push(...events); } },
+  });
+  await routedAlerts.restore();
+  const routed = await routedAlerts.publishAndAnalyze(alertSource, "facade-observability-alert", { policy: { warn_on_unmeasured_domains: true } });
+  assert.equal(routed.alert_delivery.status, "delivered");
+  assert.equal(routed.alert_delivery.attempted, alertEvents.length);
+  assert.ok(alertEvents.length > 0);
+  assert.ok(alertEvents.every((event) => /^[0-9a-f]{64}$/.test(event.alert_id)));
+  assert.doesNotMatch(JSON.stringify(alertEvents), /private task|offline provider output|sk-[A-Za-z0-9]/i);
+
+  const failedAlertDelivery = brain.createRunObservabilityController({
+    traceRegistry: brain.createTraceRegistryController({
+      registry: new AutonomousRunTraceRegistry({ max_runs: 16, max_events: 128, max_bytes: 250_000 }),
+      persistence: new TransactionalJsonAutonomousRunTraceRegistryPersistence(transactionalTextStore(), { maxBytes: 250_000 }),
+    }),
+    runAnalytics: brain.createRunAnalyticsController({
+      ledger: new AutonomousRunAnalyticsLedger(),
+      persistence: new TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(transactionalTextStore()),
+    }),
+    alertSink: { publish: () => { throw new Error("alert route unavailable"); } },
+  });
+  await failedAlertDelivery.restore();
+  const alertFailure = await failedAlertDelivery.publishAndAnalyze(alertSource, "facade-observability-alert", { policy: { warn_on_unmeasured_domains: true } });
+  assert.equal(alertFailure.controller.status, "alert_delivery_failed");
+  assert.equal(alertFailure.alert_delivery.status, "failed");
+  assert.equal(alertFailure.run_analytics?.persisted, true);
+  assert.equal(alertFailure.errors.some((error) => error.scope === "alert_delivery"), true);
 });

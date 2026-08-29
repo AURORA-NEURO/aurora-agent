@@ -25902,10 +25902,11 @@ class AutonomousAgent:
         self,
         trace_registry: AutonomousRunTraceRegistryController,
         run_analytics: AutonomousRunAnalyticsController,
+        alert_sink: Any | None = None,
     ) -> AutonomousRunObservabilityController:
         """Coordinate one source snapshot across trace indexing and longitudinal analytics."""
 
-        return AutonomousRunObservabilityController(self, trace_registry, run_analytics)
+        return AutonomousRunObservabilityController(self, trace_registry, run_analytics, alert_sink)
 
     def run_cross_domain_with_trace(
         self,

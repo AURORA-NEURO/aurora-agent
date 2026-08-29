@@ -103,6 +103,8 @@ The TypeScript facade and Python agent also provide a run-observability controll
 and flushes both projections and coordinates publication plus analysis from one source snapshot
 so registry and analytics digests cannot drift during an append race. Partial persistence is
 reported explicitly and never retriggers execution.
+When configured, its caller-owned alert sink receives only deterministic, digest-keyed threshold
+metadata; delivery failures are isolated from analytics and execution outcomes.
 
 ## Status
 

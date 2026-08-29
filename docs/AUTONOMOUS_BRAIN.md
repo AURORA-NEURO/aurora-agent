@@ -10721,6 +10721,11 @@ the other successful outcome is retained in memory and the original autonomous r
 replayed. The controller is observational only: it cannot invoke a provider, open credentials,
 execute tools, or authorize an external effect. Its projections retain only metadata, digests,
 counts, domains, provider/model identifiers, and explicit persistence posture.
+An optional caller-owned alert sink can receive the report's threshold alerts after analysis. Each
+envelope contains a deterministic `alert_id` derived from the source/report digests and bounded
+alert identity, so downstream delivery can be idempotent across retries. No task, prompt,
+response, credential, tool payload, evidence body, or effect value enters the envelope. Delivery
+errors are isolated and reported as `alert_delivery_failed`; the provider run is never replayed.
 
 The summary emits all twelve configured domain rows even when no report measured a domain, along
 with observed provider and `provider/model` dimensions. Counts and means are additive/weighted;

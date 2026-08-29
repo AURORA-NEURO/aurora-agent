@@ -347,3 +347,69 @@ def test_agent_coordinates_one_trace_snapshot_across_registry_and_analytics() ->
     assert any(error["scope"] == "analytics_persistence" for error in failed.errors)
     with pytest.raises(ArgumentError, match="bounded identifier"):
         partial.publish_and_analyze(source, "untrusted run id")
+
+    alert_source = InMemoryAutonomousRunTraceStore(clock=lambda: 10_000)
+    alert_session = AutonomousRunTraceSession(
+        alert_source,
+        run_id="facade-observability-alert",
+        task_digest="4" * 64,
+        domains=("coding",),
+    )
+    alert_session.started()
+    alert_session.complete(status="completed")
+
+    class _AlertSink:
+        def __init__(self) -> None:
+            self.events = []
+
+        def publish(self, events) -> None:
+            self.events.extend(events)
+
+    alert_sink = _AlertSink()
+    routed = agent.create_run_observability_controller(
+        agent.create_trace_registry_controller(
+            AutonomousRunTraceRegistry({"max_runs": 16, "max_events": 128, "max_bytes": 250_000}),
+            TransactionalJsonAutonomousRunTraceRegistryPersistence(_TransactionalTextStore(), max_bytes=250_000),
+        ),
+        agent.create_run_analytics_controller(
+            AutonomousRunAnalyticsLedger(),
+            TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(_TransactionalTextStore()),
+        ),
+        alert_sink,
+    )
+    routed.restore()
+    alerted = routed.publish_and_analyze(
+        alert_source,
+        "facade-observability-alert",
+        {"warn_on_unmeasured_domains": True},
+    )
+    assert alerted.alert_delivery.status == "delivered"
+    assert alerted.alert_delivery.attempted == len(alert_sink.events) > 0
+    assert all(len(event.alert_id) == 64 for event in alert_sink.events)
+    assert "private task" not in str([event.to_dict() for event in alert_sink.events])
+
+    class _FailingAlertSink:
+        def publish(self, _events) -> None:
+            raise RuntimeError("alert route unavailable")
+
+    alert_failure_controller = agent.create_run_observability_controller(
+        agent.create_trace_registry_controller(
+            AutonomousRunTraceRegistry({"max_runs": 16, "max_events": 128, "max_bytes": 250_000}),
+            TransactionalJsonAutonomousRunTraceRegistryPersistence(_TransactionalTextStore(), max_bytes=250_000),
+        ),
+        agent.create_run_analytics_controller(
+            AutonomousRunAnalyticsLedger(),
+            TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(_TransactionalTextStore()),
+        ),
+        _FailingAlertSink(),
+    )
+    alert_failure_controller.restore()
+    alert_failure = alert_failure_controller.publish_and_analyze(
+        alert_source,
+        "facade-observability-alert",
+        {"warn_on_unmeasured_domains": True},
+    )
+    assert alert_failure.controller.status == "alert_delivery_failed"
+    assert alert_failure.alert_delivery.status == "failed"
+    assert alert_failure.run_analytics is not None and alert_failure.run_analytics.persisted is True
+    assert any(error["scope"] == "alert_delivery" for error in alert_failure.errors)

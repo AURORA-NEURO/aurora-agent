@@ -97,6 +97,9 @@ indexing and analytics, `agent.create_trace_registry_controller(...)` plus
 `agent.create_run_observability_controller(...)` provide restore-before-read lifecycle,
 single-snapshot publication/analysis, explicit partial-persistence outcomes, and restart-safe
 all-domain projections without replaying the run.
+An optional alert sink receives only digest-keyed threshold metadata and must treat `alert_id` as
+its downstream idempotency key; sink failures are returned separately from trace and analytics
+results.
 evidence, tool payloads, credentials, or cost claims.
 
 For provider-backed evidence, `AutonomousConnectorRegistry` and `AutonomousConnectorRuntime`

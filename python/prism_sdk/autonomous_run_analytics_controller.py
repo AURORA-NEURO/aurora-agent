@@ -249,6 +249,10 @@ class AutonomousRunAnalyticsController:
         ingested_at: int | None = None,
     ) -> AutonomousBrainRunAnalyticsAnalysisRun:
         with self._operation():
+            if isinstance(policy, Mapping):
+                normalized_policy = AutonomousRunTraceAnalyticsPolicy().to_dict()
+                normalized_policy.update(policy)
+                policy = AutonomousRunTraceAnalyticsPolicy.from_dict(normalized_policy)
             report = analyze_autonomous_run_trace(snapshot, policy)
             outcome = self._ingest_report(report, ingested_at=ingested_at)
             return AutonomousBrainRunAnalyticsAnalysisRun(
