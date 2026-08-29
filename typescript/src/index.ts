@@ -3952,6 +3952,7 @@ export {
   AutonomousAuthorizationEvent,
   AutonomousAuthorizationLedger,
   AutonomousAuthorizationGate,
+  AutonomousAuthorizationContext,
   JsonAutonomousAuthorizationSnapshotPersistence,
   TransactionalJsonAutonomousAuthorizationSnapshotPersistence,
   AutonomousAuthorizationPersistenceCoordinator,

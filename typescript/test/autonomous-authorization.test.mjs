@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AUTONOMOUS_AUTHORIZATION_OPERATIONS,
   AUTONOMOUS_DOMAIN_NAMES,
+  AutonomousAuthorizationContext,
   AutonomousAuthorizationError,
   AutonomousAuthorizationGate,
   AutonomousAuthorizationLedger,
@@ -137,4 +138,47 @@ test("fail-closed authorization gate never invokes a refused operation", async (
     AutonomousAuthorizationError,
   );
   assert.equal(called, false);
+});
+
+test("authorization context mints fresh, domain-bound provider requests", () => {
+  const ledger = new AutonomousAuthorizationLedger(16, 64);
+  const issued = ledger.issue({
+    grant_id: "provider-grant",
+    tenant_id: "tenant-a",
+    actor_id: "actor-a",
+    session_id: "session-a",
+    authorization_digest: digest("a"),
+    allowed_domains: ["coding"],
+    allowed_operations: ["provider_invocation"],
+    allowed_capabilities: [],
+    allowed_risk_classes: [],
+    issued_at: 1000,
+    expires_at: 2000,
+    max_uses: 2,
+  });
+  const context = new AutonomousAuthorizationContext(
+    new AutonomousAuthorizationGate(ledger),
+    issued.grant_id,
+    issued.tenant_id,
+    issued.actor_id,
+    issued.session_id,
+    issued.authorization_digest,
+    ["coding"],
+    null,
+    "provider_invocation",
+    "provider",
+    () => 1200,
+  );
+
+  const first = context.authorizeProvider({ provider: "offline", model: "model-a", invocationKind: "provider_call" });
+  const second = context.authorizeProvider({ provider: "offline", model: "model-a", invocationKind: "provider_call", turn: 1 });
+
+  assert.equal(first.status, "allowed");
+  assert.equal(second.status, "allowed");
+  assert.notEqual(first.request_digest, second.request_digest);
+  assert.equal(ledger.grants()[0].used_count, 2);
+  assert.throws(
+    () => context.authorizeProvider({ provider: "offline", model: "model-a", invocationKind: "provider_call", domain: "science" }),
+    AutonomousAuthorizationError,
+  );
 });

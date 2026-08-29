@@ -10,6 +10,8 @@ import unittest
 
 import pytest
 
+from prism_sdk.errors import ArgumentError
+
 from prism_sdk.llm_runtime import (
     CredentialError,
     CredentialProvisioner,
@@ -65,6 +67,9 @@ from prism_sdk.brain import (
 from prism_sdk import (
     AutonomousEffectBoundary,
     AutonomousEffectReconciliationRequiredError,
+    AutonomousAuthorizationContext,
+    AutonomousAuthorizationGate,
+    AutonomousAuthorizationLedger,
     InMemoryAutonomousEffectJournal,
 )
 
@@ -74,6 +79,33 @@ def _context_digest(context: dict[str, object]) -> str:
     return hashlib.sha256(
         json.dumps(identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def _provider_authorization_context(*, max_uses: int = 2, domains: tuple[str, ...] = ("coding",)) -> tuple[AutonomousAuthorizationLedger, AutonomousAuthorizationContext]:
+    ledger = AutonomousAuthorizationLedger(max_grants=16, max_events=64)
+    grant = ledger.issue(
+        grant_id="runtime-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=domains,
+        allowed_operations=("provider_invocation",),
+        allowed_risk_classes=(),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=max_uses,
+    )
+    return ledger, AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(ledger),
+        grant_id=grant.grant_id,
+        tenant_id=grant.tenant_id,
+        actor_id=grant.actor_id,
+        session_id=grant.session_id,
+        authorization_digest=grant.authorization_digest,
+        domains=domains,
+        clock=lambda: 1_200,
+    )
 
 
 def test_provider_invocation_effect_boundary_projects_transient_response() -> None:
@@ -104,6 +136,100 @@ def test_provider_invocation_effect_boundary_projects_transient_response() -> No
     with pytest.raises(AutonomousEffectReconciliationRequiredError):
         runtime.invoke("offline", request)
     assert calls == 1
+
+
+def test_provider_authorization_rejects_before_credentials_or_transport() -> None:
+    runtime = LLMRuntime()
+    runtime.register_provider(openai_compatible_provider("credentialed", "https://credentialed.invalid"))
+    _ledger, context = _provider_authorization_context(domains=("coding",))
+    request = ProviderRequest(model="credentialed-model", messages=({"role": "user", "content": "safe"},))
+
+    with pytest.raises(ArgumentError, match="outside its context scope"):
+        runtime.invoke(
+            "credentialed",
+            request,
+            authorization_context=context,
+            authorization_domain="science",
+        )
+
+
+def test_provider_authorization_consumes_one_fresh_budget_entry_per_invocation_and_stream() -> None:
+    ledger, context = _provider_authorization_context(max_uses=2)
+    calls = {"invoke": 0, "stream": 0}
+    runtime = LLMRuntime()
+
+    def handler(request: ProviderRequest) -> str:
+        calls["invoke"] += 1
+        return f"answer-{request.model}"
+
+    def stream_handler(request: ProviderRequest):
+        calls["stream"] += 1
+        yield ProviderStreamEvent(
+            provider="authorized-offline",
+            model=request.model,
+            sequence=0,
+            event_type="done",
+            done=True,
+        )
+
+    runtime.register_in_memory_provider("authorized-offline", handler, stream_handler=stream_handler)
+    request = ProviderRequest(model="authorized-model", messages=({"role": "user", "content": "safe"},))
+    assert runtime.invoke("authorized-offline", request, authorization_context=context, authorization_domain="coding").text == "answer-authorized-model"
+    assert list(runtime.invoke_stream("authorized-offline", request, authorization_context=context, authorization_domain="coding"))[0].done is True
+
+    with pytest.raises(ArgumentError, match="exhausted"):
+        runtime.invoke("authorized-offline", request, authorization_context=context, authorization_domain="coding")
+    assert calls == {"invoke": 1, "stream": 1}
+    assert ledger.get("runtime-grant").used_count == 2  # type: ignore[union-attr]
+
+
+def test_provider_authorization_is_consumed_for_each_tool_loop_turn() -> None:
+    ledger, context = _provider_authorization_context(max_uses=2)
+    calls = 0
+    runtime = LLMRuntime()
+
+    def handler(request: ProviderRequest) -> ProviderResponse:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return ProviderResponse(
+                provider="authorized-loop",
+                model=request.model,
+                text="",
+                status_code=200,
+                request_id=None,
+                usage={},
+                raw={},
+                tool_calls=(ProviderToolCall("call-1", "lookup", {"query": "safe"}),),
+            )
+        return ProviderResponse(
+            provider="authorized-loop",
+            model=request.model,
+            text="done",
+            status_code=200,
+            request_id=None,
+            usage={},
+            raw={},
+        )
+
+    runtime.register_in_memory_provider("authorized-loop", handler)
+    result = runtime.invoke_tool_loop(
+        "authorized-loop",
+        ProviderRequest(
+            model="authorized-loop-model",
+            messages=({"role": "user", "content": "use lookup"},),
+            tools=(ProviderTool("lookup", parameters={"type": "object"}),),
+        ),
+        authorize_and_execute=lambda calls: [ProviderToolResult(calls[0].call_id, {"ok": True}, approved=True)],
+        max_turns=3,
+        authorization_context=context,
+        authorization_domain="coding",
+    )
+
+    assert result.status == "completed"
+    assert result.turns == 2
+    assert calls == 2
+    assert ledger.get("runtime-grant").used_count == 2  # type: ignore[union-attr]
 
 
 def test_provider_effect_boundary_keeps_definite_http_refusal_as_provider_error() -> None:

@@ -24,6 +24,7 @@ import {
   type AutonomousContextBudgetOptions,
   type AutonomousContextBudgetPlan,
 } from "./autonomous-context-budget.js";
+import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 
 /** Public schema for the cross-language, application-owned provider runtime. */
 export const LLM_RUNTIME_SCHEMA = "bioprism-typescript-llm-runtime/0.1" as const;
@@ -755,6 +756,14 @@ export interface ProviderInvocationOptions {
   providerQuota?: ProviderQuotaController;
   /** Optional explicit history compaction applied before each tool-loop turn. */
   contextBudget?: AutonomousContextBudgetOptions;
+  /** Optional caller-issued grant enforced immediately before provider dispatch. */
+  authorizationContext?: AutonomousAuthorizationContext;
+  /** Exact domain bound into the authorization request; required for multi-domain contexts. */
+  authorizationDomain?: string;
+  /** Metadata-only attempt identity used by the authorization resource digest. */
+  authorizationAttempt?: number;
+  /** Metadata-only provider turn identity used by the authorization resource digest. */
+  authorizationTurn?: number;
 }
 
 /**
@@ -1115,6 +1124,10 @@ export interface AutonomousStreamInvocationOptions {
   reserveCost?: AutonomousCostReservationCallback;
   effectBoundary?: AutonomousEffectBoundary;
   effectIdObserver?: (effectId: string) => void;
+  authorizationContext?: AutonomousAuthorizationContext;
+  authorizationDomain?: string;
+  authorizationAttempt?: number;
+  authorizationTurn?: number;
 }
 
 export type AutonomousModelSelector = (request: AutonomousSelectionRequest) => AutonomousSelectionDecision | Promise<AutonomousSelectionDecision>;
@@ -2461,6 +2474,20 @@ export class LLMRuntime {
     this.effectBoundaryValue = effectBoundary;
   }
 
+  private authorizeProvider(options: ProviderInvocationOptions, provider: string, request: ProviderRequest, invocationKind: string): void {
+    const context = options.authorizationContext;
+    if (context === undefined) return;
+    if (!context || typeof context.authorizeProvider !== "function") throw new ProviderRuntimeError("authorizationContext must expose authorizeProvider");
+    context.authorizeProvider({
+      provider,
+      model: request.model,
+      invocationKind,
+      domain: options.authorizationDomain,
+      attempt: options.authorizationAttempt ?? 0,
+      turn: options.authorizationTurn ?? 0,
+    });
+  }
+
   registerProvider(config: ProviderConfig): void {
     const normalized = normalizeConfig(config);
     this.providers.set(normalized.provider, normalized);
@@ -2691,6 +2718,7 @@ export class LLMRuntime {
     validateRequest(request);
     validateStructuredOutputSupport(config, request);
     const metadata = requestMetadata(provider, request, options.invocationKind ?? "provider_call");
+    this.authorizeProvider(options, provider, request, metadata.kind);
     const quota = options.providerQuota ?? this.providerQuota;
     const quotaReservation = quota?.reserve({ provider, model: request.model, inputTokens: metadata.inputTokens, outputTokens: request.maxOutputTokens, costUnits: options.estimatedCostUnits ?? 0 });
     const releaseCost = options.reserveCost?.(options.estimatedCostUnits ?? 0);
@@ -2795,6 +2823,7 @@ export class LLMRuntime {
     request: ProviderRequest,
     options: ProviderInvocationOptions = {},
   ): AsyncIterable<ProviderStreamEvent> {
+    this.authorizeProvider(options, provider, request, options.invocationKind ?? "provider_stream");
     const selectedBoundary = options.effectBoundary ?? this.effectBoundaryValue;
     if (!selectedBoundary) {
       for await (const event of this.invokeStreamUnbounded(provider, request, options)) yield event;
@@ -3041,6 +3070,7 @@ export class LLMRuntime {
   }
 
   async collectStream(provider: string, request: ProviderRequest, options: ProviderInvocationOptions = {}): Promise<ProviderResponse> {
+    this.authorizeProvider(options, provider, request, options.invocationKind ?? "provider_stream");
     const collect = async (dispatchedRequest: ProviderRequest): Promise<ProviderResponse> => {
       const text: string[] = [];
       const calls: ProviderToolCall[] = [];
@@ -3728,6 +3758,8 @@ export class AutonomousRuntime {
       executionAttempt?: number;
       maxProviderFailovers?: number;
       reserveCost?: AutonomousCostReservationCallback;
+      authorizationContext?: AutonomousAuthorizationContext;
+      authorizationDomain?: string;
     } = {},
   ): Promise<AutonomousExecutionResult> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
@@ -3778,7 +3810,7 @@ export class AutonomousRuntime {
       const estimatedCostUnits = estimatedProviderCostUnits(selectedCandidate, plan.request);
       const selectionDigest = await digestJson(selection);
       try {
-        const response = await this.llm.invoke(provider, { ...plan.request, model: step.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost });
+        const response = await this.llm.invoke(provider, { ...plan.request, model: step.model }, { credential, signal: options.signal, observer, invocationKind: "autonomous_selected_model", execution: options.execution, executionAttempt: options.executionAttempt, executionTurn: 1, executionFailover: failovers > 0, selectionDigest, estimatedCostUnits, reserveCost: options.reserveCost, authorizationContext: options.authorizationContext, authorizationDomain: options.authorizationDomain ?? plan.domain, authorizationAttempt: failovers, authorizationTurn: 0 });
         continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, statusCode: response.statusCode });
         const projection = await autonomousProviderInvocationProjection(invocationSamples, continuationPlan);
         return { selection, response, continuation_plan: continuationPlan, provider_invocations: projection.providerInvocations, provider_failover: projection.providerFailover, context_budget: contextBudget };
@@ -3926,6 +3958,10 @@ export class AutonomousRuntime {
                 selectionDigest,
                 estimatedCostUnits,
                 reserveCost: options.reserveCost,
+                authorizationContext: options.authorizationContext,
+                authorizationDomain: plan.domain,
+                authorizationAttempt: failovers,
+                authorizationTurn: 0,
                 effectIdObserver: (effectId) => {
                   if (!effectIds.includes(effectId)) effectIds.push(effectId);
                   options.effectIdObserver?.(effectId);
@@ -4002,6 +4038,7 @@ export class AutonomousRuntime {
       maxProviderFailovers?: number;
       reserveCost?: AutonomousCostReservationCallback;
       toolReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>;
+      authorizationContext?: AutonomousAuthorizationContext;
     },
   ): Promise<{ selection: AutonomousSelectionDecision; loop: ProviderToolLoopResult; continuation_plan: AutonomousModelContinuationPlan; provider_invocations: AutonomousProviderInvocationReceipt[]; provider_failover: AutonomousProviderFailoverProjection | null; context_budget?: AutonomousContextBudgetPlan | null }> {
     const maxProviderFailovers = autonomousProviderFailoverLimit(options);
@@ -4076,6 +4113,8 @@ export class AutonomousRuntime {
           costEstimator: (request) => estimatedProviderCostUnits(selectedCandidate, request),
           toolReadOnly: options.toolReadOnly,
           contextBudget: plan.contextBudget,
+          authorizationContext: options.authorizationContext,
+          authorizationDomain: plan.domain,
         });
         continuationState = await completeAutonomousModelContinuationState(continuationPlan, continuationState, { provider, model: step.model, statusCode: loop.finalResponse?.statusCode ?? null });
         const projection = await autonomousProviderInvocationProjection(invocationSamples, continuationPlan);

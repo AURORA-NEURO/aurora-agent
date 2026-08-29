@@ -36,6 +36,7 @@ from .llm_runtime import (
     ProviderToolResult,
     normalize_provider_content_parts,
 )
+from .autonomous_authorization import AutonomousAuthorizationContext
 from .errors import ArgumentError
 from .mission import MissionPolicy, MissionRequest
 from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_facet_digests
@@ -4504,6 +4505,8 @@ class AutonomousBrain:
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainRunResult:
         """Select, plan, and invoke from live providers using caller-persisted learning state."""
 
@@ -4616,6 +4619,8 @@ class AutonomousBrain:
                     tool_choice=tool_choice,
                     context_budget=normalized_context_budget,
                     invocation_observer=effective_observer,
+                    authorization_context=authorization_context,
+                    authorization_domain=authorization_domain,
                 )
                 if policy_observer is not None:
                     result = replace(result, provider_invocations=policy_observer.evidence())
@@ -4724,6 +4729,8 @@ class AutonomousBrain:
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainToolLoopResult:
         """Select adaptively, then enter the bounded route-aware native tool loop.
 
@@ -4878,6 +4885,8 @@ class AutonomousBrain:
                     content_parts=content_parts,
                     contextual_observations=effective_contextual_observations,
                     invocation_observer=effective_observer,
+                    authorization_context=authorization_context,
+                    authorization_domain=authorization_domain,
                     **attempt_options,
                 )
                 if policy_observer is not None:
@@ -5018,6 +5027,8 @@ class AutonomousBrain:
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainMissionResult:
         """Select, route, plan, and execute one bounded cross-domain mission.
 
@@ -5167,6 +5178,8 @@ class AutonomousBrain:
                     tool_choice=tool_choice,
                     attempt_state=attempt_state,
                     invocation_observer=effective_observer,
+                    authorization_context=authorization_context,
+                    authorization_domain=authorization_domain,
                 )
                 if policy_observer is not None:
                     result = replace(
@@ -5420,6 +5433,8 @@ class AutonomousBrain:
             "provider_tools",
             "tool_choice",
             "max_provider_failovers",
+            "authorization_context",
+            "authorization_domain",
         }
         unknown = sorted(set(options).difference(allowed_options))
         if unknown:
@@ -6964,6 +6979,8 @@ class AutonomousBrain:
         tool_choice: str | None = None,
         context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainRunResult:
         if not isinstance(task, str) or not task.strip():
             raise BrainRunError("task must be a non-empty string")
@@ -7163,6 +7180,8 @@ class AutonomousBrain:
             credential=handle,
             invocation_observer=invocation_observer,
             invocation_kind="provider_call",
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
         )
         invocations = ()
         if isinstance(invocation_observer, AutonomousProviderInvocationSession):
@@ -7216,6 +7235,8 @@ class AutonomousBrain:
         route_report: Mapping[str, Any] | None = None,
         attempt_state: dict[str, Any] | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainToolLoopResult:
         """Run the planned provider call and continue only through caller-approved tool results.
 
@@ -7450,6 +7471,8 @@ class AutonomousBrain:
             invocation_observer=invocation_observer,
             invocation_kind="tool_loop_turn",
             context_budget=context_budget,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
         )
         if isinstance(invocation_observer, AutonomousProviderInvocationSession):
             first = replace(first, provider_invocations=tuple(invocation_observer.evidence()))
@@ -7884,6 +7907,8 @@ class AutonomousBrain:
         provider_tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainMissionResult:
         """Run a model decision through the existing bounded mission executor.
 
@@ -8051,6 +8076,8 @@ class AutonomousBrain:
             tools=provider_tools,
             tool_choice=tool_choice,
             invocation_observer=invocation_observer,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
         )
         if brain_run.status != "completed_provider_call" or brain_run.response is None:
             return BrainMissionResult(

@@ -4017,6 +4017,32 @@ class LLMRuntime:
         )
 
     @staticmethod
+    def _authorize_provider(
+        authorization_context: AutonomousAuthorizationContext | None,
+        *,
+        provider: str,
+        request: ProviderRequest,
+        invocation_kind: str,
+        authorization_domain: str | None,
+        execution_attempt: int | None,
+        execution_turn: int | None,
+    ) -> None:
+        """Apply caller authorization before credential resolution or effect dispatch."""
+
+        if authorization_context is None:
+            return
+        if not callable(getattr(authorization_context, "authorize_provider", None)):
+            raise ProviderError("authorization_context must expose authorize_provider")
+        authorization_context.authorize_provider(
+            provider=provider,
+            model=request.model,
+            invocation_kind=invocation_kind,
+            domain=authorization_domain,
+            attempt=0 if execution_attempt is None else execution_attempt,
+            turn=0 if execution_turn is None else execution_turn,
+        )
+
+    @staticmethod
     def _notify_invocation_before(
         observer: ProviderInvocationObserver | None,
         metadata: ProviderInvocationMetadata,
@@ -4074,10 +4100,23 @@ class LLMRuntime:
         effect_execution: Any | None = None,
         provider_quota: Any | None = None,
         estimated_cost_units: float = 0.0,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_attempt: int = 0,
+        authorization_turn: int = 0,
     ) -> ProviderResponse:
         config = self._providers.get(provider)
         if config is None:
             raise ProviderError(f"provider {provider!r} is not configured")
+        self._authorize_provider(
+            authorization_context,
+            provider=provider,
+            request=request,
+            invocation_kind=invocation_kind,
+            authorization_domain=authorization_domain,
+            execution_attempt=authorization_attempt,
+            execution_turn=authorization_turn,
+        )
         secret: SecretValue | None = None
         if config.requires_credential:
             if credential is None:
@@ -4193,6 +4232,10 @@ class LLMRuntime:
         effect_boundary: Any | None = None,
         effect_execution: Any | None = None,
         effect_id_observer: Callable[[str], None] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_attempt: int = 0,
+        authorization_turn: int = 0,
     ) -> Iterator[ProviderStreamEvent]:
         """Open a provider stream with a metadata-only crash-safe dispatch boundary.
 
@@ -4201,6 +4244,15 @@ class LLMRuntime:
         bounded completion summary.  Raw deltas never enter the effect journal.
         """
 
+        self._authorize_provider(
+            authorization_context,
+            provider=provider,
+            request=request,
+            invocation_kind=invocation_kind,
+            authorization_domain=authorization_domain,
+            execution_attempt=authorization_attempt,
+            execution_turn=authorization_turn,
+        )
         selected_boundary = effect_boundary if effect_boundary is not None else self._effect_boundary
         if selected_boundary is None:
             return self._invoke_stream_unbounded(
@@ -4406,9 +4458,22 @@ class LLMRuntime:
         effect_execution: Any | None = None,
         provider_quota: Any | None = None,
         estimated_cost_units: float = 0.0,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_attempt: int = 0,
+        authorization_turn: int = 0,
     ) -> ProviderResponse:
         """Collect a stream into the same bounded response contract as ``invoke``."""
 
+        self._authorize_provider(
+            authorization_context,
+            provider=provider,
+            request=request,
+            invocation_kind=invocation_kind,
+            authorization_domain=authorization_domain,
+            execution_attempt=authorization_attempt,
+            execution_turn=authorization_turn,
+        )
         metadata = self._invocation_metadata(provider, request, invocation_kind)
         self._notify_invocation_before(invocation_observer, metadata)
         started = time.perf_counter()
@@ -4545,6 +4610,9 @@ class LLMRuntime:
         provider_quota: Any | None = None,
         estimated_cost_units: float = 0.0,
         context_budget: Any | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_attempt: int = 0,
     ) -> ProviderToolLoopResult:
         """Run bounded native tool continuation with a caller-owned authorization callback.
 
@@ -4588,6 +4656,10 @@ class LLMRuntime:
                         invocation_kind=invocation_kind,
                         provider_quota=provider_quota,
                         estimated_cost_units=estimated_cost_units,
+                        authorization_context=authorization_context,
+                        authorization_domain=authorization_domain,
+                        authorization_attempt=authorization_attempt,
+                        authorization_turn=_turn,
                     )
                     if stream
                     else self.invoke(
@@ -4598,6 +4670,10 @@ class LLMRuntime:
                         invocation_kind=invocation_kind,
                         provider_quota=provider_quota,
                         estimated_cost_units=estimated_cost_units,
+                        authorization_context=authorization_context,
+                        authorization_domain=authorization_domain,
+                        authorization_attempt=authorization_attempt,
+                        authorization_turn=_turn,
                     )
                 )
             responses.append(response)

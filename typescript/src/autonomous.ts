@@ -85,6 +85,7 @@ import {
   type AutonomousConnectorTraceEventCallback,
 } from "./autonomous-connectors.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
+import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import type { AutonomousEvaluatorCalibrationReport } from "./autonomous-evaluator-calibration.js";
 import type {
@@ -1717,6 +1718,8 @@ export interface AutonomousProviderPlanningOptions {
   /** Planning itself has no effect by default; callers may declare an effectful planner explicitly. */
   domainPolicyEffectsRequested?: boolean;
   domainPolicyEffectsApproved?: boolean;
+  /** Optional caller-issued grant enforced before the planner provider call. */
+  authorizationContext?: AutonomousAuthorizationContext;
 }
 
 /** Metadata-safe input for planning an existing dependency-closed step graph. */
@@ -1838,6 +1841,8 @@ export interface AutonomousRunOptions {
   candidates?: readonly AutonomousModelCandidate[];
   credential?: CredentialHandle;
   credentialFor?: (provider: string) => CredentialHandle | undefined;
+  /** Optional caller-issued grant enforced immediately before each provider attempt/turn. */
+  authorizationContext?: AutonomousAuthorizationContext;
   context?: readonly AutonomousPromptChunk[];
   /** Explicit versioned prompt implementation; its rendered messages remain transient. */
   promptTemplate?: AutonomousPromptTemplate;
@@ -8745,6 +8750,8 @@ export class AutonomousAgent {
         executionAttempt: options.executionAttempt,
         maxProviderFailovers: options.maxProviderFailovers,
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
+        authorizationContext: options.authorizationContext,
+        authorizationDomain: prepared.plan.domain,
       });
     } catch (error) {
       if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
@@ -8859,6 +8866,8 @@ export class AutonomousAgent {
         executionAttempt: options.executionAttempt,
         maxProviderFailovers: effectiveMaxProviderFailovers,
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
+        authorizationContext: options.authorizationContext,
+        authorizationDomain: prepared.plan.domain,
       });
     } catch (error) {
       if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
@@ -8961,6 +8970,8 @@ export class AutonomousAgent {
         executionAttempt: options.executionAttempt,
         maxProviderFailovers: effectiveMaxProviderFailovers,
         reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined,
+        authorizationContext: options.authorizationContext,
+        authorizationDomain: prepared.plan.domain,
       });
     } catch (error) {
       if (!(error instanceof ProviderRuntimeError || error instanceof CredentialError)) throw error;
@@ -10139,6 +10150,8 @@ export class AutonomousAgent {
       maxProviderFailovers: effectiveMaxProviderFailovers,
       reserveCost: streamCostBudget ? (costUnits) => streamCostBudget.reserve(costUnits) : undefined,
       effectBoundary: options.effectBoundary ?? this.effectBoundary,
+      authorizationContext: options.authorizationContext,
+      authorizationDomain: blueprint.domain_profile.domain,
     });
     let completionResolver: ((completion: AutonomousRunStreamCompletion) => void) | undefined;
     const completion = new Promise<AutonomousRunStreamCompletion>((resolve) => { completionResolver = resolve; });
@@ -10372,7 +10385,7 @@ export class AutonomousAgent {
           ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary, workflowContext: options.workflowContext }))
           : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
-      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, maxTurns: effectiveMaxToolTurns, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, toolReadOnly });
+      const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, maxTurns: effectiveMaxToolTurns, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, toolReadOnly, authorizationContext: options.authorizationContext });
       const responseEvaluation = options.structuredDomainResponse === true && loop.loop.finalResponse
         ? evaluateAutonomousDomainResponseOrThrow(loop.loop.finalResponse, blueprint.response_contract)
         : null;
@@ -10383,7 +10396,7 @@ export class AutonomousAgent {
       );
       return finish({ schema: "bioprism-typescript-autonomous-run/0.1", status, route, blueprint, plan_refinement_digest: planRefinementDigest, selection: loop.selection, response: loop.loop.finalResponse, provider_invocations: loop.provider_invocations, provider_failover: loop.provider_failover, continuation_plan: loop.continuation_plan, context_budget: loop.context_budget, prompt: promptProjection, response_evaluation: responseEvaluation, tool_loop: { status: loop.loop.status, turns: loop.loop.turns, toolCalls: loop.loop.toolCalls }, cross_domain: null, domain_policy_admission: domainPolicyAdmission, learning: this.learner ? "online_bandit_feedback_available" : "provider_health_feedback_only", retention: "provider_response_local; value_only_learning_projection" });
     }
-    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined });
+    const result = await this.runtime.invoke(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, authorizationContext: options.authorizationContext });
     const responseEvaluation = options.structuredDomainResponse === true
       ? evaluateAutonomousDomainResponseOrThrow(result.response, blueprint.response_contract)
       : null;

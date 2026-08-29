@@ -23,6 +23,7 @@ from .autonomous_context_budget import (
     AutonomousContextBudgetOptions,
     compact_autonomous_provider_request,
 )
+from .autonomous_authorization import AutonomousAuthorizationContext
 from .llm_runtime import (
     CredentialHandle,
     LLMRuntime,
@@ -163,6 +164,8 @@ class AutonomousStreamHandle:
         "_effect_boundary",
         "_effect_execution",
         "_provider_quota",
+        "_authorization_context",
+        "_authorization_domain",
         "_estimated_input_tokens",
         "_started",
         "_completion",
@@ -190,6 +193,8 @@ class AutonomousStreamHandle:
         effect_boundary: Any | None,
         effect_execution: Any | None,
         provider_quota: Any | None,
+        authorization_context: AutonomousAuthorizationContext | None,
+        authorization_domain: str | None,
     ) -> None:
         self.selection = dict(selection)
         self.continuation_plan = dict(continuation_plan)
@@ -205,6 +210,8 @@ class AutonomousStreamHandle:
         self._effect_boundary = effect_boundary
         self._effect_execution = effect_execution
         self._provider_quota = provider_quota
+        self._authorization_context = authorization_context
+        self._authorization_domain = authorization_domain
         self._estimated_input_tokens = max(
             1,
             sum(len(str(message.get("content", "")).encode("utf-8")) for message in request.messages) // 4,
@@ -326,6 +333,10 @@ class AutonomousStreamHandle:
                         effect_id_observer=observe_effect,
                         provider_quota=self._provider_quota,
                         estimated_cost_units=attempt["estimated_cost_units"],
+                        authorization_context=self._authorization_context,
+                        authorization_domain=self._authorization_domain,
+                        authorization_attempt=index,
+                        authorization_turn=0,
                     ):
                         attempt["event_count"] += 1
                         attempt["text_delta_bytes"] += len(event.text_delta.encode("utf-8"))
@@ -422,6 +433,8 @@ class AutonomousStreamRuntime:
         effect_execution: Any | None = None,
         provider_quota: Any | None = None,
         selection: Mapping[str, Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> AutonomousStreamHandle:
         if not isinstance(request, ProviderRequest):
             raise ProviderError("autonomous stream request must be a ProviderRequest")
@@ -504,6 +517,8 @@ class AutonomousStreamRuntime:
             effect_boundary=effect_boundary,
             effect_execution=effect_execution,
             provider_quota=provider_quota,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
         )
 
 

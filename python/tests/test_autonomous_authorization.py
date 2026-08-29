@@ -7,6 +7,7 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_AUTHORIZATION_OPERATIONS,
     AUTONOMOUS_DOMAIN_NAMES,
+    AutonomousAuthorizationContext,
     AutonomousAuthorizationLedger,
     AutonomousAuthorizationGate,
     AutonomousAuthorizationPersistenceCoordinator,
@@ -85,6 +86,43 @@ def test_authorization_is_scoped_idempotent_and_bounded() -> None:
     assert ledger.authorize(_request(request_id="request-3"), now=1_203).status == "exhausted"
     assert len(ledger.events()) == 4
     assert ledger.verify_integrity()["domain_coverage"]["coding"] == 1
+
+
+def test_authorization_context_mints_fresh_domain_bound_provider_requests() -> None:
+    ledger = _ledger()
+    grant = ledger.issue(
+        grant_id="provider-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=("coding",),
+        allowed_operations=("provider_invocation",),
+        allowed_risk_classes=(),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=2,
+    )
+    context = AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(ledger),
+        grant_id=grant.grant_id,
+        tenant_id=grant.tenant_id,
+        actor_id=grant.actor_id,
+        session_id=grant.session_id,
+        authorization_digest=grant.authorization_digest,
+        domains=("coding",),
+        clock=lambda: 1_200,
+    )
+
+    first = context.authorize_provider(provider="offline", model="model-a", invocation_kind="provider_call")
+    second = context.authorize_provider(provider="offline", model="model-a", invocation_kind="provider_call", turn=1)
+
+    assert first.status == "allowed"
+    assert second.status == "allowed"
+    assert first.request_digest != second.request_digest
+    assert ledger.get(grant.grant_id).used_count == 2  # type: ignore[union-attr]
+    with pytest.raises(ArgumentError, match="outside its context scope"):
+        context.authorize_provider(provider="offline", model="model-a", invocation_kind="provider_call", domain="science")
 
 
 def test_authorization_rejects_identity_scope_and_time_drift() -> None:

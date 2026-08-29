@@ -90,7 +90,7 @@ function scope(name: string, value: unknown, allowed?: Set<string>, required = f
   return [...result].sort();
 }
 
-function domains(name: string, value: unknown): AutonomousDomainName[] {
+function normalizeAuthorizationDomains(name: string, value: unknown): AutonomousDomainName[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > MAX_AUTONOMOUS_AUTHORIZATION_SCOPE_ITEMS || value.some((item) => typeof item !== "string")) fail(`${name} is empty or exceeds its bound`);
   const normalized = value.map((item) => identifier(`${name} entry`, item));
   if (new Set(normalized).size !== normalized.length || normalized.some((item) => !DOMAINS.includes(item as AutonomousDomainName))) fail(`${name} contains an unsupported or duplicate domain`);
@@ -161,7 +161,7 @@ export class AutonomousAuthorizationGrant {
 
   constructor(input: { grant_id: string; tenant_id: string; actor_id: string; session_id: string; authorization_digest: string; allowed_domains: AutonomousDomainName[]; allowed_operations: AutonomousAuthorizationOperation[]; allowed_capabilities: string[]; allowed_risk_classes: string[]; issued_at: number; expires_at: number; max_uses: number | null; used_count: number; used_request_digests: string[]; status: AutonomousAuthorizationGrantStatus; revoked_at: number | null; revocation_reason_digest: string | null; grant_digest: string }) {
     this.grant_id = identifier("grant_id", input.grant_id); this.tenant_id = identifier("grant tenant_id", input.tenant_id); this.actor_id = identifier("grant actor_id", input.actor_id); this.session_id = identifier("grant session_id", input.session_id); this.authorization_digest = digest("grant authorization_digest", input.authorization_digest)!;
-    this.allowed_domains = domains("grant allowed_domains", input.allowed_domains); this.allowed_operations = scope("grant allowed_operations", input.allowed_operations, new Set(OPERATIONS), true) as AutonomousAuthorizationOperation[]; this.allowed_capabilities = scope("grant allowed_capabilities", input.allowed_capabilities); this.allowed_risk_classes = scope("grant allowed_risk_classes", input.allowed_risk_classes);
+    this.allowed_domains = normalizeAuthorizationDomains("grant allowed_domains", input.allowed_domains); this.allowed_operations = scope("grant allowed_operations", input.allowed_operations, new Set(OPERATIONS), true) as AutonomousAuthorizationOperation[]; this.allowed_capabilities = scope("grant allowed_capabilities", input.allowed_capabilities); this.allowed_risk_classes = scope("grant allowed_risk_classes", input.allowed_risk_classes);
     this.issued_at = timestamp("grant issued_at", input.issued_at); this.expires_at = timestamp("grant expires_at", input.expires_at); if (this.expires_at < this.issued_at || this.expires_at - this.issued_at > MAX_AUTONOMOUS_AUTHORIZATION_TTL_MS) fail("grant lifetime exceeds its bound");
     if (input.max_uses !== null) integer("grant max_uses", input.max_uses, 1, MAX_AUTONOMOUS_AUTHORIZATION_REQUEST_DIGESTS_PER_GRANT); this.max_uses = input.max_uses;
     this.used_count = integer("grant used_count", input.used_count, 0, MAX_AUTONOMOUS_AUTHORIZATION_REQUEST_DIGESTS_PER_GRANT); this.used_request_digests = input.used_request_digests.map((item) => digest("grant used request digest", item)!); if (this.used_count !== this.used_request_digests.length || new Set(this.used_request_digests).size !== this.used_request_digests.length || (this.max_uses !== null && this.used_count > this.max_uses)) fail("grant use accounting is inconsistent");
@@ -171,7 +171,7 @@ export class AutonomousAuthorizationGrant {
 
   static issue(input: { grant_id: string; tenant_id: string; actor_id: string; session_id: string; authorization_digest: string; allowed_domains: AutonomousDomainName[]; allowed_operations: AutonomousAuthorizationOperation[]; allowed_capabilities?: string[]; allowed_risk_classes?: string[]; issued_at: number; expires_at: number; max_uses?: number | null }): AutonomousAuthorizationGrant {
     const normalized = {
-      schema: AUTONOMOUS_AUTHORIZATION_GRANT_SCHEMA, grant_id: identifier("grant_id", input.grant_id), tenant_id: identifier("grant tenant_id", input.tenant_id), actor_id: identifier("grant actor_id", input.actor_id), session_id: identifier("grant session_id", input.session_id), authorization_digest: digest("grant authorization_digest", input.authorization_digest)!, allowed_domains: domains("grant allowed_domains", input.allowed_domains), allowed_operations: scope("grant allowed_operations", input.allowed_operations, new Set(OPERATIONS), true) as AutonomousAuthorizationOperation[], allowed_capabilities: scope("grant allowed_capabilities", input.allowed_capabilities ?? []), allowed_risk_classes: scope("grant allowed_risk_classes", input.allowed_risk_classes ?? []), issued_at: timestamp("grant issued_at", input.issued_at), expires_at: timestamp("grant expires_at", input.expires_at), max_uses: input.max_uses === undefined ? 1 : input.max_uses,
+      schema: AUTONOMOUS_AUTHORIZATION_GRANT_SCHEMA, grant_id: identifier("grant_id", input.grant_id), tenant_id: identifier("grant tenant_id", input.tenant_id), actor_id: identifier("grant actor_id", input.actor_id), session_id: identifier("grant session_id", input.session_id), authorization_digest: digest("grant authorization_digest", input.authorization_digest)!, allowed_domains: normalizeAuthorizationDomains("grant allowed_domains", input.allowed_domains), allowed_operations: scope("grant allowed_operations", input.allowed_operations, new Set(OPERATIONS), true) as AutonomousAuthorizationOperation[], allowed_capabilities: scope("grant allowed_capabilities", input.allowed_capabilities ?? []), allowed_risk_classes: scope("grant allowed_risk_classes", input.allowed_risk_classes ?? []), issued_at: timestamp("grant issued_at", input.issued_at), expires_at: timestamp("grant expires_at", input.expires_at), max_uses: input.max_uses === undefined ? 1 : input.max_uses,
     };
     if (normalized.expires_at < normalized.issued_at || normalized.expires_at - normalized.issued_at > MAX_AUTONOMOUS_AUTHORIZATION_TTL_MS) fail("grant lifetime exceeds its bound");
     return new AutonomousAuthorizationGrant({ ...normalized, used_count: 0, used_request_digests: [], status: "active", revoked_at: null, revocation_reason_digest: null, grant_digest: digestJsonSync(normalized) });
@@ -192,8 +192,8 @@ export interface AutonomousAuthorizationRequestJSON extends JsonObject { schema:
 
 export class AutonomousAuthorizationRequest {
   readonly request_id: string; readonly grant_id: string; readonly tenant_id: string; readonly actor_id: string; readonly session_id: string; readonly authorization_digest: string; readonly domains: AutonomousDomainName[]; readonly operation: AutonomousAuthorizationOperation; readonly capability: string | null; readonly risk_class: string | null; readonly resource_digest: string | null; readonly issued_at: number; readonly request_digest: string;
-  constructor(input: { request_id: string; grant_id: string; tenant_id: string; actor_id: string; session_id: string; authorization_digest: string; domains: AutonomousDomainName[]; operation: AutonomousAuthorizationOperation; capability: string | null; risk_class: string | null; resource_digest: string | null; issued_at: number; request_digest: string }) { this.request_id = identifier("request_id", input.request_id); this.grant_id = identifier("request grant_id", input.grant_id); this.tenant_id = identifier("request tenant_id", input.tenant_id); this.actor_id = identifier("request actor_id", input.actor_id); this.session_id = identifier("request session_id", input.session_id); this.authorization_digest = digest("request authorization_digest", input.authorization_digest)!; this.domains = domains("request domains", input.domains); this.operation = identifier("request operation", input.operation) as AutonomousAuthorizationOperation; if (!OPERATIONS.has(this.operation)) fail("request operation is unsupported"); this.capability = input.capability === null ? null : identifier("request capability", input.capability); this.risk_class = input.risk_class === null ? null : identifier("request risk_class", input.risk_class); this.resource_digest = digest("request resource_digest", input.resource_digest, true); this.issued_at = timestamp("request issued_at", input.issued_at); this.request_digest = digest("request request_digest", input.request_digest)!; if (this.request_digest !== digestJsonSync(requestCore(this))) fail("request_digest does not match request metadata"); }
-  static create(input: { request_id: string; grant_id: string; tenant_id: string; actor_id: string; session_id: string; authorization_digest: string; domains: AutonomousDomainName[]; operation: AutonomousAuthorizationOperation; capability?: string | null; risk_class?: string | null; resource_digest?: string | null; issued_at: number }): AutonomousAuthorizationRequest { const core = { schema: AUTONOMOUS_AUTHORIZATION_REQUEST_SCHEMA, request_id: identifier("request_id", input.request_id), grant_id: identifier("request grant_id", input.grant_id), tenant_id: identifier("request tenant_id", input.tenant_id), actor_id: identifier("request actor_id", input.actor_id), session_id: identifier("request session_id", input.session_id), authorization_digest: digest("request authorization_digest", input.authorization_digest)!, domains: domains("request domains", input.domains), operation: identifier("request operation", input.operation) as AutonomousAuthorizationOperation, capability: input.capability === undefined ? null : identifier("request capability", input.capability), risk_class: input.risk_class === undefined ? null : identifier("request risk_class", input.risk_class), resource_digest: digest("request resource_digest", input.resource_digest === undefined ? null : input.resource_digest, true), issued_at: timestamp("request issued_at", input.issued_at) }; if (!OPERATIONS.has(core.operation)) fail("request operation is unsupported"); return new AutonomousAuthorizationRequest({ ...core, request_digest: digestJsonSync(core) }); }
+  constructor(input: { request_id: string; grant_id: string; tenant_id: string; actor_id: string; session_id: string; authorization_digest: string; domains: AutonomousDomainName[]; operation: AutonomousAuthorizationOperation; capability: string | null; risk_class: string | null; resource_digest: string | null; issued_at: number; request_digest: string }) { this.request_id = identifier("request_id", input.request_id); this.grant_id = identifier("request grant_id", input.grant_id); this.tenant_id = identifier("request tenant_id", input.tenant_id); this.actor_id = identifier("request actor_id", input.actor_id); this.session_id = identifier("request session_id", input.session_id); this.authorization_digest = digest("request authorization_digest", input.authorization_digest)!; this.domains = normalizeAuthorizationDomains("request domains", input.domains); this.operation = identifier("request operation", input.operation) as AutonomousAuthorizationOperation; if (!OPERATIONS.has(this.operation)) fail("request operation is unsupported"); this.capability = input.capability === null ? null : identifier("request capability", input.capability); this.risk_class = input.risk_class === null ? null : identifier("request risk_class", input.risk_class); this.resource_digest = digest("request resource_digest", input.resource_digest, true); this.issued_at = timestamp("request issued_at", input.issued_at); this.request_digest = digest("request request_digest", input.request_digest)!; if (this.request_digest !== digestJsonSync(requestCore(this))) fail("request_digest does not match request metadata"); }
+  static create(input: { request_id: string; grant_id: string; tenant_id: string; actor_id: string; session_id: string; authorization_digest: string; domains: AutonomousDomainName[]; operation: AutonomousAuthorizationOperation; capability?: string | null; risk_class?: string | null; resource_digest?: string | null; issued_at: number }): AutonomousAuthorizationRequest { const core = { schema: AUTONOMOUS_AUTHORIZATION_REQUEST_SCHEMA, request_id: identifier("request_id", input.request_id), grant_id: identifier("request grant_id", input.grant_id), tenant_id: identifier("request tenant_id", input.tenant_id), actor_id: identifier("request actor_id", input.actor_id), session_id: identifier("request session_id", input.session_id), authorization_digest: digest("request authorization_digest", input.authorization_digest)!, domains: normalizeAuthorizationDomains("request domains", input.domains), operation: identifier("request operation", input.operation) as AutonomousAuthorizationOperation, capability: input.capability === undefined || input.capability === null ? null : identifier("request capability", input.capability), risk_class: input.risk_class === undefined || input.risk_class === null ? null : identifier("request risk_class", input.risk_class), resource_digest: digest("request resource_digest", input.resource_digest === undefined ? null : input.resource_digest, true), issued_at: timestamp("request issued_at", input.issued_at) }; if (!OPERATIONS.has(core.operation)) fail("request operation is unsupported"); return new AutonomousAuthorizationRequest({ ...core, request_digest: digestJsonSync(core) }); }
   static fromJSON(value: unknown): AutonomousAuthorizationRequest { if (!isObject(value)) fail("request must be an object"); const expected = ["actor_id", "authority", "authorization_digest", "capability", "domains", "execution", "grant_id", "issued_at", "request_digest", "request_id", "resource_digest", "retention", "risk_class", "schema", "secret_material", "session_id", "tenant_id"]; if (Object.keys(value).sort().join(",") !== expected.join(",") || value.schema !== AUTONOMOUS_AUTHORIZATION_REQUEST_SCHEMA || value.retention !== AUTONOMOUS_AUTHORIZATION_RETENTION || value.authority !== AUTONOMOUS_AUTHORIZATION_AUTHORITY || value.execution !== AUTONOMOUS_AUTHORIZATION_EXECUTION || value.secret_material !== AUTONOMOUS_AUTHORIZATION_SECRET_MATERIAL) fail("request contains unsupported fields or invalid markers"); return new AutonomousAuthorizationRequest(value as unknown as ConstructorParameters<typeof AutonomousAuthorizationRequest>[0]); }
   get contextDigest(): string { return autonomousAuthorizationContextDigest({ tenantId: this.tenant_id, actorId: this.actor_id, sessionId: this.session_id, authorizationDigest: this.authorization_digest }); }
   toJSON(): AutonomousAuthorizationRequestJSON { return { ...requestCore(this), request_digest: this.request_digest, retention: AUTONOMOUS_AUTHORIZATION_RETENTION, authority: AUTONOMOUS_AUTHORIZATION_AUTHORITY, execution: AUTONOMOUS_AUTHORIZATION_EXECUTION, secret_material: AUTONOMOUS_AUTHORIZATION_SECRET_MATERIAL } as AutonomousAuthorizationRequestJSON; }
@@ -246,6 +246,71 @@ export class AutonomousAuthorizationGate {
   require(request: AutonomousAuthorizationRequest | AutonomousAuthorizationRequestJSON, now: number): AutonomousAuthorizationDecision { const decision = this.ledger.authorize(request, now); if (decision.status !== "allowed" && decision.status !== "already_allowed") fail(`operation authorization was refused: ${decision.status}`); return decision; }
   async execute<T>(request: AutonomousAuthorizationRequest | AutonomousAuthorizationRequestJSON, now: number, operation: () => T | Promise<T>): Promise<AutonomousAuthorizedOperation<T>> { if (typeof operation !== "function") fail("authorized operation must be callable"); const decision = this.require(request, now); const result = await operation(); return { decision: decision.toJSON(), result_present: true, result_retained: false, retention: "transient_caller_result_only", authority: AUTONOMOUS_AUTHORIZATION_AUTHORITY, execution: AUTONOMOUS_AUTHORIZATION_EXECUTION, secret_material: AUTONOMOUS_AUTHORIZATION_SECRET_MATERIAL, result }; }
   toJSON<T>(operation: AutonomousAuthorizedOperation<T>): Omit<AutonomousAuthorizedOperation<T>, "result"> { const { result: _result, ...safe } = operation; return safe; }
+}
+
+/** Bind one caller-issued grant to live provider attempts without retaining payloads or secrets. */
+export class AutonomousAuthorizationContext {
+  private requestCounter = 0;
+
+  constructor(
+    readonly gate: AutonomousAuthorizationGate,
+    readonly grantId: string,
+    readonly tenantId: string,
+    readonly actorId: string,
+    readonly sessionId: string,
+    readonly authorizationDigest: string,
+    readonly domains: AutonomousDomainName[],
+    readonly capability: string | null = null,
+    readonly riskClass: string | null = "provider_invocation",
+    readonly requestPrefix = "provider",
+    readonly clock: () => number = () => Date.now(),
+  ) {
+    if (!(gate instanceof AutonomousAuthorizationGate)) fail("context requires an AutonomousAuthorizationGate");
+    identifier("context grantId", grantId); identifier("context tenantId", tenantId); identifier("context actorId", actorId); identifier("context sessionId", sessionId);
+    digest("context authorizationDigest", authorizationDigest); normalizeAuthorizationDomains("context domains", domains);
+    if (capability !== null) identifier("context capability", capability);
+    if (riskClass !== null) identifier("context riskClass", riskClass);
+    identifier("context requestPrefix", text("context requestPrefix", requestPrefix, 128));
+    if (typeof clock !== "function") fail("context clock must be callable");
+  }
+
+  /** Return a child context narrowed to one already-authorized domain. */
+  forDomain(domain: AutonomousDomainName): AutonomousAuthorizationContext {
+    const normalized = identifier("context domain", domain) as AutonomousDomainName;
+    if (!this.domains.includes(normalized)) fail("context domain is outside its authorized scope");
+    return new AutonomousAuthorizationContext(this.gate, this.grantId, this.tenantId, this.actorId, this.sessionId, this.authorizationDigest, [normalized], this.capability, this.riskClass, this.requestPrefix, this.clock);
+  }
+
+  /** Require permission for one provider attempt; request metadata excludes task and provider payloads. */
+  authorizeProvider(input: { provider: string; model: string; invocationKind: string; domain?: string; attempt?: number; turn?: number }): AutonomousAuthorizationDecision {
+    const selectedDomain = input.domain ?? (this.domains.length === 1 ? this.domains[0] : undefined);
+    if (!selectedDomain) fail("provider authorization requires an exact domain when context spans domains");
+    const domain = identifier("provider authorization domain", selectedDomain) as AutonomousDomainName;
+    if (!this.domains.includes(domain)) fail("provider authorization domain is outside its context scope");
+    const provider = identifier("provider authorization provider", input.provider);
+    const model = identifier("provider authorization model", input.model);
+    const invocationKind = identifier("provider authorization invocationKind", input.invocationKind);
+    const attempt = integer("provider authorization attempt", input.attempt ?? 0, 0, 8);
+    const turn = integer("provider authorization turn", input.turn ?? 0, 0, 32);
+    const issuedAt = timestamp("provider authorization issuedAt", this.clock());
+    const resourceDigest = digestJsonSync({ schema: "bioprism-autonomous-provider-authorization-resource/0.1", domain, provider, model, invocation_kind: invocationKind, attempt, turn });
+    this.requestCounter += 1;
+    const request = AutonomousAuthorizationRequest.create({
+      request_id: identifier("provider authorization requestId", `${this.requestPrefix}-${this.requestCounter}`),
+      grant_id: this.grantId,
+      tenant_id: this.tenantId,
+      actor_id: this.actorId,
+      session_id: this.sessionId,
+      authorization_digest: this.authorizationDigest,
+      domains: [domain],
+      operation: "provider_invocation",
+      capability: this.capability,
+      risk_class: this.riskClass,
+      resource_digest: resourceDigest,
+      issued_at: issuedAt,
+    });
+    return this.gate.require(request, issuedAt);
+  }
 }
 
 export interface AutonomousAuthorizationSnapshotTextStore { read(): Promise<string | null> | string | null; write(value: string): Promise<void> | void; }

@@ -36,7 +36,11 @@ if TYPE_CHECKING:
 from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
 from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
-from .autonomous_authorization import AutonomousAuthorizationGate, AutonomousAuthorizationLedger
+from .autonomous_authorization import (
+    AutonomousAuthorizationContext,
+    AutonomousAuthorizationGate,
+    AutonomousAuthorizationLedger,
+)
 from .autonomous_evidence import (
     AutonomousEvidencePlan,
     build_autonomous_evidence_plan,
@@ -12244,6 +12248,7 @@ class AutonomousTaskOrchestrator:
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
         # Keep the legacy ``mission_policy`` shorthand while making the execution route
         # explicit for new callers.
@@ -12283,6 +12288,8 @@ class AutonomousTaskOrchestrator:
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
                 trace_event_callback=trace_event_callback,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint.spec.domain,
             )
             return self._attach_domain_response_evaluation(blueprint, result)
         if effective_mode == "tool_loop":
@@ -12344,6 +12351,8 @@ class AutonomousTaskOrchestrator:
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
                 trace_event_callback=trace_event_callback,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint.spec.domain,
             )
             return self._attach_domain_response_evaluation(blueprint, result)
         if effective_mode != "mission":
@@ -12376,6 +12385,7 @@ class AutonomousTaskOrchestrator:
             provider_tools=provider_tools,
             tool_choice=tool_choice,
             max_provider_failovers=max_provider_failovers,
+            authorization_context=authorization_context,
         )
         result = self.brain.run_adaptive_mission(
             task=blueprint.spec.task,
@@ -12500,7 +12510,7 @@ class AutonomousTaskOrchestrator:
             "provider_tools", "tool_choice", "max_provider_failovers", "prompt", "execution_mode",
             "tool_loop_options", "bandit_state",
             "execution_controller", "invocation_observer",
-            "trace_event_callback",
+            "trace_event_callback", "authorization_context",
         }
         unknown = sorted(set(kwargs).difference(allowed))
         if unknown:
@@ -13180,6 +13190,7 @@ class AutonomousTaskOrchestrator:
         memory_tags: Sequence[str] = (),
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> Any:
         """Run one domain-aware task through adaptive selection and bounded invocation.
 
@@ -13409,6 +13420,7 @@ class AutonomousTaskOrchestrator:
                         "provider_tools": provider_tools,
                         "tool_choice": tool_choice,
                         "max_provider_failovers": max_provider_failovers,
+                        "authorization_context": authorization_context,
                     }
                 )
                 learning_cycle = self.brain.run_adaptive_mission_learning_cycle(
@@ -13478,11 +13490,12 @@ class AutonomousTaskOrchestrator:
                     "execution_mode": execution_mode,
                     "tool_loop_options": tool_loop_options,
                     "bandit_state": bandit_state,
-                    "execution_controller": execution_controller,
-                    "invocation_observer": invocation_observer,
-                    "trace_event_callback": trace_event_callback,
-                },
-            ))
+                        "execution_controller": execution_controller,
+                        "invocation_observer": invocation_observer,
+                        "trace_event_callback": trace_event_callback,
+                        "authorization_context": authorization_context,
+                    },
+                ))
         result = self._execute(
             blueprint,
             model_candidates=model_candidates,
@@ -13518,6 +13531,7 @@ class AutonomousTaskOrchestrator:
             execution_controller=execution_controller,
             invocation_observer=invocation_observer,
             trace_event_callback=trace_event_callback,
+            authorization_context=authorization_context,
         )
         return self._apply_direct_response_review_gate(
             result,
@@ -24801,6 +24815,8 @@ class AutonomousAgent:
             observer=resolved_options.get("invocation_observer"),
             invocation_kind="autonomous_agent_stream",
             selection=preflight.selection,
+            authorization_context=resolved_options.get("authorization_context"),
+            authorization_domain=domain,
         )
         return AutonomousAgentStreamHandle(
             selection=preflight.selection,

@@ -13696,6 +13696,24 @@ outer digests before replacing live state. The high-level Python agent exposes
 `createAuthorizationLedger()` / `createAuthorizationGate()` so applications do not need to
 reach below the application boundary to construct the contract.
 
+For provider execution, `AutonomousAuthorizationContext` binds one caller-issued grant to the
+live runtime. Pass it as `authorization_context` / `authorizationContext` to the low-level
+provider methods or through the high-level run, stream, mission, and orchestrator options. The
+context chooses an exact domain, retains only tenant/actor/session identity and the caller's
+authorization digest, and mints a unique request for each provider attempt. Its resource digest
+contains only the domain, provider, model, invocation kind, failover attempt, and tool-loop turn;
+task text, prompt messages, credentials, headers, raw provider payloads, and tool results are
+intentionally excluded.
+
+The enforcement point is inside `LLMRuntime`, after provider configuration and request shape
+validation but before credential-handle resolution, quota reservation, execution admission,
+observation callbacks, effect boundaries, or transport. `invoke()`, live streams, collected
+streams, and every native tool-loop turn use the same gate. High-level failover and streaming
+bridges forward the context to the selected arm, so each retry/turn consumes a distinct grant use
+and a refused attempt cannot touch credentials or the network. Applications that span multiple
+domains should use `for_domain()` / `forDomain()` or pass the exact domain on every call; omitting
+the domain for a multi-domain context fails closed.
+
 This is deliberately an authorization contract and enforcement seam, not an identity provider:
 the deployment still authenticates the caller, issues and protects the authorization digest,
 stores/encrypts snapshots, coordinates distributed writers, and decides which external action is

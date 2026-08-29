@@ -116,6 +116,15 @@ headers, provider payloads, tool arguments, or results; authentication, grant is
 storage, distributed leases, and external effect reconciliation remain deployment-owned. See the
 [tenant authorization contract](docs/AUTONOMOUS_BRAIN.md#tenant-scoped-authorization-contract).
 
+For live model calls, bind an `AutonomousAuthorizationContext` created from the caller's grant to
+`LLMRuntime.invoke()`, `invokeStream()`, `collectStream()`, or `invokeToolLoop()` (and to the
+high-level autonomous run options). The runtime mints a fresh, metadata-only request immediately
+before every provider attempt and every tool-loop turn, then checks it before credential
+resolution, quota reservation, observers, effect journaling, or transport. A denied domain or
+exhausted grant therefore cannot contact a provider, while failover and streaming retain the same
+tenant/session boundary. The context never carries a key, prompt, message, response, or tool
+result; credentials remain caller-supplied opaque handles.
+
 ## Status
 
 **83 crates, 538,938 lines, clippy -D warnings enforced in CI.** Byte-level parity with the

@@ -111,6 +111,15 @@ arguments, or results. Identity authentication, grant issuance, encryption, and 
 coordination remain deployment responsibilities.
 evidence, tool payloads, credentials, or cost claims.
 
+For actual provider execution, bind an `AutonomousAuthorizationContext` (constructed from the
+caller-issued grant) to `LLMRuntime.invoke()`, `invoke_stream()`, `collect_stream()`, or
+`invoke_tool_loop()`, or pass it through the high-level brain/orchestrator options. The runtime
+mints a fresh metadata-only request immediately before each provider attempt and each tool-loop
+turn. Authorization is checked before credential resolution, quota reservation, observers, effect
+journaling, and transport, so a denied scope or exhausted grant cannot contact a provider. The
+context carries no key, prompt, message, response, or tool result; credentials remain caller-owned
+opaque handles.
+
 For provider-backed evidence, `AutonomousConnectorRegistry` and `AutonomousConnectorRuntime`
 provide the corresponding caller-owned connector process. Register a typed
 `DomainEvidenceProviderConnectorManifest` and an executor that may close over a short-lived

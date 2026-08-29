@@ -16,9 +16,10 @@ deployment-owned.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import json
 import re
+import time
 from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
@@ -954,6 +955,124 @@ class AutonomousAuthorizationGate:
             _fail("authorized operation must be callable")
         decision = self.require(request, now=now)
         return AutonomousAuthorizedOperation(decision=decision, result=operation())
+
+
+@dataclass(slots=True)
+class AutonomousAuthorizationContext:
+    """Bind one caller-issued grant to live autonomous provider invocations.
+
+    The context is deliberately not a credential or a bearer token. It carries only the
+    metadata required to mint a fresh authorization request immediately before a provider
+    attempt. A fresh request digest is important: reusing one request would be interpreted as a
+    replay and would bypass a grant's max-use accounting during tool loops or failover.
+    """
+
+    gate: AutonomousAuthorizationGate
+    grant_id: str
+    tenant_id: str
+    actor_id: str
+    session_id: str
+    authorization_digest: str
+    domains: tuple[str, ...]
+    capability: str | None = None
+    risk_class: str | None = "provider_invocation"
+    request_prefix: str = "provider"
+    clock: Callable[[], int] = lambda: int(time.time() * 1000)
+    _counter: int = 0
+    _lock: RLock = field(default_factory=RLock, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.gate, AutonomousAuthorizationGate):
+            _fail("context requires an AutonomousAuthorizationGate")
+        self.grant_id = _identifier("context grant_id", self.grant_id)
+        self.tenant_id = _identifier("context tenant_id", self.tenant_id)
+        self.actor_id = _identifier("context actor_id", self.actor_id)
+        self.session_id = _identifier("context session_id", self.session_id)
+        self.authorization_digest = _digest("context authorization_digest", self.authorization_digest)  # type: ignore[assignment]
+        self.domains = _domains("context domains", self.domains)
+        self.capability = None if self.capability is None else _identifier("context capability", self.capability)
+        self.risk_class = None if self.risk_class is None else _identifier("context risk_class", self.risk_class)
+        self.request_prefix = _identifier("context request_prefix", self.request_prefix)
+        if not callable(self.clock):
+            _fail("context clock must be callable")
+        if isinstance(self._counter, bool) or not isinstance(self._counter, int) or self._counter < 0:
+            _fail("context request counter is invalid")
+
+    def for_domain(self, domain: str) -> "AutonomousAuthorizationContext":
+        """Return a child context narrowed to one already-authorized domain."""
+
+        normalized = _identifier("context domain", domain)
+        if normalized not in self.domains:
+            _fail("context domain is outside its authorized scope")
+        return AutonomousAuthorizationContext(
+            gate=self.gate,
+            grant_id=self.grant_id,
+            tenant_id=self.tenant_id,
+            actor_id=self.actor_id,
+            session_id=self.session_id,
+            authorization_digest=self.authorization_digest,
+            domains=(normalized,),
+            capability=self.capability,
+            risk_class=self.risk_class,
+            request_prefix=self.request_prefix,
+            clock=self.clock,
+        )
+
+    def authorize_provider(
+        self,
+        *,
+        provider: str,
+        model: str,
+        invocation_kind: str,
+        domain: str | None = None,
+        attempt: int = 0,
+        turn: int = 0,
+    ) -> AutonomousAuthorizationDecision:
+        """Require permission for one provider attempt without retaining request payloads."""
+
+        selected_domain = domain
+        if selected_domain is None:
+            if len(self.domains) != 1:
+                _fail("provider authorization requires an exact domain when context spans domains")
+            selected_domain = self.domains[0]
+        selected_domain = _identifier("provider authorization domain", selected_domain)
+        if selected_domain not in self.domains:
+            _fail("provider authorization domain is outside its context scope")
+        normalized_provider = _identifier("provider authorization provider", provider)
+        normalized_model = _identifier("provider authorization model", model)
+        normalized_kind = _identifier("provider authorization invocation_kind", invocation_kind)
+        normalized_attempt = _integer("provider authorization attempt", attempt, 0, 8)
+        normalized_turn = _integer("provider authorization turn", turn, 0, 32)
+        issued_at = _timestamp("provider authorization issued_at", self.clock())
+        resource_digest = content_digest(
+            {
+                "schema": "bioprism-autonomous-provider-authorization-resource/0.1",
+                "domain": selected_domain,
+                "provider": normalized_provider,
+                "model": normalized_model,
+                "invocation_kind": normalized_kind,
+                "attempt": normalized_attempt,
+                "turn": normalized_turn,
+            }
+        )
+        with self._lock:
+            self._counter += 1
+            request_id = f"{self.request_prefix}-{self._counter}"
+        request = AutonomousAuthorizationRequest.create(
+            request_id=request_id,
+            grant_id=self.grant_id,
+            tenant_id=self.tenant_id,
+            actor_id=self.actor_id,
+            session_id=self.session_id,
+            authorization_digest=self.authorization_digest,
+            domains=(selected_domain,),
+            operation="provider_invocation",
+            capability=self.capability,
+            risk_class=self.risk_class,
+            resource_digest=resource_digest,
+            issued_at=issued_at,
+        )
+        return self.gate.require(request, now=issued_at)
 
 
 class AutonomousAuthorizationSnapshotTextStore(Protocol):

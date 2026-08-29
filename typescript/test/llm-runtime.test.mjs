@@ -5,6 +5,10 @@ import {
   CredentialError,
   CredentialProvisioner,
   CredentialStore,
+  AutonomousAuthorizationContext,
+  AutonomousAuthorizationError,
+  AutonomousAuthorizationGate,
+  AutonomousAuthorizationLedger,
   AutonomousAgent,
   AutonomousCostBudget,
   AutonomousCostBudgetError,
@@ -55,6 +59,40 @@ function request(model = "test-model", overrides = {}) {
     messages: [{ role: "user", content: "Return a bounded answer." }],
     maxOutputTokens: 128,
     ...overrides,
+  };
+}
+
+function providerAuthorizationContext(maxUses = 2, domains = ["coding"]) {
+  const ledger = new AutonomousAuthorizationLedger(16, 64);
+  const issued = ledger.issue({
+    grant_id: "runtime-grant",
+    tenant_id: "tenant-a",
+    actor_id: "actor-a",
+    session_id: "session-a",
+    authorization_digest: "a".repeat(64),
+    allowed_domains: domains,
+    allowed_operations: ["provider_invocation"],
+    allowed_capabilities: [],
+    allowed_risk_classes: [],
+    issued_at: 1000,
+    expires_at: 2000,
+    max_uses: maxUses,
+  });
+  return {
+    ledger,
+    context: new AutonomousAuthorizationContext(
+      new AutonomousAuthorizationGate(ledger),
+      issued.grant_id,
+      issued.tenant_id,
+      issued.actor_id,
+      issued.session_id,
+      issued.authorization_digest,
+      [...domains],
+      null,
+      "provider_invocation",
+      "provider",
+      () => 1200,
+    ),
   };
 }
 
@@ -646,6 +684,68 @@ test("provider invocation effect boundary projects transient responses and block
   assert.deepEqual((await journal.events()).map((row) => row.event.status), ["prepared", "dispatching", "dispatched", "completed"]);
   await assert.rejects(() => runtime.invoke("offline-effect", input), AutonomousEffectReconciliationRequiredError);
   assert.equal(calls, 1);
+});
+
+test("provider authorization rejects before credential resolution or transport", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("transport must not run"); } });
+  runtime.registerProvider(openaiCompatibleProvider("credentialed", "https://credentialed.invalid"));
+  const { context } = providerAuthorizationContext(2, ["coding"]);
+  await assert.rejects(
+    () => runtime.invoke("credentialed", request("credentialed-model"), { authorizationContext: context, authorizationDomain: "science" }),
+    AutonomousAuthorizationError,
+  );
+});
+
+test("provider authorization consumes one fresh budget entry per invocation and stream", async () => {
+  const { ledger, context } = providerAuthorizationContext();
+  const calls = { invoke: 0, stream: 0 };
+  const runtime = new LLMRuntime();
+  runtime.registerInMemoryProvider("authorized-offline", (input) => {
+    calls.invoke += 1;
+    return `answer-${input.model}`;
+  }, {
+    stream: async function* (input) {
+      calls.stream += 1;
+      yield { provider: "authorized-offline", model: input.model, sequence: 0, eventType: "done", textDelta: "", requestId: null, usage: {}, done: true };
+    },
+  });
+  const input = request("authorized-model");
+  const response = await runtime.invoke("authorized-offline", input, { authorizationContext: context, authorizationDomain: "coding" });
+  assert.equal(response.text, "answer-authorized-model");
+  const events = [];
+  for await (const event of runtime.invokeStream("authorized-offline", input, { authorizationContext: context, authorizationDomain: "coding" })) events.push(event);
+  assert.equal(events[0].done, true);
+  await assert.rejects(
+    () => runtime.invoke("authorized-offline", input, { authorizationContext: context, authorizationDomain: "coding" }),
+    AutonomousAuthorizationError,
+  );
+  assert.deepEqual(calls, { invoke: 1, stream: 1 });
+  assert.equal(ledger.grants()[0].used_count, 2);
+});
+
+test("provider authorization is consumed for each tool-loop turn", async () => {
+  const { ledger, context } = providerAuthorizationContext();
+  let calls = 0;
+  const runtime = new LLMRuntime();
+  runtime.registerInMemoryProvider("authorized-loop", () => {
+    calls += 1;
+    return calls === 1
+      ? { output_text: "", tool_calls: [{ id: "call-1", name: "lookup", arguments: { query: "safe" } }] }
+      : { output_text: "done" };
+  });
+  const result = await runtime.invokeToolLoop("authorized-loop", {
+    ...request("authorized-loop-model"),
+    tools: [{ name: "lookup", description: "Look up a fact.", parameters: { type: "object" } }],
+  }, {
+    authorizeAndExecute: async (toolCalls) => toolCalls.map((call) => ({ callId: call.id, approved: true, content: { ok: true } })),
+    maxTurns: 3,
+    authorizationContext: context,
+    authorizationDomain: "coding",
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.turns, 2);
+  assert.equal(calls, 2);
+  assert.equal(ledger.grants()[0].used_count, 2);
 });
 
 test("provider effect boundary preserves definite local provider refusals", async () => {

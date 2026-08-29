@@ -192,6 +192,18 @@ is process-local and does not claim billing truth, tenant isolation, distributed
 provider-side rate-limit authority, encryption, or credential management; those remain deployment
 responsibilities.
 
+The provider runtime now consumes the shared tenant-scoped authorization contract at the actual
+provider boundary in both SDKs. `AutonomousAuthorizationContext` mints a fresh digest-bound
+request for each invocation attempt, stream, collected stream, failover arm, and native tool-loop
+turn. The gate runs before credential resolution, quota reservation, observer/effect dispatch, or
+transport, and high-level brain, stream, mission, and orchestrator paths forward the same context.
+Denied scope and exhausted grants are therefore side-effect-free, while successful calls consume
+bounded uses with replay-safe request identities. Cross-language tests cover domain refusal before
+credential/transport access, exact stream authorization without double charging, fresh invocation
+budget accounting, tool-loop turns, context construction, and nullable request metadata parity.
+This closes the in-process authorization-consumption seam; identity authentication, grant issuance,
+encrypted/distributed storage, and external reconciliation remain deployment-owned.
+
 The shared `bioprism-brain` planner now emits deterministic, dependency-closed execution waves
 alongside its serial topological order. `max_parallelism`, critical-path cost, estimated rounds,
 and peak width are bounded and digest-bound in the Rust/MCP contract; duplicate dependencies and
