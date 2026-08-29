@@ -165,10 +165,12 @@ export {
   AUTONOMOUS_TASK_DECISION_POSTURES,
   AUTONOMOUS_TASK_DECISION_PATHS,
   AUTONOMOUS_TASK_DECISION_APPROVALS,
+  AUTONOMOUS_TASK_DECISION_EVIDENCE_POSTURES,
   MAX_AUTONOMOUS_TASK_DECISION_ITEMS,
   autonomousTaskDecisionDigest,
   autonomousTaskDecisionPromptContract,
   inferAutonomousTaskDecision,
+  validateAutonomousTaskDecision,
 } from "./autonomous-task-decision.js";
 export type { AutonomousTaskDecision } from "./autonomous-task-decision.js";
 export {

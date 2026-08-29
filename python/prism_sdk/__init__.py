@@ -835,9 +835,11 @@ from .autonomous_task_decision import (
     AUTONOMOUS_TASK_DECISION_POSTURES,
     AUTONOMOUS_TASK_DECISION_PATHS,
     AUTONOMOUS_TASK_DECISION_APPROVALS,
+    AUTONOMOUS_TASK_DECISION_EVIDENCE_POSTURES,
     MAX_AUTONOMOUS_TASK_DECISION_ITEMS,
     AutonomousTaskDecision,
     infer_autonomous_task_decision,
+    validate_autonomous_task_decision,
 )
 from .autonomous_task_clarification import (
     AUTONOMOUS_TASK_CLARIFICATION_SCHEMA,

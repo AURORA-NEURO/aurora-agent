@@ -1,7 +1,7 @@
 import { ArgumentError } from "./errors.js";
 import type { AutonomousDomainPolicy } from "./autonomous-domain-policy.js";
 import type { AutonomousDomainTaskLens } from "./autonomous-task-lens.js";
-import type { AutonomousTaskIntent } from "./autonomous-task-intent.js";
+import { AUTONOMOUS_TASK_INTENT_DOMAINS, type AutonomousTaskIntent } from "./autonomous-task-intent.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
@@ -10,6 +10,7 @@ export const AUTONOMOUS_TASK_DECISION_VERSION = "0.1" as const;
 export const AUTONOMOUS_TASK_DECISION_POSTURES = ["admitted", "review_required", "blocked"] as const;
 export const AUTONOMOUS_TASK_DECISION_PATHS = ["provider", "evidence_first", "workflow", "planning", "cross_domain"] as const;
 export const AUTONOMOUS_TASK_DECISION_APPROVALS = ["provider_call", "evidence_dispatch", "plan_acceptance", "effect_approval", "evaluator_settlement"] as const;
+export const AUTONOMOUS_TASK_DECISION_EVIDENCE_POSTURES = ["optional", "required_before_provider"] as const;
 export const MAX_AUTONOMOUS_TASK_DECISION_ITEMS = 12;
 const MAX_DECISION_TEXT_BYTES = 512;
 
@@ -184,4 +185,109 @@ export function inferAutonomousTaskDecision(args: {
     next_actions: unique(nextActions),
   };
   return Object.freeze({ ...descriptor, decision_digest: autonomousTaskDecisionDigest(descriptor), authorization: "guidance_only;provider_source_tool_and_effect_authority_remain_separate", retention: "value_only_decision_metadata;task_text_not_retained", secret_material: "never_returned" }) as AutonomousTaskDecision;
+}
+
+/**
+ * Validate a persisted decision and optionally replay it against live task artifacts.
+ *
+ * The serialized decision is guidance metadata, never an authorization token. Structural
+ * validation checks its canonical digest, bounded fields, and markers. When the original intent,
+ * lens, and policy are supplied, deterministic inference is rerun and every descriptor field
+ * must match before a caller crosses a provider, source, tool, evaluator, or effect boundary.
+ */
+export function validateAutonomousTaskDecision(
+  value: AutonomousTaskDecision | unknown,
+  options: {
+    intent?: AutonomousTaskIntent;
+    lens?: AutonomousDomainTaskLens;
+    policy?: AutonomousDomainPolicy;
+    requiredModelCapabilities?: readonly string[];
+  } = {},
+): AutonomousTaskDecision {
+  let decision: AutonomousTaskDecision;
+  if (value && typeof value === "object" && !Array.isArray(value) && (value as Partial<AutonomousTaskDecision>).schema === AUTONOMOUS_TASK_DECISION_SCHEMA) {
+    const candidate = value as Record<string, unknown>;
+    const allowed = new Set([
+      "schema", "decision_version", "domain", "workflow_id", "task_digest", "intent_id", "intent_digest",
+      "lens_digest", "policy_digest", "decision_id", "posture", "recommended_path", "requested_effect",
+      "evidence_posture", "required_model_capabilities", "preferred_model_capabilities", "approval_requirements",
+      "review_reasons", "blocking_reasons", "next_actions", "decision_digest", "authorization", "retention",
+      "secret_material",
+    ]);
+    if (Object.keys(candidate).some((key) => !allowed.has(key))) throw new ArgumentError("task decision contains unsupported fields");
+    if (
+      candidate.authorization !== "guidance_only;provider_source_tool_and_effect_authority_remain_separate"
+      || candidate.retention !== "value_only_decision_metadata;task_text_not_retained"
+      || candidate.secret_material !== "never_returned"
+    ) throw new ArgumentError("task decision markers are invalid");
+    const asItems = (name: string): string[] => {
+      const raw = candidate[name];
+      if (!Array.isArray(raw)) throw new ArgumentError(`task decision ${name} must be a sequence`);
+      return items(`task decision ${name}`, raw);
+    };
+    const domain = text("task decision domain", candidate.domain);
+    if (!AUTONOMOUS_TASK_INTENT_DOMAINS.includes(domain as typeof AUTONOMOUS_TASK_INTENT_DOMAINS[number])) throw new ArgumentError("task decision domain is unsupported");
+    const workflowId = text("task decision workflow_id", candidate.workflow_id);
+    const decisionId = text("task decision decision_id", candidate.decision_id);
+    const taskDigest = digest("task decision task_digest", candidate.task_digest);
+    const intentDigest = digest("task decision intent_digest", candidate.intent_digest);
+    const lensDigest = digest("task decision lens_digest", candidate.lens_digest);
+    const policyDigest = digest("task decision policy_digest", candidate.policy_digest);
+    const decisionDigest = digest("task decision decision_digest", candidate.decision_digest);
+    if (candidate.decision_version !== AUTONOMOUS_TASK_DECISION_VERSION) throw new ArgumentError("unsupported task-decision version");
+    if (!AUTONOMOUS_TASK_DECISION_POSTURES.includes(candidate.posture as typeof AUTONOMOUS_TASK_DECISION_POSTURES[number])) throw new ArgumentError("task decision posture is unsupported");
+    if (!AUTONOMOUS_TASK_DECISION_PATHS.includes(candidate.recommended_path as typeof AUTONOMOUS_TASK_DECISION_PATHS[number])) throw new ArgumentError("task decision recommended_path is unsupported");
+    if (!["none", "local_change", "external_effect"].includes(candidate.requested_effect as string)) throw new ArgumentError("task decision requested_effect is unsupported");
+    const evidencePosture = text("task decision evidence_posture", candidate.evidence_posture);
+    if (!AUTONOMOUS_TASK_DECISION_EVIDENCE_POSTURES.includes(evidencePosture as typeof AUTONOMOUS_TASK_DECISION_EVIDENCE_POSTURES[number])) throw new ArgumentError("task decision evidence_posture is unsupported");
+    const descriptor: DecisionDescriptor = {
+      schema: AUTONOMOUS_TASK_DECISION_SCHEMA,
+      decision_version: AUTONOMOUS_TASK_DECISION_VERSION,
+      domain: domain as AutonomousTaskIntent["domain"],
+      workflow_id: workflowId,
+      task_digest: taskDigest,
+      intent_id: text("task decision intent_id", candidate.intent_id),
+      intent_digest: intentDigest,
+      lens_digest: lensDigest,
+      policy_digest: policyDigest,
+      decision_id: decisionId,
+      posture: candidate.posture as AutonomousTaskDecision["posture"],
+      recommended_path: candidate.recommended_path as AutonomousTaskDecision["recommended_path"],
+      requested_effect: candidate.requested_effect as AutonomousTaskDecision["requested_effect"],
+      evidence_posture: evidencePosture as AutonomousTaskDecision["evidence_posture"],
+      required_model_capabilities: asItems("required_model_capabilities"),
+      preferred_model_capabilities: asItems("preferred_model_capabilities"),
+      approval_requirements: asItems("approval_requirements"),
+      review_reasons: asItems("review_reasons"),
+      blocking_reasons: asItems("blocking_reasons"),
+      next_actions: asItems("next_actions"),
+    };
+    const approvals = descriptor.approval_requirements as string[];
+    if (approvals.some((approval) => !AUTONOMOUS_TASK_DECISION_APPROVALS.includes(approval as typeof AUTONOMOUS_TASK_DECISION_APPROVALS[number]))) throw new ArgumentError("task decision approval_requirements contains an unsupported gate");
+    if (autonomousTaskDecisionDigest(descriptor) !== decisionDigest) throw new ArgumentError("task decision digest does not match its metadata");
+    decision = Object.freeze({
+      ...descriptor,
+      decision_digest: decisionDigest,
+      authorization: "guidance_only;provider_source_tool_and_effect_authority_remain_separate",
+      retention: "value_only_decision_metadata;task_text_not_retained",
+      secret_material: "never_returned",
+    }) as AutonomousTaskDecision;
+  } else {
+    throw new ArgumentError("task decision must be an object");
+  }
+
+  const supplied = [options.intent, options.lens, options.policy];
+  if (supplied.some((entry) => entry !== undefined)) {
+    if (!options.intent || !options.lens || !options.policy) throw new ArgumentError("task decision replay requires intent, lens, and policy together");
+    const replay = inferAutonomousTaskDecision({
+      intent: options.intent,
+      lens: options.lens,
+      policy: options.policy,
+      requiredModelCapabilities: options.requiredModelCapabilities ?? decision.required_model_capabilities,
+    });
+    if (JSON.stringify(descriptorFor(replay)) !== JSON.stringify(descriptorFor(decision))) throw new ArgumentError("task decision does not match the supplied intent, lens, and policy");
+  } else if (options.requiredModelCapabilities !== undefined) {
+    throw new ArgumentError("task decision replay capabilities require intent, lens, and policy");
+  }
+  return decision;
 }

@@ -17,6 +17,7 @@ from prism_sdk import (
     infer_autonomous_task_intent,
     plan_autonomous_task_clarification,
     resolve_autonomous_task_clarification,
+    validate_autonomous_task_decision,
     validate_autonomous_task_clarification_plan,
     validate_autonomous_task_clarification_resolution,
 )
@@ -60,6 +61,22 @@ def test_clarification_plan_is_cross_runtime_digest_bound() -> None:
     assert "analyze the dataset lineage" not in json.dumps(public)
     assert public["authorization"] == "interaction_guidance_only;does_not_authorize_provider_source_tool_or_effect_actions"
     assert validate_autonomous_task_clarification_plan(public).plan_digest == plan.plan_digest
+
+
+def test_task_decision_replay_rejects_tampering_and_stale_artifacts() -> None:
+    intent, lens, policy, decision = _artifacts()
+    public = decision.to_dict()
+    assert validate_autonomous_task_decision(public).decision_digest == decision.decision_digest
+    replayed = validate_autonomous_task_decision(public, intent=intent, lens=lens, policy=policy)
+    assert replayed.decision_digest == decision.decision_digest
+
+    tampered = {**public, "next_actions": ["bypass_review"]}
+    with pytest.raises(Exception, match="digest|metadata"):
+        validate_autonomous_task_decision(tampered)
+    with pytest.raises(Exception, match="does not match"):
+        validate_autonomous_task_decision(public, intent=intent, lens=lens, policy=policy, required_model_capabilities=("reasoning",))
+    with pytest.raises(Exception, match="together"):
+        validate_autonomous_task_decision(public, intent=intent)
 
 
 def test_clarification_answers_are_transient_and_require_complete_contracts() -> None:
@@ -108,6 +125,9 @@ def test_clarification_handles_all_domains_and_blocked_policy_without_bypass() -
             task=f"review the {domain} workflow and report verification gaps",
             domain=domain,
         )
+        assert validate_autonomous_task_decision(
+            decision.to_dict(), intent=intent, lens=lens, policy=policy
+        ).decision_digest == decision.decision_digest
         plan = plan_autonomous_task_clarification(intent=intent, lens=lens, policy=policy, decision=decision)
         assert plan.domain == domain
         assert plan.review_dimensions
@@ -131,7 +151,16 @@ def test_agent_facade_uses_the_same_preflight_and_answer_receipt() -> None:
     plan = agent.clarification_plan(task=task, domain="data")
     blueprint = agent.prepare(task=task, domain="data")
     assert blueprint.task_intent is not None
+    assert blueprint.task_lens is not None
+    assert blueprint.domain_policy is not None
+    assert blueprint.task_decision is not None
     assert plan.intent_digest == blueprint.task_intent.intent_digest
+    assert agent.validate_task_decision(
+        value=blueprint.task_decision.to_dict(),
+        intent=blueprint.task_intent,
+        lens=blueprint.task_lens,
+        policy=blueprint.domain_policy,
+    ).decision_digest == blueprint.task_decision.decision_digest
     assert len(plan.plan_digest) == 64
     answers = {question.question_id: "caller-owned boundary" for question in plan.questions}
     receipt = agent.resolve_clarification(plan=plan, task=task, answers=answers)

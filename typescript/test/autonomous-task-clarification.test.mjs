@@ -14,6 +14,7 @@ import {
   inferAutonomousTaskIntent,
   planAutonomousTaskClarification,
   resolveAutonomousTaskClarification,
+  validateAutonomousTaskDecision,
   validateAutonomousTaskClarificationPlan,
   validateAutonomousTaskClarificationResolution,
 } from "../dist/index.js";
@@ -45,6 +46,15 @@ test("clarification plan is cross-runtime digest-bound", () => {
   assert.equal(validateAutonomousTaskClarificationPlan(plan).plan_digest, plan.plan_digest);
 });
 
+test("task decision replay rejects tampering and stale artifacts", () => {
+  const { intent, lens, policy, decision } = artifacts();
+  assert.equal(validateAutonomousTaskDecision(decision).decision_digest, decision.decision_digest);
+  assert.equal(validateAutonomousTaskDecision(decision, { intent, lens, policy }).decision_digest, decision.decision_digest);
+  assert.throws(() => validateAutonomousTaskDecision({ ...decision, next_actions: ["bypass_review"] }), ArgumentError);
+  assert.throws(() => validateAutonomousTaskDecision(decision, { intent, lens, policy, requiredModelCapabilities: ["reasoning"] }), ArgumentError);
+  assert.throws(() => validateAutonomousTaskDecision(decision, { intent }), ArgumentError);
+});
+
 test("clarification answers are transient and require complete contracts", () => {
   const { intent, lens, policy, decision } = artifacts();
   const plan = planAutonomousTaskClarification({ intent, lens, policy, decision });
@@ -69,6 +79,7 @@ test("clarification answers are transient and require complete contracts", () =>
 test("clarification handles every domain and blocks forbidden effects without a bypass", () => {
   for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
     const { intent, lens, policy, decision } = artifacts(`review the ${domain} workflow and report verification gaps`, domain);
+    assert.equal(validateAutonomousTaskDecision(decision, { intent, lens, policy }).decision_digest, decision.decision_digest);
     const plan = planAutonomousTaskClarification({ intent, lens, policy, decision });
     assert.equal(plan.domain, domain);
     assert.ok(plan.review_dimensions.length > 0);
@@ -89,6 +100,11 @@ test("agent facade uses the same preflight and answer receipt", async () => {
   const blueprint = await agent.blueprint(task, { domain: "data" });
   assert.ok(blueprint.blueprint);
   assert.equal(plan.intent_digest, blueprint.blueprint.task_intent.intent_digest);
+  assert.equal(agent.validateTaskDecision(blueprint.blueprint.task_decision, {
+    intent: blueprint.blueprint.task_intent,
+    lens: blueprint.blueprint.task_lens,
+    policy: blueprint.blueprint.domain_policy,
+  }).decision_digest, blueprint.blueprint.task_decision.decision_digest);
   assert.equal(plan.plan_digest.length, 64);
   const answers = Object.fromEntries(plan.questions.map((question) => [question.question_id, "caller-owned boundary"]));
   const receipt = await agent.resolveClarification(plan, task, answers);

@@ -82,6 +82,7 @@ from .autonomous_task_decision import (
     AUTONOMOUS_TASK_DECISION_SCHEMA,
     AutonomousTaskDecision,
     infer_autonomous_task_decision,
+    validate_autonomous_task_decision,
 )
 from .autonomous_task_clarification import (
     AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA,
@@ -21644,6 +21645,30 @@ class AutonomousAgent:
         """
 
         return validate_autonomous_task_clarification_resolution(receipt, plan=plan)
+
+    def validate_task_decision(
+        self,
+        *,
+        value: AutonomousTaskDecision | Mapping[str, Any],
+        intent: Any | None = None,
+        lens: Any | None = None,
+        policy: Any | None = None,
+        required_model_capabilities: Sequence[str] | None = None,
+    ) -> AutonomousTaskDecision:
+        """Validate a persisted task decision before a resumed execution boundary.
+
+        Without bindings this verifies the decision's canonical metadata and digest.  Supplying
+        the live intent, lens, and policy additionally replays the deterministic decision so a
+        stale task artifact cannot silently retain old approval requirements.
+        """
+
+        return validate_autonomous_task_decision(
+            value,
+            intent=intent,
+            lens=lens,
+            policy=policy,
+            required_model_capabilities=required_model_capabilities,
+        )
 
     def recompile_clarification(
         self,

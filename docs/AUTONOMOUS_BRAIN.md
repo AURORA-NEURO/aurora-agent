@@ -13309,3 +13309,21 @@ evidence, tool, evaluator, and effect gates; its serialized recompile envelope r
 original/updated digests, workflow identities, plan identities, and an explicit no-authorization
 marker. This creates a restart-safe path without pretending that a digest-only receipt can
 reconstruct answer text or establish that an answer is true.
+
+### Restart-safe task-decision replay
+
+The task decision is the deterministic bridge between intent classification and the execution
+path. It is now independently replayable through `validate_task_decision(...)` in Python and
+`validateTaskDecision(...)` in TypeScript, in addition to the lower-level
+`validate_autonomous_task_decision(...)` and `validateAutonomousTaskDecision(...)` exports.
+Structural validation checks the canonical descriptor digest, bounded arrays, approval-gate
+vocabulary, posture/path/effect enums, and the metadata-only authorization markers. A caller can
+also provide the live intent, domain lens, and policy; the validator then reruns the same
+provider-free decision function and requires every descriptor field to match.
+
+This closes a subtle restart failure mode: a valid-looking decision from an older task or policy
+revision can no longer be carried into a new provider, source, tool, evaluator, learner, or effect
+boundary merely because its outer JSON parses. A validated decision remains guidance only; it does
+not satisfy any approval requirement or authorize execution. Tests cover canonical replay,
+tampering, incomplete replay bindings, stale model-capability requirements, high-level agent
+access, and the shared all-domain intake path.

@@ -321,6 +321,7 @@ import {
 import {
   autonomousTaskDecisionPromptContract,
   inferAutonomousTaskDecision,
+  validateAutonomousTaskDecision,
   type AutonomousTaskDecision,
 } from "./autonomous-task-decision.js";
 import {
@@ -7850,6 +7851,19 @@ export class AutonomousAgent {
     receipt: AutonomousTaskClarificationResolution | unknown,
   ): Promise<AutonomousTaskClarificationResolution> {
     return validateAutonomousTaskClarificationResolution(receipt, plan);
+  }
+
+  /** Validate a persisted task decision before a resumed execution boundary. */
+  validateTaskDecision(
+    value: AutonomousTaskDecision | unknown,
+    options: {
+      intent?: AutonomousTaskIntent;
+      lens?: AutonomousDomainTaskLens;
+      policy?: AutonomousDomainPolicy;
+      requiredModelCapabilities?: readonly string[];
+    } = {},
+  ): AutonomousTaskDecision {
+    return validateAutonomousTaskDecision(value, options);
   }
 
   /**

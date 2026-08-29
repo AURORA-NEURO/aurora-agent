@@ -2440,3 +2440,10 @@ bundle for the ordinary downstream gates. The result keeps the live clarified bl
 caller-owned while serializing only receipt, task, workflow, intent, decision, and execution-plan
 digests. All built-in domains are covered, and partial, blocked, drifted, and answer-containing
 projection paths fail closed or redact their values.
+
+Task-decision replay is now independently validated in both SDKs. The validator checks canonical
+digest integrity, bounded fields, approval vocabulary, posture/path/effect enums, and retention
+markers, then optionally recomputes the decision against the live intent, domain lens, and policy
+to reject stale guidance before a resumed execution boundary. High-level agents expose the same
+check. This is still guidance validation, not authorization: provider/source/tool/evaluator/
+learner/effect approvals and caller-owned persistence remain separate deployment responsibilities.
