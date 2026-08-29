@@ -2418,3 +2418,11 @@ execution; it does not authorize a provider, source, credential, tool, evaluator
 effect. Cross-language plan and answer identities are canonical and covered by parity, tamper,
 partial-answer, blocked-effect, all-domain, and high-level-facade tests. Further work remains on
 caller-owned UI, persistence, operator identity, and deployment-specific answer rehydration.
+
+Clarification receipts now have an independent restart/replay validator in both SDKs. It checks
+canonical receipt digests and retention markers, rejects answer-count/status inconsistencies,
+cross-plan question IDs, answered-and-unanswered overlap, and blocked/resolved invariant drift.
+Because answer values are deliberately absent, validation proves metadata integrity only; it never
+promotes an answer digest into evidence or truth. This closes the persisted UI/worker handoff seam
+while leaving encrypted storage, operator identity, and caller-owned answer rehydration outside the
+SDK boundary.

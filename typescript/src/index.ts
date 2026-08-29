@@ -187,6 +187,7 @@ export {
   planAutonomousTaskClarification,
   validateAutonomousTaskClarificationPlan,
   resolveAutonomousTaskClarification,
+  validateAutonomousTaskClarificationResolution,
 } from "./autonomous-task-clarification.js";
 export type {
   AutonomousTaskClarificationStatus,

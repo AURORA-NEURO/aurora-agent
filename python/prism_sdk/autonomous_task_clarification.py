@@ -626,6 +626,97 @@ def resolve_autonomous_task_clarification(
     )
 
 
+def validate_autonomous_task_clarification_resolution(
+    value: AutonomousTaskClarificationResolution | Mapping[str, Any],
+    *,
+    plan: AutonomousTaskClarificationPlan | Mapping[str, Any] | None = None,
+) -> AutonomousTaskClarificationResolution:
+    """Rehydrate a receipt and optionally bind it to its exact clarification plan.
+
+    Answer values are intentionally unavailable here, so validation can only prove the receipt's
+    structure, digest, markers, and question identities.  It never treats an answer digest as
+    proof that the caller's statement is true.  When a plan is supplied, the validator also
+    checks the selected required-question count, rejects cross-plan IDs, and preserves the
+    blocked/resolved status invariants before an application resumes a UI or worker handoff.
+    """
+
+    if isinstance(value, AutonomousTaskClarificationResolution):
+        resolution = value
+    else:
+        if not isinstance(value, Mapping):
+            raise AutonomousTaskClarificationError("clarification resolution must be an object")
+        allowed = {
+            "schema", "plan_digest", "task_digest", "status", "answered_count", "required_answer_count",
+            "unanswered_question_ids", "answer_digests", "resolution_digest", "retention", "authorization", "secret_material",
+        }
+        if set(value).difference(allowed):
+            raise AutonomousTaskClarificationError("clarification resolution contains unsupported fields")
+        if (
+            value.get("schema") != AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA
+            or value.get("retention") != "answer_digests_only;answer_values_not_retained"
+            or value.get("authorization") != "review_receipt_only;requires_recompiled_intent_and_decision"
+            or value.get("secret_material") != "never_returned"
+        ):
+            raise AutonomousTaskClarificationError("clarification resolution markers are invalid")
+        raw_answers = value.get("answer_digests")
+        if not isinstance(raw_answers, Sequence) or isinstance(raw_answers, (str, bytes)):
+            raise AutonomousTaskClarificationError("clarification answer digests must be a sequence")
+        answer_digests: list[tuple[str, str]] = []
+        for item in raw_answers:
+            if not isinstance(item, Mapping):
+                raise AutonomousTaskClarificationError("clarification answer digest row must be an object")
+            answer_digests.append((
+                _text("clarification answer question_id", item.get("question_id")),
+                _digest("clarification answer digest", item.get("answer_digest")),
+            ))
+        resolution = AutonomousTaskClarificationResolution(
+            plan_digest=value.get("plan_digest"),
+            task_digest=value.get("task_digest"),
+            status=value.get("status"),
+            answered_count=value.get("answered_count"),
+            required_answer_count=value.get("required_answer_count"),
+            unanswered_question_ids=tuple(value.get("unanswered_question_ids", ())),
+            answer_digests=tuple(answer_digests),
+        )
+        if value.get("resolution_digest") != resolution.resolution_digest:
+            raise AutonomousTaskClarificationError("clarification resolution digest does not match its metadata")
+
+    if resolution.answered_count > resolution.required_answer_count:
+        raise AutonomousTaskClarificationError("clarification answered_count exceeds required_answer_count")
+    if resolution.status == "blocked" and (resolution.answered_count or resolution.unanswered_question_ids):
+        raise AutonomousTaskClarificationError("blocked clarification resolution cannot contain answer state")
+    if resolution.status == "resolved" and resolution.unanswered_question_ids:
+        raise AutonomousTaskClarificationError("resolved clarification resolution cannot have unanswered questions")
+
+    if plan is not None:
+        resolved_plan = validate_autonomous_task_clarification_plan(plan)
+        if resolution.plan_digest != resolved_plan.plan_digest:
+            raise AutonomousTaskClarificationError("clarification resolution does not match the supplied plan")
+        question_ids = {question.question_id for question in resolved_plan.questions}
+        marker = "clarification_question_limit_reached"
+        answer_ids = {question_id for question_id, _ in resolution.answer_digests}
+        unanswered_ids = set(resolution.unanswered_question_ids)
+        if not answer_ids.issubset(question_ids):
+            raise AutonomousTaskClarificationError("clarification resolution contains an answer for an unknown question")
+        if not unanswered_ids.difference(question_ids | {marker}) == set():
+            raise AutonomousTaskClarificationError("clarification resolution contains an unknown unanswered question")
+        if answer_ids.intersection(unanswered_ids):
+            raise AutonomousTaskClarificationError("clarification resolution marks one question answered and unanswered")
+        required_count = sum(1 for question in resolved_plan.questions if question.required)
+        if resolution.required_answer_count != required_count:
+            raise AutonomousTaskClarificationError("clarification resolution required count does not match the plan")
+        actual_unanswered = len(unanswered_ids.intersection(question_ids))
+        if resolution.answered_count + actual_unanswered != required_count:
+            raise AutonomousTaskClarificationError("clarification resolution does not account for every required question")
+        if resolved_plan.status == "blocked" and resolution.status != "blocked":
+            raise AutonomousTaskClarificationError("blocked clarification plan requires a blocked resolution")
+        if resolved_plan.status != "blocked" and resolution.status == "blocked":
+            raise AutonomousTaskClarificationError("non-blocked clarification plan cannot have a blocked resolution")
+        if resolution.status == "resolved" and resolved_plan.omitted_contracts:
+            raise AutonomousTaskClarificationError("clarification with omitted contracts cannot be resolved")
+    return resolution
+
+
 __all__ = [
     "AUTONOMOUS_TASK_CLARIFICATION_SCHEMA",
     "AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA",
@@ -645,4 +736,5 @@ __all__ = [
     "plan_autonomous_task_clarification",
     "validate_autonomous_task_clarification_plan",
     "resolve_autonomous_task_clarification",
+    "validate_autonomous_task_clarification_resolution",
 ]

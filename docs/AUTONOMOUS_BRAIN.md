@@ -13274,3 +13274,19 @@ digests, plan rehydration, partial and complete answers, plan/task tampering, un
 forbidden biomedical effects, every domain, and the high-level agent facades. Caller-owned UI,
 encrypted answer storage, operator identity, and deployment-specific rehydration are intentionally
 left as integration responsibilities.
+
+### Restart-safe clarification receipt validation
+
+The plan validator is not sufficient once a UI or worker persists the answer receipt. Both SDKs
+now expose `validate_autonomous_task_clarification_resolution(...)` and
+`validateAutonomousTaskClarificationResolution(...)`. The validator rehydrates the canonical
+receipt, verifies its digest and retention/authorization markers, and can bind it to the exact
+clarification plan. Binding checks that every answer and unanswered question belongs to the plan,
+that no question is both answered and unanswered, that the required-question count is unchanged,
+and that blocked, partial, and resolved statuses remain internally consistent.
+
+The check is intentionally limited by the privacy contract: answer values are not present, so a
+valid answer digest proves only that the receipt metadata was not modified. It does not prove the
+answer, authorize a provider call, or replace intent/decision recompilation. A worker can therefore
+restore a durable UI handoff safely while still requiring the caller to rehydrate the transient
+answer values and repeat the execution gates.

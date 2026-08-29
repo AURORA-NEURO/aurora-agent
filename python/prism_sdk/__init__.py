@@ -857,6 +857,7 @@ from .autonomous_task_clarification import (
     plan_autonomous_task_clarification,
     validate_autonomous_task_clarification_plan,
     resolve_autonomous_task_clarification,
+    validate_autonomous_task_clarification_resolution,
 )
 from .autonomous_execution_policy import (
     AUTONOMOUS_JOINT_EXECUTION_POLICY_SCHEMA,

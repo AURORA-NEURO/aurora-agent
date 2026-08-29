@@ -17,6 +17,7 @@ from prism_sdk import (
     plan_autonomous_task_clarification,
     resolve_autonomous_task_clarification,
     validate_autonomous_task_clarification_plan,
+    validate_autonomous_task_clarification_resolution,
 )
 
 
@@ -83,6 +84,8 @@ def test_clarification_answers_are_transient_and_require_complete_contracts() ->
     assert resolved.status == "resolved"
     assert resolved.required_answer_count == 2
     assert len(resolved.answer_digests) == 2
+    restored = validate_autonomous_task_clarification_resolution(resolved.to_dict(), plan=plan.to_dict())
+    assert restored.resolution_digest == resolved.resolution_digest
 
     tampered = plan.to_dict()
     tampered["plan_digest"] = "0" * 64
@@ -92,6 +95,10 @@ def test_clarification_answers_are_transient_and_require_complete_contracts() ->
         resolve_autonomous_task_clarification(plan, task_digest="0" * 64, answers={})
     with pytest.raises(AutonomousTaskClarificationError):
         resolve_autonomous_task_clarification(plan, task_digest=intent.task_digest, answers={"unknown": "x"})
+    tampered_receipt = resolved.to_dict()
+    tampered_receipt["resolution_digest"] = "0" * 64
+    with pytest.raises(AutonomousTaskClarificationError):
+        validate_autonomous_task_clarification_resolution(tampered_receipt, plan=plan)
 
 
 def test_clarification_handles_all_domains_and_blocked_policy_without_bypass() -> None:

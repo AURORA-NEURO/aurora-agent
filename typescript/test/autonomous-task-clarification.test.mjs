@@ -14,6 +14,7 @@ import {
   planAutonomousTaskClarification,
   resolveAutonomousTaskClarification,
   validateAutonomousTaskClarificationPlan,
+  validateAutonomousTaskClarificationResolution,
 } from "../dist/index.js";
 
 function artifacts(task = "analyze the dataset lineage", domain = "data") {
@@ -56,10 +57,12 @@ test("clarification answers are transient and require complete contracts", () =>
   assert.equal(resolved.status, "resolved");
   assert.equal(resolved.required_answer_count, 2);
   assert.equal(resolved.answer_digests.length, 2);
+  assert.equal(validateAutonomousTaskClarificationResolution(resolved, plan).resolution_digest, resolved.resolution_digest);
   const tampered = { ...plan, plan_digest: "0".repeat(64) };
   assert.throws(() => validateAutonomousTaskClarificationPlan(tampered), AutonomousTaskClarificationError);
   assert.throws(() => resolveAutonomousTaskClarification(plan, { taskDigest: "0".repeat(64), answers: {} }), AutonomousTaskClarificationError);
   assert.throws(() => resolveAutonomousTaskClarification(plan, { taskDigest: intent.task_digest, answers: { unknown: "x" } }), AutonomousTaskClarificationError);
+  assert.throws(() => validateAutonomousTaskClarificationResolution({ ...resolved, resolution_digest: "0".repeat(64) }, plan), AutonomousTaskClarificationError);
 });
 
 test("clarification handles every domain and blocks forbidden effects without a bypass", () => {

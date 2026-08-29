@@ -292,3 +292,52 @@ export function resolveAutonomousTaskClarification(plan: AutonomousTaskClarifica
   const descriptor = { plan_digest: resolvedPlan.plan_digest, task_digest: taskDigest, status, answered_count: answerDigests.length, required_answer_count: requiredAnswerCount, unanswered_question_ids: unanswered, answer_digests: answerDigests };
   return { ...resolutionDescriptor(descriptor), resolution_digest: digestJsonSync(resolutionDescriptor(descriptor)), retention: "answer_digests_only;answer_values_not_retained", authorization: "review_receipt_only;requires_recompiled_intent_and_decision", secret_material: "never_returned" } as AutonomousTaskClarificationResolution;
 }
+
+/** Rehydrate a receipt and optionally bind it to the exact plan that produced it. */
+export function validateAutonomousTaskClarificationResolution(value: unknown, plan?: AutonomousTaskClarificationPlan | unknown): AutonomousTaskClarificationResolution {
+  if (!isObject(value)) throw new AutonomousTaskClarificationError("clarification resolution must be an object");
+  const allowed = new Set(["schema", "plan_digest", "task_digest", "status", "answered_count", "required_answer_count", "unanswered_question_ids", "answer_digests", "resolution_digest", "retention", "authorization", "secret_material"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw new AutonomousTaskClarificationError("clarification resolution contains unsupported fields");
+  if (value.schema !== AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA || value.retention !== "answer_digests_only;answer_values_not_retained" || value.authorization !== "review_receipt_only;requires_recompiled_intent_and_decision" || value.secret_material !== "never_returned") throw new AutonomousTaskClarificationError("clarification resolution markers are invalid");
+  const planDigest = digest("clarification resolution plan_digest", value.plan_digest);
+  const taskDigest = digest("clarification resolution task_digest", value.task_digest);
+  const status = value.status as AutonomousTaskClarificationResolutionStatus;
+  if (!AUTONOMOUS_TASK_CLARIFICATION_RESOLUTION_STATUSES.includes(status)) throw new AutonomousTaskClarificationError("clarification resolution status is unsupported");
+  const answeredCount = count("clarification resolution answered_count", value.answered_count, MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS);
+  const requiredAnswerCount = count("clarification resolution required_answer_count", value.required_answer_count, MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS);
+  const unanswered = items("clarification resolution unanswered_question_ids", value.unanswered_question_ids);
+  if (!Array.isArray(value.answer_digests) || value.answer_digests.length > MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS) throw new AutonomousTaskClarificationError("clarification answer digests exceed their bound");
+  const answerDigests = value.answer_digests.map((raw) => {
+    if (!isObject(raw)) throw new AutonomousTaskClarificationError("clarification answer digest row must be an object");
+    return { question_id: text("clarification answer question_id", raw.question_id), answer_digest: digest("clarification answer digest", raw.answer_digest) };
+  });
+  if (new Set(answerDigests.map((item) => item.question_id)).size !== answerDigests.length) throw new AutonomousTaskClarificationError("clarification answer question IDs must be unique");
+  if (answerDigests.length !== answeredCount) throw new AutonomousTaskClarificationError("clarification answered_count does not match answer digests");
+  if (answeredCount > requiredAnswerCount) throw new AutonomousTaskClarificationError("clarification answered_count exceeds required_answer_count");
+  if (status === "blocked" && (answeredCount > 0 || unanswered.length > 0)) throw new AutonomousTaskClarificationError("blocked clarification resolution cannot contain answer state");
+  if (status === "resolved" && unanswered.length > 0) throw new AutonomousTaskClarificationError("resolved clarification resolution cannot have unanswered questions");
+  const descriptor = resolutionDescriptor({ plan_digest: planDigest, task_digest: taskDigest, status, answered_count: answeredCount, required_answer_count: requiredAnswerCount, unanswered_question_ids: unanswered, answer_digests: answerDigests });
+  if (value.resolution_digest !== digestJsonSync(descriptor)) throw new AutonomousTaskClarificationError("clarification resolution digest does not match its metadata");
+  const resolution = { ...descriptor, resolution_digest: value.resolution_digest, retention: "answer_digests_only;answer_values_not_retained", authorization: "review_receipt_only;requires_recompiled_intent_and_decision", secret_material: "never_returned" } as AutonomousTaskClarificationResolution;
+
+  if (plan !== undefined) {
+    const resolvedPlan = validateAutonomousTaskClarificationPlan(plan);
+    if (resolution.plan_digest !== resolvedPlan.plan_digest) throw new AutonomousTaskClarificationError("clarification resolution does not match the supplied plan");
+    const questionIds = new Set(resolvedPlan.questions.map((question) => question.question_id));
+    const marker = "clarification_question_limit_reached";
+    const answerIds = new Set(answerDigests.map((item) => item.question_id));
+    const unansweredIds = new Set(unanswered);
+    if ([...answerIds].some((id) => !questionIds.has(id))) throw new AutonomousTaskClarificationError("clarification resolution contains an answer for an unknown question");
+    if ([...unansweredIds].some((id) => id !== marker && !questionIds.has(id))) throw new AutonomousTaskClarificationError("clarification resolution contains an unknown unanswered question");
+    if ([...answerIds].some((id) => unansweredIds.has(id))) throw new AutonomousTaskClarificationError("clarification resolution marks one question answered and unanswered");
+    const requiredCount = resolvedPlan.questions.filter((question) => question.required).length;
+    if (requiredAnswerCount !== requiredCount) throw new AutonomousTaskClarificationError("clarification resolution required count does not match the plan");
+    const actualUnanswered = [...unansweredIds].filter((id) => questionIds.has(id)).length;
+    if (answeredCount + actualUnanswered !== requiredCount) throw new AutonomousTaskClarificationError("clarification resolution does not account for every required question");
+    if (resolvedPlan.status === "blocked" && status !== "blocked") throw new AutonomousTaskClarificationError("blocked clarification plan requires a blocked resolution");
+    if (resolvedPlan.status !== "blocked" && status === "blocked") throw new AutonomousTaskClarificationError("non-blocked clarification plan cannot have a blocked resolution");
+    if (status === "resolved" && resolvedPlan.omitted_contracts.length > 0) throw new AutonomousTaskClarificationError("clarification with omitted contracts cannot be resolved");
+    if (status === "still_required" && actualUnanswered === 0 && resolvedPlan.omitted_contracts.length === 0) throw new AutonomousTaskClarificationError("complete clarification resolution must be marked resolved");
+  }
+  return resolution;
+}
