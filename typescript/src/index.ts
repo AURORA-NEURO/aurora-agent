@@ -172,6 +172,32 @@ export {
 } from "./autonomous-task-decision.js";
 export type { AutonomousTaskDecision } from "./autonomous-task-decision.js";
 export {
+  AUTONOMOUS_TASK_CLARIFICATION_SCHEMA,
+  AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA,
+  AUTONOMOUS_TASK_CLARIFICATION_VERSION,
+  AUTONOMOUS_TASK_CLARIFICATION_STATUSES,
+  AUTONOMOUS_TASK_CLARIFICATION_RESOLUTION_STATUSES,
+  AUTONOMOUS_TASK_CLARIFICATION_QUESTION_KINDS,
+  AUTONOMOUS_TASK_CLARIFICATION_ANSWER_KINDS,
+  MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS,
+  MAX_AUTONOMOUS_TASK_CLARIFICATION_OPTIONS,
+  MAX_AUTONOMOUS_TASK_CLARIFICATION_TEXT_BYTES,
+  MAX_AUTONOMOUS_TASK_CLARIFICATION_ANSWER_BYTES,
+  AutonomousTaskClarificationError,
+  planAutonomousTaskClarification,
+  validateAutonomousTaskClarificationPlan,
+  resolveAutonomousTaskClarification,
+} from "./autonomous-task-clarification.js";
+export type {
+  AutonomousTaskClarificationStatus,
+  AutonomousTaskClarificationResolutionStatus,
+  AutonomousTaskClarificationQuestionKind,
+  AutonomousTaskClarificationAnswerKind,
+  AutonomousTaskClarificationQuestion,
+  AutonomousTaskClarificationPlan,
+  AutonomousTaskClarificationResolution,
+} from "./autonomous-task-clarification.js";
+export {
   AUTONOMOUS_JOINT_EXECUTION_POLICY_SCHEMA,
   AUTONOMOUS_JOINT_EXECUTION_POLICY_STATE_SCHEMA,
   AUTONOMOUS_JOINT_EXECUTION_POLICY_SETTLEMENT_SCHEMA,

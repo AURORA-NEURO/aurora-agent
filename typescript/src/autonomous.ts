@@ -324,6 +324,12 @@ import {
   type AutonomousTaskDecision,
 } from "./autonomous-task-decision.js";
 import {
+  planAutonomousTaskClarification,
+  resolveAutonomousTaskClarification,
+  type AutonomousTaskClarificationPlan,
+  type AutonomousTaskClarificationResolution,
+} from "./autonomous-task-clarification.js";
+import {
   semanticRouteAutonomousTask,
   type AutonomousSemanticRouteOptions,
   type AutonomousSemanticRouteResult,
@@ -3484,8 +3490,11 @@ async function buildTaskBlueprint(
     taskDigest?: string;
     routeDigest?: string;
     capability?: string;
+    riskClass?: string;
     capabilityRoute?: AutonomousCapabilityRoute;
     context?: readonly AutonomousPromptChunk[];
+    constraints?: readonly string[];
+    desiredOutputs?: readonly string[];
     maxInputTokens?: number;
     activeToolNames?: readonly string[];
     selectedToolNames?: readonly string[];
@@ -3506,9 +3515,11 @@ async function buildTaskBlueprint(
     taskDigest,
     domain: profile.domain,
     capability: effectiveCapability,
-    riskClass: profile.risk_class,
+    riskClass: options.riskClass ?? profile.risk_class,
     workflowId: profile.workflow.workflow_id,
     lens: taskLens,
+    constraints: options.constraints,
+    desiredOutputs: options.desiredOutputs,
   });
   const taskDecision = inferAutonomousTaskDecision({
     intent: taskIntent,
@@ -3539,7 +3550,7 @@ async function buildTaskBlueprint(
   const selectionContext: BrainModelSelectionContext = {
     domain: profile.domain,
     capability: effectiveCapability,
-    risk_class: profile.risk_class,
+    risk_class: taskIntent.risk_class,
     task_family: profile.workflow.workflow_id,
     task_lens_id: taskLens.lens_id,
     task_lens_digest: taskLens.lens_digest,
@@ -7723,7 +7734,7 @@ export class AutonomousAgent {
     return this.runWithDomainEvidenceCatalogue(task, options);
   }
 
-  async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; minConfidence?: number; minMargin?: number; maxDomains?: number; allowCrossDomain?: boolean; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number; maxToolRiskClass?: AutonomousToolRiskClass } = {}): Promise<AutonomousAutoBlueprint> {
+  async blueprint(task: string, options: { domain?: AutonomousDomainName; routeOverride?: AutonomousRouteProposal; capability?: string; riskClass?: string; constraints?: readonly string[]; desiredOutputs?: readonly string[]; context?: readonly AutonomousPromptChunk[]; hints?: readonly string[]; minConfidence?: number; minMargin?: number; maxDomains?: number; allowCrossDomain?: boolean; maxInputTokens?: number; tools?: readonly string[]; subtasks?: readonly AutonomousCrossDomainSubtask[]; structuredDomainResponse?: boolean; toolSelectionState?: AutonomousToolSelectionState | null; toolSelectionExploration?: number; maxToolRiskClass?: AutonomousToolRiskClass } = {}): Promise<AutonomousAutoBlueprint> {
     const taskText = boundedText("autonomous task", task, 32_000);
     const route = options.routeOverride ? await validateAutonomousRouteOverride(taskText, options.routeOverride) : await this.route(taskText, { domain: options.domain, hints: options.hints, minConfidence: options.minConfidence, minMargin: options.minMargin, maxDomains: options.maxDomains, allowCrossDomain: options.allowCrossDomain });
     if (route.abstained || !route.primary_domain) return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint: null, cross_domain_blueprint: null, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
@@ -7735,8 +7746,60 @@ export class AutonomousAgent {
     const capabilityRoute = routeAutonomousCapability(taskText, profile.domain, options.capability === undefined ? {} : { explicitCapability: options.capability });
     const effectiveCapability = options.capability ?? capabilityRoute.selected_capability ?? undefined;
     const activeToolNames = options.tools ? this.filterActivatedToolNames([...options.tools]) : await this.liveToolNamesForTask(taskText, [route.primary_domain], effectiveCapability, this.effectiveToolSelectionState(options.toolSelectionState), options.toolSelectionExploration, options.maxToolRiskClass);
-    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: effectiveCapability, capabilityRoute, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames, structuredDomainResponse: options.structuredDomainResponse });
+    const blueprint = await buildTaskBlueprint(profile, taskText, { taskDigest: route.task_digest, routeDigest: route.route_digest, capability: effectiveCapability, riskClass: options.riskClass, constraints: options.constraints, desiredOutputs: options.desiredOutputs, capabilityRoute, context: options.context, maxInputTokens: options.maxInputTokens, activeToolNames, selectedToolNames: activeToolNames, structuredDomainResponse: options.structuredDomainResponse });
     return { schema: "bioprism-python-autonomous-auto-blueprint/0.1", route, blueprint, cross_domain_blueprint: null, capability_route: capabilityRoute, execution: "not_started", authorization: "route_and_plan_only; no_provider_or_tool_effects_authorized" };
+  }
+
+  /**
+   * Compile deterministic clarification questions from the same blueprint that would shape
+   * execution. The returned plan is a user-interaction receipt only; it cannot authorize a
+   * provider, source, tool, credential, evaluator, or external effect.
+   */
+  async clarificationPlan(
+    task: string,
+    options: {
+      domain: AutonomousDomainName;
+      capability?: string;
+      riskClass?: string;
+      constraints?: readonly string[];
+      desiredOutputs?: readonly string[];
+      context?: readonly AutonomousPromptChunk[];
+      maxInputTokens?: number;
+      structuredDomainResponse?: boolean;
+      maxQuestions?: number;
+    },
+  ): Promise<AutonomousTaskClarificationPlan> {
+    if (!options || !options.domain) throw new ArgumentError("clarificationPlan requires an explicit domain");
+    const taskText = boundedText("autonomous clarification task", task, 32_000);
+    const envelope = await this.blueprint(taskText, {
+      domain: options.domain,
+      capability: options.capability,
+      riskClass: options.riskClass,
+      constraints: options.constraints,
+      desiredOutputs: options.desiredOutputs,
+      context: options.context,
+      maxInputTokens: options.maxInputTokens,
+      structuredDomainResponse: options.structuredDomainResponse,
+      allowCrossDomain: false,
+    });
+    if (!envelope.blueprint || envelope.cross_domain_blueprint) throw new ArgumentError("clarificationPlan requires a single-domain blueprint");
+    return planAutonomousTaskClarification({
+      intent: envelope.blueprint.task_intent,
+      lens: envelope.blueprint.task_lens,
+      policy: envelope.blueprint.domain_policy,
+      decision: envelope.blueprint.task_decision,
+      maxQuestions: options.maxQuestions,
+    });
+  }
+
+  /** Resolve transient answers into a plan-bound, answer-digest-only receipt. */
+  async resolveClarification(
+    plan: AutonomousTaskClarificationPlan | unknown,
+    task: string,
+    answers: Readonly<Record<string, string>>,
+  ): Promise<AutonomousTaskClarificationResolution> {
+    const taskText = boundedText("autonomous clarification task", task, 32_000);
+    return resolveAutonomousTaskClarification(plan, { taskDigest: digestJsonSync({ task: taskText }), answers });
   }
 
   /**

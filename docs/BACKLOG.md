@@ -2402,3 +2402,19 @@ stage edges, self-dependencies, cycles, inconsistent workflow identity on requir
 completed-stage IDs absent from the reviewed workflow before emitting readiness or next-stage
 metadata. Valid plans retain the existing canonical digest and cross-language wire shape; the
 change only removes false-ready states from malformed or stale workflow graphs.
+
+The task-intake interaction boundary is now implemented in both SDKs. `clarification_plan()` /
+`clarificationPlan()` compile a bounded, deterministic questionnaire from the exact task intent,
+domain lens, policy, and decision artifacts that would shape execution. The planner asks for an
+action, output contract, evidence boundary, authority scope, accountable reviewer, specialist
+handoff, success criterion, or review scope only when the corresponding reviewed signal exists,
+and it covers every built-in domain. Blocked policy decisions produce no bypass questions.
+
+`resolve_clarification()` / `resolveClarification()` accept transient answers only after checking
+the original task digest, question IDs, answer bounds, and choice membership. The durable result
+contains answer digests bound to the clarification plan, never answer values. A resolved receipt
+is explicitly interaction guidance and must be followed by intent/decision recompilation before
+execution; it does not authorize a provider, source, credential, tool, evaluator, learner, or
+effect. Cross-language plan and answer identities are canonical and covered by parity, tamper,
+partial-answer, blocked-effect, all-domain, and high-level-facade tests. Further work remains on
+caller-owned UI, persistence, operator identity, and deployment-specific answer rehydration.

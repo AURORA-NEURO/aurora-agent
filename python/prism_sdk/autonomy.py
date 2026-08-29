@@ -83,6 +83,15 @@ from .autonomous_task_decision import (
     AutonomousTaskDecision,
     infer_autonomous_task_decision,
 )
+from .autonomous_task_clarification import (
+    AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA,
+    AUTONOMOUS_TASK_CLARIFICATION_SCHEMA,
+    MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS,
+    AutonomousTaskClarificationPlan,
+    AutonomousTaskClarificationResolution,
+    plan_autonomous_task_clarification,
+    resolve_autonomous_task_clarification,
+)
 from .autonomous_domain_response import (
     AutonomousDomainResponseContract,
     build_autonomous_domain_response_contract,
@@ -21464,6 +21473,75 @@ class AutonomousAgent:
         """Build a domain-aware plan and prompt without contacting any provider."""
 
         return self.orchestrator.prepare(**kwargs)
+
+    def clarification_plan(
+        self,
+        *,
+        task: str,
+        domain: str,
+        capability: str | None = None,
+        risk_class: str | None = None,
+        constraints: Sequence[str] = (),
+        desired_outputs: Sequence[str] = (),
+        context: Mapping[str, Any] | None = None,
+        max_steps: int = 8,
+        require_json: bool = False,
+        structured_domain_response: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        execution_mode: str = "provider",
+        max_input_tokens: int = 4_096,
+        required_model_capabilities: Sequence[str] = (),
+        max_questions: int = MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS,
+    ) -> AutonomousTaskClarificationPlan:
+        """Compile bounded user questions before provider, source, tool, or effect work.
+
+        This is an explicit preflight boundary. It reuses the exact task artifacts that would
+        shape execution, but its result is guidance only. A caller must collect answers, rebuild
+        the task description/intent/decision when scope changes, and still pass the existing
+        provider, evidence, tool, credential, evaluator, and effect gates.
+        """
+
+        blueprint = self.orchestrator.prepare(
+            task=task,
+            domain=domain,
+            capability=capability,
+            risk_class=risk_class,
+            constraints=constraints,
+            desired_outputs=desired_outputs,
+            context=context,
+            max_steps=max_steps,
+            require_json=require_json,
+            structured_domain_response=structured_domain_response,
+            response_schema=response_schema,
+            execution_mode=execution_mode,
+            max_input_tokens=max_input_tokens,
+            required_model_capabilities=required_model_capabilities,
+        )
+        if blueprint.task_intent is None or blueprint.task_lens is None or blueprint.domain_policy is None or blueprint.task_decision is None:
+            raise BrainRunError("clarification plan requires complete prepared task artifacts")
+        return plan_autonomous_task_clarification(
+            intent=blueprint.task_intent,
+            lens=blueprint.task_lens,
+            policy=blueprint.domain_policy,
+            decision=blueprint.task_decision,
+            max_questions=max_questions,
+        )
+
+    def resolve_clarification(
+        self,
+        *,
+        plan: AutonomousTaskClarificationPlan | Mapping[str, Any],
+        task: str,
+        answers: Mapping[str, str],
+    ) -> AutonomousTaskClarificationResolution:
+        """Turn transient answers into a digest-only receipt bound to the original task."""
+
+        task_text = _text("clarification task", task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        return resolve_autonomous_task_clarification(
+            plan,
+            task_digest=content_digest({"task": task_text}),
+            answers=answers,
+        )
 
     def route(self, *, task: str, **kwargs: Any) -> AutonomousRouteProposal:
         """Return an auditable domain proposal without contacting a provider."""
