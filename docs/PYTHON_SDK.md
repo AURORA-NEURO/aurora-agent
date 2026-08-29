@@ -100,6 +100,40 @@ accepted-plan order for the items that did settle. With `allow_partial=False`, t
 `child_failed` without synthesis after a strict child failure. Programming, malformed-input, and
 configuration errors remain hard failures.
 
+### Shared aggregate cost admission
+
+`AutonomousCostBudget` is the composition-level estimate ceiling. `ProviderQuotaController`
+still handles provider/model windows and concurrency; this budget handles the total estimated
+cost of one composed run across providers and domains:
+
+```python
+from prism_sdk import AutonomousCostBudget
+
+budget = AutonomousCostBudget(max_cost_units=12)
+result = agent.run(
+    task="compare the available evidence and produce a safe implementation plan",
+    domain="cross_domain",
+    reserve_cost=budget.reserve,
+)
+print(budget.snapshot())
+```
+
+The callback is forwarded through model failover, native tool-loop turns, missions, workflows,
+cross-domain specialists and synthesis, including evaluator/replan and restart-step facades.
+Admission is atomic inside one Python process, so concurrent fan-out cannot oversubscribe the
+ceiling. A reservation is released only when local admission or an observer refuses before
+provider dispatch; transport failures after dispatch remain charged because the provider may
+have incurred cost. Live streams reserve lazily when iteration begins, and an unconsumed stream
+does not spend either aggregate or provider quota. `AutonomousCostBudgetError` exposes bounded
+accounting fields without prompt, response, credential, or provider payload data.
+
+`budget.snapshot()` and `AutonomousCostBudget.from_snapshot(...)` provide a portable numeric
+handoff for caller-owned restart storage. The snapshot is not billing truth, does not restore an
+in-flight request, and cannot lower already-consumed accounting. Persist it alongside the
+execution/checkpoint identity and rehydrate the same budget before resuming; distributed writers,
+tenant isolation, encryption, billing reconciliation, and provider-side limits remain deployment
+responsibilities.
+
 The delayed `run_cross_domain_trajectory_learning()` and
 `settle_cross_domain_trajectory_learning()` entry points apply the same admission at the
 trajectory boundary. They preserve accepted execution order but pass only `completed*` child and

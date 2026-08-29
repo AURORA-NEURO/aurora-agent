@@ -9,6 +9,13 @@ and typed authorization refusals are preserved instead of being downgraded to pr
 failures. Boundary regressions exercise the twelve-domain portfolio without using credentials or
 network access.
 
+The Python runtime now has aggregate cost-budget parity with TypeScript. `AutonomousCostBudget`
+provides atomic, snapshot-able estimate admission across provider failover, lazy streams,
+tool-loop turns, workflows, missions, cross-domain fan-out/synthesis, and evaluator-driven
+retries, while preserving the distinction between local pre-dispatch release and post-dispatch
+charge retention. The remaining deployment work is caller-owned persistence/reconciliation,
+distributed lease coordination, billing truth, and provider-side quota integration.
+
 The high-level learning surfaces now share those checks all the way through their final sinks.
 Workflow and mission learning, immediate and delayed trajectory settlement, cross-domain
 specialist/synthesis fan-out, replan retries, automatic decision cycles, and consolidated lesson

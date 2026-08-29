@@ -21,6 +21,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
 from .llm_runtime import (
+    AutonomousCostReservationCallback,
     CredentialError,
     CredentialHandle,
     CompositeProviderInvocationObserver,
@@ -4552,6 +4553,7 @@ class AutonomousBrain:
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
         authorization_domain: str | None = None,
@@ -4666,6 +4668,7 @@ class AutonomousBrain:
                     tools=tools,
                     tool_choice=tool_choice,
                     context_budget=normalized_context_budget,
+                    reserve_cost=reserve_cost,
                     invocation_observer=effective_observer,
                     authorization_context=authorization_context,
                     authorization_domain=authorization_domain,
@@ -4776,6 +4779,7 @@ class AutonomousBrain:
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
         authorization_domain: str | None = None,
@@ -4824,6 +4828,8 @@ class AutonomousBrain:
         unknown = sorted(set(options).difference(allowed_options))
         if unknown:
             raise BrainRunError(f"tool_loop_options contains unsupported fields: {', '.join(unknown)}")
+        if reserve_cost is not None:
+            options["reserve_cost"] = reserve_cost
         effective_context = context
         route_report: dict[str, Any] | None = None
         if "route_request" in options:
@@ -5074,6 +5080,7 @@ class AutonomousBrain:
         max_provider_failovers: int = 2,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
         authorization_domain: str | None = None,
@@ -5226,6 +5233,7 @@ class AutonomousBrain:
                     tool_choice=tool_choice,
                     attempt_state=attempt_state,
                     invocation_observer=effective_observer,
+                    reserve_cost=reserve_cost,
                     authorization_context=authorization_context,
                     authorization_domain=authorization_domain,
                 )
@@ -5347,6 +5355,7 @@ class AutonomousBrain:
         trajectory_discount: float | None = None,
         trajectory_terminal_reward: float | None = None,
         context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         mission_options: Mapping[str, Any] | None = None,
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
@@ -5423,6 +5432,8 @@ class AutonomousBrain:
         options = {} if mission_options is None else dict(mission_options)
         if normalized_context_budget is not None:
             options["context_budget"] = normalized_context_budget
+        if reserve_cost is not None:
+            options["reserve_cost"] = reserve_cost
         if authorization_context is not None:
             options["authorization_context"] = authorization_context
         if authorization_domain is not None:
@@ -5497,6 +5508,7 @@ class AutonomousBrain:
             "provider_tools",
             "tool_choice",
             "max_provider_failovers",
+            "reserve_cost",
             "authorization_context",
             "authorization_domain",
         }
@@ -7118,6 +7130,7 @@ class AutonomousBrain:
         tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
         context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
         authorization_domain: str | None = None,
@@ -7320,6 +7333,7 @@ class AutonomousBrain:
             credential=handle,
             invocation_observer=invocation_observer,
             invocation_kind="provider_call",
+            reserve_cost=reserve_cost,
             authorization_context=authorization_context,
             authorization_domain=authorization_domain,
         )
@@ -7360,6 +7374,7 @@ class AutonomousBrain:
         provider_tools: Sequence[ProviderTool] = (),
         tool_choice: str | None = None,
         context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         max_turns: int = 4,
         max_tool_calls: int = 128,
         stream: bool = False,
@@ -7560,6 +7575,7 @@ class AutonomousBrain:
             tools=provider_tools,
             tool_choice=tool_choice,
             context_budget=context_budget,
+            reserve_cost=reserve_cost,
             invocation_observer=invocation_observer,
         )
         if first.status != "completed_provider_call" or first.response is None:
@@ -7611,6 +7627,7 @@ class AutonomousBrain:
             invocation_observer=invocation_observer,
             invocation_kind="tool_loop_turn",
             context_budget=context_budget,
+            reserve_cost=reserve_cost,
             authorization_context=authorization_context,
             authorization_domain=authorization_domain,
         )
@@ -8034,6 +8051,7 @@ class AutonomousBrain:
         context: Mapping[str, Any] | None = None,
         content_parts: Sequence[ProviderContentPart | Mapping[str, Any]] | None = None,
         context_budget: AutonomousContextBudgetOptions | Mapping[str, Any] | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         contextual_observations: Sequence[Mapping[str, Any]] = (),
         evaluator_review: Mapping[str, Any] | None = None,
         workflow_binding: Mapping[str, Any] | None = None,
@@ -8212,6 +8230,7 @@ class AutonomousBrain:
             context=context,
             content_parts=content_parts,
             context_budget=context_budget,
+            reserve_cost=reserve_cost,
             contextual_observations=contextual_observations,
             tools=provider_tools,
             tool_choice=tool_choice,

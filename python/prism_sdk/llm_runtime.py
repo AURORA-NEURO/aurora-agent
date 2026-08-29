@@ -36,10 +36,14 @@ import secrets
 import threading
 import time
 import uuid
-from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 from urllib.parse import urlsplit
 
 from .authoring import content_digest
+from .autonomous_cost_budget import AutonomousCostReservationCallback
+
+if TYPE_CHECKING:
+    from .autonomous_authorization import AutonomousAuthorizationContext
 
 
 MAX_MESSAGES = 512
@@ -4100,6 +4104,7 @@ class LLMRuntime:
         effect_execution: Any | None = None,
         provider_quota: Any | None = None,
         estimated_cost_units: float = 0.0,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
         authorization_domain: str | None = None,
         authorization_attempt: int = 0,
@@ -4137,11 +4142,29 @@ class LLMRuntime:
                 "output_tokens": request.max_output_tokens,
                 "cost_units": estimated_cost_units,
             })
+        cost_reservation = None
+        if reserve_cost is not None:
+            if not callable(reserve_cost):
+                if quota_reservation is not None:
+                    quota_reservation.release()
+                raise ProviderError("reserve_cost must be callable")
+            try:
+                cost_reservation = reserve_cost(estimated_cost_units)
+            except BaseException:
+                if quota_reservation is not None:
+                    quota_reservation.release()
+                raise
+            if cost_reservation is not None and not callable(cost_reservation):
+                if quota_reservation is not None:
+                    quota_reservation.release()
+                raise ProviderError("reserve_cost must return a callable release handle or None")
         try:
             self._notify_invocation_before(invocation_observer, metadata)
         except BaseException:
             if quota_reservation is not None:
                 quota_reservation.release()
+            if cost_reservation is not None:
+                cost_reservation()
             raise
         started = time.perf_counter()
         try:
@@ -4229,6 +4252,7 @@ class LLMRuntime:
         invocation_kind: str = "provider_stream",
         provider_quota: Any | None = None,
         estimated_cost_units: float = 0.0,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         effect_boundary: Any | None = None,
         effect_execution: Any | None = None,
         effect_id_observer: Callable[[str], None] | None = None,
@@ -4263,6 +4287,7 @@ class LLMRuntime:
                 invocation_kind=invocation_kind,
                 provider_quota=provider_quota,
                 estimated_cost_units=estimated_cost_units,
+                reserve_cost=reserve_cost,
             )
         if not callable(getattr(selected_boundary, "execute_stream", None)):
             raise ProviderError("effect_boundary must expose execute_stream for live provider streams")
@@ -4341,6 +4366,7 @@ class LLMRuntime:
                 invocation_kind=invocation_kind,
                 provider_quota=provider_quota,
                 estimated_cost_units=estimated_cost_units,
+                reserve_cost=reserve_cost,
             )
 
         return selected_boundary.execute_stream(
@@ -4362,6 +4388,7 @@ class LLMRuntime:
         invocation_kind: str = "provider_stream",
         provider_quota: Any | None = None,
         estimated_cost_units: float = 0.0,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> Iterator[ProviderStreamEvent]:
         """Open one bounded SSE provider invocation.
 
@@ -4397,42 +4424,47 @@ class LLMRuntime:
             headers["Idempotency-Key"] = request.idempotency_key
         metadata = self._invocation_metadata(provider, request, invocation_kind)
         quota = self._provider_quota if provider_quota is None else provider_quota
-        quota_reservation = None
-        if quota is not None:
-            if not callable(getattr(quota, "reserve", None)):
-                raise ProviderError("provider_quota must expose a callable reserve method")
-            quota_reservation = quota.reserve({
-                "provider": provider,
-                "model": request.model,
-                "input_tokens": metadata.input_tokens,
-                "output_tokens": request.max_output_tokens,
-                "cost_units": estimated_cost_units,
-            })
-        try:
-            stream = self._stream(config, body, headers, request)
-        except BaseException:
-            if quota_reservation is not None:
-                quota_reservation.release()
-            raise
 
         def observed_stream() -> Iterator[ProviderStreamEvent]:
+            quota_reservation = None
+            cost_reservation = None
+            dispatched = False
             try:
+                if quota is not None:
+                    if not callable(getattr(quota, "reserve", None)):
+                        raise ProviderError("provider_quota must expose a callable reserve method")
+                    quota_reservation = quota.reserve({
+                        "provider": provider,
+                        "model": request.model,
+                        "input_tokens": metadata.input_tokens,
+                        "output_tokens": request.max_output_tokens,
+                        "cost_units": estimated_cost_units,
+                    })
+                if reserve_cost is not None:
+                    if not callable(reserve_cost):
+                        raise ProviderError("reserve_cost must be callable")
+                    cost_reservation = reserve_cost(estimated_cost_units)
+                    if cost_reservation is not None and not callable(cost_reservation):
+                        raise ProviderError("reserve_cost must return a callable release handle or None")
                 self._notify_invocation_before(invocation_observer, metadata)
-            except BaseException:
-                if quota_reservation is not None:
-                    quota_reservation.release()
-                raise
-            started = time.perf_counter()
-            try:
+                started = time.perf_counter()
+                stream = self._stream(config, body, headers, request)
                 if quota_reservation is not None:
                     quota_reservation.mark_dispatched()
+                dispatched = True
                 yield from stream
             except BaseException as error:
-                try:
-                    self._notify_invocation_after(invocation_observer, metadata, None, error, started)
-                finally:
+                if dispatched:
+                    try:
+                        self._notify_invocation_after(invocation_observer, metadata, None, error, started)
+                    finally:
+                        if quota_reservation is not None:
+                            quota_reservation.settle()
+                else:
                     if quota_reservation is not None:
-                        quota_reservation.settle()
+                        quota_reservation.release()
+                    if cost_reservation is not None:
+                        cost_reservation()
                 raise
             try:
                 self._notify_invocation_after(invocation_observer, metadata, None, None, started)
@@ -4458,6 +4490,7 @@ class LLMRuntime:
         effect_execution: Any | None = None,
         provider_quota: Any | None = None,
         estimated_cost_units: float = 0.0,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
         authorization_domain: str | None = None,
         authorization_attempt: int = 0,
@@ -4495,6 +4528,7 @@ class LLMRuntime:
                 credential=credential,
                 provider_quota=provider_quota,
                 estimated_cost_units=estimated_cost_units,
+                reserve_cost=reserve_cost,
             ):
                 event_count += 1
                 if event_count > MAX_STREAM_EVENTS:
@@ -4609,6 +4643,7 @@ class LLMRuntime:
         invocation_kind: str = "tool_loop_turn",
         provider_quota: Any | None = None,
         estimated_cost_units: float = 0.0,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         context_budget: Any | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
         authorization_domain: str | None = None,
@@ -4656,6 +4691,7 @@ class LLMRuntime:
                         invocation_kind=invocation_kind,
                         provider_quota=provider_quota,
                         estimated_cost_units=estimated_cost_units,
+                        reserve_cost=reserve_cost,
                         authorization_context=authorization_context,
                         authorization_domain=authorization_domain,
                         authorization_attempt=authorization_attempt,
@@ -4670,6 +4706,7 @@ class LLMRuntime:
                         invocation_kind=invocation_kind,
                         provider_quota=provider_quota,
                         estimated_cost_units=estimated_cost_units,
+                        reserve_cost=reserve_cost,
                         authorization_context=authorization_context,
                         authorization_domain=authorization_domain,
                         authorization_attempt=authorization_attempt,

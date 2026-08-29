@@ -2146,6 +2146,14 @@ from .autonomous_agent_lifecycle import (
     AutonomousAgentPersistenceComponentResult,
     AutonomousAgentPersistenceLifecycleReport,
 )
+from .autonomous_cost_budget import (
+    AUTONOMOUS_COST_BUDGET_MAX_COST_UNITS,
+    AutonomousCostBudget,
+    AutonomousCostBudgetError,
+    AutonomousCostBudgetSnapshot,
+    AutonomousCostReservation,
+    AutonomousCostReservationCallback,
+)
 from .llm_runtime import (
     CredentialError,
     CompositeProviderInvocationObserver,
@@ -8496,6 +8504,12 @@ __all__ = [
     "autonomous_provider_outcome_evaluation_input",
     "settle_autonomous_provider_model_outcome",
     "CredentialError",
+    "AUTONOMOUS_COST_BUDGET_MAX_COST_UNITS",
+    "AutonomousCostBudget",
+    "AutonomousCostBudgetError",
+    "AutonomousCostBudgetSnapshot",
+    "AutonomousCostReservation",
+    "AutonomousCostReservationCallback",
     "CompositeProviderInvocationObserver",
     "CredentialHandle",
     "CredentialProvisioner",

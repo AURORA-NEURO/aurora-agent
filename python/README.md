@@ -288,6 +288,15 @@ opaque credential handles, approval callbacks, memory, tools, and policy at exec
 twelve domains, including `cross_domain`, use the same facade path; no resolver or provider value
 is copied into goal or loop metadata.
 
+For one ceiling across a composed run, create an `AutonomousCostBudget` and pass its
+`reserve` callback through the agent options. The same callback covers semantic/planning calls,
+provider failover, tool-loop turns, workflow stages, cross-domain fan-out, synthesis, and
+evaluator-driven retries. Reservations are atomic for local concurrent workers; only a refusal
+before provider dispatch releases one. Streams reserve on first iteration, while an already
+dispatched or transport-ambiguous attempt remains charged. Use `budget.snapshot()` and
+`AutonomousCostBudget.from_snapshot(...)` for caller-owned restart handoff; this is estimate
+accounting, not billing truth, and never stores prompts, responses, credentials, or keys.
+
 For one metadata-only observability record across the complete batch, call
 `runtime.run_with_trace(trace_store=trace_store, run_id="goal-batch-001", ...)`. The trace spans
 goal planning, rehydrated worker execution, selector/provider lifecycle, evaluator settlement,

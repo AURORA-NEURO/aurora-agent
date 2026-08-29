@@ -293,6 +293,7 @@ from .autonomous_provider_evaluation import (
 from .autonomy_provider import AutonomousProviderInvocationReceipt
 from .autonomous_context_budget import AutonomousContextBudgetOptions
 from .llm_runtime import (
+    AutonomousCostReservationCallback,
     CredentialError,
     CredentialHandle,
     CredentialProvisioner,
@@ -12240,6 +12241,7 @@ class AutonomousTaskOrchestrator:
         max_provider_failovers: int,
         authorization_context: AutonomousAuthorizationContext | None,
         authorization_domain: str,
+        reserve_cost: AutonomousCostReservationCallback | None,
     ) -> dict[str, Any]:
         if options is not None and not isinstance(options, Mapping):
             raise BrainRunError("mission_options must be a mapping or None")
@@ -12270,6 +12272,7 @@ class AutonomousTaskOrchestrator:
             "max_provider_failovers": max_provider_failovers,
             "authorization_context": authorization_context,
             "authorization_domain": authorization_domain,
+            "reserve_cost": reserve_cost,
         }
         for name, value in (
             ("max_cost_per_million_tokens", max_cost_per_million_tokens),
@@ -12372,6 +12375,7 @@ class AutonomousTaskOrchestrator:
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> BrainRunResult | BrainToolLoopResult | BrainMissionResult:
         # Keep the legacy ``mission_policy`` shorthand while making the execution route
         # explicit for new callers.
@@ -12410,6 +12414,7 @@ class AutonomousTaskOrchestrator:
                 max_provider_failovers=max_provider_failovers,
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
+                reserve_cost=reserve_cost,
                 trace_event_callback=trace_event_callback,
                 authorization_context=authorization_context,
                 authorization_domain=blueprint.spec.domain,
@@ -12473,6 +12478,7 @@ class AutonomousTaskOrchestrator:
                 max_provider_failovers=max_provider_failovers,
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
+                reserve_cost=reserve_cost,
                 trace_event_callback=trace_event_callback,
                 authorization_context=authorization_context,
                 authorization_domain=blueprint.spec.domain,
@@ -12510,6 +12516,7 @@ class AutonomousTaskOrchestrator:
             max_provider_failovers=max_provider_failovers,
             authorization_context=authorization_context,
             authorization_domain=blueprint.spec.domain,
+            reserve_cost=reserve_cost,
         )
         result = self.brain.run_adaptive_mission(
             task=blueprint.spec.task,
@@ -12634,7 +12641,7 @@ class AutonomousTaskOrchestrator:
             "provider_tools", "tool_choice", "max_provider_failovers", "prompt", "execution_mode",
             "tool_loop_options", "bandit_state",
             "execution_controller", "invocation_observer",
-            "trace_event_callback", "authorization_context",
+            "trace_event_callback", "authorization_context", "reserve_cost",
         }
         unknown = sorted(set(kwargs).difference(allowed))
         if unknown:
@@ -13315,6 +13322,7 @@ class AutonomousTaskOrchestrator:
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> Any:
         """Run one domain-aware task through adaptive selection and bounded invocation.
 
@@ -13548,6 +13556,7 @@ class AutonomousTaskOrchestrator:
                         "max_provider_failovers": max_provider_failovers,
                         "authorization_context": authorization_context,
                         "authorization_domain": blueprint.spec.domain,
+                        "reserve_cost": reserve_cost,
                     }
                 )
                 learning_cycle = self.brain.run_adaptive_mission_learning_cycle(
@@ -13617,10 +13626,11 @@ class AutonomousTaskOrchestrator:
                     "execution_mode": execution_mode,
                     "tool_loop_options": tool_loop_options,
                     "bandit_state": bandit_state,
-                        "execution_controller": execution_controller,
-                        "invocation_observer": invocation_observer,
-                        "trace_event_callback": trace_event_callback,
-                        "authorization_context": authorization_context,
+                    "reserve_cost": reserve_cost,
+                    "execution_controller": execution_controller,
+                    "invocation_observer": invocation_observer,
+                    "trace_event_callback": trace_event_callback,
+                    "authorization_context": authorization_context,
                     },
                 ))
         result = self._execute(
@@ -13659,6 +13669,7 @@ class AutonomousTaskOrchestrator:
             invocation_observer=invocation_observer,
             trace_event_callback=trace_event_callback,
             authorization_context=authorization_context,
+            reserve_cost=reserve_cost,
         )
         return self._apply_direct_response_review_gate(
             result,
@@ -13885,6 +13896,7 @@ class AutonomousTaskOrchestrator:
         retry_synthesis_after_response_review: bool = False,
         execution_controller: AutonomousExecutionController | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> AutonomousCrossDomainStepResult:
         """Execute exactly one child or the final synthesis for restart-safe fan-out.
 
@@ -14008,6 +14020,7 @@ class AutonomousTaskOrchestrator:
                 tool_loop_options=tool_loop_options,
                 execution_controller=execution_controller,
                 authorization_context=authorization_context,
+                reserve_cost=reserve_cost,
             )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("cross-domain step returned an unsupported brain result")
@@ -14273,6 +14286,7 @@ class AutonomousTaskOrchestrator:
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> AutonomousWorkflowRun:
         """Execute a prepared domain workflow as a resumable, dependency-checked stage DAG.
 
@@ -14564,6 +14578,7 @@ class AutonomousTaskOrchestrator:
                 invocation_observer=invocation_observer,
                 trace_event_callback=trace_event_callback,
                 authorization_context=authorization_context,
+                reserve_cost=reserve_cost,
             )
             if not isinstance(stage_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("workflow stage returned an unsupported result")
@@ -15552,6 +15567,7 @@ class AutonomousTaskOrchestrator:
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
     ) -> AutonomousCrossDomainResult:
         """Execute bounded domain specialists, then optionally synthesize their outputs.
 
@@ -15729,6 +15745,7 @@ class AutonomousTaskOrchestrator:
                     invocation_observer=invocation_observer,
                     trace_event_callback=trace_event_callback,
                     authorization_context=authorization_context,
+                    reserve_cost=reserve_cost,
                 )
             except (ProviderError, CredentialError) as error:
                 result = self._provider_failure_result(
@@ -15919,6 +15936,7 @@ class AutonomousTaskOrchestrator:
             invocation_observer=invocation_observer,
             trace_event_callback=trace_event_callback,
             authorization_context=authorization_context,
+            reserve_cost=reserve_cost,
             ),
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
@@ -25075,6 +25093,7 @@ class AutonomousAgent:
             observer=resolved_options.get("invocation_observer"),
             invocation_kind="autonomous_agent_stream",
             selection=preflight.selection,
+            reserve_cost=resolved_options.get("reserve_cost"),
             authorization_context=resolved_options.get("authorization_context"),
             authorization_domain=domain,
         )
@@ -25633,6 +25652,7 @@ class AutonomousAgent:
             "provider_tools",
             "tool_choice",
             "max_provider_failovers",
+            "reserve_cost",
         }
         adaptive_options = {
             key: resolved_options[key]

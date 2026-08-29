@@ -13823,3 +13823,22 @@ restart behavior across the direct runtime, reviewed evidence execution controll
 execution, and the high-level Python facade. Omitting the context remains compatible with local
 caller-owned integrations; grant-controlled deployments should pass it through every external
 boundary and test the denial path as part of their integration contract.
+
+### Python aggregate cost parity
+
+Python now exposes the same process-local composition budget as TypeScript through
+`AutonomousCostBudget`, `AutonomousCostBudgetSnapshot`, and the `reserve_cost` callback. A caller
+can attach one `budget.reserve` function to the high-level agent and have the estimate ceiling
+span provider selection attempts, failover, lazy streaming, native tool-loop turns, missions,
+workflow stages, cross-domain specialists, synthesis, trajectory/replan retries, and resumable
+steps. The provider-specific `ProviderQuotaController` remains an independent window/concurrency
+policy; the aggregate budget is the cross-provider total.
+
+Reservations are linearizable under the Python lock and release handles are idempotent. Local
+observer, approval, or other pre-dispatch failures release the estimate; once dispatch begins,
+the estimate is retained even when transport fails. Streams defer both aggregate and provider
+quota admission until iteration starts, so creating and abandoning an unconsumed stream cannot
+spend budget. Numeric snapshots can be persisted and rehydrated by the caller, but they are
+estimate accounting rather than billing truth and do not reconstruct an in-flight external
+request. Typed overflow errors retain only bounded accounting fields; task text, prompts,
+provider payloads, credentials, and keys remain transient.

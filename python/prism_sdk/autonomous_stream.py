@@ -17,7 +17,7 @@ from dataclasses import dataclass, replace
 import hashlib
 import json
 import time
-from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from .autonomous_context_budget import (
     AutonomousContextBudgetOptions,
@@ -25,6 +25,7 @@ from .autonomous_context_budget import (
 )
 from .autonomous_authorization import AutonomousAuthorizationContext
 from .llm_runtime import (
+    AutonomousCostReservationCallback,
     CredentialHandle,
     LLMRuntime,
     ProviderError,
@@ -164,6 +165,7 @@ class AutonomousStreamHandle:
         "_effect_boundary",
         "_effect_execution",
         "_provider_quota",
+        "_reserve_cost",
         "_authorization_context",
         "_authorization_domain",
         "_estimated_input_tokens",
@@ -193,6 +195,7 @@ class AutonomousStreamHandle:
         effect_boundary: Any | None,
         effect_execution: Any | None,
         provider_quota: Any | None,
+        reserve_cost: AutonomousCostReservationCallback | None,
         authorization_context: AutonomousAuthorizationContext | None,
         authorization_domain: str | None,
     ) -> None:
@@ -210,6 +213,7 @@ class AutonomousStreamHandle:
         self._effect_boundary = effect_boundary
         self._effect_execution = effect_execution
         self._provider_quota = provider_quota
+        self._reserve_cost = reserve_cost
         self._authorization_context = authorization_context
         self._authorization_domain = authorization_domain
         self._estimated_input_tokens = max(
@@ -333,6 +337,7 @@ class AutonomousStreamHandle:
                         effect_id_observer=observe_effect,
                         provider_quota=self._provider_quota,
                         estimated_cost_units=attempt["estimated_cost_units"],
+                        reserve_cost=self._reserve_cost,
                         authorization_context=self._authorization_context,
                         authorization_domain=self._authorization_domain,
                         authorization_attempt=index,
@@ -432,6 +437,7 @@ class AutonomousStreamRuntime:
         effect_boundary: Any | None = None,
         effect_execution: Any | None = None,
         provider_quota: Any | None = None,
+        reserve_cost: AutonomousCostReservationCallback | None = None,
         selection: Mapping[str, Any] | None = None,
         authorization_context: AutonomousAuthorizationContext | None = None,
         authorization_domain: str | None = None,
@@ -517,6 +523,7 @@ class AutonomousStreamRuntime:
             effect_boundary=effect_boundary,
             effect_execution=effect_execution,
             provider_quota=provider_quota,
+            reserve_cost=reserve_cost,
             authorization_context=authorization_context,
             authorization_domain=authorization_domain,
         )
