@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
+import pytest
+
 from prism_sdk import (
+    ArgumentError,
     AutonomousEvidencePlan,
     AutonomousPromptBuilder,
     AutonomousTaskSpec,
@@ -39,6 +44,22 @@ def test_evidence_plan_accepts_digest_bound_observations_and_rejects_ambiguous_s
     ambiguous = build_autonomous_evidence_plan(workflows, available_evidence=("observations",))
     assert ambiguous.coverage_status == "missing"
     assert not ambiguous.covered_requirement_ids
+
+
+def test_evidence_planner_rejects_impossible_stage_graphs_and_unknown_completion() -> None:
+    workflow = deepcopy(builtin_autonomous_workflow_strategies()[0].to_dict())
+    workflow["stages"][1]["depends_on"] = ["missing-stage"]
+    with pytest.raises(ArgumentError, match="unknown stage dependencies"):
+        build_autonomous_evidence_plan((workflow,))
+
+    workflow = deepcopy(builtin_autonomous_workflow_strategies()[0].to_dict())
+    workflow["stages"][1]["depends_on"] = ["implement"]
+    with pytest.raises(ArgumentError, match="dependency cycle"):
+        build_autonomous_evidence_plan((workflow,))
+
+    workflow = builtin_autonomous_workflow_strategies()[0]
+    with pytest.raises(ArgumentError, match="unknown stages"):
+        build_autonomous_evidence_plan((workflow,), completed_stages={workflow.domain: ("not-reviewed",)})
 
 
 def test_prompt_builder_includes_the_evidence_contract_without_retaining_task_text() -> None:

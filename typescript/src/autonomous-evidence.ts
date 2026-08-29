@@ -34,6 +34,33 @@ function digest(value: unknown, name: string): string {
   return value;
 }
 
+function validateStageGraph(domain: string, stages: readonly { id: string; depends_on: string[] }[]): void {
+  /** Dependencies are reviewed workflow edges; reject impossible graphs before readiness claims. */
+  const stageIds = stages.map((stage) => stage.id);
+  const known = new Set(stageIds);
+  const unknown = [...new Set(stages.flatMap((stage) => stage.depends_on.filter((dependency) => !known.has(dependency))))].sort();
+  if (unknown.length) throw new ArgumentError(`autonomous evidence workflow ${domain} has unknown stage dependencies: ${unknown.join(", ")}`);
+  if (stages.some((stage) => stage.depends_on.includes(stage.id))) throw new ArgumentError(`autonomous evidence workflow ${domain} contains a self dependency`);
+  const indegree = new Map(stageIds.map((stageId) => [stageId, 0]));
+  const dependents = new Map(stageIds.map((stageId) => [stageId, [] as string[]]));
+  for (const stage of stages) {
+    indegree.set(stage.id, stage.depends_on.length);
+    for (const dependency of stage.depends_on) dependents.get(dependency)!.push(stage.id);
+  }
+  const ready = stageIds.filter((stageId) => indegree.get(stageId) === 0);
+  let visited = 0;
+  while (ready.length) {
+    const current = ready.shift()!;
+    visited += 1;
+    for (const dependent of dependents.get(current)!) {
+      const next = indegree.get(dependent)! - 1;
+      indegree.set(dependent, next);
+      if (next === 0) ready.push(dependent);
+    }
+  }
+  if (visited !== stageIds.length) throw new ArgumentError(`autonomous evidence workflow ${domain} contains a dependency cycle`);
+}
+
 export interface AutonomousEvidenceRequirement extends JsonObject {
   schema: typeof AUTONOMOUS_EVIDENCE_REQUIREMENT_SCHEMA;
   requirement_id: string;
@@ -148,6 +175,12 @@ export class AutonomousEvidencePlan {
     });
     const ids = requirements.map((item) => item.requirement_id);
     if (new Set(ids).size !== ids.length) throw new ArgumentError("evidence plan requirement IDs must be unique");
+    const workflowById = new Map(workflowIds.map((workflowId, index) => [workflowId, { domain: domains[index], digest: workflowDigests[index] }]));
+    for (const requirement of requirements) {
+      const workflow = workflowById.get(requirement.workflow_id);
+      if (!workflow) throw new ArgumentError("evidence plan requirement references an unknown workflow");
+      if (requirement.domain !== workflow.domain || requirement.workflow_digest !== workflow.digest) throw new ArgumentError("evidence plan requirement workflow identity is inconsistent");
+    }
     const available = list(input.available_evidence ?? [], "evidence plan available_evidence", MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS);
     const covered = list(input.covered_requirement_ids ?? [], "evidence plan covered_requirement_ids", MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS);
     const missing = list(input.missing_requirement_ids ?? [], "evidence plan missing_requirement_ids", MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS);
@@ -251,6 +284,7 @@ export async function buildAutonomousEvidencePlan(workflows: readonly Autonomous
   for (const [workflowIndex, workflow] of workflows.entries()) {
     if (!Array.isArray(workflow.stages) || workflow.stages.length === 0) throw new ArgumentError(`autonomous evidence workflow ${workflowIndex} has no stages`);
     const stageIds = new Set<string>();
+    const normalizedStages: Array<{ id: string; depends_on: string[] }> = [];
     for (const stage of workflow.stages) {
       const stageId = identifier(stage.id, "autonomous evidence stage id");
       if (stageIds.has(stageId)) throw new ArgumentError("autonomous evidence stage IDs must be unique");
@@ -258,10 +292,12 @@ export async function buildAutonomousEvidencePlan(workflows: readonly Autonomous
       const capabilities = list(stage.required_capabilities, "autonomous evidence stage capabilities", 64);
       const signals = list(stage.evaluator_signals, "autonomous evidence stage evaluator signals", 64);
       const dependencies = list(stage.depends_on, "autonomous evidence stage dependencies", 64);
+      normalizedStages.push({ id: stageId, depends_on: dependencies });
       const objective = text(stage.objective, "autonomous evidence stage objective");
       if (!capabilities.length) throw new ArgumentError("autonomous evidence stage must require a capability");
       for (const label of list(stage.evidence_outputs, "autonomous evidence stage outputs", 64)) requirements.push({ schema: AUTONOMOUS_EVIDENCE_REQUIREMENT_SCHEMA, requirement_id: `${workflow.domain}:${stageId}:${label}`, domain: workflow.domain, workflow_id: workflow.workflow_id, workflow_digest: workflow.workflow_digest, stage_id: stageId, label, objective, required_capabilities: capabilities, evaluator_signals: signals, depends_on: dependencies });
     }
+    validateStageGraph(workflow.domain, normalizedStages);
   }
   if (requirements.length > MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS) throw new ArgumentError("autonomous evidence requirements exceed their bound");
   const available = list(options.availableEvidence ?? [], "autonomous evidence availableEvidence", MAX_AUTONOMOUS_EVIDENCE_REQUIREMENTS);
@@ -273,6 +309,9 @@ export async function buildAutonomousEvidencePlan(workflows: readonly Autonomous
   const nextStages: string[] = [];
   for (const workflow of workflows) {
     const done = new Set(list(completed[workflow.domain] ?? [], `completed stages for ${workflow.domain}`, 64));
+    const knownStageIds = new Set(workflow.stages.map((stage: AutonomousWorkflow["stages"][number]) => stage.id));
+    const unknownCompleted = [...done].filter((stageId) => !knownStageIds.has(stageId)).sort();
+    if (unknownCompleted.length) throw new ArgumentError(`completed stages for ${workflow.domain} reference unknown stages: ${unknownCompleted.join(", ")}`);
     for (const stage of workflow.stages) if (!done.has(stage.id) && stage.depends_on.every((dependency: string) => done.has(dependency))) nextStages.push(`${workflow.domain}:${stage.id}`);
   }
   const coverageStatus: AutonomousEvidenceCoverageStatus = available.length === 0 ? "not_evaluated" : missing.length === 0 ? "complete" : covered.length ? "partial" : "missing";

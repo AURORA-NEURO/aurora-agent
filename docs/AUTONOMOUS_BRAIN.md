@@ -13206,3 +13206,19 @@ options consumed by routing, prompt assembly, model selection, tool policy, and 
 A caller-owned options factory may repeat the same value, but a conflicting value is rejected before
 the provider/connector boundary. This keeps the durable goal identity, contextual bandit arm, and
 actual execution contract aligned across all twelve domains, including cross-domain synthesis.
+
+### Evidence graph integrity
+
+Evidence planning is a structural planning boundary, not just a list of desired outputs. During
+compilation, the planner now validates each reviewed workflow as a directed acyclic graph. Every
+dependency must name a stage in that same workflow, a stage cannot depend on itself, and a cycle
+cannot produce a readiness projection. The plan constructor also verifies that each requirement's
+workflow ID, domain, and workflow digest agree with the plan's authoritative workflow metadata.
+
+`completed_stages` is treated as a claim against that reviewed graph: unknown completion IDs are
+rejected instead of being silently ignored. This prevents a stale worker, typo, or cross-workflow
+stage name from making a downstream stage appear runnable. The validation is deterministic and
+implemented identically in Python and TypeScript, while valid plan digests and the existing
+metadata-only retention contract remain unchanged. The graph check still does not acquire source
+evidence, decide truth, authorize tools, or open a provider session; those remain separate
+execution and policy gates.

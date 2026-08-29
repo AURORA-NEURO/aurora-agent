@@ -2396,3 +2396,9 @@ transient model/planner invocation for every domain and cross-domain goal. Calle
 restate the context but cannot override it; conflicting values fail before dispatch. This closes
 the gap between contextual admission learning and the execution contract while keeping task text,
 credentials, prompts, and provider values outside durable state.
+
+Evidence-plan graph integrity is now enforced in both SDKs. Planner compilation rejects unknown
+stage edges, self-dependencies, cycles, inconsistent workflow identity on requirements, and
+completed-stage IDs absent from the reviewed workflow before emitting readiness or next-stage
+metadata. Valid plans retain the existing canonical digest and cross-language wire shape; the
+change only removes false-ready states from malformed or stale workflow graphs.

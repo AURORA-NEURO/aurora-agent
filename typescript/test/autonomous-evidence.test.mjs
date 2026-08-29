@@ -34,6 +34,23 @@ test("evidence planning requires fully qualified IDs when output labels are shar
   assert.equal(ambiguous.covered_requirement_ids.length, 0);
 });
 
+test("evidence planning rejects impossible stage graphs and unknown completion", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const base = profiles[0].workflow;
+  const unknownDependency = structuredClone(base);
+  unknownDependency.stages[1].depends_on = ["missing-stage"];
+  await assert.rejects(() => buildAutonomousEvidencePlan([unknownDependency]), /unknown stage dependencies/);
+
+  const cycle = structuredClone(base);
+  cycle.stages[1].depends_on = ["implement"];
+  await assert.rejects(() => buildAutonomousEvidencePlan([cycle]), /dependency cycle/);
+
+  await assert.rejects(
+    () => buildAutonomousEvidencePlan([base], { completedStages: { [base.domain]: ["not-reviewed"] } }),
+    /unknown stages/,
+  );
+});
+
 test("prompt assembly includes the evidence contract while keeping acquisition and authority explicit", async () => {
   const profile = (await builtinAutonomousDomainProfiles()).find((candidate) => candidate.domain === "science");
   assert.ok(profile);
