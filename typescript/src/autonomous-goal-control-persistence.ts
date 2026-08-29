@@ -12,6 +12,7 @@ export const AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SIGNALS = 4_096;
 export const AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SNAPSHOT_BYTES = 2_000_000;
 
 const BANDIT_SCHEMA = "bioprism-autonomous-goal-control-bandit/0.1";
+const BANDIT_RETENTIONS = new Set(["value_only_goal_domain_bandit_state", "value_only_goal_contextual_bandit_state"]);
 const STOP_REASONS = new Set(["all_terminal", "no_admissible_work", "cycle_budget_exhausted", "run_budget_exhausted"]);
 
 export type AutonomousGoalControlLoopCheckpointStopReason = "all_terminal" | "no_admissible_work" | "cycle_budget_exhausted" | "run_budget_exhausted";
@@ -148,8 +149,8 @@ function cycleSummary(value: unknown, name: string): JsonObject {
     counts: counts(`${name}.counts`, value.counts, 128),
     selected_domains: value.selected_domains.map((item, index) => identifier(`${name}.selected_domain ${index}`, item, 128)),
     missing_domains: value.missing_domains.map((item, index) => identifier(`${name}.missing_domain ${index}`, item, 128)),
-    retention: value.retention,
-    secret_material: value.secret_material,
+    retention: value.retention as string,
+    secret_material: value.secret_material as string,
   };
   if ("evaluated" in value) {
     result.evaluated = integer(`${name}.evaluated`, value.evaluated, 0, 128);
@@ -162,27 +163,43 @@ function cycleSummary(value: unknown, name: string): JsonObject {
 function learnerState(value: unknown): JsonObject {
   if (!isObject(value)) fail("learner_state must be an object or null");
   exactKeys("learner_state", value, ["schema", "generation", "arms", "exploration", "retention", "secret_material", "state_digest"]);
-  if (value.schema !== BANDIT_SCHEMA || value.retention !== "value_only_goal_domain_bandit_state" || value.secret_material !== "never_returned") fail("learner_state markers are invalid");
+  if (value.schema !== BANDIT_SCHEMA || !BANDIT_RETENTIONS.has(String(value.retention)) || value.secret_material !== "never_returned") fail("learner_state markers are invalid");
   if (!Array.isArray(value.arms) || value.arms.length > 128) fail("learner_state arms are outside their bounds");
   const seen = new Set<string>();
   const arms = value.arms.map((raw, index) => {
     if (!isObject(raw)) fail(`learner_state arm ${index} is malformed`);
-    exactKeys(`learner_state arm ${index}`, raw, ["domain", "pulls", "failures", "reward_sum"]);
+    const requiredArmFields = new Set(["domain", "pulls", "failures", "reward_sum"]);
+    const optionalContextFields = new Set(["capability", "risk_class", "arm_id"]);
+    if (Object.keys(raw).some((key) => !requiredArmFields.has(key) && !optionalContextFields.has(key)) || [...requiredArmFields].some((key) => !(key in raw))) fail(`learner_state arm ${index} has unsupported or missing fields`);
     const domain = identifier(`learner_state arm ${index}.domain`, raw.domain, 128);
-    if (seen.has(domain)) fail("learner_state contains duplicate domains");
-    seen.add(domain);
+    const capability = raw.capability === undefined || raw.capability === null ? null : text(`learner_state arm ${index}.capability`, raw.capability, 128);
+    const riskClass = raw.risk_class === undefined || raw.risk_class === null ? null : text(`learner_state arm ${index}.risk_class`, raw.risk_class, 128);
+    const expectedArmId = capability === null && riskClass === null
+      ? domain
+      : digestJsonSync({ schema: `${BANDIT_SCHEMA}/context-arm`, domain, capability, risk_class: riskClass });
+    const armId = raw.arm_id === undefined || raw.arm_id === null ? null : digest(`learner_state arm ${index}.arm_id`, raw.arm_id);
+    if (armId !== expectedArmId && !(armId === null && expectedArmId === domain)) fail(`learner_state arm ${index}.arm_id does not match its context`);
+    const armKey = expectedArmId;
+    if (seen.has(armKey)) fail("learner_state contains duplicate contextual arms");
+    seen.add(armKey);
     const pulls = integer(`learner_state arm ${index}.pulls`, raw.pulls, 0, 2_147_483_647);
     const failures = integer(`learner_state arm ${index}.failures`, raw.failures, 0, 2_147_483_647);
     if (failures > pulls) fail(`learner_state arm ${index} failures exceed pulls`);
-    return { domain, pulls, failures, reward_sum: numberValue(`learner_state arm ${index}.reward_sum`, raw.reward_sum, -pulls, pulls) };
-  }).sort((left, right) => left.domain.localeCompare(right.domain));
+    const normalizedArm: JsonObject = { domain, pulls, failures, reward_sum: numberValue(`learner_state arm ${index}.reward_sum`, raw.reward_sum, -pulls, pulls) };
+    if (capability !== null || riskClass !== null) {
+      normalizedArm.capability = capability;
+      normalizedArm.risk_class = riskClass;
+      normalizedArm.arm_id = armKey;
+    }
+    return normalizedArm;
+  }).sort((left, right) => String(left.arm_id ?? left.domain).localeCompare(String(right.arm_id ?? right.domain)));
   const body: JsonObject = {
     schema: value.schema,
     generation: integer("learner_state.generation", value.generation, 0, 2_147_483_647),
     arms,
     exploration: numberValue("learner_state.exploration", value.exploration, 0, 2),
-    retention: value.retention,
-    secret_material: value.secret_material,
+    retention: value.retention as string,
+    secret_material: value.secret_material as string,
   };
   if (digest("learner_state.state_digest", value.state_digest)! !== digestJsonSync(body)) fail("learner_state digest mismatch");
   return { ...body, state_digest: value.state_digest as string };

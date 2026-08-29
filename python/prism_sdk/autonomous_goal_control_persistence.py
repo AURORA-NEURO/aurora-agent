@@ -2,7 +2,7 @@
 
 The goal ledger and worker journal already protect objective state and effect settlement.  This
 module protects the *decision process around them*: cycle numbering, bounded counters, evaluator
-digest history, and the value-only domain bandit.  A checkpoint is deliberately not executable
+digest history, and the value-only contextual goal bandit.  A checkpoint is deliberately not executable
 state.  It contains no task text, prompts, provider output, tool arguments, credentials, or live
 callbacks; callers rehydrate those through the normal worker/agent seams after a successful
 claim.
@@ -27,6 +27,7 @@ AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_EVALUATIONS = 128
 AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SIGNALS = 4_096
 AUTONOMOUS_GOAL_CONTROL_CHECKPOINT_MAX_SNAPSHOT_BYTES = 2_000_000
 _BANDIT_SCHEMA = "bioprism-autonomous-goal-control-bandit/0.1"
+_BANDIT_RETENTIONS = frozenset({"value_only_goal_domain_bandit_state", "value_only_goal_contextual_bandit_state"})
 _STOP_REASONS = {"all_terminal", "no_admissible_work", "cycle_budget_exhausted", "run_budget_exhausted"}
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:/-]+$")
@@ -164,7 +165,7 @@ def _bandit(value: Any) -> dict[str, Any]:
         _fail("learner_state must be a mapping or null")
     expected = {"schema", "generation", "arms", "exploration", "retention", "secret_material", "state_digest"}
     _keys(value, expected, name="learner_state")
-    if value["schema"] != _BANDIT_SCHEMA or value["retention"] != "value_only_goal_domain_bandit_state" or value["secret_material"] != "never_returned":
+    if value["schema"] != _BANDIT_SCHEMA or value["retention"] not in _BANDIT_RETENTIONS or value["secret_material"] != "never_returned":
         _fail("learner_state markers are invalid")
     generation = _integer(value["generation"], name="learner_state.generation", minimum=0, maximum=2**31 - 1)
     exploration = _number(value["exploration"], name="learner_state.exploration", minimum=0, maximum=2)
@@ -176,18 +177,42 @@ def _bandit(value: Any) -> dict[str, Any]:
     for index, raw in enumerate(arms):
         if not isinstance(raw, Mapping):
             _fail(f"learner_state arm {index} is malformed")
-        _keys(raw, {"domain", "pulls", "failures", "reward_sum"}, name=f"learner_state arm {index}")
+        required_arm_fields = {"domain", "pulls", "failures", "reward_sum"}
+        optional_context_fields = {"capability", "risk_class", "arm_id"}
+        if set(raw).difference(required_arm_fields | optional_context_fields) or not required_arm_fields.issubset(raw):
+            _fail(f"learner_state arm {index} has unsupported or missing fields")
         domain = _identifier(raw["domain"], name=f"learner_state arm {index}.domain", maximum=128)
-        if domain in seen:
-            _fail("learner_state contains duplicate domains")
-        seen.add(domain)
+        capability = None if raw.get("capability") is None else _text(raw["capability"], name=f"learner_state arm {index}.capability", maximum=128)
+        risk_class = None if raw.get("risk_class") is None else _text(raw["risk_class"], name=f"learner_state arm {index}.risk_class", maximum=128)
+        arm_id = raw.get("arm_id")
+        expected_arm_id = domain if capability is None and risk_class is None else content_digest(
+            {
+                "schema": f"{_BANDIT_SCHEMA}/context-arm",
+                "domain": domain,
+                "capability": capability,
+                "risk_class": risk_class,
+            }
+        )
+        if arm_id is not None:
+            arm_id = _digest(arm_id, name=f"learner_state arm {index}.arm_id")
+        if arm_id != expected_arm_id and not (arm_id is None and expected_arm_id == domain):
+            _fail(f"learner_state arm {index}.arm_id does not match its context")
+        arm_key = expected_arm_id
+        if arm_key in seen:
+            _fail("learner_state contains duplicate contextual arms")
+        seen.add(arm_key)
         pulls = _integer(raw["pulls"], name=f"learner_state arm {index}.pulls", minimum=0, maximum=2**31 - 1)
         failures = _integer(raw["failures"], name=f"learner_state arm {index}.failures", minimum=0, maximum=2**31 - 1)
         if failures > pulls:
             _fail(f"learner_state arm {index} failures exceed pulls")
         reward_sum = _number(raw["reward_sum"], name=f"learner_state arm {index}.reward_sum", minimum=-pulls, maximum=pulls)
-        normalized_arms.append({"domain": domain, "pulls": pulls, "failures": failures, "reward_sum": reward_sum})
-    normalized_arms.sort(key=lambda arm: arm["domain"])
+        normalized_arm: dict[str, Any] = {"domain": domain, "pulls": pulls, "failures": failures, "reward_sum": reward_sum}
+        if capability is not None or risk_class is not None:
+            normalized_arm["capability"] = capability
+            normalized_arm["risk_class"] = risk_class
+            normalized_arm["arm_id"] = arm_key
+        normalized_arms.append(normalized_arm)
+    normalized_arms.sort(key=lambda arm: arm.get("arm_id", arm["domain"]))
     body = {
         "schema": value["schema"],
         "generation": generation,

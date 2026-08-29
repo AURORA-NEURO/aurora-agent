@@ -2383,3 +2383,10 @@ replacement. Receipt-authorized runs are also fenced to one scheduler cycle; eac
 must be previewed and approved again. Deployment-owned work remains operator authentication,
 encrypted/shared persistence, distributed leases, and an approval UX that surfaces revocation and
 staleness clearly.
+
+The goal-control learner now uses contextual value estimates. Capability and risk-class metadata
+derive independent content-addressed arms within each domain, while metadata-free goals preserve
+the legacy domain arm. Both SDKs validate contextual arm identity, preserve value-only retention,
+restore legacy snapshots, and share deterministic cross-language state digests. Remaining
+deployment-owned work is unchanged: operator authentication, encrypted/shared persistence,
+distributed leases, and approval UX.

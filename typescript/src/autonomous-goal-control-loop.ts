@@ -222,16 +222,54 @@ function normalizeLearningSignal(value: unknown, index: number): AutonomousGoalS
 }
 
 type BanditArm = { pulls: number; failures: number; reward_sum: number };
+type BanditContext = { domain: string; capability: string | null; risk_class: string | null };
 
-/** Value-only UCB-style domain adaptation driven only by explicit evaluator rewards. */
+/** Value-only contextual UCB adaptation driven only by explicit evaluator rewards. */
 export class AutonomousGoalBanditLearner {
   private generationValue = 0;
   private readonly arms = new Map<string, BanditArm>();
+  private readonly contexts = new Map<string, BanditContext>();
   exploration: number;
 
   constructor(options: { state?: JsonObject; exploration?: number } = {}) {
     this.exploration = finite("bandit exploration", options.exploration ?? 0.35, 0, 2);
     if (options.state !== undefined) this.restore(options.state);
+  }
+
+  private static contextPart(name: string, value: unknown): string | null {
+    return value === null || value === undefined ? null : identifier(name, value, 128);
+  }
+
+  private static context(name: string, value: JsonObject): BanditContext {
+    return {
+      domain: identifier(`${name}.domain`, value.domain, 128),
+      capability: AutonomousGoalBanditLearner.contextPart(`${name}.capability`, value.capability),
+      risk_class: AutonomousGoalBanditLearner.contextPart(`${name}.risk_class`, value.risk_class),
+    };
+  }
+
+  private static armId(context: BanditContext): string {
+    if (context.capability === null && context.risk_class === null) return context.domain;
+    return digestJsonSync({
+      schema: `${AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA}/context-arm`,
+      domain: context.domain,
+      capability: context.capability,
+      risk_class: context.risk_class,
+    });
+  }
+
+  private ensureArm(context: BanditContext): BanditArm {
+    const armId = AutonomousGoalBanditLearner.armId(context);
+    const priorContext = this.contexts.get(armId);
+    if (priorContext !== undefined && JSON.stringify(priorContext) !== JSON.stringify(context)) fail("bandit arm context identity collision");
+    this.contexts.set(armId, context);
+    const arm = this.arms.get(armId) ?? { pulls: 0, failures: 0, reward_sum: 0 };
+    this.arms.set(armId, arm);
+    return arm;
+  }
+
+  private armFor(context: BanditContext): BanditArm {
+    return this.arms.get(AutonomousGoalBanditLearner.armId(context)) ?? { pulls: 0, failures: 0, reward_sum: 0 };
   }
 
   restore(state: JsonObject): void {
@@ -240,15 +278,20 @@ export class AutonomousGoalBanditLearner {
     this.generationValue = integer("bandit generation", state.generation, 0, 2_147_483_647);
     if (!Array.isArray(state.arms) || state.arms.length > 128) fail("bandit arms are outside their bounds");
     this.arms.clear();
+    this.contexts.clear();
     for (const raw of state.arms) {
       if (!isObject(raw)) fail("bandit arm is malformed");
-      const domain = identifier("bandit arm domain", raw.domain, 128);
-      if (this.arms.has(domain)) fail("bandit state contains duplicate domains");
+      const context = AutonomousGoalBanditLearner.context("bandit arm", raw);
+      const expectedArmId = AutonomousGoalBanditLearner.armId(context);
+      const armId = raw.arm_id === undefined || raw.arm_id === null ? expectedArmId : digest("bandit arm_id", raw.arm_id)!;
+      if (armId !== expectedArmId) fail("bandit arm_id does not match its context");
+      if (this.arms.has(armId)) fail("bandit state contains duplicate contextual arms");
       const pulls = integer("bandit arm pulls", raw.pulls, 0, 2_147_483_647);
       const failures = integer("bandit arm failures", raw.failures, 0, 2_147_483_647);
       if (failures > pulls) fail("bandit arm failures exceed pulls");
       const rewardSum = finite("bandit arm reward_sum", raw.reward_sum, -pulls, pulls);
-      this.arms.set(domain, { pulls, failures, reward_sum: rewardSum });
+      this.arms.set(armId, { pulls, failures, reward_sum: rewardSum });
+      this.contexts.set(armId, context);
     }
   }
 
@@ -256,9 +299,18 @@ export class AutonomousGoalBanditLearner {
     const body: JsonObject = {
       schema: AUTONOMOUS_GOAL_CONTROL_BANDIT_SCHEMA,
       generation: this.generationValue,
-      arms: [...this.arms.keys()].sort().map((domain) => ({ domain, ...this.arms.get(domain)! })),
+      arms: [...this.arms.keys()].sort().map((armId) => {
+        const context = this.contexts.get(armId) ?? { domain: armId, capability: null, risk_class: null };
+        const row: JsonObject = { domain: context.domain, ...this.arms.get(armId)! };
+        if (context.capability !== null || context.risk_class !== null) {
+          row.capability = context.capability;
+          row.risk_class = context.risk_class;
+          row.arm_id = armId;
+        }
+        return row;
+      }),
       exploration: this.exploration,
-      retention: "value_only_goal_domain_bandit_state",
+      retention: "value_only_goal_contextual_bandit_state",
       secret_material: "never_returned",
     };
     return { ...body, state_digest: digestJsonSync(body) };
@@ -266,14 +318,23 @@ export class AutonomousGoalBanditLearner {
 
   update(evaluations: readonly AutonomousGoalEvaluation[], goals: readonly AutonomousGoalRecord[]): Record<string, unknown> {
     if (!Array.isArray(evaluations) || evaluations.length > AUTONOMOUS_GOAL_CONTROL_MAX_EVALUATIONS) fail("bandit evaluations are outside their bounds");
+    const goalsById = new Map<string, AutonomousGoalRecord>();
+    for (const goal of goals) {
+      if (goalsById.has(goal.goal_id)) fail("bandit goals contain duplicate goal_id values");
+      goalsById.set(goal.goal_id, goal);
+    }
     for (const evaluation of evaluations) {
       const domain = identifier("bandit evaluation domain", evaluation.domain, 128);
       const reward = finite("bandit evaluation reward", evaluation.reward, -1, 1);
-      const arm = this.arms.get(domain) ?? { pulls: 0, failures: 0, reward_sum: 0 };
+      const evaluationGoal = goalsById.get(evaluation.goal_id);
+      const context = evaluationGoal === undefined
+        ? { domain, capability: null, risk_class: null }
+        : AutonomousGoalBanditLearner.context("bandit evaluation goal", evaluationGoal);
+      if (context.domain !== domain) fail("bandit evaluation domain does not match its goal");
+      const arm = this.ensureArm(context);
       arm.pulls += 1;
       arm.reward_sum += reward;
       if (!evaluation.passed) arm.failures += 1;
-      this.arms.set(domain, arm);
     }
     if (this.generationValue >= 2_147_483_647) fail("bandit generation is exhausted");
     this.generationValue += 1;
@@ -281,7 +342,7 @@ export class AutonomousGoalBanditLearner {
     const signals: AutonomousGoalSchedulingSignal[] = [];
     for (const goal of goals) {
       if (!(["ready", "paused", "failed"] as readonly string[]).includes(goal.status)) continue;
-      const arm = this.arms.get(goal.domain) ?? { pulls: 0, failures: 0, reward_sum: 0 };
+      const arm = this.armFor(AutonomousGoalBanditLearner.context("bandit goal", goal));
       const mean = arm.pulls === 0 ? 1 : (arm.reward_sum / arm.pulls + 1) / 2;
       const score = arm.pulls === 0 ? 1 : Math.min(1, Math.max(0, mean + this.exploration * Math.sqrt(Math.log(totalPulls + 1) / arm.pulls)));
       const urgency = Math.min(1, arm.failures / Math.max(1, arm.pulls));

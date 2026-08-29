@@ -13178,3 +13178,24 @@ change, policy change, learner-state change, or schedule change produces a diffe
 the call fails closed. This guard is intentionally limited to a fixed schedule policy: dynamic
 `options_factory` policies and recovery-owned resume snapshots cannot be combined with it because
 their effective decision is not fully represented by the static preview.
+
+### Contextual goal-bandit adaptation
+
+The built-in goal learner is contextual rather than domain-only. When a goal carries `capability`
+or `risk_class` metadata, the learner derives a deterministic content-addressed arm from
+`{domain, capability, risk_class}`. A successful low-risk coding workflow therefore does not
+automatically become evidence for a high-risk production migration. Goals that omit both optional
+fields retain the legacy domain arm and can restore older persisted state without rewriting it.
+
+Only the explicit evaluator packet for a goal updates that goal's contextual arm. Transport status,
+provider availability, retry envelopes, and execution failures cannot create reward by themselves.
+The retained projection is bounded metadata: domain, optional context labels, pulls, failures,
+reward sum, and an arm identity digest. It never contains task text, prompts, provider output,
+credentials, tool arguments, evidence, or evaluator prose.
+
+Both SDKs validate context-derived arm identity, reject duplicate or colliding arms, and accept both
+legacy domain-only and current contextual retention markers during checkpoint restore. Their
+canonical arm identity and snapshot/state digests are aligned, so a learner can move between Python
+and TypeScript without silently mixing unrelated goal populations. This remains value-only admission
+priority adaptation: it does not grant permissions, choose credentials, bypass approvals, or treat
+an evaluator reward as scientific truth.

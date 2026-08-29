@@ -76,6 +76,51 @@ test("goal scheduler prioritizes dependency-closed work across every domain", ()
   assert.equal(schedule.schedule_digest, "30451f0e55e23ad929f23415a2ffe0a9281e3c3632c51ac9420d00995c789654");
 });
 
+test("goal bandit separates capability and risk contexts with deterministic restore", () => {
+  const goals = [
+    { goal_id: "coding-low-risk", domain: "coding", capability: "implementation", risk_class: "low", status: "ready" },
+    { goal_id: "coding-high-risk", domain: "coding", capability: "implementation", risk_class: "high", status: "ready" },
+  ];
+  const learner = new AutonomousGoalBanditLearner({ exploration: 0.35 });
+  learner.update([
+    { goal_id: "coding-low-risk", domain: "coding", reward: -1, passed: false },
+    { goal_id: "coding-high-risk", domain: "coding", reward: 0.75, passed: true },
+  ], goals);
+  const snapshot = learner.snapshot();
+  assert.equal(snapshot.retention, "value_only_goal_contextual_bandit_state");
+  assert.equal(snapshot.arms.length, 2);
+  assert.deepEqual(new Set(snapshot.arms.map((row) => row.risk_class)), new Set(["low", "high"]));
+  assert.ok(snapshot.arms.every((row) => typeof row.arm_id === "string" && row.arm_id.length === 64));
+  assert.equal(snapshot.arms[0].domain, "coding");
+  assert.equal(learner.update([], goals).signals[0].goal_id, "coding-high-risk");
+  const restored = new AutonomousGoalBanditLearner({ state: snapshot });
+  assert.deepEqual(restored.snapshot(), snapshot);
+  const checkpoint = sealAutonomousGoalControlLoopSnapshot({
+    schema: "bioprism-autonomous-goal-control-checkpoint/0.1",
+    run_id: "contextual-bandit-checkpoint",
+    next_cycle: 1,
+    cycle_summaries: [],
+    previous_cycle: null,
+    completed_cycles: 0,
+    total_selected: 0,
+    total_claimed: 0,
+    total_runs: 0,
+    status_counts: {},
+    domain_counts: {},
+    evaluation_count: 0,
+    evaluation_digests: [],
+    learning_state_digest: null,
+    learned_signals: [],
+    learner_state: snapshot,
+    stop_reason: "cycle_budget_exhausted",
+    generation: 1,
+    previous_snapshot_digest: null,
+    retention: "metadata_only_goal_control_checkpoint;tasks_prompts_parameters_credentials_and_results_not_retained",
+    secret_material: "never_returned",
+  });
+  assert.deepEqual(validateAutonomousGoalControlLoopSnapshot(checkpoint).learner_state, snapshot);
+});
+
 test("goal control loop preview is provider-free and explains all-domain admission", async () => {
   const domains = [...AUTONOMOUS_DOMAIN_NAMES];
   const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length + 1, clock: () => 100 });

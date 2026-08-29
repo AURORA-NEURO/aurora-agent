@@ -174,10 +174,14 @@ class AutonomousGoalEvaluation:
 
 
 class AutonomousGoalBanditLearner:
-    """Value-only UCB-style domain learner used when a loop has an evaluator but no custom learner.
+    """Value-only contextual UCB learner used when a loop has an evaluator but no custom learner.
 
     It adapts future goal admission priorities, not permissions or provider authority. Rewards are
     accepted only from explicit evaluator packets; transport status is never converted to reward.
+    The context key is ``domain + capability + risk_class``.  Goals without capability or risk
+    metadata retain the original domain-only arm identity so older persisted state remains
+    replayable.  Contextual arms are content-addressed and therefore cannot collide merely because
+    a caller chose a delimiter-containing identifier.
     """
 
     def __init__(self, *, state: Mapping[str, Any] | None = None, exploration: float = 0.35) -> None:
@@ -186,8 +190,48 @@ class AutonomousGoalBanditLearner:
         self.exploration = float(exploration)
         self.generation = 0
         self.arms: dict[str, dict[str, float | int]] = {}
+        self._arm_context: dict[str, tuple[str, str | None, str | None]] = {}
         if state is not None:
             self._restore(state)
+
+    @staticmethod
+    def _context_part(value: Any, *, name: str) -> str | None:
+        if value is None:
+            return None
+        return _identifier(value, name=name, maximum=128)
+
+    @classmethod
+    def _arm_id(cls, domain: str, capability: str | None, risk_class: str | None) -> str:
+        if capability is None and risk_class is None:
+            return domain
+        return content_digest(
+            {
+                "schema": f"{GOAL_CONTROL_BANDIT_SCHEMA}/context-arm",
+                "domain": domain,
+                "capability": capability,
+                "risk_class": risk_class,
+            }
+        )
+
+    @classmethod
+    def _context(cls, value: Mapping[str, Any], *, name: str) -> tuple[str, str | None, str | None]:
+        domain = _identifier(value.get("domain"), name=f"{name}.domain", maximum=128)
+        capability = cls._context_part(value.get("capability"), name=f"{name}.capability")
+        risk_class = cls._context_part(value.get("risk_class"), name=f"{name}.risk_class")
+        return domain, capability, risk_class
+
+    def _ensure_arm(self, domain: str, capability: str | None, risk_class: str | None) -> dict[str, float | int]:
+        arm_id = self._arm_id(domain, capability, risk_class)
+        context = (domain, capability, risk_class)
+        prior_context = self._arm_context.get(arm_id)
+        if prior_context is not None and prior_context != context:
+            _fail("bandit arm context identity collision")
+        self._arm_context[arm_id] = context
+        return self.arms.setdefault(arm_id, {"pulls": 0, "failures": 0, "reward_sum": 0.0})
+
+    def _arm_for_context(self, domain: str, capability: str | None, risk_class: str | None) -> dict[str, float | int]:
+        arm_id = self._arm_id(domain, capability, risk_class)
+        return self.arms.get(arm_id, {"pulls": 0, "failures": 0, "reward_sum": 0.0})
 
     def _restore(self, state: Mapping[str, Any]) -> None:
         if not isinstance(state, Mapping) or state.get("schema") != GOAL_CONTROL_BANDIT_SCHEMA:
@@ -201,12 +245,21 @@ class AutonomousGoalBanditLearner:
         if not isinstance(raw_arms, Sequence) or isinstance(raw_arms, (str, bytes, bytearray)) or len(raw_arms) > 128:
             _fail("bandit arms are outside their bounds")
         self.arms.clear()
+        self._arm_context.clear()
         for raw in raw_arms:
             if not isinstance(raw, Mapping):
                 _fail("bandit arm is malformed")
-            domain = _identifier(raw.get("domain"), name="bandit arm domain", maximum=128)
-            if domain in self.arms:
-                _fail("bandit state contains duplicate domains")
+            domain, capability, risk_class = self._context(raw, name="bandit arm")
+            arm_id = raw.get("arm_id")
+            expected_arm_id = self._arm_id(domain, capability, risk_class)
+            if arm_id is not None:
+                arm_id = _digest(arm_id, name="bandit arm_id")
+                if arm_id != expected_arm_id:
+                    _fail("bandit arm_id does not match its context")
+            else:
+                arm_id = expected_arm_id
+            if arm_id in self.arms:
+                _fail("bandit state contains duplicate contextual arms")
             pulls = _integer(raw.get("pulls"), name="bandit arm pulls", minimum=0, maximum=2**31 - 1)
             failures = _integer(raw.get("failures"), name="bandit arm failures", minimum=0, maximum=2**31 - 1)
             if failures > pulls:
@@ -214,7 +267,8 @@ class AutonomousGoalBanditLearner:
             reward_sum = raw.get("reward_sum")
             if isinstance(reward_sum, bool) or not isinstance(reward_sum, (int, float)) or not math.isfinite(float(reward_sum)) or not -pulls <= float(reward_sum) <= pulls:
                 _fail("bandit arm reward_sum is outside its bounds")
-            self.arms[domain] = {"pulls": pulls, "failures": failures, "reward_sum": float(reward_sum)}
+            self.arms[arm_id] = {"pulls": pulls, "failures": failures, "reward_sum": float(reward_sum)}
+            self._arm_context[arm_id] = (domain, capability, risk_class)
 
     def restore(self, state: Mapping[str, Any]) -> None:
         """Replace value-only state after a process restart."""
@@ -225,20 +279,39 @@ class AutonomousGoalBanditLearner:
         body = {
             "schema": GOAL_CONTROL_BANDIT_SCHEMA,
             "generation": self.generation,
-            "arms": [{"domain": domain, **self.arms[domain]} for domain in sorted(self.arms)],
+            "arms": [],
             "exploration": _portable_number(self.exploration),
-            "retention": "value_only_goal_domain_bandit_state",
+            "retention": "value_only_goal_contextual_bandit_state",
             "secret_material": "never_returned",
         }
-        body["arms"] = [
-            {"domain": domain, "pulls": int(self.arms[domain]["pulls"]), "failures": int(self.arms[domain]["failures"]), "reward_sum": _portable_number(float(self.arms[domain]["reward_sum"]))}
-            for domain in sorted(self.arms)
-        ]
+        arms: list[dict[str, Any]] = []
+        for arm_id in sorted(self.arms):
+            domain, capability, risk_class = self._arm_context.get(arm_id, (arm_id, None, None))
+            row: dict[str, Any] = {
+                "domain": domain,
+                "pulls": int(self.arms[arm_id]["pulls"]),
+                "failures": int(self.arms[arm_id]["failures"]),
+                "reward_sum": _portable_number(float(self.arms[arm_id]["reward_sum"])),
+            }
+            if capability is not None or risk_class is not None:
+                row["capability"] = capability
+                row["risk_class"] = risk_class
+                row["arm_id"] = arm_id
+            arms.append(row)
+        body["arms"] = arms
         return {**body, "state_digest": content_digest(body)}
 
     def update(self, evaluations: Sequence[Mapping[str, Any]], goals: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if not isinstance(evaluations, Sequence) or isinstance(evaluations, (str, bytes, bytearray)) or len(evaluations) > MAX_GOAL_CONTROL_EVALUATIONS:
             _fail("bandit evaluations are outside their bounds")
+        goals_by_id: dict[str, Mapping[str, Any]] = {}
+        for goal in goals:
+            if not isinstance(goal, Mapping):
+                _fail("bandit goal is malformed")
+            goal_id = _identifier(goal.get("goal_id"), name="bandit goal_id")
+            if goal_id in goals_by_id:
+                _fail("bandit goals contain duplicate goal_id values")
+            goals_by_id[goal_id] = goal
         for raw in evaluations:
             if not isinstance(raw, Mapping) or not isinstance(raw.get("passed"), bool):
                 _fail("bandit evaluation is malformed")
@@ -246,7 +319,15 @@ class AutonomousGoalBanditLearner:
             reward = raw.get("reward")
             if isinstance(reward, bool) or not isinstance(reward, (int, float)) or not math.isfinite(float(reward)) or not -1.0 <= float(reward) <= 1.0:
                 _fail("bandit evaluation reward is outside its bounds")
-            arm = self.arms.setdefault(domain, {"pulls": 0, "failures": 0, "reward_sum": 0.0})
+            evaluation_goal = goals_by_id.get(raw.get("goal_id"))
+            if evaluation_goal is not None:
+                context_domain, capability, risk_class = self._context(evaluation_goal, name="bandit evaluation goal")
+                if context_domain != domain:
+                    _fail("bandit evaluation domain does not match its goal")
+            else:
+                capability = None
+                risk_class = None
+            arm = self._ensure_arm(domain, capability, risk_class)
             arm["pulls"] = int(arm["pulls"]) + 1
             arm["reward_sum"] = float(arm["reward_sum"]) + float(reward)
             if not bool(raw.get("passed")):
@@ -261,8 +342,8 @@ class AutonomousGoalBanditLearner:
             if status not in {"ready", "paused", "failed"}:
                 continue
             goal_id = _identifier(goal.get("goal_id"), name="bandit goal_id")
-            domain = _identifier(goal.get("domain"), name="bandit goal domain", maximum=128)
-            arm = self.arms.get(domain, {"pulls": 0, "failures": 0, "reward_sum": 0.0})
+            domain, capability, risk_class = self._context(goal, name="bandit goal")
+            arm = self._arm_for_context(domain, capability, risk_class)
             pulls = int(arm["pulls"])
             if pulls == 0:
                 score = 1.0
