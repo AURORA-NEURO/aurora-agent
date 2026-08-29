@@ -2497,8 +2497,8 @@ the route provider-free and checks the exact selected domains before dispatch; p
 semantic routing is rejected until its separate classifier boundary is reviewed. Integration
 coverage runs real structured provider fixtures across all twelve built-in domains, verifies
 restart completion and checkpoint redaction, and proves held admission prevents dispatch. Future
-deployment work remains persistence adapters, operator-facing recovery UX, and a caller-owned
-workflow trace/settlement surface for long-running workers.
+deployment work remains persistence adapters, operator-facing recovery UX, and richer caller-owned
+workflow settlement/export integrations for long-running workers.
 
 The TypeScript high-level facade now also exposes evaluator-guided workflow cycles through
 `runWorkflowCycle()` and `runWorkflowCycleWithLaunchAdmission()`. The cycle binds a fresh durable
@@ -2510,3 +2510,19 @@ outcomes only through explicit callbacks. All twelve domains run through the sam
 contract; provider completion is never treated as task reward, and launch admission still gates
 the first provider or planner boundary. Future work remains deployment-owned trace export,
 operator identity, and production persistence adapters.
+
+The TypeScript facade now adds `runWorkflowWithTrace()` / `resumeWorkflowWithTrace()` and their
+launch-admitted variants. These bind provider and selection observers to a metadata-only trace
+session while leaving task text, prompts, structured stage responses, evaluator values, tool
+payloads, and credentials caller-owned. Restart traces use a fresh trace run identity and report
+only the current invocation's bounded lifecycle, so a resumed worker cannot accidentally rewrite
+or replay an earlier trace. Remaining work is durable trace export, operator identity, and
+deployment-specific trace retention policy.
+
+Cycle observability is now available at the same facade boundary through
+`runWorkflowCycleWithTrace()` and `runWorkflowCycleWithLaunchAdmissionAndTrace()`. These methods
+attach metadata-only provider and selection observers to evaluator-guided execution, publish the
+final cycle route/plan/checkpoint identity, and map bounded cycle statuses without promoting
+evaluator evidence or learning values into durable trace state. Future work is limited to
+deployment-owned trace export, operator identity, and retention policy rather than missing SDK
+execution coverage.

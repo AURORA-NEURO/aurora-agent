@@ -13426,7 +13426,7 @@ This closes the application composition gap for coding, browser, data, science, 
 neuroscience, operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation
 profiles while preserving the current single-domain workflow limitation. Distributed checkpoint
 storage, task/credential rehydration, evaluator settlement, operator identity, and durable
-workflow traces remain deployment-owned follow-up surfaces.
+workflow trace retention remain deployment-owned follow-up surfaces.
 
 The facade also exposes `runWorkflowCycle()` and
 `runWorkflowCycleWithLaunchAdmission()` for the closed-loop workflow path. These methods compose
@@ -13444,3 +13444,22 @@ instructions. After restart, caller-owned rehydration callbacks must return the 
 execution/evidence/plan values whose digests are already recorded. This gives high-level
 applications a complete workflow/evaluator/learning composition boundary while retaining the
 same explicit recovery responsibilities as the lower-level kernels.
+
+The traced workflow methods, `runWorkflowWithTrace()` and `resumeWorkflowWithTrace()`, compose
+this lifecycle with `AutonomousRunTraceSession`. Their observer bridge records provider start and
+finish metadata plus model-selection lifecycle events, then records the resolved route/plan
+identity and terminal status. The launch-admitted traced variants run the provider-free domain
+admission before creating the trace, so a held or mismatched admission leaves both provider and
+trace state untouched. Trace summaries are safe operational projections: they exclude task text,
+prompts, structured stage responses, evaluator evidence, tool arguments, credentials, and retry
+instructions. A restart uses a new caller-supplied trace identity and never appends to an earlier
+terminal trace implicitly.
+
+Cycle tracing is available through `runWorkflowCycleWithTrace()` and
+`runWorkflowCycleWithLaunchAdmissionAndTrace()`. The cycle wrapper attaches the trace observer
+and selection callback before any stage or planner dispatch, records the final route and plan
+identity when an execution exists, and maps evaluator/replan outcomes to the trace's explicit
+terminal statuses. If a cycle is held at route, plan, provider, or evaluator review, the trace
+preserves that non-success state. The trace never stores evaluator evidence, retry guidance,
+learning values, stage output, task text, prompts, credentials, or tool payloads; caller-owned
+cycle state and trace persistence remain separate restart boundaries.

@@ -1858,6 +1858,33 @@ const cycle = await brain.runWorkflowCycle(task, {
 });
 ```
 
+For operational visibility, `runWorkflowWithTrace()` and `resumeWorkflowWithTrace()` attach the
+existing `AutonomousRunTraceSession` to the workflow's provider observer and model-selection
+callback. The launch-admitted traced variants perform domain admission before creating a trace
+or opening a provider boundary. Trace events retain only bounded route/plan/selection digests,
+provider metadata, timing, token counts, failure classes, and terminal status; the task, prompt,
+structured stage response, tool payload, credential, and evaluator values remain outside the trace.
+
+```typescript
+const traced = await brain.runWorkflowWithTrace(task, {
+  checkpointStore,
+  traceStore,
+  runId: "workflow-trace-42",
+  domain: "data",
+  candidates: agent.models(),
+  approveProviderCall: true,
+  maxStages: 2,
+});
+// traced.trace is safe for the caller's trace store; traced.execution remains local.
+```
+
+Evaluator-guided cycles can use the same trace boundary through
+`runWorkflowCycleWithTrace()` and `runWorkflowCycleWithLaunchAdmissionAndTrace()`. The trace
+reports the current cycle's provider/selection lifecycle and final route/plan/checkpoint
+identity; evaluator evidence, retry instructions, learning values, and stage responses stay
+caller-owned. A new trace `runId` should be used for each restart attempt so the append-only
+trace does not merge separate process lifecycles implicitly.
+
 ```typescript
 const first = await executor.start(task, {
   candidates: agent.models(),

@@ -444,6 +444,103 @@ test("brain facade exposes evaluator-guided workflow cycles across every built-i
   assert.equal(requests.length, attempts);
 });
 
+test("brain facade traces durable workflow start and restart across every built-in domain", async () => {
+  const requests = [];
+  const runtime = workflowRuntime((request) => requests.push(request));
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+
+  for (const [index, domain] of AUTONOMOUS_DOMAIN_NAMES.entries()) {
+    const task = `Trace a bounded ${domain} workflow`;
+    const traced = await brain.runWorkflowWithTrace(task, {
+      checkpointStore: new InMemoryAutonomousWorkflowCheckpointStore(),
+      traceStore,
+      runId: `facade-traced-workflow-${domain}-${index}`,
+      domain,
+      candidates: [model],
+      approveProviderCall: true,
+      maxStages: 1,
+    });
+    assert.ok(["completed", "paused"].includes(traced.execution.status), domain);
+    assert.equal(traced.trace.provider_invocations, 1, domain);
+    assert.ok(traced.trace.domains.includes(domain), domain);
+    assert.equal(JSON.stringify(traced.trace).includes(task), false, domain);
+  }
+
+  const store = new InMemoryAutonomousWorkflowCheckpointStore();
+  const task = "Trace restart recovery for coding";
+  const first = await brain.runWorkflow(task, {
+    checkpointStore: store,
+    domain: "coding",
+    candidates: [model],
+    approveProviderCall: true,
+    maxStages: 1,
+    jobId: "facade-trace-restart",
+  });
+  const resumed = await brain.resumeWorkflowWithTrace(first.job_id, task, {
+    checkpointStore: store,
+    traceStore,
+    runId: "facade-trace-restart-resume",
+    domain: "coding",
+    candidates: [model],
+    approveProviderCall: true,
+  });
+  assert.equal(resumed.execution.status, "completed");
+  assert.equal(resumed.trace.status, "completed");
+  assert.equal(resumed.trace.provider_invocations, first.total_stage_count - 1);
+
+  const admission = await approvedLaunchAdmission(brain);
+  const admitted = await brain.runWorkflowWithLaunchAdmissionAndTrace("admitted traced workflow", admission, {
+    checkpointStore: new InMemoryAutonomousWorkflowCheckpointStore(),
+    traceStore,
+    runId: "facade-admitted-trace",
+    domain: "evaluation",
+    candidates: [model],
+    approveProviderCall: true,
+    maxStages: 1,
+  });
+  assert.ok(["completed", "paused"].includes(admitted.execution.status));
+  assert.equal(admitted.trace.provider_invocations, 1);
+});
+
+test("brain facade traces evaluator-guided workflow cycles before and after launch admission", async () => {
+  const requests = [];
+  const runtime = workflowRuntime((request) => requests.push(request));
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+  const cycle = await brain.runWorkflowCycleWithTrace("trace an evaluated science workflow", {
+    checkpointStore: new InMemoryAutonomousWorkflowCheckpointStore(),
+    traceStore,
+    runId: "facade-cycle-trace",
+    domain: "science",
+    candidates: [model],
+    approveProviderCall: true,
+    evaluate: async (execution) => ({ evidence: perfectWorkflowEvidence(execution) }),
+  });
+  assert.equal(cycle.cycle.status, "completed");
+  assert.equal(cycle.trace.status, "completed");
+  assert.equal(cycle.trace.provider_invocations, cycle.cycle.final.stage_results.length);
+  assert.equal(JSON.stringify(cycle.trace).includes("trace an evaluated science workflow"), false);
+
+  const admission = await approvedLaunchAdmission(brain);
+  const admitted = await brain.runWorkflowCycleWithLaunchAdmissionAndTrace("admitted evaluated cycle", admission, {
+    checkpointStore: new InMemoryAutonomousWorkflowCheckpointStore(),
+    traceStore,
+    runId: "facade-admitted-cycle-trace",
+    domain: "evaluation",
+    candidates: [model],
+    approveProviderCall: true,
+    evaluate: async (execution) => ({ evidence: perfectWorkflowEvidence(execution) }),
+  });
+  assert.equal(admitted.cycle.status, "completed");
+  assert.equal(admitted.trace.status, "completed");
+  assert.equal(admitted.trace.provider_invocations, admitted.cycle.final.stage_results.length);
+});
+
 test("brain facade automatic execution preserves the separate provider-planning acceptance gate", async () => {
   const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
   runtime.registerInMemoryProvider("offline", (request) => {

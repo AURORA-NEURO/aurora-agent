@@ -239,6 +239,24 @@ export interface AutonomousBrainWorkflowResumeOptions extends Omit<AutonomousWor
 /** Result of one bounded workflow start or resume operation. */
 export type AutonomousBrainWorkflowResult = AutonomousWorkflowExecutionResult;
 
+/** Durable workflow start controls plus a caller-owned metadata-only trace. */
+export interface AutonomousBrainWorkflowTraceOptions extends AutonomousBrainWorkflowOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+/** Durable workflow resume controls plus a caller-owned metadata-only trace. */
+export interface AutonomousBrainWorkflowResumeTraceOptions extends AutonomousBrainWorkflowResumeOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+/** A durable workflow result paired with its metadata-only execution trace. */
+export interface AutonomousBrainTracedWorkflowResult {
+  execution: AutonomousBrainWorkflowResult;
+  trace: AutonomousRunTraceSummary;
+}
+
 /**
  * Evaluator-guided workflow cycle controls exposed by the high-level facade.
  *
@@ -252,6 +270,18 @@ export interface AutonomousBrainWorkflowCycleOptions extends AutonomousWorkflowC
 
 /** Result of one bounded workflow execution/evaluation/replan cycle. */
 export type AutonomousBrainWorkflowCycleResult = AutonomousWorkflowCycleRunResult;
+
+/** Evaluator-guided workflow cycle controls plus a caller-owned metadata-only trace. */
+export interface AutonomousBrainWorkflowCycleTraceOptions extends AutonomousBrainWorkflowCycleOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+/** An evaluator-guided workflow cycle paired with its metadata-only trace. */
+export interface AutonomousBrainTracedWorkflowCycleResult {
+  cycle: AutonomousBrainWorkflowCycleResult;
+  trace: AutonomousRunTraceSummary;
+}
 
 export interface AutonomousBrainExecutionPolicyOptions {
   candidates: readonly AutonomousExecutionPolicyCandidateInput[];
@@ -2212,6 +2242,121 @@ export class AutonomousBrainFacade {
     const domains = await this.workflowLaunchDomains(task, options);
     if (domains.length > 0) authorizeAutonomousLaunchDomains(admission, domains);
     return this.runWorkflowCycle(task, options);
+  }
+
+  /** Run an evaluator-guided workflow cycle while recording metadata-only lifecycle telemetry. */
+  async runWorkflowCycleWithTrace(
+    task: string,
+    options: AutonomousBrainWorkflowCycleTraceOptions,
+  ): Promise<AutonomousBrainTracedWorkflowCycleResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain workflow cycle trace options must be an object");
+    const { checkpointStore, executorOptions, traceStore, runId, ...cycleOptions } = options;
+    const trace = await this.createWorkflowTrace(task, cycleOptions, traceStore, runId);
+    await trace.started();
+    try {
+      const executor = new AutonomousWorkflowExecutor(this.agent, checkpointStore, executorOptions);
+      const cycle = await runAutonomousWorkflowCycle(task, executor, {
+        ...cycleOptions,
+        observer: composeBrainObservers(cycleOptions.observer, trace.providerObserver()),
+        selectionEventCallback: trace.selectionEventCallback(cycleOptions.selectionEventCallback),
+      });
+      if (cycle.final) await this.recordWorkflowTracePlan(trace, cycle.final);
+      await trace.complete(this.workflowCycleTraceCompletion(cycle));
+      return { cycle, trace: await trace.summary() };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Run a traced evaluator-guided cycle only after provider-free launch admission. */
+  async runWorkflowCycleWithLaunchAdmissionAndTrace(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainWorkflowCycleTraceOptions,
+  ): Promise<AutonomousBrainTracedWorkflowCycleResult> {
+    const domains = await this.workflowLaunchDomains(task, options);
+    if (domains.length > 0) authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWorkflowCycleWithTrace(task, options);
+  }
+
+  /** Run a durable workflow while recording provider/selection lifecycle metadata only. */
+  async runWorkflowWithTrace(
+    task: string,
+    options: AutonomousBrainWorkflowTraceOptions,
+  ): Promise<AutonomousBrainTracedWorkflowResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain workflow trace options must be an object");
+    const { checkpointStore, executorOptions, traceStore, runId, ...workflowOptions } = options;
+    const trace = await this.createWorkflowTrace(task, workflowOptions, traceStore, runId);
+    await trace.started();
+    try {
+      const execution = await this.runWorkflow(task, {
+        checkpointStore,
+        executorOptions,
+        ...workflowOptions,
+        observer: composeBrainObservers(workflowOptions.observer, trace.providerObserver()),
+        selectionEventCallback: trace.selectionEventCallback(workflowOptions.selectionEventCallback),
+      });
+      await this.recordWorkflowTracePlan(trace, execution);
+      await trace.complete(this.workflowTraceCompletion(execution));
+      return { execution, trace: await trace.summary() };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Resume a durable workflow while recording only restart-safe provider/selection metadata. */
+  async resumeWorkflowWithTrace(
+    jobId: string,
+    task: string,
+    options: AutonomousBrainWorkflowResumeTraceOptions,
+  ): Promise<AutonomousBrainTracedWorkflowResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain workflow trace options must be an object");
+    const { checkpointStore, executorOptions, traceStore, runId, ...workflowOptions } = options;
+    const trace = await this.createWorkflowTrace(task, workflowOptions, traceStore, runId);
+    await trace.started();
+    try {
+      const execution = await this.resumeWorkflow(jobId, task, {
+        checkpointStore,
+        executorOptions,
+        ...workflowOptions,
+        observer: composeBrainObservers(workflowOptions.observer, trace.providerObserver()),
+        selectionEventCallback: trace.selectionEventCallback(workflowOptions.selectionEventCallback),
+      });
+      await this.recordWorkflowTracePlan(trace, execution);
+      await trace.complete(this.workflowTraceCompletion(execution));
+      return { execution, trace: await trace.summary() };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Run a traced workflow only after provider-free launch admission covers its route. */
+  async runWorkflowWithLaunchAdmissionAndTrace(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainWorkflowTraceOptions,
+  ): Promise<AutonomousBrainTracedWorkflowResult> {
+    const domains = await this.workflowLaunchDomains(task, options);
+    if (domains.length > 0) authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWorkflowWithTrace(task, options);
+  }
+
+  /** Resume a traced workflow only after provider-free launch admission covers its route. */
+  async resumeWorkflowWithLaunchAdmissionAndTrace(
+    jobId: string,
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainWorkflowResumeTraceOptions,
+  ): Promise<AutonomousBrainTracedWorkflowResult> {
+    const domains = await this.workflowLaunchDomains(task, options);
+    if (domains.length > 0) authorizeAutonomousLaunchDomains(admission, domains);
+    return this.resumeWorkflowWithTrace(jobId, task, options);
   }
 
   /**
@@ -4246,6 +4391,78 @@ export class AutonomousBrainFacade {
       ? await validateAutonomousRouteOverride(task, options.routeOverride)
       : await this.agent.route(task, { domain: options.domain, hints: options.hints });
     return route.abstained ? [] : [...route.selected_domains];
+  }
+
+  private async createWorkflowTrace(
+    task: string,
+    options: Pick<AutonomousWorkflowExecuteOptions, "domain" | "routeOverride">,
+    traceStore: AutonomousRunTraceStore,
+    runId: string,
+  ): Promise<AutonomousRunTraceSession> {
+    const taskText = boundedText("autonomous brain workflow task", task, 32_000);
+    const routeDomains = options.routeOverride?.selected_domains ?? [];
+    const domains = routeDomains.length > 0
+      ? [...routeDomains]
+      : [options.domain ?? "cross_domain"];
+    if (!traceStore || typeof traceStore.append !== "function" || typeof traceStore.events !== "function") throw new ArgumentError("autonomous brain workflow trace requires a trace store");
+    return new AutonomousRunTraceSession(traceStore, {
+      run_id: runId,
+      task_digest: digestJsonSync({ task: taskText }),
+      domains,
+    });
+  }
+
+  private async recordWorkflowTracePlan(
+    trace: AutonomousRunTraceSession,
+    execution: AutonomousBrainWorkflowResult,
+  ): Promise<void> {
+    const route = execution.route;
+    const domains = route?.selected_domains?.length
+      ? [...route.selected_domains, ...(route.cross_domain ? ["cross_domain" as const] : [])]
+      : execution.blueprint
+        ? [execution.blueprint.domain_profile.domain]
+        : trace.domains;
+    const uniqueDomains = [...new Set(domains)] as AutonomousDomainName[];
+    const selections = execution.stage_results
+      .map((stage) => stage.run?.selection)
+      .filter((selection): selection is NonNullable<AutonomousRunResult["selection"]> => selection !== null && selection !== undefined);
+    await trace.record({
+      phase: "plan_compiled",
+      status: "running",
+      domains: uniqueDomains,
+      route_digest: route?.route_digest ?? null,
+      plan_digest: execution.blueprint?.plan.plan_digest ?? null,
+      selection_digest: selections.length > 0 ? digestJsonSync(selections) : null,
+    });
+  }
+
+  private workflowTraceCompletion(execution: AutonomousBrainWorkflowResult): Parameters<AutonomousRunTraceSession["complete"]>[0] {
+    const route = execution.route;
+    const domains = route?.selected_domains?.length
+      ? [...route.selected_domains, ...(route.cross_domain ? ["cross_domain" as const] : [])]
+      : execution.blueprint
+        ? [execution.blueprint.domain_profile.domain]
+        : undefined;
+    const selections = execution.stage_results
+      .map((stage) => stage.run?.selection)
+      .filter((selection): selection is NonNullable<AutonomousRunResult["selection"]> => selection !== null && selection !== undefined);
+    return {
+      status: autonomousRunTraceStatus(execution.status),
+      ...(domains === undefined ? {} : { domains: [...new Set(domains)] as AutonomousDomainName[] }),
+      route_digest: route?.route_digest ?? null,
+      plan_digest: execution.blueprint?.plan.plan_digest ?? null,
+      selection_digest: selections.length > 0 ? digestJsonSync(selections) : null,
+      detail_digest: execution.checkpoint?.checkpoint_digest ?? null,
+    };
+  }
+
+  private workflowCycleTraceCompletion(cycle: AutonomousBrainWorkflowCycleResult): Parameters<AutonomousRunTraceSession["complete"]>[0] {
+    const execution = cycle.final;
+    const completion = execution === null ? {} : this.workflowTraceCompletion(execution);
+    return {
+      ...completion,
+      status: autonomousRunTraceStatus(cycle.status),
+    };
   }
 
   /** Rehydrate a plan through its canonical projection so caller mutations cannot widen replay. */
