@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
+  ArgumentError,
   AutonomousTaskClarificationError,
   LLMRuntime,
   autonomousDomainPolicy,
@@ -95,4 +96,33 @@ test("agent facade uses the same preflight and answer receipt", async () => {
   const restored = await agent.validateClarification(plan, receipt);
   assert.equal(restored.resolution_digest, receipt.resolution_digest);
   await assert.rejects(() => agent.validateClarification({ ...plan, plan_digest: "0".repeat(64) }, receipt), AutonomousTaskClarificationError);
+});
+
+test("clarification recompile rebuilds a fresh blueprint for every domain", async () => {
+  const agent = new AutonomousAgent(new LLMRuntime());
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const task = `review the ${domain} workflow`;
+    const plan = await agent.clarificationPlan(task, { domain });
+    const answers = Object.fromEntries(plan.questions.map((question) => [question.question_id, question.answer_kind === "choice" ? question.options[0] : "caller-owned clarified boundary"]));
+    const receipt = await agent.resolveClarification(plan, task, answers);
+    const recompiled = await agent.recompileClarification(plan, receipt, task, `review the ${domain} workflow and produce a bounded verification report`, { desiredOutputs: ["bounded verification report"] });
+    assert.equal(recompiled.domain, domain);
+    assert.equal(recompiled.blueprint.domain_profile.domain, domain);
+    assert.equal(recompiled.recompiled_task_digest, recompiled.blueprint.task_digest);
+    const publicProjection = JSON.stringify(recompiled);
+    assert.equal(publicProjection.includes(task), false);
+    assert.equal(publicProjection.includes("caller-owned clarified boundary"), false);
+    assert.equal(recompiled.toJSON().authorization, "recompile_only; provider_source_tool_and_effect_gates_remain_required");
+    const restored = await agent.validateClarificationRecompile(recompiled, plan, receipt);
+    assert.equal(restored.recompile_digest, recompiled.recompile_digest);
+    await assert.rejects(() => agent.validateClarificationRecompile({ ...recompiled.toJSON(), recompile_digest: "0".repeat(64) }, plan, receipt), ArgumentError);
+  }
+
+  const task = "review the data workflow";
+  const plan = await agent.clarificationPlan(task, { domain: "data" });
+  const partial = await agent.resolveClarification(plan, task, {});
+  await assert.rejects(() => agent.recompileClarification(plan, partial, task, "review the data workflow and produce a report"), ArgumentError);
+  const answers = Object.fromEntries(plan.questions.map((question) => [question.question_id, "caller-owned boundary"]));
+  const receipt = await agent.resolveClarification(plan, task, answers);
+  await assert.rejects(() => agent.recompileClarification(plan, receipt, "a different task", "review the data workflow and produce a report"), ArgumentError);
 });

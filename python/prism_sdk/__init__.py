@@ -700,6 +700,7 @@ from .autonomy import (
     AutonomousAgent,
     AutonomousAutoBlueprint,
     AutonomousAutoResult,
+    AutonomousClarificationRecompile,
     AutonomousDecisionCycleResult,
     AutonomousAutoDecisionCycleResult,
     AutonomousAutoReplanResult,
@@ -841,6 +842,7 @@ from .autonomous_task_decision import (
 from .autonomous_task_clarification import (
     AUTONOMOUS_TASK_CLARIFICATION_SCHEMA,
     AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA,
+    AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
     AUTONOMOUS_TASK_CLARIFICATION_VERSION,
     AUTONOMOUS_TASK_CLARIFICATION_STATUSES,
     AUTONOMOUS_TASK_CLARIFICATION_RESOLUTION_STATUSES,
@@ -857,6 +859,7 @@ from .autonomous_task_clarification import (
     plan_autonomous_task_clarification,
     validate_autonomous_task_clarification_plan,
     resolve_autonomous_task_clarification,
+    validate_autonomous_task_clarification_recompile,
     validate_autonomous_task_clarification_resolution,
 )
 from .autonomous_execution_policy import (
@@ -7102,6 +7105,7 @@ __all__ = [
     "AUTONOMOUS_LEARNING_MODES",
     "AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA",
     "MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES",
+    "AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA",
     "AUTONOMOUS_PLANNING_MODES",
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
@@ -7172,6 +7176,7 @@ __all__ = [
     "AutonomousAgent",
     "AutonomousAutoBlueprint",
     "AutonomousAutoResult",
+    "AutonomousClarificationRecompile",
     "AutonomousDecisionCycleResult",
     "AutonomousAutoDecisionCycleResult",
     "AutonomousAutoReplanResult",
@@ -7282,6 +7287,7 @@ __all__ = [
     "plan_autonomous_task_clarification",
     "validate_autonomous_task_clarification_plan",
     "resolve_autonomous_task_clarification",
+    "validate_autonomous_task_clarification_recompile",
     "AUTONOMOUS_JOINT_EXECUTION_POLICY_SCHEMA",
     "AUTONOMOUS_JOINT_EXECUTION_POLICY_STATE_SCHEMA",
     "AUTONOMOUS_JOINT_EXECUTION_POLICY_SETTLEMENT_SCHEMA",

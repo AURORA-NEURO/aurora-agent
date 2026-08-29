@@ -13298,3 +13298,14 @@ receipt. A malformed or cross-plan receipt is rejected before the caller can res
 worker state. This does not turn a receipt into an execution authorization: after a caller
 rehydrates its answer values, it must incorporate them into a fresh task description and
 recompile intent, policy, and decision artifacts before invoking any provider or effect gate.
+
+The fresh-plan handoff is now explicit through `agent.recompile_clarification(...)` in Python and
+`agent.recompileClarification(...)` in TypeScript. The caller supplies the original task, the
+validated complete receipt, and a new clarified task after interpreting its transient answers.
+The agent rejects original-task drift, partial or blocked receipts, and cross-plan metadata before
+rebuilding the fixed-domain capability route, prompt, intent, decision, evidence plan, and
+execution blueprint. The live blueprint is available for the ordinary selection, provider,
+evidence, tool, evaluator, and effect gates; its serialized recompile envelope retains only the
+original/updated digests, workflow identities, plan identities, and an explicit no-authorization
+marker. This creates a restart-safe path without pretending that a digest-only receipt can
+reconstruct answer text or establish that an answer is true.

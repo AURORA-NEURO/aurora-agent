@@ -172,6 +172,7 @@ export {
 } from "./autonomous-task-decision.js";
 export type { AutonomousTaskDecision } from "./autonomous-task-decision.js";
 export {
+  AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
   AUTONOMOUS_TASK_CLARIFICATION_SCHEMA,
   AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA,
   AUTONOMOUS_TASK_CLARIFICATION_VERSION,
@@ -188,6 +189,7 @@ export {
   validateAutonomousTaskClarificationPlan,
   resolveAutonomousTaskClarification,
   validateAutonomousTaskClarificationResolution,
+  validateAutonomousTaskClarificationRecompile,
 } from "./autonomous-task-clarification.js";
 export type {
   AutonomousTaskClarificationStatus,
@@ -1156,6 +1158,8 @@ export type {
   AutonomousGoalLearningStepResult,
   AutonomousRunStatus,
   AutonomousTaskBlueprint,
+  AutonomousClarificationRecompileProjection,
+  AutonomousClarificationRecompileResult,
   AutonomousCapabilityContract,
   AutonomousWorkflowStageExecutionPlan,
   AutonomousToolLoopStatus,

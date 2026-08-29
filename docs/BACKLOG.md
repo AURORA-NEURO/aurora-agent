@@ -2432,3 +2432,11 @@ The high-level Python and TypeScript agents now expose matching `validate_clarif
 receipt together, reject cross-plan or tampered metadata before resuming a worker, and preserve
 the existing requirement to recompile intent and decision artifacts after answer values are
 rehydrated by the caller.
+
+The recompile handoff is now first-class as `recompile_clarification()` /
+`recompileClarification()`. It checks the original task digest and complete receipt, fixes the
+new blueprint to the plan's reviewed domain, and returns a fresh intent/decision/prompt/plan
+bundle for the ordinary downstream gates. The result keeps the live clarified blueprint
+caller-owned while serializing only receipt, task, workflow, intent, decision, and execution-plan
+digests. All built-in domains are covered, and partial, blocked, drifted, and answer-containing
+projection paths fail closed or redact their values.

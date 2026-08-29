@@ -7,6 +7,7 @@ import pytest
 from prism_sdk import (
     AUTONOMOUS_DOMAINS,
     AutonomousAgent,
+    BrainRunError,
     AutonomousTaskClarificationError,
     LLMRuntime,
     autonomous_domain_policy,
@@ -139,3 +140,61 @@ def test_agent_facade_uses_the_same_preflight_and_answer_receipt() -> None:
     assert restored.resolution_digest == receipt.resolution_digest
     with pytest.raises(AutonomousTaskClarificationError):
         agent.validate_clarification(plan={**plan.to_dict(), "plan_digest": "0" * 64}, receipt=receipt.to_dict())
+
+
+def test_recompile_clarification_rebuilds_a_fresh_blueprint_for_every_domain() -> None:
+    agent = AutonomousAgent(None, LLMRuntime())
+    for domain in AUTONOMOUS_DOMAINS:
+        task = f"review the {domain} workflow"
+        plan = agent.clarification_plan(task=task, domain=domain)
+        answers = {
+            question.question_id: question.options[0] if question.answer_kind == "choice" else "caller-owned clarified boundary"
+            for question in plan.questions
+        }
+        receipt = agent.resolve_clarification(plan=plan, task=task, answers=answers)
+        recompiled = agent.recompile_clarification(
+            plan=plan.to_dict(),
+            receipt=receipt.to_dict(),
+            task=task,
+            clarified_task=f"review the {domain} workflow and produce a bounded verification report",
+            desired_outputs=("bounded verification report",),
+        )
+        assert recompiled.domain == domain
+        assert recompiled.blueprint.spec.domain == domain
+        assert recompiled.recompiled_task_digest == recompiled.blueprint.spec.task_digest
+        public = json.dumps(recompiled.to_dict())
+        assert task not in public
+        assert "caller-owned clarified boundary" not in public
+        assert recompiled.to_dict()["authorization"] == "recompile_only; provider_source_tool_and_effect_gates_remain_required"
+        restored = agent.validate_clarification_recompile(
+            value=recompiled.to_dict(),
+            plan=plan.to_dict(),
+            receipt=receipt.to_dict(),
+        )
+        assert restored["recompile_digest"] == recompiled.recompile_digest
+        tampered = recompiled.to_dict()
+        tampered["recompile_digest"] = "0" * 64
+        with pytest.raises(AutonomousTaskClarificationError):
+            agent.validate_clarification_recompile(value=tampered, plan=plan, receipt=receipt)
+
+    task = "review the data workflow"
+    plan = agent.clarification_plan(task=task, domain="data")
+    partial = agent.resolve_clarification(plan=plan, task=task, answers={})
+    with pytest.raises(BrainRunError):
+        agent.recompile_clarification(
+            plan=plan,
+            receipt=partial,
+            task=task,
+            clarified_task="review the data workflow and produce a report",
+        )
+    with pytest.raises(BrainRunError):
+        agent.recompile_clarification(
+            plan=plan,
+            receipt=agent.resolve_clarification(
+                plan=plan,
+                task=task,
+                answers={question.question_id: "caller-owned boundary" for question in plan.questions},
+            ),
+            task="a different task",
+            clarified_task="review the data workflow and produce a report",
+        )

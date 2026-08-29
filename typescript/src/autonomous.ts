@@ -324,8 +324,11 @@ import {
   type AutonomousTaskDecision,
 } from "./autonomous-task-decision.js";
 import {
+  AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
   planAutonomousTaskClarification,
   resolveAutonomousTaskClarification,
+  validateAutonomousTaskClarificationPlan,
+  validateAutonomousTaskClarificationRecompile,
   validateAutonomousTaskClarificationResolution,
   type AutonomousTaskClarificationPlan,
   type AutonomousTaskClarificationResolution,
@@ -920,6 +923,44 @@ export interface AutonomousTaskBlueprint extends JsonObject {
   response_contract?: AutonomousDomainResponseContract;
   execution: "not_started";
   credential_posture: "caller_supplied_opaque_handle_not_returned";
+}
+
+export interface AutonomousClarificationRecompileProjection extends JsonObject {
+  schema: "bioprism-autonomous-task-clarification-recompile/0.1";
+  plan_digest: string;
+  resolution_digest: string;
+  original_task_digest: string;
+  recompiled_task_digest: string;
+  domain: AutonomousDomainName;
+  workflow_id: string;
+  recompiled_intent_digest: string;
+  recompiled_decision_digest: string;
+  execution_plan_digest: string;
+  status: "ready";
+  recompile_digest: string;
+  blueprint: JsonObject;
+  execution: "not_started; fresh_blueprint_requires_existing_gates";
+  authorization: "recompile_only; provider_source_tool_and_effect_gates_remain_required";
+  retention: "metadata_only; task_text_and_answer_values_not_retained";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousClarificationRecompileResult {
+  schema: "bioprism-autonomous-task-clarification-recompile/0.1";
+  plan_digest: string;
+  resolution_digest: string;
+  original_task_digest: string;
+  recompiled_task_digest: string;
+  domain: AutonomousDomainName;
+  workflow_id: string;
+  recompiled_intent_digest: string;
+  recompiled_decision_digest: string;
+  execution_plan_digest: string;
+  status: "ready";
+  recompile_digest: string;
+  /** Live blueprint; task text and prompt messages remain caller-owned and transient. */
+  blueprint: AutonomousTaskBlueprint;
+  toJSON(): AutonomousClarificationRecompileProjection;
 }
 
 export interface AutonomousCapabilityContract extends JsonObject {
@@ -7809,6 +7850,107 @@ export class AutonomousAgent {
     receipt: AutonomousTaskClarificationResolution | unknown,
   ): Promise<AutonomousTaskClarificationResolution> {
     return validateAutonomousTaskClarificationResolution(receipt, plan);
+  }
+
+  /**
+   * Recompile a caller-clarified task only after the original task and complete receipt verify.
+   * The returned live blueprint remains transient; JSON serialization uses a metadata-only
+   * projection so answer values and task text cannot accidentally enter a durable handoff.
+   */
+  async recompileClarification(
+    plan: AutonomousTaskClarificationPlan | unknown,
+    receipt: AutonomousTaskClarificationResolution | unknown,
+    task: string,
+    clarifiedTask: string,
+    options: {
+      capability?: string;
+      riskClass?: string;
+      constraints?: readonly string[];
+      desiredOutputs?: readonly string[];
+      context?: readonly AutonomousPromptChunk[];
+      maxInputTokens?: number;
+      structuredDomainResponse?: boolean;
+    } = {},
+  ): Promise<AutonomousClarificationRecompileResult> {
+    const resolvedPlan = validateAutonomousTaskClarificationPlan(plan);
+    const taskText = boundedText("autonomous clarification task", task, 32_000);
+    const originalTaskDigest = digestJsonSync({ task: taskText });
+    if (resolvedPlan.task_digest !== originalTaskDigest) throw new ArgumentError("clarification recompile task does not match the original plan");
+    const resolvedReceipt = validateAutonomousTaskClarificationResolution(receipt, resolvedPlan);
+    if (resolvedReceipt.task_digest !== originalTaskDigest) throw new ArgumentError("clarification recompile receipt does not match the original task");
+    if (resolvedReceipt.status !== "resolved") throw new ArgumentError("clarification recompile requires a resolved clarification receipt");
+    const clarifiedText = boundedText("autonomous clarified task", clarifiedTask, 32_000);
+    const envelope = await this.blueprint(clarifiedText, {
+      domain: resolvedPlan.domain,
+      capability: options.capability,
+      riskClass: options.riskClass,
+      constraints: options.constraints,
+      desiredOutputs: options.desiredOutputs,
+      context: options.context,
+      maxInputTokens: options.maxInputTokens,
+      structuredDomainResponse: options.structuredDomainResponse,
+      allowCrossDomain: false,
+    });
+    if (!envelope.blueprint || envelope.cross_domain_blueprint) throw new ArgumentError("clarification recompile requires a single-domain blueprint");
+    const blueprint = envelope.blueprint;
+    const descriptor = {
+      schema: AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
+      plan_digest: resolvedPlan.plan_digest,
+      resolution_digest: resolvedReceipt.resolution_digest,
+      original_task_digest: originalTaskDigest,
+      recompiled_task_digest: blueprint.task_digest,
+      domain: blueprint.domain_profile.domain,
+      workflow_id: blueprint.workflow.workflow_id,
+      recompiled_intent_digest: blueprint.task_intent.intent_digest,
+      recompiled_decision_digest: blueprint.task_decision.decision_digest,
+      execution_plan_digest: blueprint.plan.plan_digest,
+      status: "ready" as const,
+    };
+    const recompileDigest = digestJsonSync(descriptor);
+    const blueprintProjection: JsonObject = {
+      schema: blueprint.schema,
+      task_digest: blueprint.task_digest,
+      route_digest: blueprint.route_digest,
+      domain: blueprint.domain_profile.domain,
+      workflow_id: blueprint.workflow.workflow_id,
+      workflow_digest: blueprint.workflow.workflow_digest,
+      task_intent_digest: blueprint.task_intent.intent_digest,
+      task_decision_digest: blueprint.task_decision.decision_digest,
+      task_decision_posture: blueprint.task_decision.posture,
+      plan_digest: blueprint.plan.plan_digest,
+      prompt_digest: blueprint.prompt.prompt_digest,
+      learning_context_digest: blueprint.learning_context_digest,
+      required_capabilities: [...blueprint.required_capabilities],
+      stage_ids: blueprint.stage_execution_plans.map((stage) => stage.stage_id),
+      execution: "not_started",
+      authorization: "plan_only; provider_source_tool_and_effect_gates_remain_required",
+      retention: "metadata_only; task_text_and_answer_values_not_retained",
+      secret_material: "never_returned",
+    };
+    const toJSON = (): AutonomousClarificationRecompileProjection => ({
+      ...descriptor,
+      recompile_digest: recompileDigest,
+      blueprint: blueprintProjection,
+      execution: "not_started; fresh_blueprint_requires_existing_gates",
+      authorization: "recompile_only; provider_source_tool_and_effect_gates_remain_required",
+      retention: "metadata_only; task_text_and_answer_values_not_retained",
+      secret_material: "never_returned",
+    });
+    return {
+      ...descriptor,
+      recompile_digest: recompileDigest,
+      blueprint,
+      toJSON,
+    };
+  }
+
+  /** Validate a persisted recompile projection without restoring transient task values. */
+  async validateClarificationRecompile(
+    value: unknown,
+    plan?: AutonomousTaskClarificationPlan | unknown,
+    receipt?: AutonomousTaskClarificationResolution | unknown,
+  ): Promise<AutonomousClarificationRecompileProjection> {
+    return validateAutonomousTaskClarificationRecompile(value, plan, receipt) as AutonomousClarificationRecompileProjection;
   }
 
   /**

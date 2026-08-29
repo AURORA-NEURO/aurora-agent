@@ -32,6 +32,7 @@ from .errors import ArgumentError
 
 AUTONOMOUS_TASK_CLARIFICATION_SCHEMA = "bioprism-autonomous-task-clarification/0.1"
 AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA = "bioprism-autonomous-task-clarification-answer/0.1"
+AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA = "bioprism-autonomous-task-clarification-recompile/0.1"
 AUTONOMOUS_TASK_CLARIFICATION_VERSION = "0.1"
 AUTONOMOUS_TASK_CLARIFICATION_STATUSES = ("not_required", "required", "blocked")
 AUTONOMOUS_TASK_CLARIFICATION_RESOLUTION_STATUSES = ("resolved", "still_required", "blocked")
@@ -717,9 +718,109 @@ def validate_autonomous_task_clarification_resolution(
     return resolution
 
 
+def validate_autonomous_task_clarification_recompile(
+    value: Mapping[str, Any],
+    *,
+    plan: AutonomousTaskClarificationPlan | Mapping[str, Any] | None = None,
+    receipt: AutonomousTaskClarificationResolution | Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate a serialized clarification-recompile envelope without restoring task values.
+
+    The live recompiled blueprint is caller-owned.  This validator checks the metadata-only
+    projection emitted by :class:`AutonomousAgent`, supports both the Python full blueprint
+    projection and the compact TypeScript blueprint projection, and optionally binds the result
+    to the exact original plan and answer receipt.  It never reconstructs a provider prompt,
+    credentials, answer text, or execution authority.
+    """
+
+    if not isinstance(value, Mapping):
+        raise AutonomousTaskClarificationError("clarification recompile must be an object")
+    allowed = {
+        "schema", "plan_digest", "resolution_digest", "original_task_digest", "recompiled_task_digest",
+        "domain", "workflow_id", "recompiled_intent_digest", "recompiled_decision_digest", "execution_plan_digest",
+        "status", "recompile_digest", "blueprint", "execution", "authorization", "retention", "secret_material",
+    }
+    if set(value).difference(allowed):
+        raise AutonomousTaskClarificationError("clarification recompile contains unsupported fields")
+    if (
+        value.get("schema") != AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA
+        or value.get("status") != "ready"
+        or value.get("execution") != "not_started; fresh_blueprint_requires_existing_gates"
+        or value.get("authorization") != "recompile_only; provider_source_tool_and_effect_gates_remain_required"
+        or value.get("retention") != "metadata_only; task_text_and_answer_values_not_retained"
+        or value.get("secret_material") != "never_returned"
+    ):
+        raise AutonomousTaskClarificationError("clarification recompile markers are invalid")
+    digest_fields = (
+        "plan_digest", "resolution_digest", "original_task_digest", "recompiled_task_digest",
+        "recompiled_intent_digest", "recompiled_decision_digest", "execution_plan_digest",
+    )
+    for field in digest_fields:
+        _digest(f"clarification recompile {field}", value.get(field))
+    domain = _text("clarification recompile domain", value.get("domain"))
+    workflow_id = _text("clarification recompile workflow_id", value.get("workflow_id"))
+    blueprint = value.get("blueprint")
+    if not isinstance(blueprint, Mapping):
+        raise AutonomousTaskClarificationError("clarification recompile blueprint must be an object")
+
+    # Python serializes the complete metadata-only blueprint while TypeScript serializes a
+    # compact projection.  Normalize the identity fields from either representation.
+    task_projection = blueprint.get("task") if isinstance(blueprint.get("task"), Mapping) else blueprint
+    workflow_projection = blueprint.get("workflow") if isinstance(blueprint.get("workflow"), Mapping) else blueprint
+    intent_projection = blueprint.get("task_intent") if isinstance(blueprint.get("task_intent"), Mapping) else blueprint
+    decision_projection = blueprint.get("task_decision") if isinstance(blueprint.get("task_decision"), Mapping) else blueprint
+    plan_projection = blueprint.get("plan")
+    blueprint_task_digest = task_projection.get("task_digest")
+    blueprint_domain = task_projection.get("domain", blueprint.get("domain"))
+    blueprint_workflow_id = workflow_projection.get("workflow_id")
+    blueprint_intent_digest = intent_projection.get("intent_digest", blueprint.get("task_intent_digest"))
+    blueprint_decision_digest = decision_projection.get("decision_digest", blueprint.get("task_decision_digest"))
+    blueprint_plan_digest = blueprint.get("plan_digest")
+    if blueprint_plan_digest is None and isinstance(plan_projection, Mapping):
+        blueprint_plan_digest = content_digest(dict(plan_projection))
+    if blueprint_task_digest != value.get("recompiled_task_digest"):
+        raise AutonomousTaskClarificationError("clarification recompile blueprint task digest does not match its envelope")
+    if blueprint_domain != domain or blueprint_workflow_id != workflow_id:
+        raise AutonomousTaskClarificationError("clarification recompile blueprint identity does not match its envelope")
+    if blueprint_intent_digest != value.get("recompiled_intent_digest"):
+        raise AutonomousTaskClarificationError("clarification recompile blueprint intent digest does not match its envelope")
+    if blueprint_decision_digest != value.get("recompiled_decision_digest"):
+        raise AutonomousTaskClarificationError("clarification recompile blueprint decision digest does not match its envelope")
+    if blueprint_plan_digest != value.get("execution_plan_digest"):
+        raise AutonomousTaskClarificationError("clarification recompile blueprint plan digest does not match its envelope")
+
+    descriptor = {
+        "schema": value.get("schema"),
+        "plan_digest": value.get("plan_digest"),
+        "resolution_digest": value.get("resolution_digest"),
+        "original_task_digest": value.get("original_task_digest"),
+        "recompiled_task_digest": value.get("recompiled_task_digest"),
+        "domain": domain,
+        "workflow_id": workflow_id,
+        "recompiled_intent_digest": value.get("recompiled_intent_digest"),
+        "recompiled_decision_digest": value.get("recompiled_decision_digest"),
+        "execution_plan_digest": value.get("execution_plan_digest"),
+        "status": "ready",
+    }
+    if value.get("recompile_digest") != content_digest(descriptor):
+        raise AutonomousTaskClarificationError("clarification recompile digest does not match its metadata")
+    if plan is not None:
+        resolved_plan = validate_autonomous_task_clarification_plan(plan)
+        if value.get("plan_digest") != resolved_plan.plan_digest:
+            raise AutonomousTaskClarificationError("clarification recompile does not match the supplied plan")
+    if receipt is not None:
+        resolved_receipt = validate_autonomous_task_clarification_resolution(receipt, plan=plan)
+        if value.get("resolution_digest") != resolved_receipt.resolution_digest or value.get("original_task_digest") != resolved_receipt.task_digest:
+            raise AutonomousTaskClarificationError("clarification recompile does not match the supplied receipt")
+        if resolved_receipt.status != "resolved":
+            raise AutonomousTaskClarificationError("clarification recompile receipt is not resolved")
+    return dict(value)
+
+
 __all__ = [
     "AUTONOMOUS_TASK_CLARIFICATION_SCHEMA",
     "AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA",
+    "AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA",
     "AUTONOMOUS_TASK_CLARIFICATION_VERSION",
     "AUTONOMOUS_TASK_CLARIFICATION_STATUSES",
     "AUTONOMOUS_TASK_CLARIFICATION_RESOLUTION_STATUSES",
@@ -737,4 +838,5 @@ __all__ = [
     "validate_autonomous_task_clarification_plan",
     "resolve_autonomous_task_clarification",
     "validate_autonomous_task_clarification_resolution",
+    "validate_autonomous_task_clarification_recompile",
 ]

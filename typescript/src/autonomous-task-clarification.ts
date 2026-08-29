@@ -25,6 +25,7 @@ export const MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS = 8;
 export const MAX_AUTONOMOUS_TASK_CLARIFICATION_OPTIONS = 12;
 export const MAX_AUTONOMOUS_TASK_CLARIFICATION_TEXT_BYTES = 512;
 export const MAX_AUTONOMOUS_TASK_CLARIFICATION_ANSWER_BYTES = 4_096;
+export const AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA = "bioprism-autonomous-task-clarification-recompile/0.1" as const;
 
 export type AutonomousTaskClarificationStatus = typeof AUTONOMOUS_TASK_CLARIFICATION_STATUSES[number];
 export type AutonomousTaskClarificationResolutionStatus = typeof AUTONOMOUS_TASK_CLARIFICATION_RESOLUTION_STATUSES[number];
@@ -340,4 +341,79 @@ export function validateAutonomousTaskClarificationResolution(value: unknown, pl
     if (status === "still_required" && actualUnanswered === 0 && resolvedPlan.omitted_contracts.length === 0) throw new AutonomousTaskClarificationError("complete clarification resolution must be marked resolved");
   }
   return resolution;
+}
+
+/** Validate the metadata-only envelope emitted after a clarification recompile. */
+export function validateAutonomousTaskClarificationRecompile(
+  value: unknown,
+  plan?: AutonomousTaskClarificationPlan | unknown,
+  receipt?: AutonomousTaskClarificationResolution | unknown,
+): JsonObject {
+  const candidate = isObject(value) && typeof value.toJSON === "function" ? value.toJSON() : value;
+  if (!isObject(candidate)) throw new AutonomousTaskClarificationError("clarification recompile must be an object");
+  const allowed = new Set([
+    "schema", "plan_digest", "resolution_digest", "original_task_digest", "recompiled_task_digest",
+    "domain", "workflow_id", "recompiled_intent_digest", "recompiled_decision_digest", "execution_plan_digest",
+    "status", "recompile_digest", "blueprint", "execution", "authorization", "retention", "secret_material",
+  ]);
+  if (Object.keys(candidate).some((key) => !allowed.has(key))) throw new AutonomousTaskClarificationError("clarification recompile contains unsupported fields");
+  if (
+    candidate.schema !== AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA
+    || candidate.status !== "ready"
+    || candidate.execution !== "not_started; fresh_blueprint_requires_existing_gates"
+    || candidate.authorization !== "recompile_only; provider_source_tool_and_effect_gates_remain_required"
+    || candidate.retention !== "metadata_only; task_text_and_answer_values_not_retained"
+    || candidate.secret_material !== "never_returned"
+  ) throw new AutonomousTaskClarificationError("clarification recompile markers are invalid");
+  const planDigest = digest("clarification recompile plan_digest", candidate.plan_digest);
+  const resolutionDigest = digest("clarification recompile resolution_digest", candidate.resolution_digest);
+  const originalTaskDigest = digest("clarification recompile original_task_digest", candidate.original_task_digest);
+  const recompiledTaskDigest = digest("clarification recompile recompiled_task_digest", candidate.recompiled_task_digest);
+  const recompiledIntentDigest = digest("clarification recompile recompiled_intent_digest", candidate.recompiled_intent_digest);
+  const recompiledDecisionDigest = digest("clarification recompile recompiled_decision_digest", candidate.recompiled_decision_digest);
+  const executionPlanDigest = digest("clarification recompile execution_plan_digest", candidate.execution_plan_digest);
+  const domain = text("clarification recompile domain", candidate.domain);
+  const workflowId = text("clarification recompile workflow_id", candidate.workflow_id);
+  if (!isObject(candidate.blueprint)) throw new AutonomousTaskClarificationError("clarification recompile blueprint must be an object");
+  const blueprint = candidate.blueprint;
+  const taskProjection = isObject(blueprint.task) ? blueprint.task : blueprint;
+  const workflowProjection = isObject(blueprint.workflow) ? blueprint.workflow : blueprint;
+  const intentProjection = isObject(blueprint.task_intent) ? blueprint.task_intent : blueprint;
+  const decisionProjection = isObject(blueprint.task_decision) ? blueprint.task_decision : blueprint;
+  const planProjection = blueprint.plan;
+  const blueprintTaskDigest = taskProjection.task_digest;
+  const blueprintDomain = taskProjection.domain ?? blueprint.domain;
+  const blueprintWorkflowId = workflowProjection.workflow_id;
+  const blueprintIntentDigest = intentProjection.intent_digest ?? blueprint.task_intent_digest;
+  const blueprintDecisionDigest = decisionProjection.decision_digest ?? blueprint.task_decision_digest;
+  const blueprintPlanDigest = blueprint.plan_digest ?? (isObject(planProjection) ? digestJsonSync(planProjection) : undefined);
+  if (blueprintTaskDigest !== recompiledTaskDigest) throw new AutonomousTaskClarificationError("clarification recompile blueprint task digest does not match its envelope");
+  if (blueprintDomain !== domain || blueprintWorkflowId !== workflowId) throw new AutonomousTaskClarificationError("clarification recompile blueprint identity does not match its envelope");
+  if (blueprintIntentDigest !== recompiledIntentDigest) throw new AutonomousTaskClarificationError("clarification recompile blueprint intent digest does not match its envelope");
+  if (blueprintDecisionDigest !== recompiledDecisionDigest) throw new AutonomousTaskClarificationError("clarification recompile blueprint decision digest does not match its envelope");
+  if (blueprintPlanDigest !== executionPlanDigest) throw new AutonomousTaskClarificationError("clarification recompile blueprint plan digest does not match its envelope");
+  const descriptor = {
+    schema: candidate.schema,
+    plan_digest: planDigest,
+    resolution_digest: resolutionDigest,
+    original_task_digest: originalTaskDigest,
+    recompiled_task_digest: recompiledTaskDigest,
+    domain,
+    workflow_id: workflowId,
+    recompiled_intent_digest: recompiledIntentDigest,
+    recompiled_decision_digest: recompiledDecisionDigest,
+    execution_plan_digest: executionPlanDigest,
+    status: "ready" as const,
+  };
+  if (candidate.recompile_digest !== digestJsonSync(descriptor)) throw new AutonomousTaskClarificationError("clarification recompile digest does not match its metadata");
+  if (plan !== undefined) {
+    const resolvedPlan = validateAutonomousTaskClarificationPlan(plan);
+    if (planDigest !== resolvedPlan.plan_digest) throw new AutonomousTaskClarificationError("clarification recompile does not match the supplied plan");
+  }
+  if (receipt !== undefined) {
+    const resolvedReceipt = validateAutonomousTaskClarificationResolution(receipt, plan);
+    if (resolutionDigest !== resolvedReceipt.resolution_digest || originalTaskDigest !== resolvedReceipt.task_digest) throw new AutonomousTaskClarificationError("clarification recompile does not match the supplied receipt");
+    if (resolvedReceipt.status !== "resolved") throw new AutonomousTaskClarificationError("clarification recompile receipt is not resolved");
+  }
+  return { ...candidate } as JsonObject;
 }

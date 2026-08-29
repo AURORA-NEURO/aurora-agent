@@ -85,12 +85,15 @@ from .autonomous_task_decision import (
 )
 from .autonomous_task_clarification import (
     AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA,
+    AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
     AUTONOMOUS_TASK_CLARIFICATION_SCHEMA,
     MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS,
     AutonomousTaskClarificationPlan,
     AutonomousTaskClarificationResolution,
     plan_autonomous_task_clarification,
     resolve_autonomous_task_clarification,
+    validate_autonomous_task_clarification_plan,
+    validate_autonomous_task_clarification_recompile,
     validate_autonomous_task_clarification_resolution,
 )
 from .autonomous_domain_response import (
@@ -4045,6 +4048,87 @@ class AutonomousTaskBlueprint:
             "plan": plan_public,
             "execution": "not_started",
             "credential_posture": "caller_handles_only",
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AutonomousClarificationRecompile:
+    """Transient fresh blueprint plus a metadata-only binding to its clarification receipt.
+
+    The original task and clarified task remain available only through the caller's live
+    ``blueprint`` object.  The serialized projection contains digests and reviewed identities,
+    allowing a worker to audit which receipt caused a recompile without retaining answer values
+    or task text.  The returned blueprint is still a plan, not provider, tool, evaluator,
+    credential, or external-effect authorization.
+    """
+
+    plan_digest: str
+    resolution_digest: str
+    original_task_digest: str
+    recompiled_task_digest: str
+    domain: str
+    workflow_id: str
+    recompiled_intent_digest: str
+    recompiled_decision_digest: str
+    execution_plan_digest: str
+    blueprint: AutonomousTaskBlueprint
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("clarification recompile plan_digest", self.plan_digest),
+            ("clarification recompile resolution_digest", self.resolution_digest),
+            ("clarification recompile original_task_digest", self.original_task_digest),
+            ("clarification recompile recompiled_task_digest", self.recompiled_task_digest),
+            ("clarification recompile recompiled_intent_digest", self.recompiled_intent_digest),
+            ("clarification recompile recompiled_decision_digest", self.recompiled_decision_digest),
+            ("clarification recompile execution_plan_digest", self.execution_plan_digest),
+        ):
+            if not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+                raise BrainRunError(f"{name} must be a lowercase SHA-256 digest")
+        _identifier("clarification recompile domain", self.domain)
+        _identifier("clarification recompile workflow_id", self.workflow_id)
+        if not isinstance(self.blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("clarification recompile blueprint must be an AutonomousTaskBlueprint")
+        if self.blueprint.spec.task_digest != self.recompiled_task_digest:
+            raise BrainRunError("clarification recompile task digest does not match the blueprint")
+        if self.blueprint.spec.domain != self.domain or self.blueprint.workflow.workflow_id != self.workflow_id:
+            raise BrainRunError("clarification recompile blueprint identity does not match its receipt")
+        if self.blueprint.task_intent is None or self.blueprint.task_intent.intent_digest != self.recompiled_intent_digest:
+            raise BrainRunError("clarification recompile intent digest does not match the blueprint")
+        if self.blueprint.task_decision is None or self.blueprint.task_decision.decision_digest != self.recompiled_decision_digest:
+            raise BrainRunError("clarification recompile decision digest does not match the blueprint")
+        execution_plan_digest = content_digest(self.blueprint.to_dict()["plan"])
+        if execution_plan_digest != self.execution_plan_digest:
+            raise BrainRunError("clarification recompile execution plan digest does not match the blueprint")
+
+    def _descriptor(self) -> dict[str, Any]:
+        return {
+            "schema": AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
+            "plan_digest": self.plan_digest,
+            "resolution_digest": self.resolution_digest,
+            "original_task_digest": self.original_task_digest,
+            "recompiled_task_digest": self.recompiled_task_digest,
+            "domain": self.domain,
+            "workflow_id": self.workflow_id,
+            "recompiled_intent_digest": self.recompiled_intent_digest,
+            "recompiled_decision_digest": self.recompiled_decision_digest,
+            "execution_plan_digest": self.execution_plan_digest,
+            "status": "ready",
+        }
+
+    @property
+    def recompile_digest(self) -> str:
+        return content_digest(self._descriptor())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self._descriptor(),
+            "recompile_digest": self.recompile_digest,
+            "blueprint": self.blueprint.to_dict(),
+            "execution": "not_started; fresh_blueprint_requires_existing_gates",
+            "authorization": "recompile_only; provider_source_tool_and_effect_gates_remain_required",
+            "retention": "metadata_only; task_text_and_answer_values_not_retained",
+            "secret_material": "never_returned",
         }
 
 
@@ -21561,6 +21645,95 @@ class AutonomousAgent:
 
         return validate_autonomous_task_clarification_resolution(receipt, plan=plan)
 
+    def recompile_clarification(
+        self,
+        *,
+        plan: AutonomousTaskClarificationPlan | Mapping[str, Any],
+        receipt: AutonomousTaskClarificationResolution | Mapping[str, Any],
+        task: str,
+        clarified_task: str,
+        capability: str | None = None,
+        risk_class: str | None = None,
+        constraints: Sequence[str] = (),
+        desired_outputs: Sequence[str] = (),
+        context: Mapping[str, Any] | None = None,
+        max_steps: int = 8,
+        require_json: bool = False,
+        structured_domain_response: bool = False,
+        response_schema: Mapping[str, Any] | None = None,
+        execution_mode: str = "provider",
+        max_input_tokens: int = 4_096,
+        required_model_capabilities: Sequence[str] = (),
+        memory_episodes: Sequence[Mapping[str, Any]] = (),
+        memory_lesson_references: Sequence[Mapping[str, Any]] = (),
+    ) -> AutonomousClarificationRecompile:
+        """Recompile a clarified task only after its complete receipt is verified.
+
+        The caller explicitly supplies ``clarified_task`` after rehydrating transient answer
+        values.  This keeps answer interpretation in the application, where it can be reviewed,
+        while the agent enforces the original task digest, exact plan binding, complete-answer
+        status, and fixed domain before building a fresh intent, decision, prompt, and execution
+        plan.  The returned live blueprint is usable by the ordinary execution APIs; its
+        ``to_dict`` projection contains no task text, answer values, credentials, or provider
+        payloads.
+        """
+
+        resolved_plan = validate_autonomous_task_clarification_plan(plan)
+        original_task_text = _text("clarification task", task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        original_task_digest = content_digest({"task": original_task_text})
+        if resolved_plan.task_digest != original_task_digest:
+            raise BrainRunError("clarification recompile task does not match the original plan")
+        resolved_receipt = validate_autonomous_task_clarification_resolution(receipt, plan=resolved_plan)
+        if resolved_receipt.task_digest != original_task_digest:
+            raise BrainRunError("clarification recompile receipt does not match the original task")
+        if resolved_receipt.status != "resolved":
+            raise BrainRunError("clarification recompile requires a resolved clarification receipt")
+        clarified_task_text = _text("clarified task", clarified_task, maximum=MAX_AUTONOMY_TEXT_BYTES)
+        blueprint = self.prepare(
+            task=clarified_task_text,
+            domain=resolved_plan.domain,
+            capability=capability,
+            risk_class=risk_class,
+            constraints=constraints,
+            desired_outputs=desired_outputs,
+            context=context,
+            max_steps=max_steps,
+            require_json=require_json,
+            structured_domain_response=structured_domain_response,
+            response_schema=response_schema,
+            execution_mode=execution_mode,
+            max_input_tokens=max_input_tokens,
+            required_model_capabilities=required_model_capabilities,
+            memory_episodes=memory_episodes,
+            memory_lesson_references=memory_lesson_references,
+        )
+        if blueprint.task_intent is None or blueprint.task_decision is None:
+            raise BrainRunError("clarification recompile produced incomplete task artifacts")
+        execution_plan_digest = content_digest(blueprint.to_dict()["plan"])
+        return AutonomousClarificationRecompile(
+            plan_digest=resolved_plan.plan_digest,
+            resolution_digest=resolved_receipt.resolution_digest,
+            original_task_digest=original_task_digest,
+            recompiled_task_digest=blueprint.spec.task_digest,
+            domain=blueprint.spec.domain,
+            workflow_id=blueprint.workflow.workflow_id,
+            recompiled_intent_digest=blueprint.task_intent.intent_digest,
+            recompiled_decision_digest=blueprint.task_decision.decision_digest,
+            execution_plan_digest=execution_plan_digest,
+            blueprint=blueprint,
+        )
+
+    def validate_clarification_recompile(
+        self,
+        *,
+        value: Mapping[str, Any],
+        plan: AutonomousTaskClarificationPlan | Mapping[str, Any] | None = None,
+        receipt: AutonomousTaskClarificationResolution | Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Validate a persisted recompile projection without restoring transient task values."""
+
+        return validate_autonomous_task_clarification_recompile(value, plan=plan, receipt=receipt)
+
     def route(self, *, task: str, **kwargs: Any) -> AutonomousRouteProposal:
         """Return an auditable domain proposal without contacting a provider."""
 
@@ -29122,6 +29295,7 @@ __all__ = [
     "AUTONOMOUS_LEARNING_MODES",
     "AUTONOMOUS_MODEL_SELECTION_PREVIEW_SCHEMA",
     "MAX_AUTONOMOUS_MODEL_SELECTION_PREVIEW_BYTES",
+    "AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_TRAJECTORY_LEARNING_SCHEMA",
     "AUTONOMOUS_CROSS_DOMAIN_REPLAN_SCHEMA",
@@ -29220,6 +29394,7 @@ __all__ = [
     "AutonomousCrossDomainReplanCheckpoint",
     "AutonomousAutoBlueprint",
     "AutonomousAutoResult",
+    "AutonomousClarificationRecompile",
     "AutonomousDecisionCycleResult",
     "AutonomousAutoDecisionCycleResult",
     "AutonomousAutoReplanResult",
