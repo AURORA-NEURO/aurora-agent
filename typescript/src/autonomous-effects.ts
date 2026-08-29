@@ -1,6 +1,7 @@
 import { ArgumentError, isObject } from "./errors.js";
+import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
-import { canonicalJson, digestJson } from "./tooling.js";
+import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type { AutonomousDomainName } from "./autonomous-domains.js";
 import type { AutonomousExecutionController } from "./autonomous-execution.js";
 import type { JsonObject, JsonValue } from "./types.js";
@@ -755,14 +756,21 @@ export class AutonomousEffectBoundary {
       resultProjector?: (result: T) => JsonValue | Promise<JsonValue>;
       cacheResult?: boolean;
       definiteFailure?: (error: unknown) => boolean | Promise<boolean>;
+      authorizationContext?: AutonomousAuthorizationContext;
+      authorizationDomains?: readonly string[];
+      authorizationCapability?: string | null;
     } = {},
   ): Promise<T> {
     if (typeof executor !== "function") throw new AutonomousEffectError("effect executor must be callable");
     if (options.resultProjector !== undefined && typeof options.resultProjector !== "function") throw new AutonomousEffectError("effect resultProjector must be callable or undefined");
     if (options.cacheResult !== undefined && typeof options.cacheResult !== "boolean") throw new AutonomousEffectError("effect cacheResult must be a boolean");
     if (options.definiteFailure !== undefined && typeof options.definiteFailure !== "function") throw new AutonomousEffectError("effect definiteFailure must be callable or undefined");
+    if (options.authorizationContext !== undefined && typeof options.authorizationContext.authorizeOperation !== "function") throw new AutonomousEffectError("effect authorizationContext must expose authorizeOperation");
     const normalized = this.normalizeRequest(request);
     const effectId = await this.effectId(normalized);
+    if (options.authorizationContext) {
+      options.authorizationContext.authorizeOperation({ operation: "effect_dispatch", domains: options.authorizationDomains, capability: options.authorizationCapability, riskClass: normalized.risk_class, resourceDigest: effectId });
+    }
     return this.exclusive(effectId, async () => this.executeExclusive(normalized, effectId, executor, options.execution ?? this.execution, options.resultProjector, options.cacheResult ?? true, options.definiteFailure));
   }
 
@@ -774,14 +782,21 @@ export class AutonomousEffectBoundary {
       summaryProjector?: (summary: JsonObject) => JsonValue | Promise<JsonValue>;
       observe?: (item: T, eventCount: number) => void | Promise<void>;
       definiteFailure?: (error: unknown) => boolean | Promise<boolean>;
+      authorizationContext?: AutonomousAuthorizationContext;
+      authorizationDomains?: readonly string[];
+      authorizationCapability?: string | null;
     } = {},
   ): AsyncIterable<T> {
     if (typeof producer !== "function") throw new AutonomousEffectError("effect stream producer must be callable");
     if (options.summaryProjector !== undefined && typeof options.summaryProjector !== "function") throw new AutonomousEffectError("effect stream summaryProjector must be callable or undefined");
     if (options.observe !== undefined && typeof options.observe !== "function") throw new AutonomousEffectError("effect stream observe must be callable or undefined");
     if (options.definiteFailure !== undefined && typeof options.definiteFailure !== "function") throw new AutonomousEffectError("effect stream definiteFailure must be callable or undefined");
+    if (options.authorizationContext !== undefined && typeof options.authorizationContext.authorizeOperation !== "function") throw new AutonomousEffectError("effect stream authorizationContext must expose authorizeOperation");
     const normalized = this.normalizeRequest(request);
     const effectId = await this.effectId(normalized);
+    if (options.authorizationContext) {
+      options.authorizationContext.authorizeOperation({ operation: "effect_dispatch", domains: options.authorizationDomains, capability: options.authorizationCapability, riskClass: normalized.risk_class, resourceDigest: effectId });
+    }
     const release = await this.acquireExclusive(effectId);
     try {
       for await (const item of this.executeStreamExclusive(normalized, effectId, producer, options.execution ?? this.execution, options.summaryProjector, options.observe, options.definiteFailure)) yield item;
@@ -808,7 +823,7 @@ export class AutonomousEffectBoundary {
 
   async authorizeAndExecute(
     calls: readonly ProviderToolCall[],
-    options: { approve: (call: ProviderToolCall) => boolean | Promise<boolean>; execute: (call: ProviderToolCall, context?: AutonomousEffectExecutionContext) => JsonValue | Promise<JsonValue>; executionId?: string | null; execution?: AutonomousExecutionController; isReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>; riskClass?: (call: ProviderToolCall) => string | Promise<string> },
+    options: { approve: (call: ProviderToolCall) => boolean | Promise<boolean>; execute: (call: ProviderToolCall, context?: AutonomousEffectExecutionContext) => JsonValue | Promise<JsonValue>; executionId?: string | null; execution?: AutonomousExecutionController; isReadOnly?: (call: ProviderToolCall) => boolean | Promise<boolean>; riskClass?: (call: ProviderToolCall) => string | Promise<string>; authorizationContext?: AutonomousAuthorizationContext; authorizationDomains?: readonly string[] },
   ): Promise<ProviderToolResultLike[]> {
     if (!Array.isArray(calls) || calls.length > 128) throw new AutonomousEffectError("effect tool call count is outside its bounds");
     if (typeof options.approve !== "function" || typeof options.execute !== "function") throw new AutonomousEffectError("effect approval and executor callbacks must be callable");
@@ -821,12 +836,15 @@ export class AutonomousEffectBoundary {
       }
       const readOnly = options.isReadOnly ? await options.isReadOnly(call) : false;
       if (readOnly) {
+        if (options.authorizationContext) {
+          options.authorizationContext.authorizeOperation({ operation: "tool_execution", domains: options.authorizationDomains, resourceDigest: digestJsonSync({ tool: call.name, call_id: call.id, arguments_digest: digestJsonSync(call.arguments) }) });
+        }
         results.push({ callId: call.id, approved: true, content: await options.execute(call) });
         continue;
       }
       const riskClass = options.riskClass ? await options.riskClass(call) : "external_effect";
       try {
-        const result = await this.execute({ execution_id: options.executionId ?? null, tool: call.name, call_id: call.id, risk_class: riskClass, arguments: call.arguments }, async (context) => options.execute(call, context), { execution: options.execution });
+        const result = await this.execute({ execution_id: options.executionId ?? null, tool: call.name, call_id: call.id, risk_class: riskClass, arguments: call.arguments }, async (context) => options.execute(call, context), { execution: options.execution, authorizationContext: options.authorizationContext, authorizationDomains: options.authorizationDomains });
         results.push({ callId: call.id, approved: true, content: result });
       } catch (error) {
         if (!(error instanceof AutonomousEffectReconciliationRequiredError)) throw error;

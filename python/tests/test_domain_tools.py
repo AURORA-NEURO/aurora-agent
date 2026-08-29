@@ -22,6 +22,11 @@ from prism_sdk import (
     plan_mcp_catalogue_bindings,
 )
 from prism_sdk.autonomy import _AUTONOMOUS_CAPABILITY_TOOL_ALIASES
+from prism_sdk.autonomous_authorization import (
+    AutonomousAuthorizationContext,
+    AutonomousAuthorizationGate,
+    AutonomousAuthorizationLedger,
+)
 from prism_sdk.errors import ArgumentError
 
 
@@ -91,6 +96,104 @@ def test_runtime_auto_executes_read_only_and_refuses_unapproved_effects() -> Non
     approved = approved_runtime((ProviderToolCall("effect-2", "release_apply", {}),))
     assert approved[0].approved is True
     assert executed[-1] == "release_apply"
+
+
+def test_runtime_enforces_authorization_context_before_read_only_executor_across_domains() -> None:
+    ledger = AutonomousAuthorizationLedger(max_grants=4, max_events=64)
+    grant = ledger.issue(
+        grant_id="domain-tool-runtime-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=AUTONOMOUS_DOMAINS,
+        allowed_operations=("tool_execution",),
+        allowed_capabilities=(),
+        allowed_risk_classes=(),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=len(AUTONOMOUS_DOMAINS),
+    )
+    context = AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(ledger),
+        grant_id=grant.grant_id,
+        tenant_id=grant.tenant_id,
+        actor_id=grant.actor_id,
+        session_id=grant.session_id,
+        authorization_digest=grant.authorization_digest,
+        domains=AUTONOMOUS_DOMAINS,
+        capability=None,
+        risk_class="provider_invocation",
+        request_prefix="domain-tool",
+        clock=lambda: 1_200,
+    )
+    executed: list[str] = []
+    for domain in AUTONOMOUS_DOMAINS:
+        tool = AutonomousDomainTool(
+            name=f"{domain}_observe",
+            domains=(domain,),
+            capability="observation",
+            description=f"Read bounded {domain} observations.",
+            parameters={"type": "object", "additionalProperties": False},
+        )
+        runtime = AutonomousDomainToolRuntime(
+            AutonomousDomainToolRegistry([tool]),
+            executor=lambda resolved, _arguments: executed.append(resolved.name) or {"domain": domain},
+            authorization_context=context,
+        )
+        scoped_runtime = runtime.scoped(execution_id=f"execution-{domain}", domain=domain)
+        result = scoped_runtime((ProviderToolCall(f"call-{domain}", tool.name, {}),))
+        assert result[0].approved is True, domain
+        assert scoped_runtime.receipts[-1].status == "executed", domain
+
+    assert len(executed) == len(AUTONOMOUS_DOMAINS)
+    assert ledger.get(grant.grant_id).used_count == len(AUTONOMOUS_DOMAINS)  # type: ignore[union-attr]
+
+    blocked_ledger = AutonomousAuthorizationLedger(max_grants=2, max_events=8)
+    blocked_grant = blocked_ledger.issue(
+        grant_id="blocked-domain-tool-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=("coding",),
+        allowed_operations=("effect_dispatch",),
+        allowed_capabilities=(),
+        allowed_risk_classes=(),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=1,
+    )
+    blocked_context = AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(blocked_ledger),
+        grant_id=blocked_grant.grant_id,
+        tenant_id=blocked_grant.tenant_id,
+        actor_id=blocked_grant.actor_id,
+        session_id=blocked_grant.session_id,
+        authorization_digest=blocked_grant.authorization_digest,
+        domains=("coding",),
+        capability=None,
+        risk_class="provider_invocation",
+        request_prefix="blocked-domain-tool",
+        clock=lambda: 1_200,
+    )
+    blocked_tool = AutonomousDomainTool(
+        name="blocked_observe",
+        domains=("coding",),
+        capability="observation",
+        description="Read bounded coding observations.",
+        parameters={"type": "object", "additionalProperties": False},
+    )
+    blocked_runtime = AutonomousDomainToolRuntime(
+        AutonomousDomainToolRegistry([blocked_tool]),
+        executor=lambda _tool, _arguments: executed.append("must-not-run") or {"blocked": False},
+        authorization_context=blocked_context,
+    )
+    blocked_result = blocked_runtime.scoped(execution_id="blocked-execution", domain="coding")((ProviderToolCall("blocked-call", blocked_tool.name, {}),))
+    assert blocked_result[0].approved is False
+    assert blocked_result[0].content["status"] == "authorization_required"
+    assert blocked_runtime.receipts[-1].status == "authorization_required"
+    assert "must-not-run" not in executed
 
 
 def test_runtime_publishes_metadata_only_receipts_to_a_caller_owned_sink() -> None:

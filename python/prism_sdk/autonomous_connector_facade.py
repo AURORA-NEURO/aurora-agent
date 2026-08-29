@@ -21,6 +21,7 @@ import threading
 from typing import Any, Callable, Mapping, Sequence
 
 from .authoring import content_digest
+from .autonomous_authorization import AutonomousAuthorizationContext
 from .autonomous_connector_worker import (
     AutonomousConnectorOperationContract,
     AutonomousConnectorOperationRegistry,
@@ -381,11 +382,13 @@ class AutonomousConnectorOperationFacade:
         value: AutonomousConnectorOperationInput | Mapping[str, Any],
         *,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousConnectorOperationExecution:
         prepared = self._prepare(self._coerce(value))
         if prepared.dispatch is None or prepared.plan.status != "ready":
             raise BrainRunError("connector operation has no eligible connector")
-        return self._dispatch(prepared, trace_event_callback=trace_event_callback)
+        return self._dispatch(prepared, trace_event_callback=trace_event_callback, authorization_context=authorization_context, authorization_risk_class=authorization_risk_class)
 
     def execute_planned(
         self,
@@ -393,6 +396,8 @@ class AutonomousConnectorOperationFacade:
         value: AutonomousConnectorOperationInput | Mapping[str, Any],
         *,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousConnectorOperationExecution:
         if not isinstance(plan, AutonomousConnectorOperationPlan):
             raise ArgumentError("connector operation execute_planned requires a typed plan")
@@ -401,7 +406,7 @@ class AutonomousConnectorOperationFacade:
             raise ArgumentError("connector operation plan does not match the supplied transient request")
         if prepared.dispatch is None:
             raise BrainRunError("connector operation plan has no eligible connector")
-        return self._dispatch(prepared, trace_event_callback=trace_event_callback)
+        return self._dispatch(prepared, trace_event_callback=trace_event_callback, authorization_context=authorization_context, authorization_risk_class=authorization_risk_class)
 
     def prepare_dispatch(
         self,
@@ -426,6 +431,8 @@ class AutonomousConnectorOperationFacade:
         max_parallelism: int = 4,
         stop_on_error: bool = False,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousConnectorOperationBatchResult:
         if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
             raise ArgumentError("connector operation batch must be a sequence")
@@ -460,6 +467,8 @@ class AutonomousConnectorOperationFacade:
                     execution = self.execute(
                         values[index],
                         trace_event_callback=trace_event_callback,
+                        authorization_context=authorization_context,
+                        authorization_risk_class=authorization_risk_class,
                     )
                     succeeded = execution.status in {"observed", "partial"}
                     items[index] = {
@@ -647,6 +656,8 @@ class AutonomousConnectorOperationFacade:
         prepared: _PreparedOperation,
         *,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousConnectorOperationExecution:
         if prepared.dispatch is None:
             raise BrainRunError("connector operation has no dispatch request")
@@ -654,6 +665,10 @@ class AutonomousConnectorOperationFacade:
             prepared.plan.selection_plan,
             prepared.dispatch,
             trace_event_callback=trace_event_callback,
+            authorization_context=authorization_context,
+            authorization_domain=prepared.plan.domain,
+            authorization_capability=prepared.plan.capability,
+            authorization_risk_class=authorization_risk_class,
         )
         return AutonomousConnectorOperationExecution(
             status=result.receipt.status,

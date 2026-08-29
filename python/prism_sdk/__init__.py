@@ -194,6 +194,7 @@ from .autonomous_authorization import (
     JsonAutonomousAuthorizationSnapshotPersistence,
     TransactionalJsonAutonomousAuthorizationSnapshotPersistence,
     AutonomousAuthorizationPersistenceCoordinator,
+    AutonomousAuthorizationError,
     seal_autonomous_authorization_snapshot,
     validate_autonomous_authorization_snapshot,
 )
@@ -4948,6 +4949,7 @@ __all__ = [
     "JsonAutonomousAuthorizationSnapshotPersistence",
     "TransactionalJsonAutonomousAuthorizationSnapshotPersistence",
     "AutonomousAuthorizationPersistenceCoordinator",
+    "AutonomousAuthorizationError",
     "seal_autonomous_authorization_snapshot",
     "validate_autonomous_authorization_snapshot",
     "GOAL_EVENT_SCHEMA",

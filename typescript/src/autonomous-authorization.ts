@@ -251,6 +251,7 @@ export class AutonomousAuthorizationGate {
 /** Bind one caller-issued grant to live provider attempts without retaining payloads or secrets. */
 export class AutonomousAuthorizationContext {
   private requestCounter = 0;
+  private counterState: { value: number };
 
   constructor(
     readonly gate: AutonomousAuthorizationGate,
@@ -272,13 +273,52 @@ export class AutonomousAuthorizationContext {
     if (riskClass !== null) identifier("context riskClass", riskClass);
     identifier("context requestPrefix", text("context requestPrefix", requestPrefix, 128));
     if (typeof clock !== "function") fail("context clock must be callable");
+    this.domains = [...this.domains];
+    this.counterState = { value: this.requestCounter };
   }
 
   /** Return a child context narrowed to one already-authorized domain. */
   forDomain(domain: AutonomousDomainName): AutonomousAuthorizationContext {
     const normalized = identifier("context domain", domain) as AutonomousDomainName;
     if (!this.domains.includes(normalized)) fail("context domain is outside its authorized scope");
-    return new AutonomousAuthorizationContext(this.gate, this.grantId, this.tenantId, this.actorId, this.sessionId, this.authorizationDigest, [normalized], this.capability, this.riskClass, this.requestPrefix, this.clock);
+    const child = new AutonomousAuthorizationContext(this.gate, this.grantId, this.tenantId, this.actorId, this.sessionId, this.authorizationDigest, [normalized], this.capability, this.riskClass, this.requestPrefix, this.clock);
+    child.counterState = this.counterState;
+    return child;
+  }
+
+  /** Authorize one non-provider operation without accepting task, prompt, payload, or secret data. */
+  authorizeOperation(input: { operation: AutonomousAuthorizationOperation; domains?: readonly string[]; domain?: string; capability?: string | null; riskClass?: string | null; resourceDigest?: string | null }): AutonomousAuthorizationDecision {
+    const operation = identifier("authorization operation", input.operation) as AutonomousAuthorizationOperation;
+    if (!AUTONOMOUS_AUTHORIZATION_OPERATIONS.includes(operation)) fail("authorization operation is unsupported");
+    if (input.domain !== undefined && input.domains !== undefined) fail("authorization operation cannot receive both domain and domains");
+    const suppliedDomains = input.domain === undefined ? input.domains : [input.domain];
+    const domains = suppliedDomains === undefined
+      ? (this.domains.length === 1 ? [...this.domains] : (() => { fail("authorization operation requires an exact domain when context spans domains"); })())
+      : normalizeAuthorizationDomains("authorization domains", suppliedDomains);
+    if (domains.some((domain) => !this.domains.includes(domain))) fail("authorization operation domain is outside its context scope");
+    const capability = input.capability === undefined ? this.capability : input.capability;
+    const riskClass = input.riskClass === undefined ? this.riskClass : input.riskClass;
+    const normalizedCapability = capability === null ? null : identifier("authorization operation capability", capability);
+    const normalizedRiskClass = riskClass === null ? null : identifier("authorization operation riskClass", riskClass);
+    const resourceDigest = digest("authorization operation resourceDigest", input.resourceDigest ?? null, true);
+    this.counterState.value += 1;
+    this.requestCounter = this.counterState.value;
+    const issuedAt = timestamp("authorization operation issuedAt", this.clock());
+    const request = AutonomousAuthorizationRequest.create({
+      request_id: identifier("authorization operation requestId", `${this.requestPrefix}-${this.requestCounter}`),
+      grant_id: this.grantId,
+      tenant_id: this.tenantId,
+      actor_id: this.actorId,
+      session_id: this.sessionId,
+      authorization_digest: this.authorizationDigest,
+      domains,
+      operation,
+      capability: normalizedCapability,
+      risk_class: normalizedRiskClass,
+      resource_digest: resourceDigest,
+      issued_at: issuedAt,
+    });
+    return this.gate.require(request, issuedAt);
   }
 
   /** Require permission for one provider attempt; request metadata excludes task and provider payloads. */
@@ -294,7 +334,8 @@ export class AutonomousAuthorizationContext {
     const turn = integer("provider authorization turn", input.turn ?? 0, 0, 32);
     const issuedAt = timestamp("provider authorization issuedAt", this.clock());
     const resourceDigest = digestJsonSync({ schema: "bioprism-autonomous-provider-authorization-resource/0.1", domain, provider, model, invocation_kind: invocationKind, attempt, turn });
-    this.requestCounter += 1;
+    this.counterState.value += 1;
+    this.requestCounter = this.counterState.value;
     const request = AutonomousAuthorizationRequest.create({
       request_id: identifier("provider authorization requestId", `${this.requestPrefix}-${this.requestCounter}`),
       grant_id: this.grantId,

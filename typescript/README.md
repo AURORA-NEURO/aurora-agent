@@ -1433,6 +1433,37 @@ execution in `reconciliation_required`, which can be resolved without replaying 
 Tool-loop results preserve that status rather than misreporting an uncertain write as a normal
 approval pause or successful model turn.
 
+### Tenant-scoped authorization across adapters
+
+`AutonomousAuthorizationLedger` and `AutonomousAuthorizationContext` provide one caller-issued
+grant contract for provider, connector, tool, and effect boundaries. Connector dispatch checks
+`connector_dispatch` after the selection plan, manifest scope, capability, and approval gates but
+before the registered connector executor. `AutonomousDomainToolRuntime` checks read-only calls
+as `tool_execution` and effectful calls as `effect_dispatch`; `AutonomousEffectBoundary` applies
+the latter before durable effect transitions and before user code, including stream producers.
+Connector replay does not re-dispatch or charge another grant use. Refused tool calls are returned
+as `authorization_required` receipts, not misreported as executor failures, and no executor is
+entered.
+
+Each operation request contains only exact domain/capability/risk metadata, call identity, and a
+SHA-256 resource digest. Task text, prompts, arguments, credentials, provider payloads, and
+results are excluded. Use `authorizationContext.forDomain("coding")` for a narrowed worker;
+parent and child contexts share a monotonic request sequence so a fan-out child cannot reset its
+request IDs and create an audit collision. The context is optional for legacy local adapters, but
+grant-controlled deployments must forward it through connector, tool, and effect paths as well as
+the provider path. Registration, activation, selection, and caller approval do not replace the
+authorization grant.
+
+```typescript
+const dispatch = await agent.dispatchConnectorFromPlan(selectionPlan, request, {
+  authorizationContext,
+});
+const toolResults = await agent.executeToolCalls(
+  [{ id: "tool-call-1", name: "repository_catalog", arguments: {} }],
+  { domains: ["coding"], authorizationContext },
+);
+```
+
 `AutonomousRuntime.invoke()` performs bounded provider failover when a selected provider returns a
 retryable `ProviderRuntimeError`: transport, circuit, and provider HTTP failures remove that
 provider from the compiled continuation ladder, while an isolated timeout removes only the timed-

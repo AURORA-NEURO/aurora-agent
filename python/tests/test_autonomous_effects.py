@@ -8,6 +8,9 @@ import pytest
 
 from prism_sdk import (
     AUTONOMOUS_DOMAIN_NAMES,
+    AutonomousAuthorizationContext,
+    AutonomousAuthorizationGate,
+    AutonomousAuthorizationLedger,
     AutonomousDomainTool,
     AutonomousDomainToolRegistry,
     AutonomousDomainToolRuntime,
@@ -34,6 +37,7 @@ from prism_sdk import (
     AutonomousEffectPersistenceCoordinator,
     protected_value_digest,
 )
+from prism_sdk.errors import ArgumentError
 
 
 def _request(execution_id: str | None = None) -> dict[str, object]:
@@ -71,6 +75,78 @@ def test_effect_boundary_is_idempotent_and_metadata_only() -> None:
     restored.restore(snapshot)
     assert restored.get(boundary.effect_id(_request())).status == "completed"  # type: ignore[union-attr]
     assert restored.verify_integrity()["verified"] is True
+
+
+def test_effect_boundary_requires_context_before_external_dispatch_for_all_domains() -> None:
+    ledger = AutonomousAuthorizationLedger(max_grants=4, max_events=64)
+    grant = ledger.issue(
+        grant_id="effect-runtime-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=AUTONOMOUS_DOMAIN_NAMES,
+        allowed_operations=("effect_dispatch",),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=len(AUTONOMOUS_DOMAIN_NAMES),
+    )
+    context = AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(ledger),
+        grant_id=grant.grant_id,
+        tenant_id=grant.tenant_id,
+        actor_id=grant.actor_id,
+        session_id=grant.session_id,
+        authorization_digest=grant.authorization_digest,
+        domains=AUTONOMOUS_DOMAIN_NAMES,
+        clock=lambda: 1_200,
+    )
+    journal = InMemoryAutonomousEffectJournal()
+    boundary = AutonomousEffectBoundary(journal=journal)
+    executed: list[str] = []
+    for domain in AUTONOMOUS_DOMAIN_NAMES:
+        result = boundary.execute(
+            {"execution_id": f"effect-{domain}", "tool": "external_write", "call_id": f"call-{domain}", "risk_class": "external_effect", "arguments": {}},
+            lambda _effect_context, domain=domain: executed.append(domain) or {"domain": domain},
+            authorization_context=context,
+            authorization_domains=(domain,),
+        )
+        assert result == {"domain": domain}
+    assert executed == list(AUTONOMOUS_DOMAIN_NAMES)
+    assert ledger.get(grant.grant_id).used_count == len(AUTONOMOUS_DOMAIN_NAMES)  # type: ignore[union-attr]
+
+    blocked_ledger = AutonomousAuthorizationLedger(max_grants=2, max_events=8)
+    blocked = blocked_ledger.issue(
+        grant_id="blocked-effect-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=("coding",),
+        allowed_operations=("tool_execution",),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=1,
+    )
+    blocked_context = AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(blocked_ledger),
+        grant_id=blocked.grant_id,
+        tenant_id=blocked.tenant_id,
+        actor_id=blocked.actor_id,
+        session_id=blocked.session_id,
+        authorization_digest=blocked.authorization_digest,
+        domains=("coding",),
+        clock=lambda: 1_200,
+    )
+    blocked_calls = 0
+    with pytest.raises(ArgumentError, match="authorization was refused"):
+        boundary.execute(
+            {"execution_id": "effect-blocked", "tool": "external_write", "call_id": "call-blocked", "risk_class": "external_effect", "arguments": {}},
+            lambda _context: (_ for _ in ()).throw(AssertionError("effect executor must not run")),
+            authorization_context=blocked_context,
+            authorization_domains=("coding",),
+        )
+    assert blocked_calls == 0
 
 
 def test_uncertain_effect_requires_resolution_before_retry(tmp_path) -> None:

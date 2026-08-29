@@ -125,6 +125,52 @@ def test_authorization_context_mints_fresh_domain_bound_provider_requests() -> N
         context.authorize_provider(provider="offline", model="model-a", invocation_kind="provider_call", domain="science")
 
 
+def test_authorization_context_shares_request_sequence_across_operation_and_domain_children() -> None:
+    ledger = _ledger()
+    grant = ledger.issue(
+        grant_id="operation-grant",
+        tenant_id="tenant-a",
+        actor_id="actor-a",
+        session_id="session-a",
+        authorization_digest="a" * 64,
+        allowed_domains=AUTONOMOUS_DOMAIN_NAMES,
+        allowed_operations=("provider_invocation", "connector_dispatch", "tool_execution", "effect_dispatch"),
+        allowed_risk_classes=(),
+        issued_at=1_000,
+        expires_at=2_000,
+        max_uses=4,
+    )
+    context = AutonomousAuthorizationContext(
+        gate=AutonomousAuthorizationGate(ledger),
+        grant_id=grant.grant_id,
+        tenant_id=grant.tenant_id,
+        actor_id=grant.actor_id,
+        session_id=grant.session_id,
+        authorization_digest=grant.authorization_digest,
+        domains=AUTONOMOUS_DOMAIN_NAMES,
+        clock=lambda: 1_200,
+    )
+
+    first = context.authorize_provider(provider="offline", model="model-a", invocation_kind="provider_call", domain="coding")
+    child = context.for_domain("coding")
+    second = child.authorize_operation(
+        operation="connector_dispatch",
+        domain="coding",
+        capability="evidence_read",
+        resource_digest="b" * 64,
+    )
+    third = context.authorize_operation(
+        operation="tool_execution",
+        domain="coding",
+        capability="evidence_read",
+        resource_digest="c" * 64,
+    )
+
+    assert len({first.request_digest, second.request_digest, third.request_digest}) == 3
+    assert context._counter == 3
+    assert child._counter == 2
+
+
 def test_authorization_rejects_identity_scope_and_time_drift() -> None:
     ledger = _ledger()
     _grant(ledger, max_uses=None)

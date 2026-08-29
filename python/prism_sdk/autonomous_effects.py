@@ -28,6 +28,7 @@ from .errors import ArgumentError
 from .llm_runtime import ProviderToolCall, ProviderToolResult
 
 if TYPE_CHECKING:
+    from .autonomous_authorization import AutonomousAuthorizationContext
     from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 
 
@@ -1170,6 +1171,9 @@ class AutonomousEffectBoundary:
         result_projector: Callable[[Any], Any] | None = None,
         cache_result: bool = True,
         definite_failure: Callable[[BaseException], bool] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domains: Sequence[str] | None = None,
+        authorization_capability: str | None = None,
     ) -> Any:
         if not callable(executor):
             raise AutonomousEffectError("effect executor must be callable")
@@ -1179,8 +1183,18 @@ class AutonomousEffectBoundary:
             raise AutonomousEffectError("effect cache_result must be a boolean")
         if definite_failure is not None and not callable(definite_failure):
             raise AutonomousEffectError("effect definite_failure must be callable or None")
+        if authorization_context is not None and not callable(getattr(authorization_context, "authorize_operation", None)):
+            raise AutonomousEffectError("effect authorization_context must be an AutonomousAuthorizationContext or None")
         normalized = self.normalize_request(request)
         effect_id = self.effect_id(normalized)
+        if authorization_context is not None:
+            authorization_context.authorize_operation(
+                operation="effect_dispatch",
+                domains=authorization_domains,
+                capability=(authorization_context.capability if authorization_capability is None else authorization_capability),
+                risk_class=normalized.risk_class,
+                resource_digest=effect_id,
+            )
         with self._exclusive(effect_id):
             return self._execute_exclusive(
                 normalized,
@@ -1201,6 +1215,9 @@ class AutonomousEffectBoundary:
         summary_projector: Callable[[Mapping[str, Any]], Any] | None = None,
         observe: Callable[[Any, int], None] | None = None,
         definite_failure: Callable[[BaseException], bool] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domains: Sequence[str] | None = None,
+        authorization_capability: str | None = None,
     ) -> Iterator[Any]:
         """Return a live stream guarded by the same durable effect protocol as ``execute``.
 
@@ -1220,10 +1237,20 @@ class AutonomousEffectBoundary:
             raise AutonomousEffectError("effect stream observe must be callable or None")
         if definite_failure is not None and not callable(definite_failure):
             raise AutonomousEffectError("effect stream definite_failure must be callable or None")
+        if authorization_context is not None and not callable(getattr(authorization_context, "authorize_operation", None)):
+            raise AutonomousEffectError("effect stream authorization_context must be an AutonomousAuthorizationContext or None")
         normalized = self.normalize_request(request)
         effect_id = self.effect_id(normalized)
 
         def guarded() -> Iterator[Any]:
+            if authorization_context is not None:
+                authorization_context.authorize_operation(
+                    operation="effect_dispatch",
+                    domains=authorization_domains,
+                    capability=(authorization_context.capability if authorization_capability is None else authorization_capability),
+                    risk_class=normalized.risk_class,
+                    resource_digest=effect_id,
+                )
             with self._exclusive(effect_id):
                 yield from self._execute_stream_exclusive(
                     normalized,
@@ -1257,11 +1284,13 @@ class AutonomousEffectBoundary:
                 return current
             return self._reconcile_exclusive(current, selected, self.execution, idempotency_key=idempotency_key)
 
-    def authorize_and_execute(self, calls: Sequence[ProviderToolCall], *, approve: Callable[[ProviderToolCall], bool], execute: Callable[..., Any], execution_id: str | None = None, execution: Any | None = None, is_read_only: Callable[[ProviderToolCall], bool] | None = None, risk_class: Callable[[ProviderToolCall], str] | None = None) -> tuple[ProviderToolResult, ...]:
+    def authorize_and_execute(self, calls: Sequence[ProviderToolCall], *, approve: Callable[[ProviderToolCall], bool], execute: Callable[..., Any], execution_id: str | None = None, execution: Any | None = None, is_read_only: Callable[[ProviderToolCall], bool] | None = None, risk_class: Callable[[ProviderToolCall], str] | None = None, authorization_context: AutonomousAuthorizationContext | None = None, authorization_domains: Sequence[str] | None = None) -> tuple[ProviderToolResult, ...]:
         if isinstance(calls, (str, bytes)) or not isinstance(calls, Sequence) or len(calls) > 128:
             raise AutonomousEffectError("effect tool call count is outside its bounds")
         if not callable(approve) or not callable(execute):
             raise AutonomousEffectError("effect approval and executor callbacks must be callable")
+        if authorization_context is not None and not callable(getattr(authorization_context, "authorize_operation", None)):
+            raise AutonomousEffectError("effect authorization_context must be an AutonomousAuthorizationContext or None")
         results: list[ProviderToolResult] = []
         for call in calls:
             if not isinstance(call, ProviderToolCall):
@@ -1275,11 +1304,17 @@ class AutonomousEffectBoundary:
                 continue
             readonly = bool(is_read_only(call)) if is_read_only is not None else False
             if readonly:
+                if authorization_context is not None:
+                    authorization_context.authorize_operation(
+                        operation="tool_execution",
+                        domains=authorization_domains,
+                        resource_digest=content_digest({"tool": call.name, "call_id": call.call_id, "arguments_digest": content_digest(dict(call.arguments))}),
+                    )
                 results.append(ProviderToolResult(call.call_id, execute(call), approved=True, is_error=False))
                 continue
             selected_risk = risk_class(call) if risk_class is not None else "external_effect"
             try:
-                value = self.execute({"execution_id": execution_id, "tool": call.name, "call_id": call.call_id, "risk_class": selected_risk, "arguments": dict(call.arguments)}, lambda context: execute(call, context), execution=execution)
+                value = self.execute({"execution_id": execution_id, "tool": call.name, "call_id": call.call_id, "risk_class": selected_risk, "arguments": dict(call.arguments)}, lambda context: execute(call, context), execution=execution, authorization_context=authorization_context, authorization_domains=authorization_domains)
                 results.append(ProviderToolResult(call.call_id, value, approved=True, is_error=False))
             except AutonomousEffectReconciliationRequiredError as error:
                 results.append(ProviderToolResult(call.call_id, {"status": "reconciliation_required", "tool": call.name, "effect_id": error.effect_id, "idempotency_key": error.idempotency_key, "secret_material": "never_returned"}, approved=False, is_error=True))

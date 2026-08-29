@@ -13714,6 +13714,46 @@ and a refused attempt cannot touch credentials or the network. Applications that
 domains should use `for_domain()` / `forDomain()` or pass the exact domain on every call; omitting
 the domain for a multi-domain context fails closed.
 
+The same context now reaches the non-provider dispatch seams. `AutonomousConnectorRuntime`
+authorizes `connector_dispatch` after selection-plan, manifest-domain, capability, and caller
+approval checks but immediately before the registered connector executor. A connector replay
+returns the already-recorded metadata receipt without re-dispatching or charging a new grant use.
+`AutonomousDomainToolRuntime` authorizes read-only bindings as `tool_execution` and effectful
+bindings as `effect_dispatch`; the authorization request carries the exact domain, reviewed
+capability, risk class, call identity, and an arguments digest, never the arguments themselves.
+`AutonomousEffectBoundary` applies the effect check before its durable prepared/dispatching/
+dispatched transitions and before user code, including lazy stream producers. This means the
+effect journal cannot be used to smuggle an unapproved call into an executor, while a refusal is
+reported as `authorization_required` rather than as a provider or executor failure.
+
+Operation requests share the context's monotonic request sequence across parent and narrowed
+domain contexts. This matters for fan-out: a child produced by `for_domain()` / `forDomain()`
+cannot restart at `provider-1` and collide with a later parent request identity. The ledger still
+uses request digests for replay idempotency, while the request ID provides a separate audit trail.
+Callers that want the whole cross-domain surface can issue one grant with the twelve domains and
+the required operation set; least-privilege deployments should issue narrower grants and use
+one-domain child contexts for each worker.
+
+```typescript
+const result = await agent.dispatchConnectorFromPlan(selectionPlan, dispatchRequest, {
+  authorizationContext,
+});
+
+const toolResults = await agent.executeToolCalls(
+  [{ id: "tool-call-1", name: "repository_catalog", arguments: {} }],
+  { domains: ["coding"], authorizationContext },
+);
+// A denied connector/tool/effect has no executor side effect and reports a bounded refusal.
+```
+
+The corresponding Python methods accept `authorization_context` on connector dispatch,
+`AutonomousDomainToolRuntime` construction/scope/session, and effect-boundary execution. The
+high-level agent forwards the same context from run options into its scoped tool runtime, so a
+provider tool loop cannot bypass authorization merely by moving from the LLM path to an adapter
+path. Context propagation is optional for backwards-compatible local integrations, but a
+deployment that has issued a grant must pass it at every external boundary; registration,
+selection, approval, and a valid plan are not substitutes for the grant check.
+
 This is deliberately an authorization contract and enforcement seam, not an identity provider:
 the deployment still authenticates the caller, issues and protects the authorization digest,
 stores/encrypts snapshots, coordinates distributed writers, and decides which external action is

@@ -120,6 +120,31 @@ journaling, and transport, so a denied scope or exhausted grant cannot contact a
 context carries no key, prompt, message, response, or tool result; credentials remain caller-owned
 opaque handles.
 
+Pass the same context into connector dispatch and domain-tool/effect execution as well. Connector
+dispatch checks `connector_dispatch` after the reviewed selection and approval checks but before
+the registered executor; read-only domain tools check `tool_execution`; effectful tools and
+`AutonomousEffectBoundary.execute()`/`execute_stream()` check `effect_dispatch` before journal
+transitions and before user code. The requests contain only exact domains, capability/risk
+metadata, call identity, and a SHA-256 resource digest. Refused tool calls return the explicit
+`authorization_required` status and never invoke the executor. Connector replay remains a
+metadata-only replay and does not consume a fresh authorization allowance.
+
+```python
+scoped_tools = tool_runtime.scoped(
+    execution_id="run-1",
+    domain="coding",
+    authorization_context=authorization_context,
+)
+tool_results = scoped_tools((provider_tool_call,))
+```
+
+Use `context.for_domain("coding")` / `context.forDomain("coding")` for workers narrowed from a
+multi-domain grant. Parent and child contexts share one monotonic request sequence, preventing a
+fan-out child from reusing a request ID already minted by its parent. The authorization context
+is optional for legacy local adapters, but once a deployment relies on caller-issued grants it
+must be forwarded to every connector, tool, and effect boundary; registration and approval alone
+do not establish authority.
+
 For provider-backed evidence, `AutonomousConnectorRegistry` and `AutonomousConnectorRuntime`
 provide the corresponding caller-owned connector process. Register a typed
 `DomainEvidenceProviderConnectorManifest` and an executor that may close over a short-lived

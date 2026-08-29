@@ -8,6 +8,9 @@ import {
   AutonomousEffectPolicyError,
   AutonomousEffectReconciliationRequiredError,
   AUTONOMOUS_DOMAIN_NAMES,
+  AutonomousAuthorizationContext,
+  AutonomousAuthorizationGate,
+  AutonomousAuthorizationLedger,
   AUTONOMOUS_PROTECTED_PROVIDER_EFFECT_REHYDRATION_SCHEMA,
   AUTONOMOUS_PROVIDER_EFFECT_RECONCILIATION_SCHEMA,
   AutonomousProtectedProviderEffectResolver,
@@ -62,6 +65,45 @@ test("effect boundary records an idempotent metadata-only lifecycle", async () =
   await restored.restore(snapshot);
   assert.equal((await restored.get(await boundary.effectId(request))).status, "completed");
   assert.equal((await effectJournal.verifyIntegrity()).verified, true);
+});
+
+test("effect authorization context gates every domain dispatch before user code", async () => {
+  const ledger = new AutonomousAuthorizationLedger(4, 64);
+  const grant = ledger.issue({
+    grant_id: "effect-runtime-grant", tenant_id: "tenant-a", actor_id: "actor-a", session_id: "session-a",
+    authorization_digest: "a".repeat(64), allowed_domains: [...AUTONOMOUS_DOMAIN_NAMES], allowed_operations: ["effect_dispatch"],
+    allowed_capabilities: [], allowed_risk_classes: [], issued_at: 1000, expires_at: 2000, max_uses: AUTONOMOUS_DOMAIN_NAMES.length,
+  });
+  const context = new AutonomousAuthorizationContext(
+    new AutonomousAuthorizationGate(ledger), grant.grant_id, grant.tenant_id, grant.actor_id,
+    grant.session_id, grant.authorization_digest, [...AUTONOMOUS_DOMAIN_NAMES], null, "provider_invocation", "effect", () => 1200,
+  );
+  const journal = new InMemoryAutonomousEffectJournal();
+  const boundary = new AutonomousEffectBoundary({ journal });
+  const executed = [];
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await boundary.execute({ execution_id: `effect-${domain}`, tool: "external_write", call_id: `call-${domain}`, risk_class: "external_effect", arguments: {} }, async () => {
+      executed.push(domain);
+      return { domain };
+    }, { authorizationContext: context, authorizationDomains: [domain] });
+    assert.deepEqual(result, { domain });
+  }
+  assert.deepEqual(executed, [...AUTONOMOUS_DOMAIN_NAMES]);
+  assert.equal(ledger.get(grant.grant_id).used_count, AUTONOMOUS_DOMAIN_NAMES.length);
+
+  const blockedLedger = new AutonomousAuthorizationLedger(2, 8);
+  const blocked = blockedLedger.issue({
+    grant_id: "blocked-effect-grant", tenant_id: "tenant-a", actor_id: "actor-a", session_id: "session-a",
+    authorization_digest: "a".repeat(64), allowed_domains: ["coding"], allowed_operations: ["tool_execution"],
+    allowed_capabilities: [], allowed_risk_classes: [], issued_at: 1000, expires_at: 2000, max_uses: 1,
+  });
+  const blockedContext = new AutonomousAuthorizationContext(
+    new AutonomousAuthorizationGate(blockedLedger), blocked.grant_id, blocked.tenant_id, blocked.actor_id,
+    blocked.session_id, blocked.authorization_digest, ["coding"], null, "provider_invocation", "blocked-effect", () => 1200,
+  );
+  await assert.rejects(() => boundary.execute({ execution_id: "effect-blocked", tool: "external_write", call_id: "call-blocked", risk_class: "external_effect", arguments: {} }, async () => {
+    throw new Error("must not execute");
+  }, { authorizationContext: blockedContext, authorizationDomains: ["coding"] }), /authorization was refused/);
 });
 
 test("effect journal persistence validates the chain and fences stale workers", async () => {
@@ -306,6 +348,18 @@ test("custom tool adapters receive approval before the idempotency-aware executo
 
 test("effect ledger is applied through the same boundary for all domain profiles", async () => {
   const profiles = await builtinAutonomousDomainProfiles();
+  const authorizationLedger = new AutonomousAuthorizationLedger(4, 64);
+  const authorizationGrant = authorizationLedger.issue({
+    grant_id: "domain-tool-runtime-grant", tenant_id: "tenant-a", actor_id: "actor-a", session_id: "session-a",
+    authorization_digest: "a".repeat(64), allowed_domains: [...AUTONOMOUS_DOMAIN_NAMES],
+    allowed_operations: ["tool_execution", "effect_dispatch"], allowed_capabilities: [], allowed_risk_classes: [],
+    issued_at: 1000, expires_at: 2000, max_uses: profiles.length,
+  });
+  const authorizationContext = new AutonomousAuthorizationContext(
+    new AutonomousAuthorizationGate(authorizationLedger), authorizationGrant.grant_id, authorizationGrant.tenant_id,
+    authorizationGrant.actor_id, authorizationGrant.session_id, authorizationGrant.authorization_digest,
+    [...AUTONOMOUS_DOMAIN_NAMES], null, "provider_invocation", "domain-tool", () => 1200,
+  );
   const effectBindings = profiles.map((profile) => {
     const binding = profile.tool_profile.bindings.find((candidate) => !candidate.read_only) ?? profile.tool_profile.bindings[0];
     assert.ok(binding, `${profile.domain} must expose at least one curated binding`);
@@ -320,7 +374,7 @@ test("effect ledger is applied through the same boundary for all domain profiles
     const runtime = new AutonomousDomainToolRuntime(registry, async (_tool, _arguments, effectContext) => { externalExecutions += 1; if (effectful) assert.match(effectContext.idempotency_key, /^aurora-effect-/); return { domain: profile.domain, committed: true }; }, { effectBoundary: new AutonomousEffectBoundary({ journal }) });
     const callId = `domain-${profile.domain}`;
     await execution.admitToolCall({ tool: binding.name, callId, readOnly: binding.read_only, approvalRequired: effectful });
-    const result = await runtime.authorizeAndExecute([{ id: callId, name: binding.name, arguments: {} }], { domains: [profile.domain], approveEffects: true, execution, effectBoundary: runtime.effectBoundary });
+    const result = await runtime.authorizeAndExecute([{ id: callId, name: binding.name, arguments: {} }], { domains: [profile.domain], approveEffects: true, execution, effectBoundary: runtime.effectBoundary, authorizationContext });
     assert.equal(result[0].approved, true, profile.domain);
     assert.equal((await journal.events()).at(-1)?.event.status ?? null, effectful ? "completed" : null, profile.domain);
   }

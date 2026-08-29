@@ -2705,3 +2705,15 @@ reduces duplicated authorization glue without claiming identity authentication o
 effect authority. Remaining deployment work is to connect the contract to the real identity
 provider, encrypted/shared persistence, distributed lease authority, grant rotation, and
 operator approval UX.
+
+The authorization context now covers the full live external-dispatch path in both SDKs. Connector
+dispatch checks `connector_dispatch` immediately before a fresh registered executor, domain-tool
+execution distinguishes `tool_execution` from `effect_dispatch`, and the durable effect boundary
+applies its check before journal transitions and user code, including streams. Refusals are
+reported as `authorization_required` at the domain-tool boundary; executors are never entered.
+Parent and `for_domain()`/`forDomain()` child contexts share a monotonic request sequence, while
+connector replay remains uncharged because it does not perform a new external dispatch. The
+cross-language regression matrix covers all twelve domains, blocked grants, replay behavior, and
+Python/TypeScript high-level propagation. Remaining deployment work is still caller-owned
+identity authentication, encrypted/shared grant persistence, distributed leasing, key/session
+rotation, and operator approval UX.

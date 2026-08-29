@@ -21,6 +21,7 @@ import {
   type AutonomousConnectorWorkerRun,
 } from "./autonomous-connector-worker.js";
 import { digestJsonSync } from "./tooling.js";
+import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import type { JsonObject } from "./types.js";
 
 /**
@@ -458,19 +459,19 @@ export class AutonomousConnectorOperationFacade {
   }
 
   /** Execute one reviewed operation through the selected connector and replay boundary. */
-  async execute(input: AutonomousConnectorOperationInput, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorOperationExecution> {
+  async execute(input: AutonomousConnectorOperationInput, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback; authorizationContext?: AutonomousAuthorizationContext; authorizationRiskClass?: string | null } = {}): Promise<AutonomousConnectorOperationExecution> {
     const prepared = this.prepare(input);
     if (!prepared.dispatch || prepared.plan.status !== "ready") throw new ProviderRuntimeError("connector operation has no eligible connector", { code: "configuration" });
-    return this.dispatch(prepared, options.traceEventCallback);
+    return this.dispatch(prepared, options.traceEventCallback, options.authorizationContext, options.authorizationRiskClass);
   }
 
   /** Rehydrate a metadata-only plan by resupplying transient request metadata and verify exact identity. */
-  async executePlanned(plan: AutonomousConnectorOperationPlan, input: AutonomousConnectorOperationInput, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorOperationExecution> {
+  async executePlanned(plan: AutonomousConnectorOperationPlan, input: AutonomousConnectorOperationInput, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback; authorizationContext?: AutonomousAuthorizationContext; authorizationRiskClass?: string | null } = {}): Promise<AutonomousConnectorOperationExecution> {
     if (!(plan instanceof AutonomousConnectorOperationPlan)) throw new ArgumentError("connector operation executePlanned requires a typed plan");
     const prepared = this.prepare(input);
     if (prepared.plan.plan_digest !== plan.plan_digest) throw new ArgumentError("connector operation plan does not match the supplied transient request");
     if (!prepared.dispatch) throw new ProviderRuntimeError("connector operation plan has no eligible connector", { code: "configuration" });
-    return this.dispatch(prepared, options.traceEventCallback);
+    return this.dispatch(prepared, options.traceEventCallback, options.authorizationContext, options.authorizationRiskClass);
   }
 
   /** Rehydrate a reviewed operation plan into a transient worker request without dispatching. */
@@ -483,7 +484,7 @@ export class AutonomousConnectorOperationFacade {
   }
 
   /** Execute independent operations with bounded concurrency and deterministic result ordering. */
-  async executeBatch(inputs: readonly AutonomousConnectorOperationInput[], options: { maxParallelism?: number; stopOnError?: boolean; traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorOperationBatchResult> {
+  async executeBatch(inputs: readonly AutonomousConnectorOperationInput[], options: { maxParallelism?: number; stopOnError?: boolean; traceEventCallback?: AutonomousConnectorTraceEventCallback; authorizationContext?: AutonomousAuthorizationContext; authorizationRiskClass?: string | null } = {}): Promise<AutonomousConnectorOperationBatchResult> {
     if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_CONNECTOR_FACADE_BATCH) throw new ArgumentError(`connector operation batch must contain 1..=${MAX_AUTONOMOUS_CONNECTOR_FACADE_BATCH} entries`);
     const maxParallelism = options.maxParallelism ?? 4;
     if (!Number.isSafeInteger(maxParallelism) || maxParallelism < 1 || maxParallelism > MAX_AUTONOMOUS_CONNECTOR_FACADE_PARALLELISM) throw new ArgumentError("connector operation batch maxParallelism is outside its bound");
@@ -502,7 +503,7 @@ export class AutonomousConnectorOperationFacade {
           continue;
         }
         try {
-          const execution = await this.execute(inputs[index]!, { traceEventCallback: options.traceEventCallback });
+          const execution = await this.execute(inputs[index]!, { traceEventCallback: options.traceEventCallback, authorizationContext: options.authorizationContext, authorizationRiskClass: options.authorizationRiskClass });
           items[index] = { index, status: execution.status === "observed" || execution.status === "partial" ? "succeeded" : "refused", plan_digest: execution.operation_plan.plan_digest, execution };
           if (stopOnError && execution.status !== "observed" && execution.status !== "partial") halted = true;
         } catch (error) {
@@ -576,9 +577,9 @@ export class AutonomousConnectorOperationFacade {
     return { operation, request, dispatch, plan };
   }
 
-  private async dispatch(prepared: PreparedOperation, traceEventCallback?: AutonomousConnectorTraceEventCallback): Promise<AutonomousConnectorOperationExecution> {
+  private async dispatch(prepared: PreparedOperation, traceEventCallback?: AutonomousConnectorTraceEventCallback, authorizationContext?: AutonomousAuthorizationContext, authorizationRiskClass?: string | null): Promise<AutonomousConnectorOperationExecution> {
     if (!prepared.dispatch) throw new ProviderRuntimeError("connector operation dispatch is unavailable", { code: "configuration" });
-    const dispatch = await this.runtime.dispatchFromPlan(prepared.plan.selection_plan, prepared.dispatch, { traceEventCallback });
+    const dispatch = await this.runtime.dispatchFromPlan(prepared.plan.selection_plan, prepared.dispatch, { traceEventCallback, authorizationContext, authorizationDomain: prepared.plan.domain, authorizationCapability: prepared.plan.capability, authorizationRiskClass });
     return {
       schema: AUTONOMOUS_CONNECTOR_OPERATION_FACADE_SCHEMA,
       status: dispatch.receipt.status,

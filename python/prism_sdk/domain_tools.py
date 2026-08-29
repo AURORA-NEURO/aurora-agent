@@ -20,14 +20,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from typing import Any, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 from .authoring import content_digest
 from .errors import ArgumentError
 from .llm_runtime import ProviderTool, ProviderToolCall, ProviderToolResult
 from .autonomous_effects import (
     AutonomousEffectBoundary,
-    AutonomousEffectExecutionError,
     AutonomousEffectReconciliationRequiredError,
 )
 from .autonomy_persistence import (
@@ -37,6 +36,9 @@ from .autonomy_persistence import (
     AutonomyPolicyError,
 )
 from .tooling import ToolCatalogue, ToolDefinition, ToolSchemaError
+
+if TYPE_CHECKING:
+    from .autonomous_authorization import AutonomousAuthorizationContext
 
 
 DOMAIN_TOOL_SCHEMA = "bioprism-python-autonomous-domain-tool/0.1"
@@ -67,6 +69,7 @@ DOMAIN_TOOL_RISK_CLASSES = (
 DOMAIN_TOOL_EXECUTION_STATUSES = (
     "executed",
     "approval_required",
+    "authorization_required",
     "policy_refused",
     "unknown_tool",
     "schema_refused",
@@ -1082,6 +1085,7 @@ class AutonomousDomainToolRuntime:
         receipt_sink: Callable[[AutonomousDomainToolReceipt], Any] | None = None,
         effect_boundary: AutonomousEffectBoundary | None = None,
         effect_executor: Callable[[AutonomousDomainTool, Mapping[str, Any], Any], Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
         _receipt_store: list[AutonomousDomainToolReceipt] | None = None,
         _scope: tuple[str, str] | None = None,
     ) -> None:
@@ -1101,6 +1105,8 @@ class AutonomousDomainToolRuntime:
             raise ArgumentError("domain tool runtime effect boundary must be an AutonomousEffectBoundary or None")
         if effect_executor is not None and not callable(effect_executor):
             raise ArgumentError("domain tool runtime effect executor must be callable")
+        if authorization_context is not None and not callable(getattr(authorization_context, "authorize_operation", None)):
+            raise ArgumentError("domain tool runtime authorization_context must be an AutonomousAuthorizationContext or None")
         if _receipt_store is not None and not isinstance(_receipt_store, list):
             raise ArgumentError("domain tool runtime receipt store must be a list or None")
         if _scope is not None:
@@ -1120,10 +1126,11 @@ class AutonomousDomainToolRuntime:
         self.receipt_sink = receipt_sink
         self.effect_boundary = effect_boundary
         self.effect_executor = effect_executor
+        self.authorization_context = authorization_context
         self._receipts = _receipt_store if _receipt_store is not None else []
         self._scope = _scope
 
-    def scoped(self, *, execution_id: str, domain: str) -> "AutonomousDomainToolRuntime":
+    def scoped(self, *, execution_id: str, domain: str, authorization_context: AutonomousAuthorizationContext | None = None) -> "AutonomousDomainToolRuntime":
         """Create a non-persistent run scope that still binds receipt identity to a domain."""
 
         resolved_execution_id = (
@@ -1140,6 +1147,7 @@ class AutonomousDomainToolRuntime:
             receipt_sink=self.receipt_sink,
             effect_boundary=self.effect_boundary,
             effect_executor=self.effect_executor,
+            authorization_context=self.authorization_context if authorization_context is None else authorization_context,
             _receipt_store=self._receipts,
             _scope=(
                 resolved_execution_id,
@@ -1157,6 +1165,7 @@ class AutonomousDomainToolRuntime:
         policy: AutonomousExecutionPolicy | Mapping[str, Any] | None = None,
         journal: AutonomousExecutionJournal | None = None,
         resume: bool = False,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> "AutonomousDomainToolRuntime":
         """Create an isolated run controller while preserving the application receipt stream."""
 
@@ -1178,6 +1187,7 @@ class AutonomousDomainToolRuntime:
             receipt_sink=self.receipt_sink,
             effect_boundary=self.effect_boundary,
             effect_executor=self.effect_executor,
+            authorization_context=self.authorization_context if authorization_context is None else authorization_context,
             _receipt_store=self._receipts,
         )
 
@@ -1367,6 +1377,14 @@ class AutonomousDomainToolRuntime:
         results: list[ProviderToolResult] = []
         for call, tool, arguments, arguments_digest in prepared:
             try:
+                if self.authorization_context is not None and tool.read_only:
+                    self.authorization_context.authorize_operation(
+                        operation="tool_execution",
+                        domain=domain,
+                        capability=tool.capability,
+                        risk_class=tool.risk_class,
+                        resource_digest=content_digest({"tool": tool.name, "call_id": call.call_id, "arguments_digest": arguments_digest}),
+                    )
                 if self.effect_boundary is not None and not tool.read_only:
                     output = self.effect_boundary.execute(
                         {
@@ -1382,8 +1400,19 @@ class AutonomousDomainToolRuntime:
                             else self.executor(tool, arguments)
                         ),
                         execution=self.controller,
+                        authorization_context=self.authorization_context,
+                        authorization_domains=None if domain is None else (domain,),
+                        authorization_capability=tool.capability,
                     )
                 else:
+                    if self.authorization_context is not None and not tool.read_only:
+                        self.authorization_context.authorize_operation(
+                            operation="effect_dispatch",
+                            domain=domain,
+                            capability=tool.capability,
+                            risk_class=tool.risk_class,
+                            resource_digest=content_digest({"tool": tool.name, "call_id": call.call_id, "arguments_digest": arguments_digest}),
+                        )
                     output = self.executor(tool, arguments)
                 _json_safe("domain tool result", output, maximum=MAX_DOMAIN_TOOL_RESULT_BYTES)
                 _reject_secret_fields(output)
@@ -1444,27 +1473,40 @@ class AutonomousDomainToolRuntime:
                         ),
                     )
                 )
-            except AutonomousEffectExecutionError:
-                results.append(
-                    self._result(
-                        call,
-                        status="execution_failed",
-                        content={"status": "execution_failed", "tool": tool.name, "authorization": "caller_approved"},
-                        approved=True,
-                        receipt=AutonomousDomainToolReceipt(
-                            call.call_id,
-                            tool.name,
-                            "execution_failed",
-                            schema_digest=tool.schema_digest,
-                            arguments_digest=arguments_digest,
-                            execution_id=execution_id,
-                            domain=domain,
-                            capability=tool.capability,
-                            risk_class=tool.risk_class,
-                        ),
+            except Exception as error:
+                # Authorization refusal is a control-plane outcome, not an executor failure.
+                # Import lazily because the authorization module imports this module for the
+                # canonical domain list; the runtime is fully initialized by this point.
+                from .autonomous_authorization import AutonomousAuthorizationError
+
+                if isinstance(error, AutonomousAuthorizationError):
+                    results.append(
+                        self._result(
+                            call,
+                            status="authorization_required",
+                            content={"status": "authorization_required", "tool": tool.name, "secret_material": "never_returned"},
+                            approved=False,
+                            receipt=AutonomousDomainToolReceipt(
+                                call.call_id,
+                                tool.name,
+                                "authorization_required",
+                                schema_digest=tool.schema_digest,
+                                arguments_digest=arguments_digest,
+                                execution_id=execution_id,
+                                domain=domain,
+                                capability=tool.capability,
+                                risk_class=tool.risk_class,
+                            ),
+                        )
                     )
-                )
-            except Exception:
+                    if self.controller is not None:
+                        self.controller.record_tool_outcome(
+                            tool=tool.name,
+                            call_id=call.call_id,
+                            status="authorization_required",
+                            reason="authorization_denied",
+                        )
+                    continue
                 results.append(
                     self._result(
                         call,

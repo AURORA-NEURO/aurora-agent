@@ -85,7 +85,7 @@ import {
   type AutonomousConnectorTraceEventCallback,
 } from "./autonomous-connectors.js";
 import { AutonomousEffectBoundary, AutonomousEffectReconciliationRequiredError, type AutonomousEffectExecutionContext } from "./autonomous-effects.js";
-import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
+import { AutonomousAuthorizationError, type AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import type { AutonomousEvaluatorCalibrationReport } from "./autonomous-evaluator-calibration.js";
 import type {
@@ -605,7 +605,7 @@ export interface AutonomousDomainToolExecutionReceipt extends JsonObject {
   does_not_claim: string[];
   tool: string;
   capability: string | null;
-  status: "approval_required" | "executed" | "reconciliation_required" | "execution_failed";
+  status: "approval_required" | "authorization_required" | "executed" | "reconciliation_required" | "execution_failed";
   schema_digest?: string;
   result_digest?: string;
   effect?: string;
@@ -5149,7 +5149,7 @@ export class AutonomousDomainToolRuntime {
     this.effectBoundary = options.effectBoundary;
   }
 
-  async authorizeAndExecute(calls: readonly ProviderToolCall[], options: { domains: readonly string[]; approveEffects?: boolean; execution?: AutonomousExecutionController; effectBoundary?: AutonomousEffectBoundary; workflowContext?: AutonomousWorkflowToolContext } ): Promise<ProviderToolResult[]> {
+  async authorizeAndExecute(calls: readonly ProviderToolCall[], options: { domains: readonly string[]; approveEffects?: boolean; execution?: AutonomousExecutionController; effectBoundary?: AutonomousEffectBoundary; workflowContext?: AutonomousWorkflowToolContext; authorizationContext?: AutonomousAuthorizationContext } ): Promise<ProviderToolResult[]> {
     if (!Array.isArray(calls) || calls.length > 128) throw new ProviderRuntimeError("autonomous tool call count is outside its bounds");
     const workflowContext = options.workflowContext === undefined ? null : normalizeWorkflowToolContext(options.workflowContext);
     if (workflowContext && !options.domains.includes(workflowContext.domain)) throw new ProviderRuntimeError("autonomous workflow tool context domain is outside the selected domains");
@@ -5203,9 +5203,24 @@ export class AutonomousDomainToolRuntime {
           continue;
         }
         const effectBoundary = options.effectBoundary ?? this.effectBoundary;
-        const value = effectBoundary && !executable.binding.read_only
-          ? await effectBoundary.execute({ execution_id: options.execution?.state.execution_id ?? null, tool: call.name, call_id: call.id, risk_class: executable.binding.risk_class, arguments: executable.arguments }, async (effectContext) => this.executor(executable.binding, executable.arguments, effectContext), { execution: options.execution })
-          : await this.executor(executable.binding, executable.arguments);
+        if (options.authorizationContext && executable.binding.read_only) {
+          options.authorizationContext.authorizeOperation({
+            operation: "tool_execution",
+            domains: options.domains,
+            capability: executable.binding.capability,
+            riskClass: executable.binding.risk_class,
+            resourceDigest: await digestJson({ tool: executable.binding.name, call_id: call.id, arguments_digest: await digestJson(executable.arguments) }),
+          });
+        }
+        let value: JsonValue;
+        if (effectBoundary && !executable.binding.read_only) {
+          value = await effectBoundary.execute({ execution_id: options.execution?.state.execution_id ?? null, tool: call.name, call_id: call.id, risk_class: executable.binding.risk_class, arguments: executable.arguments }, async (effectContext) => this.executor(executable.binding, executable.arguments, effectContext), { execution: options.execution, authorizationContext: options.authorizationContext, authorizationDomains: options.domains, authorizationCapability: executable.binding.capability });
+        } else {
+          if (options.authorizationContext && !executable.binding.read_only) {
+            options.authorizationContext.authorizeOperation({ operation: "effect_dispatch", domains: options.domains, capability: executable.binding.capability, riskClass: executable.binding.risk_class, resourceDigest: await digestJson({ tool: executable.binding.name, call_id: call.id, arguments_digest: await digestJson(executable.arguments) }) });
+          }
+          value = await this.executor(executable.binding, executable.arguments);
+        }
         assertSafeToolArguments(value);
         const encoded = canonicalJson(value);
         if (bytes(encoded) > 1_000_000) throw new ProviderRuntimeError("autonomous tool result exceeds its bounded size");
@@ -5218,6 +5233,12 @@ export class AutonomousDomainToolRuntime {
           const receipt = makeReceipt({ status: "reconciliation_required", effect_id: unknownError.effectId, idempotency_key: unknownError.idempotencyKey });
           this.receipts.push(receipt);
           results.push({ callId: call.id, approved: false, isError: true, content: { status: "reconciliation_required", tool: call.name, effect_id: unknownError.effectId, idempotency_key: unknownError.idempotencyKey, receipt_digest: await digestJson(receipt), secret_material: "never_returned" } });
+          continue;
+        }
+        if (unknownError instanceof AutonomousAuthorizationError) {
+          const receipt = makeReceipt({ status: "authorization_required" });
+          this.receipts.push(receipt);
+          results.push({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned", receipt_digest: await digestJson(receipt) } });
           continue;
         }
         const receipt = makeReceipt({ status: "execution_failed", error_class: error.constructor.name });
@@ -6295,13 +6316,13 @@ export class AutonomousAgent {
   }
 
   /** Dispatch one already-reviewed connector request; external authority remains caller-owned. */
-  async dispatchConnector(request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorDispatchResult> {
+  async dispatchConnector(request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback; authorizationContext?: AutonomousAuthorizationContext; authorizationDomain?: string; authorizationCapability?: string | null; authorizationRiskClass?: string | null } = {}): Promise<AutonomousConnectorDispatchResult> {
     if (!this.connectorRuntime) throw new ArgumentError("AutonomousAgent has no connector runtime");
     return this.connectorRuntime.dispatch(request, options);
   }
 
   /** Dispatch only when the digest-bound selection plan still matches the live connector catalogue. */
-  async dispatchConnectorFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback } = {}): Promise<AutonomousConnectorDispatchResult> {
+  async dispatchConnectorFromPlan(plan: AutonomousConnectorSelectionPlan | unknown, request: AutonomousConnectorDispatchRequest, options: { traceEventCallback?: AutonomousConnectorTraceEventCallback; authorizationContext?: AutonomousAuthorizationContext; authorizationDomain?: string; authorizationCapability?: string | null; authorizationRiskClass?: string | null } = {}): Promise<AutonomousConnectorDispatchResult> {
     if (!this.connectorRuntime) throw new ArgumentError("AutonomousAgent has no connector runtime");
     return this.connectorRuntime.dispatchFromPlan(plan, request, options);
   }
@@ -6320,6 +6341,7 @@ export class AutonomousAgent {
       execution?: AutonomousExecutionController;
       effectBoundary?: AutonomousEffectBoundary;
       workflowContext?: AutonomousWorkflowToolContext;
+      authorizationContext?: AutonomousAuthorizationContext;
     },
   ): Promise<ProviderToolResult[]> {
     if (!Array.isArray(calls) || calls.length > 128) throw new ArgumentError("autonomous tool call count is outside its bounds");
@@ -6338,6 +6360,7 @@ export class AutonomousAgent {
       execution: options.execution,
       effectBoundary: options.effectBoundary ?? this.effectBoundary,
       workflowContext: options.workflowContext,
+      authorizationContext: options.authorizationContext,
     }));
   }
 
@@ -10382,7 +10405,7 @@ export class AutonomousAgent {
       const authorizeAndExecute = options.authorizeAndExecute
         ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, options.authorizeAndExecute!)
         : (toolRuntime
-          ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary, workflowContext: options.workflowContext }))
+          ? (calls: ProviderToolCall[]) => this.dispatchActivatedToolCalls(calls, (allowed) => toolRuntime.authorizeAndExecute(allowed, { domains: selectedDomains, approveEffects: options.approveEffects, execution: options.execution, effectBoundary: options.effectBoundary ?? this.effectBoundary, workflowContext: options.workflowContext, authorizationContext: options.authorizationContext }))
           : async (calls: ProviderToolCall[]) => calls.map((call) => ({ callId: call.id, approved: false, isError: true, content: { status: "authorization_required", tool: call.name, secret_material: "never_returned" } })));
       const toolReadOnly = options.toolReadOnly ?? (async (call: ProviderToolCall): Promise<boolean> => this.domainToolRegistry?.binding(call.name, selectedDomains)?.risk_class === "read_only");
       const loop = await this.runtime.invokeToolLoop(executionPlan, { credential: options.credential, credentialFor: options.credentialFor, authorizeAndExecute, maxTurns: effectiveMaxToolTurns, signal: options.signal, observer: feedbackObserver, selectionEventCallback: options.selectionEventCallback, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: effectiveMaxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget!.reserve(costUnits) : undefined, toolReadOnly, authorizationContext: options.authorizationContext });

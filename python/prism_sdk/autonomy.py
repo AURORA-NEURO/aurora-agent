@@ -19618,6 +19618,10 @@ class AutonomousAgent:
         request: AutonomousConnectorDispatchRequest,
         *,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousConnectorDispatchResult:
         """Dispatch one connector only through a configured, plan-verifying runtime."""
 
@@ -19628,6 +19632,10 @@ class AutonomousAgent:
                 plan,
                 request,
                 trace_event_callback=trace_event_callback,
+                authorization_context=authorization_context,
+                authorization_domain=authorization_domain,
+                authorization_capability=authorization_capability,
+                authorization_risk_class=authorization_risk_class,
             )
         except (ArgumentError, BrainRunError):
             raise
@@ -19641,6 +19649,10 @@ class AutonomousAgent:
         *,
         launch_admission: Mapping[str, Any],
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousConnectorDispatchResult:
         """Dispatch a reviewed connector plan only after every plan domain is admitted."""
 
@@ -19652,6 +19664,10 @@ class AutonomousAgent:
             plan,
             request,
             trace_event_callback=trace_event_callback,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
+            authorization_capability=authorization_capability,
+            authorization_risk_class=authorization_risk_class,
         )
 
     def capability_portfolio(
@@ -24115,6 +24131,7 @@ class AutonomousAgent:
                         policy=execution_policy,
                         journal=self.execution_journal,
                         resume=resume_execution,
+                        authorization_context=resolved_options.get("authorization_context"),
                     )
                     execution_controller = session_runtime.controller
                 else:
@@ -24139,6 +24156,7 @@ class AutonomousAgent:
             session_runtime = self.tool_runtime.scoped(
                 execution_id=resolved_execution_id,
                 domain=selected_domain,
+                authorization_context=resolved_options.get("authorization_context"),
             )
         if execution_controller is not None:
             # This is an internal capability, never a caller/model option.  The orchestrator

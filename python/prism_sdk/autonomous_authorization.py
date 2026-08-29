@@ -95,10 +95,15 @@ _STATUSES = frozenset(AUTONOMOUS_AUTHORIZATION_GRANT_STATUSES)
 _DECISION_STATUSES = frozenset(AUTONOMOUS_AUTHORIZATION_DECISION_STATUSES)
 _EVENT_TYPES = frozenset(AUTONOMOUS_AUTHORIZATION_EVENT_TYPES)
 _OPERATIONS = frozenset(AUTONOMOUS_AUTHORIZATION_OPERATIONS)
+_CONTEXT_DEFAULT = object()
+
+
+class AutonomousAuthorizationError(ArgumentError):
+    """A typed refusal or malformed request at the autonomous authorization boundary."""
 
 
 def _fail(message: str) -> None:
-    raise ArgumentError(f"autonomous authorization {message}")
+    raise AutonomousAuthorizationError(f"autonomous authorization {message}")
 
 
 def _text(name: str, value: Any, maximum: int = 2_048) -> str:
@@ -979,6 +984,7 @@ class AutonomousAuthorizationContext:
     request_prefix: str = "provider"
     clock: Callable[[], int] = lambda: int(time.time() * 1000)
     _counter: int = 0
+    _counter_state: list[int] = field(default_factory=list, init=False, repr=False, compare=False)
     _lock: RLock = field(default_factory=RLock, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -997,6 +1003,7 @@ class AutonomousAuthorizationContext:
             _fail("context clock must be callable")
         if isinstance(self._counter, bool) or not isinstance(self._counter, int) or self._counter < 0:
             _fail("context request counter is invalid")
+        self._counter_state.append(self._counter)
 
     def for_domain(self, domain: str) -> "AutonomousAuthorizationContext":
         """Return a child context narrowed to one already-authorized domain."""
@@ -1004,7 +1011,7 @@ class AutonomousAuthorizationContext:
         normalized = _identifier("context domain", domain)
         if normalized not in self.domains:
             _fail("context domain is outside its authorized scope")
-        return AutonomousAuthorizationContext(
+        child = AutonomousAuthorizationContext(
             gate=self.gate,
             grant_id=self.grant_id,
             tenant_id=self.tenant_id,
@@ -1017,6 +1024,72 @@ class AutonomousAuthorizationContext:
             request_prefix=self.request_prefix,
             clock=self.clock,
         )
+        # Domain narrowing must retain one sequence across the parent and every child.  A fresh
+        # local counter would let a child mint the same request id as a later parent attempt,
+        # defeating the request-id audit trail even though the request digest differs.
+        child._counter_state = self._counter_state
+        child._lock = self._lock
+        return child
+
+    def authorize_operation(
+        self,
+        *,
+        operation: str,
+        domains: Sequence[str] | None = None,
+        domain: str | None = None,
+        capability: str | None | object = _CONTEXT_DEFAULT,
+        risk_class: str | None | object = _CONTEXT_DEFAULT,
+        resource_digest: str | None = None,
+    ) -> AutonomousAuthorizationDecision:
+        """Authorize one non-provider operation against the same transient context.
+
+        ``domains``, capability, risk class, and the resource digest are metadata only.  The
+        method intentionally accepts no task, prompt, argument, credential, response, or result
+        value, making it safe for connector, tool, effect, evaluation, and learning boundaries.
+        A caller may override the context's capability/risk for a concrete operation; omitting an
+        override preserves the context defaults.
+        """
+
+        normalized_operation = _identifier("authorization operation", operation)
+        if normalized_operation not in _OPERATIONS:
+            _fail("authorization operation is unsupported")
+        if domain is not None and domains is not None:
+            _fail("authorization operation cannot receive both domain and domains")
+        if domain is not None:
+            selected_domains = (_identifier("authorization domain", domain),)
+            selected_domains = _domains("authorization domains", selected_domains)
+        elif domains is not None:
+            selected_domains = _domains("authorization domains", tuple(domains))
+        elif len(self.domains) == 1:
+            selected_domains = self.domains
+        else:
+            _fail("authorization operation requires an exact domain when context spans domains")
+        if not set(selected_domains).issubset(set(self.domains)):
+            _fail("authorization operation domain is outside its context scope")
+        selected_capability = self.capability if capability is _CONTEXT_DEFAULT else capability
+        selected_risk_class = self.risk_class if risk_class is _CONTEXT_DEFAULT else risk_class
+        selected_capability = None if selected_capability is None else _identifier("authorization operation capability", selected_capability)
+        selected_risk_class = None if selected_risk_class is None else _identifier("authorization operation risk_class", selected_risk_class)
+        normalized_resource_digest = _digest("authorization operation resource_digest", resource_digest, allow_none=True)
+        with self._lock:
+            self._counter_state[0] += 1
+            self._counter = self._counter_state[0]
+            request_id = f"{self.request_prefix}-{self._counter}"
+        request = AutonomousAuthorizationRequest.create(
+            request_id=request_id,
+            grant_id=self.grant_id,
+            tenant_id=self.tenant_id,
+            actor_id=self.actor_id,
+            session_id=self.session_id,
+            authorization_digest=self.authorization_digest,
+            domains=selected_domains,
+            operation=normalized_operation,
+            capability=selected_capability,
+            risk_class=selected_risk_class,
+            resource_digest=normalized_resource_digest,
+            issued_at=_timestamp("authorization operation issued_at", self.clock()),
+        )
+        return self.gate.require(request, now=request.issued_at)
 
     def authorize_provider(
         self,
@@ -1056,7 +1129,8 @@ class AutonomousAuthorizationContext:
             }
         )
         with self._lock:
-            self._counter += 1
+            self._counter_state[0] += 1
+            self._counter = self._counter_state[0]
             request_id = f"{self.request_prefix}-{self._counter}"
         request = AutonomousAuthorizationRequest.create(
             request_id=request_id,
@@ -1202,4 +1276,5 @@ __all__ = [
     "AutonomousAuthorizationPersistenceCoordinator",
     "seal_autonomous_authorization_snapshot",
     "validate_autonomous_authorization_snapshot",
+    "AutonomousAuthorizationError",
 ]
