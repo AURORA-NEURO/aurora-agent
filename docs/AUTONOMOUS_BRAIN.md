@@ -13754,6 +13754,25 @@ path. Context propagation is optional for backwards-compatible local integration
 deployment that has issued a grant must pass it at every external boundary; registration,
 selection, approval, and a valid plan are not substitutes for the grant check.
 
+The remaining operation names are enforced at their actual application sinks as well. Provider
+planning calls authorize `plan` immediately before `brain.run()` / `runtime.invoke()`, after the
+provider-free policy admission and prompt/selection metadata have been assembled. The evaluator
+adapters authorize `evaluation` immediately before caller evaluator code and `learning`
+immediately before the Rust-backed bandit or model-quality write. Memory helpers authorize
+`memory_retrieval` before `retrieve()` and `memory_write` before `record_episode()` or evaluation
+annotation. Trace sessions authorize every append, including terminal completion, and analytics
+ledgers/controllers authorize each newly accepted report before ledger mutation. Replay and
+duplicate paths remain non-mutating and do not consume a new write allowance.
+
+Every one of these requests is bound to a metadata-only digest containing stable identities such as
+the domain, run/episode identity, source/report/outcome digest, and operation-specific digests.
+Neither the task, prompt, provider response, evaluator evidence, memory lesson, tool arguments,
+credential, nor analytics payload is passed to authorization. High-level cross-domain code uses
+the exact `cross_domain` or child domain for each operation; a multi-domain context without an
+exact operation scope fails closed. Authorization errors deliberately escape callback-error
+projection, preserving the difference between a caller refusal and a provider, evaluator,
+memory, trace, or persistence failure.
+
 This is deliberately an authorization contract and enforcement seam, not an identity provider:
 the deployment still authenticates the caller, issues and protects the authorization digest,
 stores/encrypts snapshots, coordinates distributed writers, and decides which external action is

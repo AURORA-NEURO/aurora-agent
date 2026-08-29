@@ -14,6 +14,7 @@ import {
 } from "./autonomous-run-analytics.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import { AUTONOMOUS_RUN_TRACE_STATUSES } from "./autonomous-run-trace.js";
+import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import type { JsonObject } from "./types.js";
 
 /** Restart-safe longitudinal storage for already-verified run analytics reports. */
@@ -306,11 +307,13 @@ export class AutonomousRunAnalyticsLedger {
   private previousSnapshotDigest: string | null = null;
   private cachedSnapshot: Record<string, unknown> | null = null;
   private cachedSignature: string | null = null;
+  readonly authorizationContext?: AutonomousAuthorizationContext;
 
-  constructor(options: { policy?: Partial<AutonomousRunAnalyticsLedgerPolicy>; clock?: () => number } = {}) {
+  constructor(options: { policy?: Partial<AutonomousRunAnalyticsLedgerPolicy>; clock?: () => number; authorizationContext?: AutonomousAuthorizationContext } = {}) {
     if (!isObject(options)) throw new ArgumentError("analytics ledger options must be an object");
     this.policy = normalizePolicy(options.policy);
     this.clock = options.clock ?? (() => Date.now());
+    this.authorizationContext = options.authorizationContext;
     if (typeof this.clock !== "function") throw new ArgumentError("analytics ledger clock must be callable");
   }
 
@@ -322,6 +325,19 @@ export class AutonomousRunAnalyticsLedger {
     if (existing !== undefined) {
       if (existing.report.report_digest === report.report_digest) return { schema: AUTONOMOUS_RUN_ANALYTICS_LEDGER_INGEST_SCHEMA, status: "duplicate", report_digest: report.report_digest, source_snapshot_digest: report.source_snapshot_digest, retained_report_count: this.entriesValue.length, evicted_report_count: this.evictedReportCount, retention: AUTONOMOUS_RUN_ANALYTICS_LEDGER_RETENTION, secret_material: "never_returned" };
       return { schema: AUTONOMOUS_RUN_ANALYTICS_LEDGER_INGEST_SCHEMA, status: "conflict", report_digest: report.report_digest, source_snapshot_digest: report.source_snapshot_digest, retained_report_count: this.entriesValue.length, evicted_report_count: this.evictedReportCount, retention: AUTONOMOUS_RUN_ANALYTICS_LEDGER_RETENTION, secret_material: "never_returned" };
+    }
+    if (this.authorizationContext) {
+      const domains = report.domains.filter((row) => row.kind === "domain").map((row) => row.identity as AutonomousDomainName);
+      this.authorizationContext.authorizeOperation({
+        operation: "analytics_write",
+        ...(domains.length === 1 ? { domain: domains[0] } : { domains }),
+        resourceDigest: digestJsonSync({
+          schema: "bioprism-autonomous-analytics-authorization-resource/0.1",
+          source_snapshot_digest: report.source_snapshot_digest,
+          policy_digest: report.policy_digest,
+          report_digest: report.report_digest,
+        }),
+      });
     }
     const stamp = options.ingestedAt === undefined ? timestamp("analytics ledger ingested_at", Math.trunc(this.clock())) : timestamp("analytics ledger ingested_at", options.ingestedAt);
     const entry: AutonomousRunAnalyticsLedgerEntry = { schema: AUTONOMOUS_RUN_ANALYTICS_LEDGER_ENTRY_SCHEMA, report, ingested_at: stamp, entry_digest: entryDigest(report, stamp), retention: AUTONOMOUS_RUN_ANALYTICS_LEDGER_RETENTION, secret_material: "never_returned" };

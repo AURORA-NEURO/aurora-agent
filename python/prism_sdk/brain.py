@@ -37,6 +37,7 @@ from .llm_runtime import (
     normalize_provider_content_parts,
 )
 from .autonomous_authorization import AutonomousAuthorizationContext
+from .authoring import content_digest
 from .errors import ArgumentError
 from .mission import MissionPolicy, MissionRequest
 from .memory import BrainEpisodicMemory, BrainMemoryError, MemoryQuery, task_facet_digests
@@ -3710,6 +3711,10 @@ class AutonomousBrain:
         *,
         limit: int | None = None,
         memory: BrainEpisodicMemory | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> list[dict[str, Any]]:
         """Recall bounded metadata/lessons from the configured episodic memory."""
 
@@ -3718,8 +3723,26 @@ class AutonomousBrain:
             raise BrainRunError("episodic memory is not configured")
         if not isinstance(store, BrainEpisodicMemory):
             raise BrainRunError("memory must be a BrainEpisodicMemory")
+        normalized_query = query if isinstance(query, MemoryQuery) else MemoryQuery.from_mapping(query)
+        if authorization_context is not None:
+            query_domain = normalized_query.domain or authorization_domain
+            authorization_kwargs: dict[str, Any] = {
+                "operation": "memory_retrieval",
+                "resource_digest": content_digest({
+                    "schema": "bioprism-autonomous-memory-authorization-resource/0.1",
+                    "query_digest": content_digest(normalized_query.to_dict()),
+                    "limit": limit,
+                }),
+            }
+            if query_domain is not None:
+                authorization_kwargs["domain"] = query_domain
+            if authorization_capability is not None:
+                authorization_kwargs["capability"] = authorization_capability
+            if authorization_risk_class is not None:
+                authorization_kwargs["risk_class"] = authorization_risk_class
+            authorization_context.authorize_operation(**authorization_kwargs)
         try:
-            return store.retrieve(query, limit=limit)
+            return store.retrieve(normalized_query, limit=limit)
         except BrainMemoryError as error:
             raise BrainRunError("episodic memory retrieval failed") from error
 
@@ -3746,6 +3769,10 @@ class AutonomousBrain:
         lesson: str | None = None,
         provenance: Mapping[str, Any] | None = None,
         memory: BrainEpisodicMemory | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> dict[str, Any]:
         """Persist one run as metadata-only episodic memory.
 
@@ -3806,6 +3833,27 @@ class AutonomousBrain:
             "lesson": lesson,
             "provenance": {} if provenance is None else dict(provenance),
         }
+        if authorization_context is not None:
+            memory_domain = authorization_domain
+            if memory_domain is None and isinstance(context_copy.get("domain"), str):
+                memory_domain = context_copy["domain"]
+            authorization_kwargs: dict[str, Any] = {
+                "operation": "memory_write",
+                "resource_digest": content_digest({
+                    "schema": "bioprism-autonomous-memory-authorization-resource/0.1",
+                    "episode_id": packet["episode_id"],
+                    "run_id": packet["run_id"],
+                    "task_digest": packet["task_digest"],
+                    "outcome_digest": digests["outcome_digest"],
+                }),
+            }
+            if memory_domain is not None:
+                authorization_kwargs["domain"] = memory_domain
+            if authorization_capability is not None:
+                authorization_kwargs["capability"] = authorization_capability
+            if authorization_risk_class is not None:
+                authorization_kwargs["risk_class"] = authorization_risk_class
+            authorization_context.authorize_operation(**authorization_kwargs)
         try:
             return store.record_episode(packet).to_dict()
         except BrainMemoryError as error:
@@ -8596,18 +8644,44 @@ class BrainOutcomeEvaluator:
         *,
         evaluator_id: str,
         evaluator_version: str,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> None:
         if not callable(evaluator):
             raise BrainRunError("evaluator must be callable")
         self.evaluator = evaluator
         self.evaluator_id = evaluator_id
         self.evaluator_version = evaluator_version
+        self.authorization_context = authorization_context
         BrainEvaluatorDecision(
             evaluator_id=evaluator_id,
             evaluator_version=evaluator_version,
             reward=0.0,
             passed=False,
         )
+
+    def _authorize(self, *, operation: str, evaluation_input: Mapping[str, Any], decision_digest: str | None = None) -> None:
+        if self.authorization_context is None:
+            return
+        context = evaluation_input.get("context")
+        kwargs: dict[str, Any] = {
+            "operation": operation,
+            "resource_digest": _json_digest({
+                "schema": "bioprism-autonomous-evaluation-authorization-resource/0.1"
+                if operation == "evaluation"
+                else "bioprism-autonomous-learning-authorization-resource/0.1",
+                "run_id": evaluation_input.get("run_id"),
+                "result_kind": evaluation_input.get("result_kind"),
+                "outcome_digest": evaluation_input.get(
+                    "learning_outcome_digest", evaluation_input.get("outcome_digest")
+                ),
+                "context_digest": evaluation_input.get("context_digest"),
+                "evidence_digest": evaluation_input.get("evidence_digest"),
+                "decision_digest": decision_digest,
+            }),
+        }
+        if isinstance(context, Mapping) and isinstance(context.get("domain"), str):
+            kwargs["domain"] = context["domain"]
+        self.authorization_context.authorize_operation(**kwargs)
 
     def assess(
         self,
@@ -8619,6 +8693,7 @@ class BrainOutcomeEvaluator:
         return self._assess_input(evaluation_input)
 
     def _assess_input(self, evaluation_input: Mapping[str, Any]) -> BrainEvaluatorDecision:
+        self._authorize(operation="evaluation", evaluation_input=evaluation_input)
         try:
             raw_decision = self.evaluator(evaluation_input)
         except Exception as error:
@@ -8714,6 +8789,11 @@ class BrainOutcomeEvaluator:
             evidence=evidence,
         )
         decision = self._assess_input(evaluation_input)
+        self._authorize(
+            operation="learning",
+            evaluation_input=evaluation_input,
+            decision_digest=_json_digest(decision.to_dict()),
+        )
         replay = {
             "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
             "episode_id": normalized_episode.episode_id,
@@ -8785,6 +8865,11 @@ class BrainOutcomeEvaluator:
             decision.evidence_digest is None and expected_evidence_digest is None
         ):
             raise BrainRunError("learning decision evidence_digest does not match the episode")
+        self._authorize(
+            operation="learning",
+            evaluation_input=evaluation_input,
+            decision_digest=_json_digest(decision.to_dict()),
+        )
         replay = {
             "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
             "episode_id": normalized_episode.episode_id,
@@ -8947,6 +9032,14 @@ class BrainOutcomeEvaluator:
         for index, (episode, decision, evaluation_input, credited_reward) in enumerate(
             zip(normalized.episodes, decisions, evaluation_inputs, credited_rewards)
         ):
+            self._authorize(
+                operation="learning",
+                evaluation_input=evaluation_input,
+                decision_digest=_json_digest({
+                    "decision": decision.to_dict(),
+                    "credited_reward": credited_reward,
+                }),
+            )
             replay = {
                 "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
                 "episode_id": episode.episode_id,
@@ -9034,6 +9127,11 @@ class BrainOutcomeEvaluator:
             raise BrainRunError("brain must be an AutonomousBrain")
         evaluation_input = build_brain_evaluation_input(result, evidence=evidence)
         decision = self._assess_input(evaluation_input)
+        self._authorize(
+            operation="learning",
+            evaluation_input=evaluation_input,
+            decision_digest=_json_digest(decision.to_dict()),
+        )
         replay = {
             "schema": BRAIN_EVALUATOR_REPLAY_SCHEMA,
             "result_kind": evaluation_input["result_kind"],
@@ -9216,6 +9314,7 @@ class AutonomousEvaluatorMesh(BrainOutcomeEvaluator):
         evaluator_id: str = "python-evaluator-mesh",
         evaluator_version: str = "0.1",
         max_reward_spread: float = 0.1,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> None:
         if not isinstance(members, Sequence) or isinstance(members, (str, bytes)) or not 2 <= len(members) <= 8:
             raise BrainRunError("evaluator mesh requires between 2 and 8 independent members")
@@ -9233,6 +9332,7 @@ class AutonomousEvaluatorMesh(BrainOutcomeEvaluator):
             lambda _input: {"reward": 0.0, "passed": False},
             evaluator_id=evaluator_id,
             evaluator_version=evaluator_version,
+            authorization_context=authorization_context,
         )
 
     @staticmethod
@@ -9254,6 +9354,7 @@ class AutonomousEvaluatorMesh(BrainOutcomeEvaluator):
     def _evaluate_input(self, evaluation_input: Mapping[str, Any]) -> AutonomousEvaluatorMeshResult:
         if not isinstance(evaluation_input, Mapping):
             raise BrainRunError("evaluator mesh input must be a mapping")
+        self._authorize(operation="evaluation", evaluation_input=evaluation_input)
         expected_evidence_digest = evaluation_input.get("evidence_digest")
         if expected_evidence_digest is not None and not _valid_digest(expected_evidence_digest):
             raise BrainRunError("evaluator mesh input evidence_digest is malformed")

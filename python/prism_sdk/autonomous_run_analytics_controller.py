@@ -14,12 +14,14 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Any, Iterator, Mapping
 
+from .authoring import content_digest
 from .autonomous_run_analytics import (
     AutonomousRunTraceAnalyticsPolicy,
     AutonomousRunTraceAnalyticsReport,
     analyze_autonomous_run_trace,
     validate_autonomous_run_trace_analytics_report,
 )
+from .autonomous_authorization import AutonomousAuthorizationContext
 from .autonomous_run_analytics_ledger import (
     AUTONOMOUS_RUN_ANALYTICS_LEDGER_AUTHORITY,
     AUTONOMOUS_RUN_ANALYTICS_LEDGER_RETENTION,
@@ -165,6 +167,7 @@ class AutonomousRunAnalyticsController:
         agent: Any,
         ledger: AutonomousRunAnalyticsLedger,
         persistence: JsonAutonomousRunAnalyticsLedgerPersistence,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> None:
         if agent is None or not callable(getattr(agent, "analyze_run_trace", None)):
             raise ArgumentError("autonomous run analytics controller requires an AutonomousAgent")
@@ -175,6 +178,7 @@ class AutonomousRunAnalyticsController:
         self.agent = agent
         self.ledger = ledger
         self.persistence = persistence
+        self.authorization_context = authorization_context
         self._coordinator = AutonomousRunAnalyticsLedgerPersistenceCoordinator(ledger, persistence)
         self._lock = RLock()
         self._busy = False
@@ -226,6 +230,24 @@ class AutonomousRunAnalyticsController:
 
     def _ingest_report(self, raw: Mapping[str, Any] | AutonomousRunTraceAnalyticsReport, *, ingested_at: int | None = None) -> AutonomousBrainRunAnalyticsIngestRun:
         report = validate_autonomous_run_trace_analytics_report(raw)
+        if self.authorization_context is not None:
+            report_domains = tuple(
+                row.identity for row in report.domains if row.kind == "domain"
+            )
+            authorization_kwargs: dict[str, Any] = {
+                "operation": "analytics_write",
+                "resource_digest": content_digest({
+                    "schema": "bioprism-autonomous-analytics-authorization-resource/0.1",
+                    "source_snapshot_digest": report.source_snapshot_digest,
+                    "policy_digest": report.policy_digest,
+                    "report_digest": report.report_digest,
+                }),
+            }
+            if len(report_domains) == 1:
+                authorization_kwargs["domain"] = report_domains[0]
+            else:
+                authorization_kwargs["domains"] = report_domains
+            self.authorization_context.authorize_operation(**authorization_kwargs)
         ingest = self.ledger.ingest(report, ingested_at=ingested_at)
         if ingest.status != "accepted":
             return AutonomousBrainRunAnalyticsIngestRun(self._projection("ingested"), ingest, self._persisted, None)

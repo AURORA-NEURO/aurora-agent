@@ -1,5 +1,14 @@
 # Remaining backlog
 
+The authorization rollout now covers the complete execution substrate rather than only provider
+and effect calls. Planning, provider invocation, evidence acquisition, connector dispatch, tool
+execution, effect dispatch, evaluator callbacks, bandit writes, episodic memory reads/writes,
+metadata-only trace appends, and analytics ingestion all have explicit operation checks in both
+SDKs. Cross-domain paths retain exact domain scopes, replay/duplicate paths remain non-mutating,
+and typed authorization refusals are preserved instead of being downgraded to provider or storage
+failures. Boundary regressions exercise the twelve-domain portfolio without using credentials or
+network access.
+
 The high-level TypeScript facade now exposes evaluator-calibration registration, validation,
 per-domain learning admission, aggregate querying, and caller-owned restore/flush controls. The
 integration coverage builds a valid calibration report across all twelve domains, verifies that

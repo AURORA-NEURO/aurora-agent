@@ -1,5 +1,6 @@
 import { ArgumentError, isObject } from "./errors.js";
 import type { AutonomousDomainName } from "./autonomous.js";
+import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import type { AutonomousModelSelectionTraceEvent, ProviderInvocationMetadata, ProviderInvocationObserver, ProviderInvocationOutcome } from "./llm.js";
 import { canonicalJson, digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
@@ -564,6 +565,7 @@ export interface AutonomousRunTraceSessionInput {
   run_id: string;
   task_digest: string;
   domains: readonly AutonomousDomainName[];
+  authorizationContext?: AutonomousAuthorizationContext;
 }
 
 export interface AutonomousRunTraceCompletion {
@@ -591,6 +593,7 @@ export class AutonomousRunTraceSession {
   readonly run_id: string;
   readonly task_digest: string;
   readonly domains: AutonomousDomainName[];
+  readonly authorizationContext?: AutonomousAuthorizationContext;
   private terminal = false;
 
   constructor(store: AutonomousRunTraceStore, input: AutonomousRunTraceSessionInput) {
@@ -599,6 +602,29 @@ export class AutonomousRunTraceSession {
     this.run_id = identifier("autonomous run trace run_id", input.run_id);
     this.task_digest = sha256Digest("autonomous run trace task_digest", input.task_digest, false) as string;
     this.domains = normalizeDomains(input.domains);
+    this.authorizationContext = input.authorizationContext;
+  }
+
+  private async authorizeTraceWrite(input: { domains: readonly AutonomousDomainName[]; phase: string; status: string; detail_digest?: string | null; route_digest?: string | null; plan_digest?: string | null; selection_digest?: string | null; failure_code?: string | null }): Promise<void> {
+    if (!this.authorizationContext) return;
+    const domains = normalizeDomains(input.domains);
+    await this.authorizationContext.authorizeOperation({
+      operation: "trace_write",
+      ...(domains.length === 1 ? { domain: domains[0] } : { domains }),
+      resourceDigest: digestJsonSync({
+        schema: "bioprism-autonomous-trace-authorization-resource/0.1",
+        run_id: this.run_id,
+        task_digest: this.task_digest,
+        domains,
+        phase: input.phase,
+        status: input.status,
+        detail_digest: input.detail_digest ?? null,
+        route_digest: input.route_digest ?? null,
+        plan_digest: input.plan_digest ?? null,
+        selection_digest: input.selection_digest ?? null,
+        failure_code: input.failure_code ?? null,
+      }),
+    });
   }
 
   async started(detailDigest: string | null = null): Promise<AutonomousRunTraceEvent> {
@@ -609,11 +635,22 @@ export class AutonomousRunTraceSession {
 
   async record(input: Omit<AutonomousRunTraceEventInput, "run_id" | "task_digest" | "domains"> & { domains?: readonly AutonomousDomainName[] }): Promise<AutonomousRunTraceEvent> {
     if (this.terminal) throw new ArgumentError("autonomous run trace session is already terminal");
+    const domains = input.domains ?? this.domains;
+    await this.authorizeTraceWrite({
+      domains,
+      phase: input.phase,
+      status: input.status,
+      detail_digest: input.detail_digest,
+      route_digest: input.route_digest,
+      plan_digest: input.plan_digest,
+      selection_digest: input.selection_digest,
+      failure_code: input.failure_code,
+    });
     const event = await this.store.append({
       ...input,
       run_id: this.run_id,
       task_digest: this.task_digest,
-      domains: input.domains ?? this.domains,
+      domains,
     });
     return event;
   }
@@ -675,11 +712,22 @@ export class AutonomousRunTraceSession {
   async complete(completion: AutonomousRunTraceCompletion): Promise<AutonomousRunTraceEvent> {
     if (this.terminal) throw new ArgumentError("autonomous run trace session is already terminal");
     if (!AUTONOMOUS_RUN_TRACE_STATUSES.includes(completion.status)) throw new ArgumentError("autonomous run trace completion status is invalid");
+    const domains = completion.domains ?? this.domains;
+    await this.authorizeTraceWrite({
+      domains,
+      phase: terminalPhase(completion.status),
+      status: completion.status,
+      detail_digest: completion.detail_digest,
+      route_digest: completion.route_digest,
+      plan_digest: completion.plan_digest,
+      selection_digest: completion.selection_digest,
+      failure_code: completion.failure_code,
+    });
     this.terminal = true;
     return this.store.append({
       run_id: this.run_id,
       task_digest: this.task_digest,
-      domains: completion.domains ?? this.domains,
+      domains,
       phase: terminalPhase(completion.status),
       status: completion.status,
       route_digest: completion.route_digest ?? null,

@@ -10283,6 +10283,7 @@ class AutonomousTaskOrchestrator:
         domain_policy_evaluator_configured: bool | None = None,
         domain_policy_effects_requested: bool | None = None,
         domain_policy_effects_approved: bool | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousOrderedStepPlanRefinementResult:
         """Ask a provider to order an existing dependency-closed graph without authorizing it.
 
@@ -10429,6 +10430,19 @@ class AutonomousTaskOrchestrator:
                 **base_kwargs,
             )
 
+        if authorization_context is not None:
+            authorization_context.authorize_operation(
+                operation="plan",
+                domain=resolved_domain,
+                resource_digest=content_digest({
+                    "schema": "bioprism-autonomous-plan-authorization-resource/0.1",
+                    "domain": resolved_domain,
+                    "task_digest": task_digest,
+                    "base_plan_digest": base_plan_digest,
+                    "planner_prompt_digest": _planner_prompt_digest(planner_blueprint),
+                }),
+            )
+
         selection_request: Mapping[str, Any] | None = None
         try:
             selection_request = self.brain.build_adaptive_model_selection(
@@ -10462,6 +10476,8 @@ class AutonomousTaskOrchestrator:
                 response_schema=response_schema,
                 context=planner_selection_context,
                 contextual_observations=contextual_observations,
+                authorization_context=authorization_context,
+                authorization_domain=resolved_domain,
             )
         except (ProviderError, CredentialError) as error:
             failure = _planning_failure_projection(error)
@@ -10632,6 +10648,7 @@ class AutonomousTaskOrchestrator:
         domain_policy_evaluator_configured: bool | None = None,
         domain_policy_effects_requested: bool | None = None,
         domain_policy_effects_approved: bool | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousPlanRefinementResult:
         """Ask a provider to prioritize existing stages under a dependency-closed contract."""
 
@@ -10759,6 +10776,19 @@ class AutonomousTaskOrchestrator:
                 planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
             )
+        if authorization_context is not None:
+            authorization_context.authorize_operation(
+                operation="plan",
+                domain=blueprint.profile.domain,
+                resource_digest=content_digest({
+                    "schema": "bioprism-autonomous-plan-authorization-resource/0.1",
+                    "domain": blueprint.profile.domain,
+                    "task_digest": blueprint.spec.task_digest,
+                    "base_plan_digest": base_plan_digest,
+                    "planner_prompt_digest": planner_prompt_digest,
+                    "planner_context_digest": planner_learning_context_digest,
+                }),
+            )
         selection_request = self.brain.build_adaptive_model_selection(
             task=planner_task,
             model_candidates=model_candidates,
@@ -10791,6 +10821,8 @@ class AutonomousTaskOrchestrator:
                 response_schema=response_schema,
                 context=planner_selection_context,
                 contextual_observations=contextual_observations,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint.profile.domain,
             )
         except (ProviderError, CredentialError) as error:
             failure = _planning_failure_projection(error)
@@ -10954,6 +10986,7 @@ class AutonomousTaskOrchestrator:
         domain_policy_evaluator_configured: bool | None = None,
         domain_policy_effects_requested: bool | None = None,
         domain_policy_effects_approved: bool | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousCrossDomainPlanRefinementResult:
         """Ask a provider to prioritize existing cross-domain specialists only."""
 
@@ -11095,6 +11128,19 @@ class AutonomousTaskOrchestrator:
                 planner_context_digest=planner_learning_context_digest,
                 domain_policy_admission=domain_policy_admission,
             )
+        if authorization_context is not None:
+            authorization_context.authorize_operation(
+                operation="plan",
+                domain="cross_domain",
+                resource_digest=content_digest({
+                    "schema": "bioprism-autonomous-plan-authorization-resource/0.1",
+                    "domain": "cross_domain",
+                    "task_digest": blueprint.task_digest,
+                    "base_plan_digest": base_plan_digest,
+                    "planner_prompt_digest": planner_prompt_digest,
+                    "planner_context_digest": planner_learning_context_digest,
+                }),
+            )
         selection_request = self.brain.build_adaptive_model_selection(
             task=planner_task,
             model_candidates=model_candidates,
@@ -11127,6 +11173,8 @@ class AutonomousTaskOrchestrator:
                 response_schema=response_schema,
                 context=planner_selection_context,
                 contextual_observations=contextual_observations,
+                authorization_context=authorization_context,
+                authorization_domain="cross_domain",
             )
         except (ProviderError, CredentialError) as error:
             failure = _planning_failure_projection(error)
@@ -25837,6 +25885,7 @@ class AutonomousAgent:
             run_id=resolved_run_id,
             task_digest=task_digest,
             domains=(domain,),
+            authorization_context=kwargs.get("authorization_context"),
         )
         session.started()
         live_observer = session.provider_observer()
@@ -26009,6 +26058,7 @@ class AutonomousAgent:
             run_id=resolved_run_id,
             task_digest=content_digest({"task": task}),
             domains=trace_domains,
+            authorization_context=kwargs.get("authorization_context"),
         )
         session.started()
         live_observer = session.provider_observer()

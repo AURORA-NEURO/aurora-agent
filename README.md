@@ -134,6 +134,15 @@ typed authorization error before the callback and does not create a misleading f
 receipt. The Python high-level `acquire_evidence()` facade forwards the same options, preserving
 least-privilege behavior across direct, reviewed, resumable, and facade entry points.
 
+The same least-privilege process now covers the remaining durable boundaries: provider planning
+authorizes `plan` before the planner invocation; episodic recall and recording authorize
+`memory_retrieval` and `memory_write`; evaluator-to-bandit settlement authorizes `learning`; and
+metadata-only trace append/complete plus longitudinal analytics ingestion authorize `trace_write`
+and `analytics_write`. These checks use only domain and digest metadata, are propagated through
+cross-domain helpers, and rethrow typed authorization refusals instead of converting them into
+provider, memory, or persistence failures. Applications can therefore issue one twelve-domain
+grant for a complete run or narrow grants to each worker boundary.
+
 ## Status
 
 **83 crates, 538,938 lines, clippy -D warnings enforced in CI.** Byte-level parity with the

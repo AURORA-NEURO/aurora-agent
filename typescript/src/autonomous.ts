@@ -8761,6 +8761,18 @@ export class AutonomousAgent {
     if (options.approveProviderCall !== true) return { ...base, cost_budget: budgetSnapshot() };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("ordered-step provider planning requires at least one model candidate");
+    options.authorizationContext?.authorizeOperation({
+      operation: "plan",
+      domain,
+      resourceDigest: digestJsonSync({
+        schema: "bioprism-autonomous-plan-authorization-resource/0.1",
+        domain,
+        task_digest: taskDigest,
+        base_plan_digest: basePlanDigest,
+        planner_prompt_digest: prepared.promptDigest,
+        planner_context_digest: prepared.learningContextDigest,
+      }),
+    });
     let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
     try {
       execution = await this.runtime.invoke({ ...prepared.plan, candidates }, {
@@ -8877,6 +8889,18 @@ export class AutonomousAgent {
     if (options.approveProviderCall !== true) return { ...base, status: "approval_required", cost_budget: budgetSnapshot() };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("provider planning requires at least one model candidate");
+    options.authorizationContext?.authorizeOperation({
+      operation: "plan",
+      domain: blueprint.domain_profile.domain,
+      resourceDigest: digestJsonSync({
+        schema: "bioprism-autonomous-plan-authorization-resource/0.1",
+        domain: blueprint.domain_profile.domain,
+        task_digest: blueprint.task_digest,
+        base_plan_digest: basePlanDigest,
+        planner_prompt_digest: prepared.promptDigest,
+        planner_context_digest: prepared.learningContextDigest,
+      }),
+    });
     let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
     try {
       execution = await this.runtime.invoke({ ...prepared.plan, candidates }, {
@@ -8981,6 +9005,18 @@ export class AutonomousAgent {
     if (options.approveProviderCall !== true) return { ...base, cost_budget: budgetSnapshot() };
     const candidates = options.candidates ? [...options.candidates] : this.models();
     if (!candidates.length) throw new ProviderRuntimeError("cross-domain provider planning requires at least one model candidate");
+    options.authorizationContext?.authorizeOperation({
+      operation: "plan",
+      domain: "cross_domain",
+      resourceDigest: digestJsonSync({
+        schema: "bioprism-autonomous-plan-authorization-resource/0.1",
+        domain: "cross_domain",
+        task_digest: blueprint.task_digest,
+        base_plan_digest: basePlanDigest,
+        planner_prompt_digest: prepared.promptDigest,
+        planner_context_digest: prepared.learningContextDigest,
+      }),
+    });
     let execution: Awaited<ReturnType<AutonomousRuntime["invoke"]>>;
     try {
       execution = await this.runtime.invoke({ ...prepared.plan, candidates }, {
@@ -9601,7 +9637,7 @@ export class AutonomousAgent {
     const taskDigest = await digestJson({ task: taskText });
     const runOptions = options.run ?? {};
     const initialDomains = [runOptions.domain ?? "cross_domain"] as AutonomousDomainName[];
-    const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: initialDomains });
+    const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: initialDomains, authorizationContext: runOptions.authorizationContext });
     await trace.started();
     try {
       const result = await this.run(taskText, { ...runOptions, observer: composeInvocationObservers(runOptions.observer, trace.providerObserver()), selectionEventCallback: trace.selectionEventCallback(runOptions.selectionEventCallback) });
@@ -9626,7 +9662,7 @@ export class AutonomousAgent {
   }
 
   /** Create bounded restart-safe storage for already-verified trace analytics reports. */
-  createRunAnalyticsLedger(options: { policy?: Partial<AutonomousRunAnalyticsLedgerPolicy>; clock?: () => number } = {}): AutonomousRunAnalyticsLedger {
+  createRunAnalyticsLedger(options: { policy?: Partial<AutonomousRunAnalyticsLedgerPolicy>; clock?: () => number; authorizationContext?: AutonomousAuthorizationContext } = {}): AutonomousRunAnalyticsLedger {
     if (!options || typeof options !== "object") throw new ArgumentError("autonomous createRunAnalyticsLedger options must be an object");
     return new AutonomousRunAnalyticsLedger(options);
   }
@@ -9638,7 +9674,7 @@ export class AutonomousAgent {
     const taskText = boundedText("autonomous traced cross-domain task", task, 32_000);
     const taskDigest = await digestJson({ task: taskText });
     const runOptions = options.run ?? {};
-    const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: ["cross_domain"] });
+    const trace = new AutonomousRunTraceSession(options.traceStore, { run_id: options.runId, task_digest: taskDigest, domains: ["cross_domain"], authorizationContext: runOptions.authorizationContext });
     await trace.started();
     try {
       const result = await this.runCrossDomain(taskText, { ...runOptions, observer: composeInvocationObservers(runOptions.observer, trace.providerObserver()), selectionEventCallback: trace.selectionEventCallback(runOptions.selectionEventCallback) });
@@ -10858,6 +10894,7 @@ export class AutonomousAgent {
     domains: readonly AutonomousDomainName[],
   ): Promise<AutonomousMemoryPreparation> {
     const store = this.memoryStoreForRun(options);
+    const authorizationContext = (options as Pick<AutonomousRunOptions, "authorizationContext">).authorizationContext;
     const consolidator = options.memoryConsolidator ?? this.memoryConsolidator;
     if (options.memoryLessonResolver !== undefined && typeof options.memoryLessonResolver !== "function") throw new ArgumentError("autonomous memoryLessonResolver must be callable");
     if (options.memoryLessonContextResolver !== undefined && typeof options.memoryLessonContextResolver !== "function") throw new ArgumentError("autonomous memoryLessonContextResolver must be callable");
@@ -10919,6 +10956,18 @@ export class AutonomousAgent {
           ranking: options.memoryRecall ?? supplied.ranking ?? "planning",
           limit,
         };
+        if (authorizationContext) {
+          const queryDomains = typeof query.domain === "string" ? [query.domain] : [...new Set(domains)];
+          await authorizationContext.authorizeOperation({
+            operation: "memory_retrieval",
+            ...(queryDomains.length === 1 ? { domain: queryDomains[0] } : { domains: queryDomains }),
+            resourceDigest: await digestJson({
+              schema: "bioprism-autonomous-memory-authorization-resource/0.1",
+              query_digest: await digestJson(query),
+              limit,
+            }),
+          });
+        }
         const episodes = await store.retrieve(query);
         for (const episode of episodes) episodesById.set(episode.episode_id, episode);
       }
@@ -10937,6 +10986,7 @@ export class AutonomousAgent {
       const projection = memoryProjection(consolidatedErrorClass === null ? "retrieved" : "retrieval_failed", episodes, retrievalDigest, null, null, consolidatedErrorClass, consolidatedLessonIds, consolidatedLessonDigests, consolidatedRetrievalDigest);
       return { store, context: [...episodes.map(memoryEpisodeContext), ...consolidatedContext], projection };
     } catch (error) {
+      if (error instanceof AutonomousAuthorizationError) throw error;
       const projection = memoryProjection("retrieval_failed", [], null, null, null, memoryErrorClass(error), consolidatedLessonIds, consolidatedLessonDigests, consolidatedRetrievalDigest);
       return { store, context: consolidatedContext, projection };
     }
@@ -10951,6 +11001,7 @@ export class AutonomousAgent {
     preparation: AutonomousMemoryPreparation,
   ): Promise<AutonomousMemoryRunProjection | null> {
     if (!preparation.store || options.recordMemory === false) return preparation.projection;
+    const authorizationContext = (options as Pick<AutonomousRunOptions, "authorizationContext">).authorizationContext;
     const retrievedDigests = preparation.projection?.retrieved_episode_digests ?? [];
     const retrievalDigest = preparation.projection?.retrieval_digest ?? null;
     try {
@@ -10977,7 +11028,7 @@ export class AutonomousAgent {
       autonomousMemoryRunSequence += 1;
       const runId = memoryIdentity("memory run id", options.memoryRunId ?? (options.learningEpisodeId ? `learning-memory:${options.learningEpisodeId}` : `autonomous:${route.task_digest.slice(0, 24)}:${autonomousMemoryRunSequence}`));
       const episodeId = memoryIdentity("memory episode id", `episode:${runId}`);
-      const receipt = await preparation.store.recordEpisode({
+      const memoryEpisodeInput = {
         episode_id: episodeId,
         run_id: runId,
         result_kind: "synthesis" in result ? "autonomous_cross_domain_run" : "autonomous_run",
@@ -11006,7 +11057,22 @@ export class AutonomousAgent {
           source: "typescript_autonomous_agent",
           result_schema: result.schema,
         },
-      });
+      } satisfies Parameters<AutonomousEpisodicMemoryStore["recordEpisode"]>[0];
+      if (authorizationContext) {
+        const authorizationDomain = typeof context.domain === "string" ? context.domain : route.primary_domain ?? "cross_domain";
+        await authorizationContext.authorizeOperation({
+          operation: "memory_write",
+          domain: authorizationDomain,
+          resourceDigest: await digestJson({
+            schema: "bioprism-autonomous-memory-authorization-resource/0.1",
+            episode_id: episodeId,
+            run_id: runId,
+            task_digest: route.task_digest,
+            outcome_digest: outcomeDigest,
+          }),
+        });
+      }
+      const receipt = await preparation.store.recordEpisode(memoryEpisodeInput);
       const recorded = await preparation.store.get(episodeId);
       return {
         status: "recorded",
@@ -11024,6 +11090,7 @@ export class AutonomousAgent {
         secret_material: "never_returned",
       };
     } catch (error) {
+      if (error instanceof AutonomousAuthorizationError) throw error;
       return {
         status: "record_failed",
         retrieved_episode_ids: preparation.projection?.retrieved_episode_ids ?? [],
