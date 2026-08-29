@@ -167,13 +167,14 @@ use bioprism_devplat::{
     MissionTraceEvent, MissionTraceObserver, OperationalReadinessManifest, ReleasePipelineManifest,
     SandboxManifest, SandboxRuntimeManifest, SecurityPrivacyManifest, SecurityProgramManifest,
     WorkbenchReportRegistry, WorkbenchRequest, WorkbenchVerificationRequest,
-    WorkflowExecutionEvidenceRegistry, ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION,
-    ADAPTER_DOMAIN_REPORT_WORKFLOW, CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION,
-    DOMAIN_ACQUISITION_WORKFLOW, DOMAIN_DECISION_READINESS_SCHEMA_VERSION,
-    DOMAIN_DECISION_READINESS_WORKFLOW, DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW, DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION,
-    DOMAIN_EVIDENCE_INTAKE_WORKFLOW, DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
+    WorkflowExecutionEvidenceQuery, WorkflowExecutionEvidenceRegistry,
+    ADAPTER_DOMAIN_REPORT_SCHEMA_VERSION, ADAPTER_DOMAIN_REPORT_WORKFLOW,
+    CAPABILITY_SCHEMA_VERSION, DOMAIN_ACQUISITION_SCHEMA_VERSION, DOMAIN_ACQUISITION_WORKFLOW,
+    DOMAIN_DECISION_READINESS_SCHEMA_VERSION, DOMAIN_DECISION_READINESS_WORKFLOW,
+    DOMAIN_EVIDENCE_HARMONIZATION_SCHEMA_VERSION, DOMAIN_EVIDENCE_HARMONIZATION_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_COVERAGE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_COVERAGE_WORKFLOW,
+    DOMAIN_EVIDENCE_INTAKE_SCHEMA_VERSION, DOMAIN_EVIDENCE_INTAKE_WORKFLOW,
+    DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_EXECUTION_WORKFLOW,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_SCHEMA,
     DOMAIN_EVIDENCE_PROVIDER_EXTERNAL_PAYLOAD_LINEAGE_WORKFLOW,
@@ -225,10 +226,6 @@ use bioprism_epistemic::{
     RegretReduction as EpistemicRegretReduction, ScriptedExecutor as EpistemicScriptedExecutor,
     SetFunction as EpistemicSetFunction, ADAPTIVE_EXECUTION_SCHEMA,
 };
-use bioprism_epistemic::{
-    RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_CONTRACT_VERSION,
-    RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
-};
 use bioprism_evalengine::attribute as bioeval_design_attribute;
 use bioprism_evalengine::{
     CapabilityPosterior, CreditPolicy, Observation, ReleaseGate as EvalReleaseGate,
@@ -255,35 +252,6 @@ use bioprism_hubapi::{
     search as hub_search_query, Catalog as HubCatalog, Federation as HubFederation,
     Query as HubQuery, Request as HubRequest,
 };
-use bioprism_ids::{
-    IDS_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION, IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
-};
-use bioprism_ids::{IDS_CONTEXT_COMPILATION_CONTRACT_VERSION, IDS_CONTEXT_COMPILATION_FEATURE_ID};
-use bioprism_ids::{IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION, IDS_EXPERIMENT_DESIGN_FEATURE_ID};
-use bioprism_ids::{
-    IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION, IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
-};
-use bioprism_ids::{
-    IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION, IDS_LABORATORY_INTEGRATION_FEATURE_ID,
-};
-use bioprism_ids::{
-    IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION, IDS_MECHANISM_EXPLORATION_FEATURE_ID,
-};
-use bioprism_ids::{
-    IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION, IDS_MULTIMODAL_INGESTION_FEATURE_ID,
-};
-use bioprism_ids::{IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION, IDS_PROTOCOL_SIMULATION_FEATURE_ID};
-use bioprism_ids::{IDS_QUALITY_CONTROL_CONTRACT_VERSION, IDS_QUALITY_CONTROL_FEATURE_ID};
-use bioprism_ids::{
-    IDS_REPLICATION_INTEROPERABILITY_CONTRACT_VERSION, IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID,
-};
-use bioprism_ids::{
-    IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
-    IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
-};
-use bioprism_ids::{
-    IDS_STATISTICAL_CAUSAL_ML_CONTRACT_VERSION, IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID,
-};
 use bioprism_influence::{InfluenceAnalyzer, Perturbation};
 use bioprism_infra::{
     AccessRecord, Cache, CodeIdentity, ComputationKey, Dataset as QualityDataset,
@@ -291,7 +259,6 @@ use bioprism_infra::{
     KeySchema, Purpose, ReferenceSets, ResourceId, ReuseRule, StorageClass, StorageQuota, Tier,
     TieringPolicy,
 };
-use bioprism_interweave::interweave_contract_frontier_federated_control_plane::feature_id as INTERWEAVE_FRONTIER_FEATURE_ID;
 use bioprism_interweave::workflow::{
     catalogue as interweave_catalogue, outstanding_deliverables, WorkflowId as InterweaveWorkflowId,
 };
@@ -1057,7 +1024,7 @@ fn validate_mission_schema_value(
             }
         }
         if let Some(minimum) = schema_object.get("minProperties").and_then(Value::as_u64) {
-            if object.len() < minimum as usize {
+            if u64::try_from(object.len()).map_or(false, |length| length < minimum) {
                 push_mission_schema_issue(
                     report,
                     path,
@@ -1067,7 +1034,7 @@ fn validate_mission_schema_value(
             }
         }
         if let Some(maximum) = schema_object.get("maxProperties").and_then(Value::as_u64) {
-            if object.len() > maximum as usize {
+            if u64::try_from(object.len()).map_or(true, |length| length > maximum) {
                 push_mission_schema_issue(
                     report,
                     path,
@@ -1080,7 +1047,7 @@ fn validate_mission_schema_value(
 
     if let Some(array) = value.as_array() {
         if let Some(minimum) = schema_object.get("minItems").and_then(Value::as_u64) {
-            if array.len() < minimum as usize {
+            if u64::try_from(array.len()).map_or(false, |length| length < minimum) {
                 push_mission_schema_issue(
                     report,
                     path,
@@ -1090,7 +1057,7 @@ fn validate_mission_schema_value(
             }
         }
         if let Some(maximum) = schema_object.get("maxItems").and_then(Value::as_u64) {
-            if array.len() > maximum as usize {
+            if u64::try_from(array.len()).map_or(true, |length| length > maximum) {
                 push_mission_schema_issue(
                     report,
                     path,
@@ -1123,7 +1090,7 @@ fn validate_mission_schema_value(
     if let Some(string) = value.as_str() {
         let length = string.chars().count();
         if let Some(minimum) = schema_object.get("minLength").and_then(Value::as_u64) {
-            if length < minimum as usize {
+            if u64::try_from(length).map_or(false, |length| length < minimum) {
                 push_mission_schema_issue(
                     report,
                     path,
@@ -1133,7 +1100,7 @@ fn validate_mission_schema_value(
             }
         }
         if let Some(maximum) = schema_object.get("maxLength").and_then(Value::as_u64) {
-            if length > maximum as usize {
+            if u64::try_from(length).map_or(true, |length| length > maximum) {
                 push_mission_schema_issue(
                     report,
                     path,
@@ -1191,6 +1158,32 @@ fn validate_mission_schema_value(
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod mission_schema_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn schema_bounds_preserve_extreme_u64_values() {
+        assert!(!mission_schema_matches(
+            &json!({}),
+            &json!({"type": "object", "minProperties": u64::MAX})
+        ));
+        assert!(mission_schema_matches(
+            &json!({}),
+            &json!({"type": "object", "maxProperties": u64::MAX})
+        ));
+        assert!(!mission_schema_matches(
+            &json!([]),
+            &json!({"type": "array", "minItems": u64::MAX})
+        ));
+        assert!(mission_schema_matches(
+            &json!("bounded"),
+            &json!({"type": "string", "maxLength": u64::MAX})
+        ));
     }
 }
 
@@ -1632,7 +1625,15 @@ impl Server {
 
     fn call_tool(&self, request: &Request) -> Response {
         let id = request.id.clone();
-        let Some(name) = request.params.get("name").and_then(Value::as_str) else {
+        let Some(params) = request.params.as_object() else {
+            return Response::error(
+                id,
+                code::INVALID_PARAMS,
+                "tools/call params must be an object".into(),
+                None,
+            );
+        };
+        let Some(name) = params.get("name").and_then(Value::as_str) else {
             return Response::error(
                 id,
                 code::INVALID_PARAMS,
@@ -1640,11 +1641,18 @@ impl Server {
                 None,
             );
         };
-        let arguments = request
-            .params
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
+        let arguments = match params.get("arguments") {
+            None => json!({}),
+            Some(Value::Object(arguments)) => Value::Object(arguments.clone()),
+            Some(_) => {
+                return Response::error(
+                    id,
+                    code::INVALID_PARAMS,
+                    "tools/call arguments must be an object".into(),
+                    None,
+                )
+            }
+        };
 
         audit(name, &arguments);
 
@@ -1734,6 +1742,9 @@ impl Server {
             "modality_comparability_check" => self.modality_comparability_check(&arguments),
             "literature_bind_check" => self.literature_bind_check(&arguments),
             "mutation_family" => self.mutation_family(&arguments),
+            "mutation_knowledge_federated_control" => {
+                self.mutation_knowledge_federated_control(&arguments)
+            }
             "prism_minimize" => self.prism_minimize(&arguments),
             "registry_gate" => self.registry_gate(&arguments),
             "registry_lifecycle_simulate" => self.registry_lifecycle_simulate(&arguments),
@@ -1841,50 +1852,6 @@ impl Server {
             "federated_evaluation_consensus" => self.federated_evaluation_consensus(&arguments),
             "resource_workbench_discover" => self.resource_workbench_discover(&arguments),
             "resource_discovery_contract_v2" => self.resource_discovery_contract_v2(&arguments),
-            "ids_federated_resource_discovery_interoperability" => {
-                self.ids_federated_resource_discovery_interoperability(&arguments)
-            }
-            "worldfactory_protocol_simulation_federated_control_plane" => {
-                self.worldfactory_protocol_simulation_federated_control_plane(&arguments)
-            }
-            "atlashub_replication_negative_results_federated_control_plane" => {
-                self.atlashub_replication_negative_results_federated_control_plane(&arguments)
-            }
-            "epistemic_retrieval_synthesis_federated_control_plane" => {
-                self.epistemic_retrieval_synthesis_federated_control_plane(&arguments)
-            }
-            "ids_context_compilation_federated_control_plane" => {
-                self.ids_context_compilation_federated_control_plane(&arguments)
-            }
-            "ids_knowledge_representation_federated_control_plane" => {
-                self.ids_knowledge_representation_federated_control_plane(&arguments)
-            }
-            "ids_multimodal_ingestion_research_copilot" => {
-                self.ids_multimodal_ingestion_research_copilot(&arguments)
-            }
-            "ids_quality_control_assurance" => self.ids_quality_control_assurance(&arguments),
-            "ids_mechanism_exploration_assurance" => {
-                self.ids_mechanism_exploration_assurance(&arguments)
-            }
-            "ids_experiment_design_workbench" => self.ids_experiment_design_workbench(&arguments),
-            "ids_protocol_simulation_workbench" => {
-                self.ids_protocol_simulation_workbench(&arguments)
-            }
-            "ids_laboratory_integration_workflow_fabric" => {
-                self.ids_laboratory_integration_workflow_fabric(&arguments)
-            }
-            "ids_computational_execution_workbench" => {
-                self.ids_computational_execution_workbench(&arguments)
-            }
-            "ids_statistical_causal_ml_research_copilot" => {
-                self.ids_statistical_causal_ml_research_copilot(&arguments)
-            }
-            "ids_retrieval_synthesis_assurance_harness" => {
-                self.ids_retrieval_synthesis_assurance_harness(&arguments)
-            }
-            "ids_replication_negative_results_interoperability_gateway" => {
-                self.ids_replication_negative_results_interoperability_gateway(&arguments)
-            }
             "governance_research_release_compile" => {
                 self.governance_research_release_compile(&arguments)
             }
@@ -1909,23 +1876,8 @@ impl Server {
             "federated_mechanism_control_plane" => {
                 self.federated_mechanism_control_plane(&arguments)
             }
-            "megafactory_mechanism_exploration_federated_control_plane" => {
-                self.megafactory_mechanism_exploration_federated_control_plane(&arguments)
-            }
             "federated_mechanism_gateway" => self.federated_mechanism_gateway(&arguments),
             "evidence_surveillance_copilot" => self.evidence_surveillance_copilot(&arguments),
-            "adapter_local_evidence_surveillance_research_copilot" => {
-                self.adapter_local_evidence_surveillance_research_copilot(&arguments)
-            }
-            "adapter_multimodal_evidence_surveillance_research_copilot" => {
-                self.adapter_multimodal_evidence_surveillance_research_copilot(&arguments)
-            }
-            "adapter_throughput_evidence_surveillance_research_copilot" => {
-                self.adapter_throughput_evidence_surveillance_research_copilot(&arguments)
-            }
-            "adapter_federated_continual_evidence_surveillance_research_copilot" => {
-                self.adapter_federated_continual_evidence_surveillance_research_copilot(&arguments)
-            }
             "adapter_local_evidence_surveillance_workflow_fabric" => {
                 self.adapter_local_evidence_surveillance_workflow_fabric(&arguments)
             }
@@ -1947,112 +1899,7 @@ impl Server {
             "adapter_throughput_evidence_surveillance_research_workbench" => {
                 self.adapter_throughput_evidence_surveillance_research_workbench(&arguments)
             }
-            "adapter_federated_continual_evidence_surveillance_research_workbench" => self
-                .adapter_federated_continual_evidence_surveillance_research_workbench(&arguments),
             "multimodal_retrieval_synthesis" => self.multimodal_retrieval_synthesis(&arguments),
-            "adapter_local_retrieval_synthesis_inference_engine" => {
-                self.adapter_local_retrieval_synthesis_inference_engine(&arguments)
-            }
-            "adapter_local_retrieval_synthesis_contract_model" => {
-                self.adapter_local_retrieval_synthesis_contract_model(&arguments)
-            }
-            "adapter_local_retrieval_synthesis_research_copilot" => {
-                self.adapter_local_retrieval_synthesis_research_copilot(&arguments)
-            }
-            "adapter_multimodal_retrieval_synthesis_research_copilot" => {
-                self.adapter_multimodal_retrieval_synthesis_research_copilot(&arguments)
-            }
-            "adapter_throughput_retrieval_synthesis_research_copilot" => {
-                self.adapter_throughput_retrieval_synthesis_research_copilot(&arguments)
-            }
-            "adapter_federated_continual_retrieval_synthesis_research_copilot" => {
-                self.adapter_federated_continual_retrieval_synthesis_research_copilot(&arguments)
-            }
-            "adapter_local_retrieval_synthesis_workflow_fabric" => {
-                self.adapter_local_retrieval_synthesis_workflow_fabric(&arguments)
-            }
-            "adapter_multimodal_retrieval_synthesis_workflow_fabric" => {
-                self.adapter_multimodal_retrieval_synthesis_workflow_fabric(&arguments)
-            }
-            "adapter_throughput_retrieval_synthesis_workflow_fabric" => {
-                self.adapter_throughput_retrieval_synthesis_workflow_fabric(&arguments)
-            }
-            "adapter_federated_continual_retrieval_synthesis_workflow_fabric" => {
-                self.adapter_federated_continual_retrieval_synthesis_workflow_fabric(&arguments)
-            }
-            "adapter_local_retrieval_synthesis_research_workbench" => {
-                self.adapter_local_retrieval_synthesis_research_workbench(&arguments)
-            }
-            "adapter_multimodal_retrieval_synthesis_research_workbench" => {
-                self.adapter_multimodal_retrieval_synthesis_research_workbench(&arguments)
-            }
-            "adapter_throughput_retrieval_synthesis_research_workbench" => {
-                self.adapter_throughput_retrieval_synthesis_research_workbench(&arguments)
-            }
-            "adapter_federated_continual_retrieval_synthesis_research_workbench" => {
-                self.adapter_federated_continual_retrieval_synthesis_research_workbench(&arguments)
-            }
-            "adapter_local_retrieval_synthesis_interoperability_gateway" => {
-                self.adapter_local_retrieval_synthesis_interoperability_gateway(&arguments)
-            }
-            "adapter_multimodal_retrieval_synthesis_interoperability_gateway" => {
-                self.adapter_multimodal_retrieval_synthesis_interoperability_gateway(&arguments)
-            }
-            "adapter_throughput_retrieval_synthesis_interoperability_gateway" => {
-                self.adapter_throughput_retrieval_synthesis_interoperability_gateway(&arguments)
-            }
-            "adapter_federated_continual_retrieval_synthesis_interoperability_gateway" => self
-                .adapter_federated_continual_retrieval_synthesis_interoperability_gateway(
-                    &arguments,
-                ),
-            "adapter_local_retrieval_synthesis_assurance_harness" => {
-                self.adapter_local_retrieval_synthesis_assurance_harness(&arguments)
-            }
-            "adapter_multimodal_retrieval_synthesis_assurance_harness" => {
-                self.adapter_multimodal_retrieval_synthesis_assurance_harness(&arguments)
-            }
-            "adapter_throughput_retrieval_synthesis_assurance_harness" => {
-                self.adapter_throughput_retrieval_synthesis_assurance_harness(&arguments)
-            }
-            "adapter_federated_continual_retrieval_synthesis_assurance_harness" => {
-                self.adapter_federated_continual_retrieval_synthesis_assurance_harness(&arguments)
-            }
-            "adapter_local_retrieval_synthesis_federated_control_plane" => {
-                self.adapter_local_retrieval_synthesis_federated_control_plane(&arguments)
-            }
-            "adapter_multimodal_retrieval_synthesis_federated_control_plane" => {
-                self.adapter_multimodal_retrieval_synthesis_federated_control_plane(&arguments)
-            }
-            "adapter_throughput_retrieval_synthesis_federated_control_plane" => {
-                self.adapter_throughput_retrieval_synthesis_federated_control_plane(&arguments)
-            }
-            "adapter_federated_continual_retrieval_synthesis_federated_control_plane" => self
-                .adapter_federated_continual_retrieval_synthesis_federated_control_plane(
-                    &arguments,
-                ),
-            "foundation_mechanism_exploration_assurance" => {
-                self.foundation_mechanism_exploration_assurance(&arguments)
-            }
-            "oraclex_publication_release" => self.oraclex_publication_release(&arguments),
-            "interweave_frontier_control" => self.interweave_frontier_control(&arguments),
-            "influence_federated_continual_interpretation" => {
-                self.influence_federated_continual_interpretation(&arguments)
-            }
-            "adapter_multimodal_retrieval_synthesis_inference_engine" => {
-                self.adapter_multimodal_retrieval_synthesis_inference_engine(&arguments)
-            }
-            "adapter_throughput_retrieval_synthesis_inference_engine" => {
-                self.adapter_throughput_retrieval_synthesis_inference_engine(&arguments)
-            }
-            "adapter_throughput_retrieval_synthesis_contract_model" => {
-                self.adapter_throughput_retrieval_synthesis_contract_model(&arguments)
-            }
-            "adapter_federated_retrieval_synthesis_inference_engine" => {
-                self.adapter_federated_retrieval_synthesis_inference_engine(&arguments)
-            }
-            "adapter_federated_retrieval_synthesis_contract_model" => {
-                self.adapter_federated_retrieval_synthesis_contract_model(&arguments)
-            }
             "adapter_context_compilation_assurance" => {
                 self.adapter_context_compilation_assurance(&arguments)
             }
@@ -2068,9 +1915,6 @@ impl Server {
             "adapter_execution_control" => self.adapter_execution_control(&arguments),
             "adapter_analysis_portfolio" => self.adapter_analysis_portfolio(&arguments),
             "adapter_interpretation_assurance" => self.adapter_interpretation_assurance(&arguments),
-            "governance_federated_continual_interpretation_assurance" => {
-                self.governance_federated_continual_interpretation_assurance(&arguments)
-            }
             "adapter_replication_assurance" => self.adapter_replication_assurance(&arguments),
             "adapter_release_assurance" => self.adapter_release_assurance(&arguments),
             "adapter_determinism_gateway" => self.adapter_determinism_gateway(&arguments),
@@ -2092,29 +1936,11 @@ impl Server {
             "mcp_bounded_evolution_assurance" => self.mcp_bounded_evolution_assurance(&arguments),
             "research_release_validate" => self.research_release_validate(&arguments),
             "research_release_batch_validate" => self.research_release_batch_validate(&arguments),
+            "federated_publication_release_inference" => {
+                self.federated_publication_release_inference(&arguments)
+            }
             "instrument_preflight" => self.instrument_preflight(&arguments),
             "multimodal_harmonize" => self.multimodal_harmonize(&arguments),
-            "mcp_multimodal_ingestion_assurance" => {
-                self.mcp_multimodal_ingestion_assurance(&arguments)
-            }
-            "weavelang_computational_execution_assurance" => {
-                self.weavelang_computational_execution_assurance(&arguments)
-            }
-            "mcp_knowledge_representation_contract" => {
-                self.mcp_knowledge_representation_contract(&arguments)
-            }
-            "registry_multimodal_scale_frontier_assurance" => {
-                self.registry_multimodal_scale_frontier_assurance(&arguments)
-            }
-            "registry_knowledge_representation_assurance" => {
-                self.registry_knowledge_representation_assurance(&arguments)
-            }
-            "ops_context_compilation_federated_control_plane" => {
-                self.ops_context_compilation_federated_control_plane(&arguments)
-            }
-            "oraclex_context_compilation_research_copilot" => {
-                self.oraclex_context_compilation_research_copilot(&arguments)
-            }
             "analysis_qualify" => self.analysis_qualify(&arguments),
             "protocol_matrix_simulate" => self.protocol_matrix_simulate(&arguments),
             "multimodal_replication_evaluate" => self.multimodal_replication_evaluate(&arguments),
@@ -2122,6 +1948,7 @@ impl Server {
             "design_frontier_evaluate" => self.design_frontier_evaluate(&arguments),
             "autonomy_batch_admit" => self.autonomy_batch_admit(&arguments),
             "workflow_batch_execute" => self.workflow_batch_execute(&arguments),
+            "runtime_interpretation_assurance" => self.runtime_interpretation_assurance(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -2192,12 +2019,6 @@ impl Server {
             "conformance_run" => self.conformance_run(&arguments),
             "conformance_context_compilation_federated_control" => {
                 self.conformance_context_compilation_federated_control(&arguments)
-            }
-            "federated_publication_release_inference" => {
-                self.federated_publication_release_inference(&arguments)
-            }
-            "mutation_knowledge_federated_control" => {
-                self.mutation_knowledge_federated_control(&arguments)
             }
             "provider_capability_gate" => self.provider_capability_gate(&arguments),
             "sdk_registry_check" => self.sdk_registry_check(&arguments),
@@ -5095,7 +4916,7 @@ impl Server {
             }
             let component = components
                 .get(name)
-                .expect("all control-plane components inserted");
+                .ok_or_else(|| format!("control-plane component {name:?} was not initialized"))?;
             if component.get("present").and_then(Value::as_bool) != Some(true) {
                 incomplete = true;
                 blockers.push(json!({
@@ -5347,18 +5168,18 @@ impl Server {
         }
         let before = before
             .as_object()
-            .expect("extracted control-plane audit is an object");
+            .ok_or("extracted before control-plane audit is not an object")?;
         let after = after
             .as_object()
-            .expect("extracted control-plane audit is an object");
+            .ok_or("extracted after control-plane audit is not an object")?;
         let before_components = before
             .get("components")
             .and_then(Value::as_object)
-            .expect("validated before components");
+            .ok_or("validated before control-plane components are not an object")?;
         let after_components = after
             .get("components")
             .and_then(Value::as_object)
-            .expect("validated after components");
+            .ok_or("validated after control-plane components are not an object")?;
         let mut component_names = BTreeSet::new();
         component_names.extend(before_components.keys().cloned());
         component_names.extend(after_components.keys().cloned());
@@ -8164,6 +7985,29 @@ impl Server {
         }))
     }
 
+    fn mutation_knowledge_federated_control(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a MutationKnowledgeFederatedControlRequest")?;
+        let receipt =
+            crate::research_contracts::run_mutation_knowledge_federated_control_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_mutation::knowledge_representation_federated_control_plane::FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "mutation-derived knowledge is admitted only with oracle, provenance, scope, policy, protected-closure, approval, quorum, locality, and replay gates",
+                "unknown/speculative and contradicted evidence, omissions, negative results, and blocked federation remain explicit",
+                "only digest-bound knowledge metadata crosses the federation boundary"
+            ],
+            "limitations": [
+                "the route does not create mutations, transport source worlds, or make clinical decisions",
+                "mutation runtime and oracle evidence remain institution-local accountability boundaries"
+            ]
+        }))
+    }
+
     fn mutation_family(&self, arguments: &Value) -> Result<Value, String> {
         let relative = arguments
             .get("world")
@@ -10610,7 +10454,7 @@ impl Server {
         let evidence_dimension_rows = BIOCAPABILITY_EVIDENCE_DIMENSIONS
             .iter()
             .map(|dimension| {
-                let dimension_states = states.get(*dimension).expect("initialized above");
+                let dimension_states = states.get(*dimension).map(Vec::as_slice).unwrap_or(&[]);
                 let state = rollup_evidence_state(dimension_states);
                 json!({
                     "dimension": dimension,
@@ -10663,7 +10507,8 @@ impl Server {
                                 ));
                             }
                             required_dimensions.push(dimension.to_string());
-                            let dimension_states = states.get(dimension).expect("known dimension");
+                            let dimension_states =
+                                states.get(dimension).map(Vec::as_slice).unwrap_or(&[]);
                             let state = rollup_evidence_state(dimension_states);
                             match state {
                                 EvidenceState::Observed | EvidenceState::Reproduced => {}
@@ -11272,7 +11117,11 @@ impl Server {
                 })?
             }
             (None, None) => return Err("tabular_ingest requires csv or document".into()),
-            (Some(_), Some(_)) => unreachable!("the mutually exclusive inputs were checked"),
+            (Some(_), Some(_)) => {
+                return Err(
+                    "tabular input state is inconsistent: csv and document are both present".into(),
+                )
+            }
         };
         let max_bytes = arguments
             .get("max_bytes")
@@ -11577,7 +11426,12 @@ impl Server {
                 })?
             }
             (None, None) => return Err("trace_otel_ingest requires otlp_json or document".into()),
-            (Some(_), Some(_)) => unreachable!("OTLP inputs were checked as exclusive"),
+            (Some(_), Some(_)) => {
+                return Err(
+                    "OTLP input state is inconsistent: otlp_json and document are both present"
+                        .into(),
+                )
+            }
         };
 
         let ingestion = from_otlp_json(
@@ -11709,7 +11563,9 @@ impl Server {
                     })
                 }
                 (None, None) => Ok(None),
-                (Some(_), Some(_)) => unreachable!("trace inputs were checked as exclusive"),
+                (Some(_), Some(_)) => Err(format!(
+                    "trace input state is inconsistent: {inline_key} and {document_key} are both present"
+                )),
             }
         };
 
@@ -14756,13 +14612,8 @@ impl Server {
         if encoded.len() > 20_000_000 {
             return Err("fabric synthesis input exceeds the 20000000-byte safety bound".into());
         }
-        let goal: FabricGoal = serde_json::from_value(
-            arguments
-                .get("goal")
-                .cloned()
-                .expect("goal was checked above"),
-        )
-        .map_err(|error| format!("invalid fabric goal: {error}"))?;
+        let goal: FabricGoal = serde_json::from_value(raw_goal)
+            .map_err(|error| format!("invalid fabric goal: {error}"))?;
         let candidates: Vec<FabricCandidate> = serde_json::from_value(raw_candidates)
             .map_err(|error| format!("invalid fabric candidates: {error}"))?;
         let mut names = BTreeSet::new();
@@ -16650,21 +16501,22 @@ impl Server {
             .map(|value| value.as_bool().ok_or("include_records must be a boolean"))
             .transpose()?
             .unwrap_or(false);
+        let query = WorkflowExecutionEvidenceQuery {
+            workflow_id: optional_text("workflow_id")?,
+            subject_id: optional_text("subject_id")?,
+            domain: optional_text("domain")?,
+            plan_digest: optional_text("plan_digest")?,
+            binding_digest: optional_text("binding_digest")?,
+            receipt_status: optional_text("receipt_status")?,
+            provenance_mode: optional_text("provenance_mode")?,
+            after: optional_text("after")?,
+            max_items,
+            include_records,
+        };
         self.workflow_execution_evidence_registry
             .lock()
             .map_err(|_| "workflow execution evidence registry lock is poisoned".to_string())?
-            .query(
-                optional_text("workflow_id")?,
-                optional_text("subject_id")?,
-                optional_text("domain")?,
-                optional_text("plan_digest")?,
-                optional_text("binding_digest")?,
-                optional_text("receipt_status")?,
-                optional_text("provenance_mode")?,
-                optional_text("after")?,
-                max_items,
-                include_records,
-            )
+            .query(&query)
             .map_err(|error| format!("workflow execution evidence query refused: {error}"))
     }
 
@@ -19917,7 +19769,11 @@ impl Server {
                 self.read_json(&path)?
             }
             (None, None, None) => return Err("bundle_verify requires bundle or document".into()),
-            _ => unreachable!("bundle inputs were checked as exclusive"),
+            _ => {
+                return Err(
+                    "bundle input state is inconsistent after exclusivity validation".into(),
+                )
+            }
         };
         if verification_key.is_some() || trust_registry.is_some() {
             let signed: PubliclyAttestedBundle = serde_json::from_value(raw)
@@ -20779,8 +20635,10 @@ impl Server {
 
         let all_claim_rows = claim_ids
             .iter()
-            .map(|claim| {
-                let state = graph.state(claim).expect("claim came from graph states");
+            .map(|claim| -> Result<Value, String> {
+                let state = graph
+                    .state(claim)
+                    .ok_or_else(|| format!("grounding graph lost state for claim {claim:?}"))?;
                 let mut supports = Vec::new();
                 let mut contradictions = Vec::new();
                 let mut adjacent = Vec::new();
@@ -20801,7 +20659,7 @@ impl Server {
                         GroundingEdgeKind::Adjacent => adjacent.push(edge.evidence.clone()),
                     }
                 }
-                json!({
+                Ok(json!({
                     "id": claim,
                     "state": state_name(&state),
                     "grounded": state == GroundingClaimState::Supported,
@@ -20811,13 +20669,13 @@ impl Server {
                     "support_edge_count": supports.len(),
                     "resolved_support_edge_count": resolved_supports,
                     "unresolved_support_edge_count": supports.len().saturating_sub(resolved_supports),
-                })
+                }))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let all_evidence_rows = evidence_records
             .iter()
-            .map(|(id, (last_modified, lineage, locator))| {
+            .map(|(id, (last_modified, lineage, locator))| -> Result<Value, String> {
                 let related = graph.edges().iter().filter(|edge| edge.evidence == *id);
                 let mut claims = BTreeSet::new();
                 let mut support_edges = 0usize;
@@ -20831,12 +20689,13 @@ impl Server {
                         GroundingEdgeKind::Adjacent => adjacent_edges += 1,
                     }
                 }
-                json!({
+                Ok(json!({
                     "id": id,
                     "last_modified": last_modified.to_rfc3339(),
                     "lineage": lineage,
                     "lineage_gap": lineage_gap_ids.contains(id),
-                    "locator_status": serde_json::to_value(locator).expect("locator serializes"),
+                    "locator_status": serde_json::to_value(locator)
+                        .map_err(|error| format!("evidence locator serialization failed: {error}"))?,
                     "resolved": locator.is_resolved(),
                     "stale": stale_ids.contains(id),
                     "linked_claim_ids": claims,
@@ -20845,28 +20704,33 @@ impl Server {
                     "contradiction_edge_count": contradiction_edges,
                     "adjacent_edge_count": adjacent_edges,
                     "orphan": claims.is_empty(),
-                })
+                }))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let all_edge_rows = graph
             .edges()
             .iter()
             .enumerate()
-            .map(|(index, edge)| {
+            .map(|(index, edge)| -> Result<Value, String> {
                 let locator_status = evidence_records
                     .get(&edge.evidence)
                     .map(|(_, _, locator)| locator)
-                    .expect("graph edges have declared evidence");
-                json!({
+                    .ok_or_else(|| {
+                        format!(
+                            "grounding graph edge {} references missing evidence {:?}",
+                            index, edge.evidence
+                        )
+                    })?;
+                Ok(json!({
                     "index": index,
                     "claim": edge.claim,
                     "evidence": edge.evidence,
                     "kind": kind_name(edge.kind),
                     "locator_resolved": locator_status.is_resolved(),
-                })
+                }))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut edge_multiplicity: BTreeMap<(String, String, GroundingEdgeKind), usize> =
             BTreeMap::new();
@@ -21212,7 +21076,15 @@ impl Server {
         }
 
         let mut finding = BioevalFinding::new(estimand, kind, basis);
-        finding = finding.identified_by(identification);
+        finding = match finding.identified_by(identification) {
+            Ok(finding) => finding,
+            Err(error) => {
+                return Ok(refusal(
+                    "identification_validation",
+                    format!("identification was refused: {error}"),
+                ));
+            }
+        };
         for (index, corroboration) in corroborations.iter().cloned().enumerate() {
             if let Err(error) = finding.promote(corroboration) {
                 return Ok(refusal(
@@ -21447,7 +21319,12 @@ impl Server {
                     format!("runs[{index}].evaluator must contain 1 to {MAX_ID_BYTES} bytes"),
                 ));
             }
-            panel.record(run.clone());
+            if let Err(error) = panel.record(run.clone()) {
+                return Ok(refusal(
+                    "run_validation",
+                    format!("runs[{index}] was refused by the evaluator panel: {error}"),
+                ));
+            }
             runs.push(run);
         }
 
@@ -21504,17 +21381,23 @@ impl Server {
                 "hidden_data_access": bounded_strings(&run.diagnostic.hidden_data_access),
                 "empty": run.diagnostic.is_empty(),
             });
+            let health = serde_json::to_value(&run.health)
+                .map_err(|error| format!("evaluator health serialization failed: {error}"))?;
+            let reached = serde_json::to_value(run.reached)
+                .map_err(|error| format!("task outcome serialization failed: {error}"))?;
+            let unscored_reason = serde_json::to_value(run.unscored_reason())
+                .map_err(|error| format!("unscored reason serialization failed: {error}"))?;
             all_rows.push(json!({
                 "index": index,
                 "evaluator": run.evaluator,
-                "health": serde_json::to_value(&run.health).expect("health serializes"),
+                "health": health,
                 "health_label": run.health.label(),
                 "healthy": run.health.is_healthy(),
-                "reached": serde_json::to_value(run.reached).expect("task outcome serializes"),
+                "reached": reached,
                 "task_outcome": outcome_value,
                 "task_outcome_status": outcome_status,
                 "task_outcome_refusal": outcome_refusal,
-                "unscored_reason": serde_json::to_value(run.unscored_reason()).expect("unscored reason serializes"),
+                "unscored_reason": unscored_reason,
                 "hidden_data_touched": run.hidden_data_touched(),
                 "diagnostic": diagnostic,
             }));
@@ -21725,7 +21608,9 @@ impl Server {
                     return Ok(refusal("trial_validation", error.to_string()));
                 }
             }
-            suite.add(normalized.clone());
+            if let Err(error) = suite.add(normalized.clone()) {
+                return Ok(refusal("suite_validation", error.to_string()));
+            }
             families.push(normalized);
         }
 
@@ -22739,11 +22624,14 @@ impl Server {
             .collect::<Vec<_>>();
         let (rating_status, rating_rows, rating_refusal) = match mesh.independent_ratings(&verdicts)
         {
-            Ok(ratings) => (
-                "accepted",
-                serde_json::to_value(ratings).expect("ratings serialize"),
-                Value::Null,
-            ),
+            Ok(ratings) => match serde_json::to_value(ratings) {
+                Ok(value) => ("accepted", value, Value::Null),
+                Err(error) => (
+                    "refused",
+                    json!([]),
+                    json!(format!("rating serialization failed: {error}")),
+                ),
+            },
             Err(error) => ("refused", json!([]), json!(error.to_string())),
         };
         if require_ratings && rating_status != "accepted" {
@@ -22757,11 +22645,14 @@ impl Server {
         }
         let (contribution_status, contribution_rows, contribution_refusal) = match expected {
             Some(expected) => match mesh.contributions(&verdicts, expected) {
-                Ok(contributions) => (
-                    "accepted",
-                    serde_json::to_value(contributions).expect("contributions serialize"),
-                    Value::Null,
-                ),
+                Ok(contributions) => match serde_json::to_value(contributions) {
+                    Ok(value) => ("accepted", value, Value::Null),
+                    Err(error) => (
+                        "refused",
+                        json!([]),
+                        json!(format!("contribution serialization failed: {error}")),
+                    ),
+                },
                 Err(error) => ("refused", json!([]), json!(error.to_string())),
             },
             None => ("not_requested", json!([]), Value::Null),
@@ -23184,18 +23075,25 @@ impl Server {
             ));
         }
 
-        let class_counts =
-            resources
-                .iter()
-                .fold(BTreeMap::<String, usize>::new(), |mut counts, resource| {
-                    let class = serde_json::to_value(resource.class)
-                        .expect("resource class serializes")
-                        .as_str()
-                        .expect("resource class is a string")
-                        .to_string();
-                    *counts.entry(class).or_default() += 1;
+        let class_counts = resources
+            .iter()
+            .map(|resource| {
+                let class = serde_json::to_value(&resource.class)
+                    .map_err(|error| format!("resource class serialization failed: {error}"))?
+                    .as_str()
+                    .ok_or("resource class did not serialize as a string")?
+                    .to_string();
+                Ok::<_, String>((class, 1usize))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .fold(
+                BTreeMap::<String, usize>::new(),
+                |mut counts, (class, count)| {
+                    *counts.entry(class).or_default() += count;
                     counts
-                });
+                },
+            );
         let nonrenewable_resources = resources
             .iter()
             .filter(|resource| resource.class.is_nonrenewable())
@@ -23210,11 +23108,14 @@ impl Server {
         let branch_rows = inspect_branches
             .iter()
             .take(max_items)
-            .map(|branch| {
-                let branch_ledger: &BioevalBranchLedger = ledger
-                    .branch(branch)
-                    .expect("branch selection was validated");
-                let residual = ledger.residual(branch).expect("branch residual is valid");
+            .map(|branch| -> Result<Value, String> {
+                let branch_ledger: &BioevalBranchLedger =
+                    ledger.branch(branch).ok_or_else(|| {
+                        format!("selected branch {branch:?} is not present in ledger")
+                    })?;
+                let residual = ledger.residual(branch).map_err(|error| {
+                    format!("selected branch {branch:?} residual failed: {error}")
+                })?;
                 let consumed = resources
                     .iter()
                     .map(|resource| (resource.id.clone(), branch_ledger.consumed(&resource.id)))
@@ -23223,16 +23124,16 @@ impl Server {
                     .iter()
                     .map(|resource| (resource.id.clone(), branch_ledger.wasted(&resource.id)))
                     .collect::<BTreeMap<_, _>>();
-                json!({
+                Ok(json!({
                     "id": branch,
                     "parent": branch_parents.get(branch).cloned().flatten(),
                     "draw_count": branch_ledger.draws().len(),
                     "consumed": consumed,
                     "wasted": wasted,
                     "residual": residual,
-                })
+                }))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         let resource_rows = resources
             .iter()
             .take(max_items)
@@ -23503,7 +23404,10 @@ impl Server {
         let sealed_at_value = json!(sealed.sealed_at());
         let rubric_digest = sealed.rubric_digest().to_string();
         let commitment_digest = sealed.commitment_digest().to_string();
-        let revealed = sealed.reveal(outcomes.clone());
+        let revealed = match sealed.reveal(outcomes.clone()) {
+            Ok(revealed) => revealed,
+            Err(error) => return Ok(refusal("outcome_validation", error.to_string())),
+        };
         let reveal_lock = match revealed.reveal(Vec::new()) {
             Ok(()) => json!({ "status": "accepted", "refusal": Value::Null }),
             Err(error) => json!({ "status": "refused", "refusal": error.to_string() }),
@@ -23521,13 +23425,18 @@ impl Server {
                     Ok(scoring) => {
                         let complete = scoring.complete();
                         let unrevealed = scoring.unrevealed.clone();
-                        (
-                            "accepted",
-                            serde_json::to_value(scoring).expect("scoring serializes"),
-                            Value::Null,
-                            json!(complete),
-                            unrevealed,
-                        )
+                        match serde_json::to_value(scoring) {
+                            Ok(value) => {
+                                ("accepted", value, Value::Null, json!(complete), unrevealed)
+                            }
+                            Err(error) => (
+                                "refused",
+                                Value::Null,
+                                json!(format!("scoring serialization failed: {error}")),
+                                Value::Null,
+                                unrevealed,
+                            ),
+                        }
                     }
                     Err(error) => (
                         "refused",
@@ -23821,11 +23730,11 @@ impl Server {
         let flow_rows = flows
             .iter()
             .take(max_items)
-            .map(|flow| {
+            .map(|flow| -> Result<Value, String> {
                 let verdict = verdict_by_id
                     .get(flow.id.as_str())
-                    .expect("every flow was assessed");
-                json!({
+                    .ok_or_else(|| format!("flow {:?} has no assessed verdict", flow.id))?;
+                Ok(json!({
                     "id": flow.id,
                     "sender": flow.sender,
                     "subject": flow.subject,
@@ -23840,14 +23749,17 @@ impl Server {
                     "verdict": verdict,
                     "violation": verdict.is_violation(),
                     "veto": verdict.is_veto(),
-                })
+                }))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         let policy_rows = policies
             .iter()
             .take(max_items)
-            .map(|policy| serde_json::to_value(policy).expect("policy serializes"))
-            .collect::<Vec<_>>();
+            .map(|policy| {
+                serde_json::to_value(policy)
+                    .map_err(|error| format!("policy serialization failed: {error}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let bounded_ids = |values: BTreeSet<String>| {
             json!({
                 "ids": values.iter().take(max_items).cloned().collect::<Vec<_>>(),
@@ -23872,15 +23784,15 @@ impl Server {
             .violations_by_channel(&flows)
             .into_iter()
             .map(|(channel, count)| {
-                (
-                    serde_json::to_value(channel)
-                        .expect("channel serializes")
-                        .as_str()
-                        .expect("channel is a string")
-                        .to_string(),
-                    count,
-                )
+                let channel = serde_json::to_value(&channel)
+                    .map_err(|error| format!("channel serialization failed: {error}"))?
+                    .as_str()
+                    .ok_or("channel did not serialize as a string")?
+                    .to_string();
+                Ok::<_, String>((channel, count))
             })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
             .collect::<BTreeMap<_, _>>();
         let (composite_status, composite_value, composite_refusal) = match utility {
             None => ("not_requested", Value::Null, Value::Null),
@@ -24016,7 +23928,8 @@ impl Server {
             ));
         }
 
-        let serialized = serde_json::to_value(&plane).expect("ScorePlane serializes");
+        let serialized = serde_json::to_value(&plane)
+            .map_err(|error| format!("ScorePlane serialization failed: {error}"))?;
         let serialized_cells = serialized
             .get("cells")
             .and_then(Value::as_object)
@@ -24065,7 +23978,12 @@ impl Server {
             let cell = plane
                 .cell(&dimension.id)
                 .ok_or_else(|| format!("dimension {:?} has no corresponding cell", dimension.id))?;
-            let cell_value = serde_json::to_value(cell).expect("Cell serializes");
+            let cell_value = serde_json::to_value(cell).map_err(|error| {
+                format!(
+                    "dimension {:?} Cell serialization failed: {error}",
+                    dimension.id
+                )
+            })?;
             let parsed_cell: BioevalCell =
                 serde_json::from_value(cell_value.clone()).map_err(|error| {
                     format!("dimension {:?} has an invalid Cell: {error}", dimension.id)
@@ -24235,7 +24153,8 @@ impl Server {
             });
         }
 
-        let mut trace = AcquisitionTrace::against(obligations);
+        let mut trace = AcquisitionTrace::against(obligations)
+            .map_err(|error| format!("invalid acquisition obligation set: {error}"))?;
         for (index, raw) in raw_actions.iter().enumerate() {
             let id = raw
                 .get("id")
@@ -24781,366 +24700,6 @@ impl Server {
         }))
     }
 
-    fn ids_federated_resource_discovery_interoperability(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::interoperate_ids_resources_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_ids::IDS_RESOURCE_INTEROPERABILITY_FEATURE_ID,
-            "contract_version": bioprism_ids::IDS_RESOURCE_INTEROPERABILITY_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "resource endpoint and peer qualification is deterministic and replay-bound",
-                "raw data stays institution-local and only aggregate permitted artifacts may cross federation boundaries",
-                "unknown, stale, contradicted, policy-denied, and missing-capability resources remain explicit"
-            ],
-            "limitations": [
-                "the route evaluates caller-supplied manifests and does not fetch endpoints or move raw data",
-                "qualification is an interoperability and policy decision, not biological validity or clinical advice"
-            ]
-        }))
-    }
-
-    fn worldfactory_protocol_simulation_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::simulate_worldfactory_protocol_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_worldfactory::PROTOCOL_SIMULATION_FEDERATED_CONTROL_FEATURE_ID,
-            "contract_version": bioprism_worldfactory::PROTOCOL_SIMULATION_FEDERATED_CONTROL_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "protocol stages and fault scenarios are simulated deterministically with checkpoint and replay identities",
-                "policy, quorum, protected-closure, approval, federation, locality, aggregate-only, and evidence gates fail closed",
-                "simulation produces no instrument, network, or raw-data effect"
-            ],
-            "limitations": [
-                "the route evaluates caller-supplied protocol declarations and does not run laboratory actions",
-                "simulation robustness is evidence for planning, not biological validity or clinical advice"
-            ]
-        }))
-    }
-
-    fn atlashub_replication_negative_results_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt =
-            crate::research_contracts::operate_atlashub_replication_control_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_atlashub::REPLICATION_CONTROL_FEATURE_ID,
-            "contract_version": bioprism_atlashub::REPLICATION_CONTROL_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "independent replication observations are deterministically partitioned by outcome and evidence state",
-                "null, negative, inconclusive, contradictory, incomparable, and omitted results remain visible",
-                "only aggregate summaries can cross federation and all policy, provenance, replay, approval, and locality gates fail closed"
-            ],
-            "limitations": [
-                "the route consumes caller-supplied replication summaries and never reads raw measurements",
-                "a qualified replication posture is not biological validity or a clinical decision"
-            ]
-        }))
-    }
-
-    fn epistemic_retrieval_synthesis_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt =
-            crate::research_contracts::operate_epistemic_retrieval_synthesis_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_FEATURE_ID,
-            "contract_version": RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "bounded candidate ranking is deterministic, replay-bound, and source-quorum aware",
-                "unknown, unmeasured, contradicted, omitted, and negative evidence remain explicit",
-                "raw data stays institution-local and policy, approval, federation, provenance, and locality gates fail closed"
-            ],
-            "limitations": [
-                "the route consumes caller-supplied typed summaries and does not fetch documents or export raw text",
-                "a qualified synthesis posture is not biological validity or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_context_compilation_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_context_compilation_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_CONTEXT_COMPILATION_FEATURE_ID,
-            "contract_version": IDS_CONTEXT_COMPILATION_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "typed facts are deterministically ranked with stable tie breaks and replay identity",
-                "unknown, unmeasured, contradicted, omitted, and negative claims remain visible",
-                "only aggregate-only permitted context summaries can cross an approved federation boundary"
-            ],
-            "limitations": [
-                "the route consumes caller-supplied fact summaries and does not retrieve documents or raw measurements",
-                "a qualified context section is not biological validity or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_knowledge_representation_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt =
-            crate::research_contracts::operate_ids_knowledge_representation_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
-            "contract_version": IDS_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "multimodal claims are deterministically ranked and bound to source, provenance, replay, and semantic identities",
-                "unknown, unmeasured, contradicted, omitted, and negative claims remain explicit",
-                "only aggregate-only permitted typed worlds can cross the approved federation boundary"
-            ],
-            "limitations": [
-                "the route consumes caller-supplied claim summaries and does not access raw imaging or omics data",
-                "a qualified typed world is not biological validity or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_multimodal_ingestion_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_multimodal_ingestion_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_MULTIMODAL_INGESTION_FEATURE_ID,
-            "contract_version": IDS_MULTIMODAL_INGESTION_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "modality manifests are deterministically ordered and quality-gated with replay and provenance identities",
-                "missing, unknown, unmeasured, contradicted, omitted, and negative modalities remain explicit",
-                "raw modality data remains institution-local and the copilot emits only governed local capability receipts"
-            ],
-            "limitations": [
-                "the route evaluates caller-supplied manifests and does not read files or control instruments",
-                "a qualified harmonized object is not biological validity or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_quality_control_assurance(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_quality_control_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_QUALITY_CONTROL_FEATURE_ID,
-            "contract_version": IDS_QUALITY_CONTROL_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "metric summaries are deterministically partitioned into passed, failed, unknown, unmeasured, and blocked states",
-                "required modality closure, quality fraction, replay, provenance, policy, approval, and locality gates are explicit",
-                "failed and negative QC evidence cannot be silently promoted to a release"
-            ],
-            "limitations": [
-                "the route evaluates caller-supplied QC summaries and never reads raw arrays, images, sequencing reads, or instrument state",
-                "a qualified QC report is not biological validity or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_mechanism_exploration_assurance(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_mechanism_exploration_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_MECHANISM_EXPLORATION_FEATURE_ID,
-            "contract_version": IDS_MECHANISM_EXPLORATION_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "mechanism candidates are deterministically ranked with stable support/novelty tie breaks",
-                "study and modality closure, peer quorum, replay, provenance, policy, approval, and locality gates are explicit",
-                "competing explanations, contradictions, counterevidence, omissions, and negative results remain visible"
-            ],
-            "limitations": [
-                "the route verifies caller-supplied summaries and does not fit models, execute experiments, or move raw data",
-                "a qualified portfolio is not biological validity or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_experiment_design_workbench(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_experiment_design_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_EXPERIMENT_DESIGN_FEATURE_ID,
-            "contract_version": IDS_EXPERIMENT_DESIGN_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "design candidates are deterministically ranked by power, effect, and stable identity",
-                "required controls, power shortfalls, replay, authorization, locality, uncertainty, and negative evidence remain explicit",
-                "the route only emits a preclinical design frontier and cannot enroll subjects, control instruments, or make clinical decisions"
-            ],
-            "limitations": [
-                "the route evaluates caller-supplied design summaries and does not calculate power from raw measurements or execute laboratory work",
-                "a qualified design frontier is not biological validity, statistical significance, or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_protocol_simulation_workbench(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_protocol_simulation_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_PROTOCOL_SIMULATION_FEATURE_ID,
-            "contract_version": IDS_PROTOCOL_SIMULATION_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "stage, scenario, batch, capacity, peer, recovery, and evidence partitions are deterministic and replay-bound",
-                "fault scenarios, unknown evidence, contradictions, budget overflow, and federation omissions remain explicit",
-                "the route produces protocol metadata only and cannot schedule animals, control instruments, or make clinical decisions"
-            ],
-            "limitations": [
-                "the route simulates caller-supplied protocol summaries and does not execute protocols or inspect instrument state",
-                "a qualified simulation report is not biological validity, operational approval, or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_laboratory_integration_workflow_fabric(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt =
-            crate::research_contracts::operate_ids_laboratory_integration_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_LABORATORY_INTEGRATION_FEATURE_ID,
-            "contract_version": IDS_LABORATORY_INTEGRATION_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "instrument, action, interlock, emergency-stop, compensation, peer, and evidence states are deterministic and replay-bound",
-                "policy, signed approval, federation quorum, provenance, locality, and no-hardware-effect gates are explicit",
-                "the route emits only an integration preflight and cannot send commands, enroll subjects, or make clinical decisions"
-            ],
-            "limitations": [
-                "the route evaluates caller-supplied instrument and action attestations and does not connect to hardware or telemetry",
-                "a qualified preflight is not a physical execution authorization, instrument safety certification, or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_computational_execution_workbench(&self, arguments: &Value) -> Result<Value, String> {
-        let receipt =
-            crate::research_contracts::operate_ids_computational_execution_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_COMPUTATIONAL_EXECUTION_FEATURE_ID,
-            "contract_version": IDS_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "workflow dependencies are deterministically planned with explicit cycles, missing dependencies, retries, and node partitions",
-                "budget, replay, provenance, policy, federation quorum, authorization, locality, and negative evidence remain auditable",
-                "the route emits only a dry-run capability receipt and cannot dispatch jobs, move raw data, or make clinical decisions"
-            ],
-            "limitations": [
-                "the route evaluates caller-supplied workflow manifests and does not launch processes, containers, instruments, or networks",
-                "a qualified dry-run plan is not execution success, scientific validity, or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_statistical_causal_ml_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt = crate::research_contracts::operate_ids_statistical_causal_ml_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_STATISTICAL_CAUSAL_ML_FEATURE_ID,
-            "contract_version": IDS_STATISTICAL_CAUSAL_ML_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "analysis candidates are deterministically scored with stable selected and fallback portfolios",
-                "study identity, sample power, missingness, robustness, evidence, replay, provenance, policy, and locality gates remain explicit",
-                "the route emits a bounded local planning receipt and cannot fit models, move raw data, publish conclusions, or make clinical decisions"
-            ],
-            "limitations": [
-                "the route evaluates caller-supplied analysis manifests and does not execute statistical, causal, or ML computation",
-                "a qualified analysis plan is not a scientific conclusion, causal identification proof, model performance claim, or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_retrieval_synthesis_assurance_harness(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt =
-            crate::research_contracts::operate_ids_retrieval_synthesis_assurance_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_FEATURE_ID,
-            "contract_version": IDS_RETRIEVAL_SYNTHESIS_ASSURANCE_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "typed evidence, source, and peer states are deterministically partitioned with stable ordering",
-                "staleness, relevance, comparability, provenance, replay, policy, approval, federation, budget, and negative evidence remain explicit",
-                "only digest-bound permitted summaries can be acknowledged and the route never performs network retrieval or exports raw evidence"
-            ],
-            "limitations": [
-                "the route verifies caller-supplied retrieval manifests and does not fetch or independently validate source content",
-                "a qualified synthesis assurance is not evidence truth, causal validity, publication approval, or clinical advice"
-            ]
-        }))
-    }
-
-    fn ids_replication_negative_results_interoperability_gateway(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let receipt =
-            crate::research_contracts::operate_ids_replication_interoperability_json(arguments)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": IDS_REPLICATION_INTEROPERABILITY_FEATURE_ID,
-            "contract_version": IDS_REPLICATION_INTEROPERABILITY_CONTRACT_VERSION,
-            "receipt": receipt,
-            "guarantees": [
-                "multimodal study, modality, observation, site, outcome, and peer states are deterministically partitioned",
-                "positive, null, negative, inconclusive, incomparable, contradictory, omitted, and uncertain evidence remains visible with a robust effect median",
-                "only aggregate digest summaries cross the interoperability boundary and the route never reruns experiments, exports raw observations, or makes clinical decisions"
-            ],
-            "limitations": [
-                "the route validates caller-supplied replication attestations and does not independently reproduce experiments or inspect raw imaging/omics data",
-                "a qualified replication record is not causal proof, publication approval, or clinical advice"
-            ]
-        }))
-    }
-
     fn governance_research_release_compile(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -25457,34 +25016,6 @@ impl Server {
         }))
     }
 
-    fn megafactory_mechanism_exploration_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a FederatedMechanismControlRequest")?;
-        let receipt =
-            crate::research_contracts::operate_megafactory_mechanism_exploration_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_megafactory::mechanism_exploration_federated_control_plane::FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "ranked competing mechanisms and origin quorum remain deterministic",
-                "A2 policy, approval, replay, locality, federation, and protected-closure gates remain explicit",
-                "unknown, speculative, contradicted, omitted, and negative evidence remain visible",
-                "qualified effects are limited to permitted summaries and local capability management"
-            ],
-            "limitations": [
-                "the route validates caller-supplied mechanism metadata and does not infer mechanisms or execute experiments",
-                "raw institution-local factor tables never cross the federation boundary",
-                "a passed receipt is a governed mechanism-operation gate, not a biological or clinical conclusion"
-            ]
-        }))
-    }
-
     fn federated_mechanism_gateway(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -25531,116 +25062,25 @@ impl Server {
         }))
     }
 
-    fn adapter_local_evidence_surveillance_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a LocalEvidenceSurveillanceResearchCopilotRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_local_evidence_surveillance_research_copilot_json(
-                request,
-            )?;
+    fn multimodal_retrieval_synthesis(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be an EvidenceSynthesisRequest")?;
+        let receipt = crate::research_contracts::compile_evidence_synthesis_json(request)?;
         Ok(json!({
             "ok": true,
             "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_adapter::ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+            "feature_id": bioprism_adapter::RETRIEVAL_SYNTHESIS_FEATURE_ID,
             "receipt": receipt,
             "guarantees": [
-                "only declared tools can be requested and max_tool_calls remains bounded",
-                "dry-run and bounded invocation effects are distinct and replay-addressed",
-                "unknown, stale, missing, contradicted, required, and negative evidence remain explicit",
-                "raw preclinical source payloads remain institution-local and policy/closure failures block"
+                "study scope and comparability profile are typed inputs",
+                "incompatible, stale, protected, and contradictory evidence remains visible",
+                "negative evidence is retained in the synthesis artifact",
+                "raw source payloads remain institution-local"
             ],
             "limitations": [
-                "the copilot qualifies caller-supplied evidence metadata and does not infer a clinical or treatment conclusion",
-                "tool hosts remain responsible for connector sandboxing, key revocation, and independent replication"
-            ]
-        }))
-    }
-
-    fn adapter_multimodal_evidence_surveillance_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a MultimodalEvidenceSurveillanceResearchCopilotRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_multimodal_evidence_surveillance_research_copilot_json(
-                request,
-            )?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "study-by-modality closure is deterministic and missing cells remain explicit",
-                "semantic-profile mismatches are incomparable and cannot be silently merged",
-                "dry-run and signed bounded invocation effects are distinct and replay-addressed",
-                "unknown, stale, contradicted, negative, and denied evidence remain visible",
-                "raw preclinical source payloads remain institution-local and policy failures block"
-            ],
-            "limitations": [
-                "the copilot qualifies caller-supplied evidence metadata and does not infer a clinical or treatment conclusion",
-                "tool hosts remain responsible for connector sandboxing, key revocation, and independent replication"
-            ]
-        }))
-    }
-
-    fn adapter_throughput_evidence_surveillance_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a ThroughputEvidenceSurveillanceResearchCopilotRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_throughput_evidence_surveillance_research_copilot_json(
-                request,
-            )?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "checkpoint and queue identity are deterministic",
-                "capacity overflow, unknown, negative, and denied evidence remain explicit",
-                "dry-run and signed bounded invocation effects are distinct",
-                "raw preclinical source payloads remain institution-local"
-            ],
-            "limitations": [
-                "the copilot qualifies caller-supplied evidence metadata and does not make clinical decisions",
-                "tool hosts remain responsible for connector isolation, key revocation, and independent replication"
-            ]
-        }))
-    }
-
-    fn adapter_federated_continual_evidence_surveillance_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a FederatedContinualEvidenceSurveillanceResearchCopilotRequest",
-        )?;
-        let receipt = crate::research_contracts::run_federated_continual_evidence_surveillance_research_copilot_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "only signed, permitted aggregate-only artifacts cross the federation boundary",
-                "purpose, semantic profile, peer quorum, replay, and envelope identity are explicit",
-                "unknown, contradicted, negative, denied, and incomplete evidence remain visible",
-                "raw observations remain institution-local and policy or closure failures block"
-            ],
-            "limitations": [
-                "the copilot qualifies caller-supplied aggregate metadata and does not infer clinical conclusions",
-                "institutions remain responsible for signer rotation, connector isolation, and independent replication"
+                "the contract model does not infer a clinical or treatment conclusion",
+                "missing modality coverage remains unknown rather than completed"
             ]
         }))
     }
@@ -25769,21 +25209,9 @@ impl Server {
             crate::research_contracts::run_local_evidence_surveillance_research_workbench_json(
                 request,
             )?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_adapter::ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "A0 local read-only workbench preserves qualified, unknown, negative, omission, and provenance views",
-                "canonical view and panel order is replayable across clients",
-                "raw preclinical data remains institution-local and no external effect is scheduled"
-            ],
-            "limitations": [
-                "the workbench renders caller-supplied evidence metadata and does not make clinical decisions",
-                "operators remain responsible for source authorization and independent replication"
-            ]
-        }))
+        Ok(
+            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local read-only workbench preserves qualified, unknown, negative, omission, and provenance views", "canonical view and panel order is replayable across clients", "raw preclinical data remains institution-local and no external effect is scheduled"], "limitations": ["the workbench renders caller-supplied evidence metadata and does not make clinical decisions", "operators remain responsible for source authorization and independent replication"]}),
+        )
     }
 
     fn adapter_multimodal_evidence_surveillance_research_workbench(
@@ -25805,553 +25233,6 @@ impl Server {
         let receipt = crate::research_contracts::run_throughput_evidence_surveillance_research_workbench_json(request)?;
         Ok(
             json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput workbench preserves queue, capacity, checkpoint, qualified, unknown, overflow, negative, and provenance views", "canonical view and panel order is replayable across clients", "raw preclinical data remains institution-local and no external effect is scheduled"], "limitations": ["the workbench renders caller-supplied evidence metadata and does not make clinical decisions", "operators remain responsible for capacity policy, queue retention, and independent replication"]}),
-        )
-    }
-
-    fn adapter_federated_continual_evidence_surveillance_research_workbench(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest")?;
-        let receipt = crate::research_contracts::run_federated_continual_evidence_surveillance_research_workbench_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual workbench exposes peer, aggregate, omission, denied, negative, qualified, unknown, and provenance views without moving raw observations", "canonical view and panel order is replayable across clients", "only permitted signed aggregate evidence is represented and raw preclinical data remains institution-local"], "limitations": ["the workbench renders caller-supplied aggregate evidence metadata and does not make clinical decisions", "operators remain responsible for federation policy, signer governance, and independent replication"]}),
-        )
-    }
-
-    fn multimodal_retrieval_synthesis(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be an EvidenceSynthesisRequest")?;
-        let receipt = crate::research_contracts::compile_evidence_synthesis_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_adapter::RETRIEVAL_SYNTHESIS_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "study scope and comparability profile are typed inputs",
-                "incompatible, stale, protected, and contradictory evidence remains visible",
-                "negative evidence is retained in the synthesis artifact",
-                "raw source payloads remain institution-local"
-            ],
-            "limitations": [
-                "the contract model does not infer a clinical or treatment conclusion",
-                "missing modality coverage remains unknown rather than completed"
-            ]
-        }))
-    }
-
-    fn adapter_local_retrieval_synthesis_inference_engine(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a LocalRetrievalSynthesisInferenceEngineRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_local_retrieval_synthesis_inference_engine_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local retrieval engine computes a deterministic single-study evidence corpus from typed candidate metadata", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for source scope and replication"]}),
-        )
-    }
-
-    fn adapter_local_retrieval_synthesis_contract_model(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a LocalRetrievalSynthesisContractModelRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_local_retrieval_synthesis_contract_model_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local typed data primitive validates schema profile, canonicalization, consumer identity, and deterministic single-study evidence corpus", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the contract model is not a clinical decision system", "operators remain responsible for schema evolution, source scope, and replication"]}),
-        )
-    }
-
-    fn adapter_local_retrieval_synthesis_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a LocalRetrievalSynthesisResearchCopilotRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_local_retrieval_synthesis_research_copilot_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 local research copilot ranks scoped evidence for a named agent and emits read-only evidence-ranked recommendations", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no clinical decision or external effect is scheduled"], "limitations": ["the copilot is advisory and not a clinical decision system", "operators remain responsible for source scope, approval, schema evolution, and independent replication"]}),
-        )
-    }
-
-    fn adapter_multimodal_retrieval_synthesis_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a MultimodalRetrievalSynthesisResearchCopilotRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_multimodal_retrieval_synthesis_research_copilot_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 multimodal research copilot compares at least two institution-local modalities across studies and emits an approval-gated tool intent", "omissions, uncertainty, contradiction, comparability gaps, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external tool effect is scheduled without a non-empty approval token"], "limitations": ["the copilot is not a clinical decision system", "operators remain responsible for tool approval, source scope, schema evolution, and independent replication"]}),
-        )
-    }
-
-    fn adapter_throughput_retrieval_synthesis_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a ThroughputRetrievalSynthesisResearchCopilotRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_throughput_retrieval_synthesis_research_copilot_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 prospective high-throughput copilot admits bounded queue capacity with checkpoint identity and compares at least two institution-local modalities", "overflow, omissions, uncertainty, contradiction, comparability gaps, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external tool effect is scheduled without a non-empty approval token"], "limitations": ["the copilot is not a clinical decision system", "operators remain responsible for queue capacity, checkpoint durability, tool approval, source scope, and independent replication"]}),
-        )
-    }
-
-    fn adapter_federated_continual_retrieval_synthesis_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisResearchCopilotRequest")?;
-        let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_research_copilot_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 federated continual copilot enforces purpose-bound peer quorum, aggregate-only exchange, bounded capacity, and checkpoint identity while comparing at least two institution-local modalities", "overflow, omissions, uncertainty, contradiction, quorum gaps, comparability gaps, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external tool effect is scheduled without approval, quorum, and aggregate-only gates"], "limitations": ["the copilot is not a clinical decision system", "operators remain responsible for federation governance, queue capacity, checkpoint durability, tool approval, and independent replication"]}),
-        )
-    }
-
-    fn adapter_local_retrieval_synthesis_workflow_fabric(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a LocalRetrievalSynthesisWorkflowRequest")?;
-        let receipt =
-            crate::research_contracts::run_local_retrieval_synthesis_workflow_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 local single-study workflow executes canonical retrieval, synthesis, persistence, and validation stages with durable checkpoints, budgets, compensation, and replay identity", "omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for approvals, replication, schema migration, and local artifact retention"]}),
-        )
-    }
-
-    fn adapter_multimodal_retrieval_synthesis_workflow_fabric(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a MultimodalRetrievalSynthesisWorkflowRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_multimodal_retrieval_synthesis_workflow_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 multimodal multi-study workflow executes canonical checkpoint, comparability, synthesis, and artifact stages with budgets, compensation, and replay identity", "incomparable, omitted, uncertain, contradictory, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for approvals, replication, schema migration, and local artifact retention"]}),
-        )
-    }
-
-    fn adapter_throughput_retrieval_synthesis_workflow_fabric(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a ThroughputRetrievalSynthesisWorkflowRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_throughput_retrieval_synthesis_workflow_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 prospective high-throughput workflow enforces bounded queue admission, overflow retention, checkpoint continuity, budget compensation, replay identity, and output validation", "overflow, omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for approvals, queue retention, replication, schema migration, and local artifact retention"]}),
-        )
-    }
-
-    fn adapter_federated_continual_retrieval_synthesis_workflow_fabric(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a FederatedContinualRetrievalSynthesisWorkflowRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_federated_continual_retrieval_synthesis_workflow_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 federated continual workflow enforces purpose-bound peer quorum, aggregate-only exchange, checkpoint continuity, bounded budget, compensation, replay identity, and output validation", "federation denials, omissions, uncertainty, contradiction, overflow, and negative evidence remain explicit", "raw preclinical data stays institution-local and clinical decisions are out of scope"], "limitations": ["the workflow is not a clinical decision system", "operators remain responsible for federation approvals, key rotation, replay, schema migration, and local artifact retention"]}),
-        )
-    }
-
-    fn adapter_local_retrieval_synthesis_research_workbench(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a LocalRetrievalSynthesisResearchWorkbenchRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_local_retrieval_synthesis_research_workbench_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A0 local read-only workbench renders canonical overview, evidence, omission, and provenance views over typed retrieval synthesis", "unknown, omitted, contradictory, and negative evidence remain explicit with deterministic replay and provenance digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for scope, local retention, independent replication, and schema migration"]}),
-        )
-    }
-
-    fn adapter_multimodal_retrieval_synthesis_research_workbench(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisResearchWorkbenchRequest")?;
-        let receipt =
-            crate::research_contracts::run_multimodal_retrieval_synthesis_research_workbench_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal workbench renders canonical overview, evidence, omission, provenance, comparability, negative, and unknown views over multiple studies and modalities", "incomparable, omitted, uncertain, contradictory, and negative evidence remain explicit with replay and provenance digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for semantic-profile governance, scope, local retention, and independent replication"]}),
-        )
-    }
-
-    fn adapter_throughput_retrieval_synthesis_research_workbench(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisResearchWorkbenchRequest")?;
-        let receipt =
-            crate::research_contracts::run_throughput_retrieval_synthesis_research_workbench_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput workbench renders queue, overflow, omission, and provenance views over bounded retrieval synthesis", "capacity overflow, uncertainty, contradiction, and negative evidence remain explicit with replay and queue digests", "raw preclinical data stays institution-local and no external or clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for queue retention, scope, local capacity, and independent replication"]}),
-        )
-    }
-
-    fn adapter_federated_continual_retrieval_synthesis_research_workbench(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisResearchWorkbenchRequest")?;
-        let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_research_workbench_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual workbench renders purpose-bound peer, aggregate, quorum, omission, negative, and provenance views", "quorum, partition, contradiction, uncertainty, negative evidence, and federation denials remain explicit with deterministic replay digests", "raw preclinical data remains institution-local; only permitted aggregate views are exposed and no clinical decision effect is scheduled"], "limitations": ["the workbench is not a clinical decision system", "operators remain responsible for consortium membership, purpose policy, local retention, and independent replication"]}),
-        )
-    }
-
-    fn adapter_local_retrieval_synthesis_interoperability_gateway(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a LocalRetrievalSynthesisInteroperabilityGatewayRequest")?;
-        let receipt =
-            crate::research_contracts::run_local_retrieval_synthesis_interoperability_gateway_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 local gateway negotiates pinned retrieval/synthesis protocol versions and records capability and semantic-loss receipts", "incompatible schemas, missing capabilities, protected-closure gaps, and policy denials fail closed", "raw preclinical data remains institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for endpoint trust, migration review, and independent replication"]}),
-        )
-    }
-
-    fn adapter_multimodal_retrieval_synthesis_interoperability_gateway(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisInteroperabilityGatewayRequest")?;
-        let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_interoperability_gateway_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal gateway negotiates pinned retrieval/synthesis protocol versions with comparability and semantic-loss receipts", "modality gaps, incompatible schemas, protected-closure gaps, and policy denials fail closed", "raw preclinical data remains institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for comparability governance, endpoint trust, migration review, and independent replication"]}),
-        )
-    }
-
-    fn adapter_throughput_retrieval_synthesis_interoperability_gateway(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisInteroperabilityGatewayRequest")?;
-        let receipt = crate::research_contracts::run_throughput_retrieval_synthesis_interoperability_gateway_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 throughput gateway negotiates pinned retrieval/synthesis protocol versions with bounded batch and checkpoint receipts", "capacity, migration loss, omissions, protected-closure gaps, and policy denials fail closed", "raw preclinical data remains institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for queue capacity, endpoint trust, migration review, and independent replication"]}),
-        )
-    }
-
-    fn adapter_federated_continual_retrieval_synthesis_interoperability_gateway(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest")?;
-        let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_interoperability_gateway_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual gateway negotiates purpose-bound pinned retrieval/synthesis schemas with quorum and aggregate-only controls", "peer capability gaps, semantic loss, quorum failures, protected-closure gaps, and policy denials fail closed", "raw preclinical observations remain institution-local and only content-addressed permitted artifacts may be exchanged"], "limitations": ["the gateway is not a clinical decision system", "operators remain responsible for consortium membership, purpose policy, endpoint trust, migration review, and independent replication"]}),
-        )
-    }
-
-    fn adapter_local_retrieval_synthesis_assurance_harness(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a LocalRetrievalSynthesisAssuranceHarnessRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_local_retrieval_synthesis_assurance_harness_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates a local retrieval/synthesis workbench against explicit policy, protected-closure, provenance, and evidence predicates", "counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for baseline selection, independent replication, and institutional release governance"]}),
-        )
-    }
-
-    fn adapter_multimodal_retrieval_synthesis_assurance_harness(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a MultimodalRetrievalSynthesisAssuranceHarnessRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_multimodal_retrieval_synthesis_assurance_harness_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates multimodal retrieval/synthesis against explicit modality, comparability, policy, protected-closure, provenance, and evidence predicates", "counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for comparability baselines, independent replication, and institutional release governance"]}),
-        )
-    }
-
-    fn adapter_throughput_retrieval_synthesis_assurance_harness(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a ThroughputRetrievalSynthesisAssuranceHarnessRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_throughput_retrieval_synthesis_assurance_harness_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates throughput retrieval/synthesis against batch, checkpoint, capacity, policy, protected-closure, provenance, and evidence predicates", "overflow, counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical data remains institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for queue baselines, independent replication, and institutional release governance"]}),
-        )
-    }
-
-    fn adapter_federated_continual_retrieval_synthesis_assurance_harness(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisAssuranceHarnessRequest")?;
-        let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_assurance_harness_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance harness evaluates federated continual retrieval/synthesis against purpose, peer quorum, aggregate-only locality, policy, protected-closure, provenance, and evidence predicates", "overflow, federation counterexamples, omissions, uncertainty, negative evidence, and contradictory evidence remain visible", "raw preclinical observations remain institution-local and failed release predicates emit a blocking effect"], "limitations": ["the harness is not a clinical decision system", "operators remain responsible for consortium baselines, independent replication, and institutional release governance"]}),
-        )
-    }
-
-    fn adapter_local_retrieval_synthesis_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a LocalRetrievalSynthesisFederatedControlPlaneRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_local_retrieval_synthesis_federated_control_plane_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 control plane admits institution-local retrieval/synthesis service work only under policy, federation-permission, signed-approval, health, and capacity gates", "degraded, approval-required, blocked, and saturated states remain explicit with omission and uncertainty receipts", "raw preclinical observations remain local and control-plane effects are content-addressed"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for service health attestations, capacity policy, and independent release governance"]}),
-        )
-    }
-
-    fn adapter_multimodal_retrieval_synthesis_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a MultimodalRetrievalSynthesisFederatedControlPlaneRequest")?;
-        let receipt = crate::research_contracts::run_multimodal_retrieval_synthesis_federated_control_plane_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits multimodal multi-study retrieval/synthesis only when peer quorum, modality comparability, capacity, health, federation, signed approval, and protected-closure gates pass", "aggregate-only federation keeps raw preclinical imaging and omics data institution-local while omission, uncertainty, counterexample, degraded, approval-required, and blocked states remain explicit", "replay and content-addressed control receipts support deterministic audit and recovery"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for peer trust, comparability profiles, health attestations, signed authorization, and independent replication"]}),
-        )
-    }
-
-    fn adapter_throughput_retrieval_synthesis_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a ThroughputRetrievalSynthesisFederatedControlPlaneRequest")?;
-        let receipt = crate::research_contracts::run_throughput_retrieval_synthesis_federated_control_plane_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits prospective high-throughput retrieval/synthesis only under purpose-bound peer quorum, queue/checkpoint continuity, capacity, health, policy, federation, signed approval, and protected-closure gates", "aggregate-only federation keeps raw preclinical data institution-local while overflow, omissions, uncertainty, counterexamples, degraded, approval-required, and blocked states remain explicit", "content-addressed queue, checkpoint, workbench, health, replay, and control digests support deterministic audit and recovery"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for queue policy, peer trust, checkpoint retention, health attestations, signed authorization, and independent replication"]}),
-        )
-    }
-
-    fn adapter_federated_continual_retrieval_synthesis_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or("request is required and must be a FederatedContinualRetrievalSynthesisFederatedControlPlaneRequest")?;
-        let receipt = crate::research_contracts::run_federated_continual_retrieval_synthesis_federated_control_plane_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID, "receipt": receipt, "guarantees": ["A2 control plane admits federated continual retrieval/synthesis only under purpose-bound peer quorum, checkpoint continuity, capacity, health, policy, federation, signed approval, and protected-closure gates", "aggregate-only locality keeps raw preclinical observations institution-local and preserves omissions, uncertainty, counterexamples, negative evidence, degraded, approval-required, and blocked states", "content-addressed workflow, workbench, health, replay, and control receipts support deterministic audit and bounded autonomy"], "limitations": ["the control plane is not a clinical decision system", "operators remain responsible for consortium governance, peer trust, checkpoint retention, health attestations, signed authorization, and independent replication"]}),
-        )
-    }
-
-    fn foundation_mechanism_exploration_assurance(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a MechanismExplorationAssuranceRequest")?;
-        let receipt =
-            crate::research_contracts::run_foundation_mechanism_exploration_assurance_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_foundation::FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 assurance evaluates prospective high-throughput mechanism candidates against typed evidence, provenance, artifact, comparability, baseline, replay, policy, approval, protected-closure, and capacity gates", "unknown, speculative, contradicted, below-threshold, omitted, negative, and required-but-not-admitted candidates remain explicit", "non-qualified portfolios fail closed with block:unsafe-release and raw preclinical data remains local"], "limitations": ["the assurance harness is not a clinical decision system", "operators remain responsible for independent replication, causal interpretation, baseline selection, and release governance"]}),
-        )
-    }
-
-    fn oraclex_publication_release(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a PublicationReleaseRequest")?;
-        let receipt = crate::research_contracts::run_oraclex_publication_release_json(request)?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_oraclex::publication_release_contract_model::feature_id(), "receipt": receipt, "guarantees": ["A2 release admission requires typed artifact, provenance, workflow replay, evaluation baseline, standards, reproducibility, policy, protected closure, signed authority, federation permission, and raw-locality gates", "unknown and speculative evidence become conditional review, contradicted evidence and failed gates block release, and negative findings remain in the signed receipt", "release payloads are content-addressed and digest-only across the federation boundary; contract migration records semantic loss and preserves replay identity"], "limitations": ["the contract model does not mint signatures, upload payloads, or perform publication hosting", "the capability is not a clinical decision system and does not process human-subject or clinical-source data"]}),
-        )
-    }
-
-    fn interweave_frontier_control(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be an InterweaveControlPlaneRequest")?;
-        let receipt = crate::research_contracts::run_interweave_frontier_control_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": INTERWEAVE_FRONTIER_FEATURE_ID(),
-            "receipt": receipt,
-            "guarantees": [
-                "A2 prospective high-throughput admission is deterministic, digest-bound, and gated by protocol pinning, peer quorum, policy, protected closure, signed approval, capacity, locality, and replay identity",
-                "unknown/speculative evidence remains conditional, contradicted evidence and failed gates block, incompatible peers are explicit, and negative results remain retained",
-                "control-plane artifacts expose only aggregate federation metadata while raw preclinical data remains institution-local"
-            ],
-            "limitations": [
-                "the contract admits and records work but does not execute jobs, mint signatures, or move raw data",
-                "the capability is not a clinical decision system and excludes human-subject and clinical-source data"
-            ]
-        }))
-    }
-
-    fn influence_federated_continual_interpretation(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be an EvidenceBackedResult4")?;
-        let receipt =
-            crate::research_contracts::run_federated_continual_interpretation_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_influence::FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "sound dynamic-range, contraction, abstract-interpretation, and exact-removal methods remain visible per factor",
-                "federated peers are version-negotiated by signed capability and quorum while raw factor tables remain institution-local",
-                "unknown influence, protected omissions, contradictory or negative evidence, migration loss, and approval requirements remain explicit",
-                "continual epochs bind replay and content-addressed interactive interpretation artifacts"
-            ],
-            "limitations": [
-                "the gateway computes caller-supplied local regions and does not fetch remote data or render a browser UI",
-                "a qualified influence view is not a biological, clinical, treatment, or causal decision",
-                "independent replication, institutional authorization, and external transport conformance remain required"
-            ]
-        }))
-    }
-
-    fn adapter_multimodal_retrieval_synthesis_inference_engine(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a MultimodalRetrievalSynthesisInferenceEngineRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_multimodal_retrieval_synthesis_inference_engine_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 multimodal retrieval engine computes a deterministic imaging/omics multi-study evidence corpus with explicit comparability", "missing modalities, incomparable evidence, contradiction, uncertainty, and negative results remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for semantic-profile governance and independent replication"]}),
-        )
-    }
-
-    fn adapter_throughput_retrieval_synthesis_inference_engine(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a ThroughputRetrievalSynthesisInferenceEngineRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_throughput_retrieval_synthesis_inference_engine_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 prospective high-throughput retrieval engine admits bounded batches with capacity and checkpoint receipts", "queue overflow, omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for queue retention, capacity policy, and independent replication"]}),
-        )
-    }
-
-    fn adapter_throughput_retrieval_synthesis_contract_model(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a ThroughputRetrievalSynthesisContractModelRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_throughput_retrieval_synthesis_contract_model_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 prospective high-throughput typed data primitive validates schema profile, canonicalization, consumer identity, bounded batch, capacity, checkpoint, and deterministic retrieval corpus", "queue overflow, omissions, uncertainty, contradiction, and negative evidence remain explicit", "raw preclinical source payloads remain institution-local and no external effects are scheduled"], "limitations": ["the contract model is not a clinical decision system", "operators remain responsible for queue retention, capacity policy, schema evolution, and independent replication"]}),
-        )
-    }
-
-    fn adapter_federated_retrieval_synthesis_inference_engine(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a FederatedRetrievalSynthesisInferenceEngineRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_federated_retrieval_synthesis_inference_engine_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual retrieval engine enforces purpose, peer quorum, aggregate-only, locality, and policy gates", "omissions, uncertainty, contradiction, negative evidence, and denied federation remain explicit", "raw preclinical source payloads remain institution-local and only permitted aggregate metadata is represented"], "limitations": ["the engine is not a clinical decision system", "operators remain responsible for federation governance, signer policy, and independent replication"]}),
-        )
-    }
-
-    fn adapter_federated_retrieval_synthesis_contract_model(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a FederatedRetrievalSynthesisContractModelRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_federated_retrieval_synthesis_contract_model_json(
-                request,
-            )?;
-        Ok(
-            json!({"ok": true, "schema": "aurora-research-contract/1.0", "feature_id": bioprism_adapter::ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID, "receipt": receipt, "guarantees": ["A1 federated continual typed data primitive validates schema profile, canonicalization, consumer identity, purpose, peer quorum, aggregate-only, locality, policy, checkpoint, capacity, and deterministic retrieval corpus", "omissions, uncertainty, contradiction, negative evidence, and denied federation remain explicit", "raw preclinical source payloads remain institution-local and only permitted aggregate metadata is represented"], "limitations": ["the contract model is not a clinical decision system", "operators remain responsible for federation governance, schema evolution, signer policy, and independent replication"]}),
         )
     }
 
@@ -26595,35 +25476,6 @@ impl Server {
             "limitations": [
                 "the adapter verifies metadata and does not inspect raw imaging or omics bytes",
                 "a qualified receipt is not a biological conclusion or publication approval"
-            ]
-        }))
-    }
-
-    fn governance_federated_continual_interpretation_assurance(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a FederatedContinualInterpretationAssuranceRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::assure_governance_federated_continual_interpretation_json(
-                request,
-            )?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_governance::federated_continual_interpretation_assurance::FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "interpretation and visualization candidates are deterministically ordered and linked to declared results",
-                "unknown, unmeasured, contradicted, omitted, uncertain, and negative evidence remain visible",
-                "protected closure, policy, signed approval, replay, provenance, baseline, and locality gates fail closed",
-                "the only effect is block:unsafe-release until a separate release board accepts the evidence"
-            ],
-            "limitations": [
-                "the harness verifies caller-supplied metadata and does not inspect raw imaging or omics bytes",
-                "it does not render visualizations, infer mechanisms, execute tools, or make clinical decisions"
             ]
         }))
     }
@@ -27070,6 +25922,29 @@ impl Server {
         }))
     }
 
+    fn federated_publication_release_inference(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments.get("request").ok_or(
+            "request is required and must be a FederatedPublicationReleaseInferenceRequest",
+        )?;
+        let receipt =
+            crate::research_contracts::run_federated_publication_release_inference_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_services::FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "release attestations are ranked deterministically across federated continual origins",
+                "unknown, speculative, contradicted, omitted, negative, policy, locality, and replay states remain explicit and fail closed",
+                "the route emits digest-only recommendations; signing and publication remain separate authorized service effects"
+            ],
+            "limitations": [
+                "the inference engine does not sign, publish, dereference, or move raw experimental data",
+                "a qualified recommendation is not a scientific conclusion or a clinical decision"
+            ]
+        }))
+    }
+
     fn research_release_validate(&self, arguments: &Value) -> Result<Value, String> {
         let receipt = arguments
             .get("receipt")
@@ -27120,29 +25995,6 @@ impl Server {
         }))
     }
 
-    fn federated_publication_release_inference(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments.get("request").ok_or(
-            "request is required and must be a FederatedPublicationReleaseInferenceRequest",
-        )?;
-        let receipt =
-            crate::research_contracts::run_federated_publication_release_inference_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_services::FEDERATED_PUBLICATION_RELEASE_INFERENCE_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "release attestations are ranked deterministically across federated continual origins",
-                "unknown, speculative, contradicted, omitted, negative, policy, locality, and replay states remain explicit and fail closed",
-                "the route emits digest-only recommendations; signing and publication remain separate authorized service effects"
-            ],
-            "limitations": [
-                "the inference engine does not sign, publish, dereference, or move raw experimental data",
-                "a qualified recommendation is not a scientific conclusion or a clinical decision"
-            ]
-        }))
-    }
-
     fn instrument_preflight(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -27161,29 +26013,6 @@ impl Server {
             "limitations": [
                 "a ready receipt is a signed-preflight input, not evidence that hardware executed",
                 "actual instrument execution requires a separate institution-local A3 gateway and human authorization"
-            ]
-        }))
-    }
-
-    fn mutation_knowledge_federated_control(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a MutationKnowledgeFederatedControlRequest")?;
-        let receipt =
-            crate::research_contracts::run_mutation_knowledge_federated_control_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_mutation::knowledge_representation_federated_control_plane::FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "mutation knowledge candidates are ranked deterministically with origin quorum and continual checkpoint identity",
-                "policy, protected-closure, signed-approval, locality, replay, oracle, and evidence gates fail closed",
-                "negative, contradicted, unknown, speculative, and omitted states remain explicit in the receipt"
-            ],
-            "limitations": [
-                "the control plane exchanges lineage and digest metadata only; raw experimental data remains institution-local",
-                "admission is a governed research automation outcome, not a clinical conclusion or treatment decision"
             ]
         }))
     }
@@ -27207,183 +26036,6 @@ impl Server {
             "limitations": [
                 "the route harmonizes caller-supplied manifests and does not inspect raw modality bytes",
                 "comparability is a manifest-level gate, not a biological validity claim"
-            ]
-        }))
-    }
-
-    fn mcp_multimodal_ingestion_assurance(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a serialized MultimodalIngestionRequest")?;
-        let receipt =
-            crate::research_contracts::assure_multimodal_ingestion_assurance_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": crate::multimodal_ingestion_assurance::FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "modality attestations and peer summaries are canonicalized before release",
-                "raw bytes remain institution-local and only aggregate signed metadata crosses federation",
-                "unknown, unmeasured, contradictory, omitted, and adversarial states remain explicit"
-            ],
-            "limitations": [
-                "the MCP route verifies caller-supplied manifests and does not inspect or harmonize raw bytes",
-                "a qualified ingestion receipt is a research-data readiness signal, not a biological or clinical conclusion"
-            ]
-        }))
-    }
-
-    fn weavelang_computational_execution_assurance(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a serialized ResearchWorkflowSpec")?;
-        let receipt =
-            crate::research_contracts::assure_weavelang_computational_execution_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_weavelang::COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "workflow nodes are deterministically ordered and graph defects are explicit",
-                "only local read, local computation, and local-artifact effects are admitted",
-                "unknown, unmeasured, contradictory, omitted, budget, and adversarial states fail closed"
-            ],
-            "limitations": [
-                "the route verifies a caller-declared graph and never dispatches tools or processes",
-                "a qualified execution receipt is not a scientific or clinical conclusion"
-            ]
-        }))
-    }
-
-    fn mcp_knowledge_representation_contract(&self, arguments: &Value) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a serialized KnowledgeRepresentationRequest")?;
-        let receipt =
-            crate::research_contracts::model_mcp_knowledge_representation_contract_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": crate::knowledge_representation_contract_model::FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "claim identities and peer summaries are canonically ordered and partitioned",
-                "only semantically comparable, signed aggregate metadata is considered qualified",
-                "unknown, speculative, contradictory, omitted, and denied claims remain explicit"
-            ],
-            "limitations": [
-                "the route validates caller-supplied claim attestations and does not infer relations from raw studies",
-                "a qualified knowledge-world envelope is not a biological, diagnostic, or clinical conclusion"
-            ]
-        }))
-    }
-
-    fn registry_multimodal_scale_frontier_assurance(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a serialized RegistryScaleWorkload")?;
-        let receipt = crate::research_contracts::assure_registry_scale_frontier_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_registry::REGISTRY_SCALE_FRONTIER_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "multimodal study order, capacity totals, omission sets, and effect receipts are deterministic",
-                "missing modality closure, unknown or unmeasured workload state, contradiction, policy denial, capacity overflow, and adversarial events fail closed",
-                "raw registry data remains institution-local and only typed capacity metadata is returned",
-                "qualified output measures declared registry capacity and is never a biological or clinical conclusion"
-            ],
-            "limitations": [
-                "the route evaluates caller-supplied workload manifests and does not inspect raw registry bytes or schedule work",
-                "capacity qualification is a release gate and requires independent benchmark, replication, and institutional governance evidence"
-            ]
-        }))
-    }
-
-    fn registry_knowledge_representation_assurance(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a serialized ScopedResearchClaims")?;
-        let receipt =
-            crate::research_contracts::assure_registry_knowledge_representation_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_registry::KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "scoped claim identities, peer summaries, evidence states, and effect receipts are canonical and partitioned",
-                "minimum peer quorum, semantic profile, signed aggregate-only locality, provenance/replay, policy, approval, and protected-closure gates are explicit",
-                "unknown, speculative, contradicted, omitted, negative, and adversarial evidence cannot be promoted to a qualified knowledge world",
-                "raw study payloads remain institution-local and the route never infers biology or makes a clinical decision"
-            ],
-            "limitations": [
-                "the assurance harness verifies caller-supplied claims and peer summaries; it does not infer relations from raw studies",
-                "a qualified typed world is a release-readiness receipt and still requires independent replication and governance review"
-            ]
-        }))
-    }
-
-    fn oraclex_context_compilation_research_copilot(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a serialized DecisionQuery")?;
-        let receipt = crate::research_contracts::compile_oraclex_context_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_oraclex::context_compilation_research_copilot::FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "fact and peer identities are canonically ordered and partitioned before a decision section is emitted",
-                "only scoped supported local facts and signed aggregate-only peer summaries enter a bounded declared-tool plan",
-                "unknown, speculative, contradictory, omitted, uncertain, policy-denied, approval-missing, and adversarial states fail closed",
-                "raw evidence stays institution-local and the MCP route never invokes tools or makes a biological or clinical conclusion"
-            ],
-            "limitations": [
-                "the copilot compiles caller-supplied attestations and plans declared tools; it does not retrieve evidence or execute a workflow",
-                "a qualified section is an automation-readiness receipt and still requires downstream tool-specific validation and independent research governance"
-            ]
-        }))
-    }
-
-    fn ops_context_compilation_federated_control_plane(
-        &self,
-        arguments: &Value,
-    ) -> Result<Value, String> {
-        let request = arguments
-            .get("request")
-            .ok_or("request is required and must be a serialized DecisionQuery")?;
-        let receipt = crate::research_contracts::operate_ops_context_compilation_json(request)?;
-        Ok(json!({
-            "ok": true,
-            "schema": "aurora-research-contract/1.0",
-            "feature_id": bioprism_ops::CONTEXT_COMPILATION_CONTROL_FEATURE_ID,
-            "receipt": receipt,
-            "guarantees": [
-                "high-throughput context identities, peer summaries, capacity witnesses, and effects are deterministic and partitioned",
-                "policy, signed approval, protected closure, federation, locality, queue, active-run, and adversarial gates fail closed",
-                "unknown, speculative, contradictory, missing, omitted, uncertain, and negative evidence remains visible",
-                "the operator route emits only typed control metadata and never schedules processes or moves raw research data"
-            ],
-            "limitations": [
-                "the control plane evaluates caller-declared queue and context manifests; it does not execute or transport a workflow",
-                "qualified admission remains subject to institution-local scheduler, instrument, security, and independent validation gates"
             ]
         }))
     }
@@ -27807,6 +26459,28 @@ impl Server {
             "limitations": [
                 "the MCP surface accepts declarative actions and never invokes an external host or instrument",
                 "a successful receipt proves admission and replayable recording, not biological validity"
+            ]
+        }))
+    }
+
+    fn runtime_interpretation_assurance(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized EvidenceBackedResult4")?;
+        let receipt = crate::research_contracts::runtime_interpretation_assurance_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_runtime::INTERPRETATION_ASSURANCE_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "candidate order and outcome partitions are deterministic by score, study, modality, and id",
+                "comparability, replay identity, provenance, evidence state, omission, uncertainty, negative-result, policy, protected-closure, signed-approval, federation, locality, and adversarial gates remain explicit",
+                "the artifact is content-addressed and the release effect is always block:unsafe-release"
+            ],
+            "limitations": [
+                "the route evaluates typed declarations and does not render figures, read raw bytes, or infer biological truth",
+                "local aggregate output is not a clinical decision and requires independent scientific review"
             ]
         }))
     }
@@ -28294,17 +26968,19 @@ impl Server {
                 .map(Timepoint::label)
                 .collect::<Vec<_>>()
         });
-        let record_index = |label: &str| {
+        let record_index = |label: &str| -> Result<usize, String> {
             record_order
                 .iter()
                 .position(|record_label| *record_label == label)
-                .expect("every biological timepoint must have a record-order position")
+                .ok_or_else(|| {
+                    format!("biological timepoint {label:?} has no record-order position")
+                })
         };
         let rows: Vec<Value> = worldline
             .timepoints()
             .iter()
             .enumerate()
-            .map(|(biological_index, timepoint)| {
+            .map(|(biological_index, timepoint)| -> Result<Value, String> {
                 let clocks = timepoint.clocks();
                 let visible_at_cutoff = cutoff.map(|at| clocks.visible <= at);
                 let visibility_state = match visible_at_cutoff {
@@ -28312,10 +26988,10 @@ impl Server {
                     Some(false) => "hidden_from_agent",
                     None => "not_filtered",
                 };
-                json!({
+                Ok(json!({
                     "label": timepoint.label(),
                     "biological_index": biological_index,
-                    "record_index": record_index(timepoint.label()),
+                    "record_index": record_index(timepoint.label())?,
                     "clocks": clocks,
                     "acquired": clocks.acquired,
                     "recorded": clocks.recorded,
@@ -28325,9 +27001,15 @@ impl Server {
                     "observation": timepoint.observation(),
                     "visibility_state": visibility_state,
                     "visible_at_cutoff": visible_at_cutoff,
-                })
+                }))
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
+        let baseline_biological_index = worldline
+            .timepoints()
+            .iter()
+            .position(|timepoint| timepoint.label() == worldline.baseline().label())
+            .ok_or("the worldline baseline is not present in its timepoints")?;
+        let baseline_record_index = record_index(worldline.baseline().label())?;
 
         Ok(json!({
             "ok": true,
@@ -28340,12 +27022,8 @@ impl Server {
             "record_order_differs": biological_order != record_order,
             "clock_axes": ["acquired", "recorded", "released", "visible"],
             "clock_order_guaranteed": true,
-            "baseline_biological_index": worldline
-                .timepoints()
-                .iter()
-                .position(|timepoint| timepoint.label() == worldline.baseline().label())
-                .expect("the worldline baseline must be present"),
-            "baseline_record_index": record_index(worldline.baseline().label()),
+            "baseline_biological_index": baseline_biological_index,
+            "baseline_record_index": baseline_record_index,
             "visibility_cutoff": cutoff.map(|at| at.timestamp().to_rfc3339()),
             "visibility_filter_applied": cutoff.is_some(),
             "visible_timepoints": visible_labels,
@@ -28987,21 +27665,21 @@ impl Server {
         let rejected_records: Vec<Value> = result
             .rejected
             .iter()
-            .map(|(history, refusal)| {
-                let refusal_value =
-                    serde_json::to_value(refusal).expect("clonal refusal is serializable");
+            .map(|(history, refusal)| -> Result<Value, String> {
+                let refusal_value = serde_json::to_value(refusal)
+                    .map_err(|error| format!("clonal refusal serialization failed: {error}"))?;
                 let refusal_kind = refusal_value
                     .get("refusal")
                     .and_then(Value::as_str)
                     .unwrap_or("unknown");
-                json!({
+                Ok(json!({
                     "history": history,
                     "refusal": refusal,
                     "refusal_kind": refusal_kind,
                     "refusal_text": refusal.to_string(),
-                })
+                }))
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(json!({
             "ok": true,
             "schema": "bioprism-mcp/oncoworlds-clonal-history-check/0.1",
@@ -30900,7 +29578,7 @@ impl Server {
                 arguments
                     .get("variant_request")
                     .cloned()
-                    .expect("variant request was checked above"),
+                    .ok_or("variant_request disappeared during validation")?,
             )
             .map_err(|error| format!("invalid variant token context request: {error}"))?;
             if variant_request.envelope.total > 10_000_000 {
@@ -31457,7 +30135,8 @@ impl Server {
             }));
         }
 
-        let (document_relative, document) = document.expect("document was checked above");
+        let (document_relative, document) =
+            document.ok_or("document disappeared during validation")?;
         let selected_id = requested.map(str::to_string).or_else(|| {
             document
                 .get("schema_version")
@@ -33028,13 +31707,14 @@ impl Server {
             "dashboard_digest": audit.dashboard_digest,
             "evidence_digest": evidence_digest.to_string(),
             "evidence_scope": evidence_scope,
-            "capability_dashboard_ready": audit.ready,
+            "capability_dashboard_ready": audit.ready && duplicate_schema_names.is_empty(),
             "audit": audit_value,
             "schema_source": "authoritative tools/list definitions",
             "duplicate_schema_names": duplicate_schema_names,
             "guarantees": [
                 "domain rows are sorted and bound to the catalogue digest and query",
                 "MCP callable status requires a present, well-formed authoritative input schema",
+                "outer dashboard readiness also requires globally unique authoritative tool schema names",
                 "crate, CLI, Python, and MCP surfaces are reported independently rather than collapsed into one score",
                 "artifact and workflow-reconciliation evidence are advisory joins and never promote the dashboard to readiness"
             ],
@@ -38786,170 +37466,10 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
-            "id": "adapter_federated_continual_retrieval_workflow",
-            "domains": ["federated continual retrieval", "purpose-bound quorum", "aggregate-only federation", "checkpointed evidence synthesis"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_federated_continual_retrieval_synthesis_workflow_fabric"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_local_retrieval_research_workbench",
-            "domains": ["local retrieval synthesis", "researcher interaction", "omission-aware views", "provenance replay"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_local_retrieval_synthesis_research_workbench"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_multimodal_retrieval_research_workbench",
-            "domains": ["multimodal retrieval synthesis", "multi-study researcher interaction", "comparability views", "omission-aware provenance"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_multimodal_retrieval_synthesis_research_workbench"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_throughput_retrieval_research_workbench",
-            "domains": ["throughput retrieval synthesis", "queue interaction", "overflow evidence", "replay provenance"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_throughput_retrieval_synthesis_research_workbench"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_federated_continual_retrieval_synthesis_research_workbench",
-            "domains": ["federated continual retrieval synthesis", "quorum workbench", "aggregate-only researcher interaction", "omission and provenance views"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_federated_continual_retrieval_synthesis_research_workbench"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_local_retrieval_synthesis_interoperability_gateway",
-            "domains": ["local retrieval synthesis interoperability", "version negotiation", "semantic-loss receipts", "protocol conformance"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_local_retrieval_synthesis_interoperability_gateway"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_multimodal_retrieval_synthesis_interoperability_gateway",
-            "domains": ["multimodal retrieval synthesis interoperability", "comparability negotiation", "semantic-loss receipts", "protocol conformance"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_multimodal_retrieval_synthesis_interoperability_gateway"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_throughput_retrieval_synthesis_interoperability_gateway",
-            "domains": ["throughput retrieval synthesis interoperability", "batch checkpoint admission", "semantic-loss receipts", "protocol conformance"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_throughput_retrieval_synthesis_interoperability_gateway"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_federated_continual_retrieval_synthesis_interoperability_gateway",
-            "domains": ["federated continual retrieval synthesis interoperability", "purpose-bound quorum", "aggregate-only exchange", "semantic-loss receipts"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_federated_continual_retrieval_synthesis_interoperability_gateway"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_local_retrieval_synthesis_assurance_harness",
-            "domains": ["local retrieval synthesis assurance", "counterexample checking", "omission-aware release gates", "replay verification"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_local_retrieval_synthesis_assurance_harness"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_multimodal_retrieval_synthesis_assurance_harness",
-            "domains": ["multimodal retrieval synthesis assurance", "comparability verification", "counterexample checking", "omission-aware release gates"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_multimodal_retrieval_synthesis_assurance_harness"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_throughput_retrieval_synthesis_assurance_harness",
-            "domains": ["throughput retrieval synthesis assurance", "queue and checkpoint verification", "overflow witnesses", "omission-aware release gates"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_throughput_retrieval_synthesis_assurance_harness"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_federated_continual_retrieval_synthesis_assurance_harness",
-            "domains": ["federated continual retrieval synthesis assurance", "purpose-bound quorum verification", "aggregate-only locality", "omission-aware release gates"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_federated_continual_retrieval_synthesis_assurance_harness"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_local_retrieval_synthesis_federated_control_plane",
-            "domains": ["local retrieval synthesis operations", "federated control plane", "capacity and health admission", "signed-approval gates"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_local_retrieval_synthesis_federated_control_plane"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_multimodal_retrieval_synthesis_federated_control_plane",
-            "domains": ["multimodal multi-study retrieval synthesis operations", "federated control plane", "modality comparability", "peer quorum", "aggregate-only locality", "capacity and health admission"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_multimodal_retrieval_synthesis_federated_control_plane"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_throughput_retrieval_synthesis_federated_control_plane",
-            "domains": ["prospective high-throughput retrieval synthesis operations", "federated control plane", "queue and checkpoint continuity", "peer quorum", "aggregate-only locality", "capacity admission"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_throughput_retrieval_synthesis_federated_control_plane"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "adapter_federated_continual_retrieval_synthesis_federated_control_plane",
-            "domains": ["federated continual retrieval synthesis operations", "purpose-bound control plane", "checkpoint continuity", "peer quorum", "aggregate-only locality", "bounded autonomy"],
-            "crates": ["bioprism-adapter", "bioprism-mcp"],
-            "mcp_tools": ["adapter_federated_continual_retrieval_synthesis_federated_control_plane"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "foundation_mechanism_exploration_assurance",
-            "domains": ["prospective mechanism exploration", "high-throughput assurance", "evidence and provenance closure", "baseline and replay gates", "negative-result retention"],
-            "crates": ["bioprism-foundation", "bioprism-mcp"],
-            "mcp_tools": ["foundation_mechanism_exploration_assurance"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "oraclex_publication_release",
-            "domains": ["publication and research-object release", "federated continual context compilation", "bounded research-copilot automation", "RO-Crate and PROV-O metadata", "provenance and evaluation closure", "negative-result disclosure", "digest-only federation", "contract migration"],
-            "crates": ["bioprism-oraclex", "bioprism-foundation", "bioprism-mcp"],
-            "mcp_tools": ["oraclex_publication_release", "oraclex_context_compilation_research_copilot"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
-            "id": "interweave_frontier_control",
-            "domains": ["prospective high-throughput Interweave control plane", "federated peer quorum", "checkpoint and queue continuity", "capacity and health admission", "aggregate-only locality", "bounded A2 operations"],
-            "crates": ["bioprism-interweave", "bioprism-foundation", "bioprism-mcp"],
-            "mcp_tools": ["interweave_frontier_control"],
-            "cli_entrypoints": [],
-            "status": "available"
-        },
-        {
             "id": "evaluation_and_baselines",
             "domains": ["matched evaluation", "equal engineering", "claim ladders", "adaptive panels", "capability posteriors", "release gates", "bounded waivers", "safety vetoes", "factorial designs", "component attribution", "interaction coverage", "evaluator independence", "disagreement witnesses", "abstention handling", "nonrenewable resource accounting", "fork feasibility", "failed-action waste", "prospective commitments", "rubric digest integrity", "selective publication", "contextual integrity", "channel exposure", "utility-safety Pareto"],
             "crates": ["bioprism-prism", "bioprism-baseline", "bioprism-adaptive", "bioprism-evalengine", "bioprism-bioeval", "bioprism-bioevalx", "bioprism-epistemic"],
-            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "release_assurance_harness", "protocol_assurance_harness", "federated_multimodal_assurance", "federated_knowledge_gateway", "federated_lens_assurance", "lab_semantic_parity", "federated_retrieval_assurance", "federated_continual_retrieval_copilot", "federated_context_compilation_assurance", "federated_knowledge_representation_assurance", "federated_resource_control_plane", "weavelang_release_assurance", "federated_mechanism_control_plane", "federated_mechanism_gateway", "evidence_surveillance_copilot", "adapter_local_evidence_surveillance_research_copilot", "adapter_multimodal_evidence_surveillance_research_copilot", "adapter_throughput_evidence_surveillance_research_copilot", "adapter_federated_continual_evidence_surveillance_research_copilot", "adapter_local_evidence_surveillance_workflow_fabric", "adapter_multimodal_evidence_surveillance_workflow_fabric", "adapter_throughput_evidence_surveillance_workflow_fabric", "adapter_federated_continual_evidence_surveillance_workflow_fabric", "multimodal_retrieval_synthesis", "adapter_local_retrieval_synthesis_inference_engine", "adapter_local_retrieval_synthesis_contract_model", "adapter_local_retrieval_synthesis_research_copilot", "adapter_multimodal_retrieval_synthesis_research_copilot", "adapter_throughput_retrieval_synthesis_research_copilot", "adapter_federated_continual_retrieval_synthesis_research_copilot", "adapter_local_retrieval_synthesis_workflow_fabric", "adapter_multimodal_retrieval_synthesis_workflow_fabric", "adapter_throughput_retrieval_synthesis_workflow_fabric", "adapter_multimodal_retrieval_synthesis_inference_engine", "adapter_throughput_retrieval_synthesis_inference_engine", "adapter_throughput_retrieval_synthesis_contract_model", "adapter_federated_retrieval_synthesis_inference_engine", "adapter_federated_retrieval_synthesis_contract_model", "adapter_context_compilation_assurance", "multimodal_knowledge_workflow", "adapter_resource_workbench", "adapter_ingestion_gateway", "adapter_quality_envelope", "adapter_experiment_design_control", "adapter_protocol_simulation", "adapter_instrument_mesh", "adapter_execution_control", "adapter_analysis_portfolio", "adapter_interpretation_assurance", "governance_federated_continual_interpretation_assurance", "adapter_replication_assurance", "adapter_release_assurance", "adapter_determinism_gateway", "adapter_provenance_assurance", "adapter_policy_gateway", "adapter_federation_workflow", "adapter_reliability_copilot", "adapter_interoperability_gateway", "adapter_evaluation_assurance", "adapter_research_workbench", "adapter_contract_frontier", "adapter_limitation_closure", "adapter_dependency_composition", "adapter_semantic_parity", "adapter_scale_frontier", "adapter_adversarial_recovery", "adapter_federated_commons", "adapter_bounded_evolution", "mcp_bounded_evolution_assurance", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
+            "mcp_tools": ["context_compare", "prism_minimize", "adaptive_panel", "posterior_gate", "evaluation_worldline_audit", "evaluation_reproduction_check", "evaluation_trajectory_check", "evaluation_observability_card", "federated_evaluation_consensus", "resource_workbench_discover", "resource_discovery_contract_v2", "governance_research_release_compile", "release_assurance_harness", "protocol_assurance_harness", "federated_multimodal_assurance", "federated_knowledge_gateway", "federated_lens_assurance", "lab_semantic_parity", "federated_retrieval_assurance", "federated_continual_retrieval_copilot", "federated_context_compilation_assurance", "federated_knowledge_representation_assurance", "federated_resource_control_plane", "weavelang_release_assurance", "federated_mechanism_control_plane", "federated_mechanism_gateway", "evidence_surveillance_copilot", "adapter_local_evidence_surveillance_workflow_fabric", "adapter_multimodal_evidence_surveillance_workflow_fabric", "adapter_throughput_evidence_surveillance_workflow_fabric", "adapter_federated_continual_evidence_surveillance_workflow_fabric", "adapter_local_evidence_surveillance_research_workbench", "adapter_multimodal_evidence_surveillance_research_workbench", "adapter_throughput_evidence_surveillance_research_workbench", "multimodal_retrieval_synthesis", "adapter_context_compilation_assurance", "multimodal_knowledge_workflow", "adapter_resource_workbench", "adapter_ingestion_gateway", "adapter_quality_envelope", "adapter_experiment_design_control", "adapter_protocol_simulation", "adapter_instrument_mesh", "adapter_execution_control", "adapter_analysis_portfolio", "adapter_interpretation_assurance", "adapter_replication_assurance", "adapter_release_assurance", "adapter_determinism_gateway", "adapter_provenance_assurance", "adapter_policy_gateway", "adapter_federation_workflow", "adapter_reliability_copilot", "adapter_interoperability_gateway", "adapter_evaluation_assurance", "adapter_research_workbench", "adapter_contract_frontier", "adapter_limitation_closure", "adapter_dependency_composition", "adapter_semantic_parity", "adapter_scale_frontier", "adapter_adversarial_recovery", "adapter_federated_commons", "adapter_bounded_evolution", "mcp_bounded_evolution_assurance", "analysis_qualify", "bioeval_reference_audit", "bioeval_acquisition_audit", "bioeval_grounding_audit", "bioeval_estimand_audit", "bioeval_evaluator_audit", "bioeval_plane_audit", "bioeval_metamorphic_audit", "bioeval_waiver_audit", "bioeval_design_audit", "bioeval_mesh_audit", "bioeval_burden_audit", "bioeval_reveal_audit", "bioeval_boundary_audit", "epistemic_voi", "epistemic_adaptive_acquisition", "epistemic_adaptive_costed", "epistemic_adaptive_execute", "epistemic_decision_quotient", "epistemic_context_audit", "epistemic_selection_audit"],
             "cli_entrypoints": ["prism fork", "prism minimize", "context compare"],
             "status": "available"
         },
@@ -38965,7 +37485,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "megafactory_scale_and_oracles",
             "domains": ["mechanistic twin simulation", "model discrepancy", "distributed placement", "oracle independence", "fencing and duplicate execution"],
             "crates": ["bioprism-megafactory", "bioprism-scale", "bioprism-factory"],
-            "mcp_tools": ["megafactory_twin_audit", "megafactory_placement_audit", "scale_family_split_verify", "factory_lifecycle_simulate", "megafactory_mechanism_exploration_federated_control_plane"],
+            "mcp_tools": ["megafactory_twin_audit", "megafactory_placement_audit", "scale_family_split_verify", "factory_lifecycle_simulate"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -38973,7 +37493,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "mutation_and_causal_discovery",
             "domains": ["metamorphic testing", "causal divergence", "robustness"],
             "crates": ["bioprism-mutation", "bioprism-benchcompiler", "bioprism-stress", "bioprism-influence"],
-            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review", "stress_profile", "stress_report", "influence_analyze", "influence_federated_continual_interpretation"],
+            "mcp_tools": ["mutation_family", "benchmark_counterfactual_check", "benchmark_oracle_review", "benchmark_compile", "benchmark_compile_review", "stress_profile", "stress_report", "influence_analyze"],
             "cli_entrypoints": ["mutate family"],
             "status": "available"
         },
@@ -39026,18 +37546,18 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
-            "id": "oncoworlds_identity_and_transport",
-            "domains": ["participant identity", "specimen and lesion joins", "disease epochs", "cross-scope transport"],
-            "crates": ["bioprism-oncoworlds", "bioprism-scope", "bioprism-standards"],
-            "mcp_tools": ["oncoworlds_identity_join"],
+            "id": "mutation_knowledge_federated_control",
+            "domains": ["federated continual knowledge representation", "metamorphic mutation evidence", "oracle verification", "origin quorum", "protected closure", "aggregate-only locality"],
+            "crates": ["bioprism-mutation", "bioprism-foundation", "bioprism-mcp"],
+            "mcp_tools": ["mutation_knowledge_federated_control"],
             "cli_entrypoints": [],
             "status": "available"
         },
         {
-            "id": "mutation_knowledge_federated_control",
-            "domains": ["federated mutation knowledge representation", "continual candidate admission", "origin quorum", "deterministic ranking", "negative evidence", "aggregate-only locality"],
-            "crates": ["bioprism-mutation", "bioprism-oracle", "bioprism-foundation", "bioprism-mcp"],
-            "mcp_tools": ["mutation_knowledge_federated_control", "mcp_knowledge_representation_contract"],
+            "id": "oncoworlds_identity_and_transport",
+            "domains": ["participant identity", "specimen and lesion joins", "disease epochs", "cross-scope transport"],
+            "crates": ["bioprism-oncoworlds", "bioprism-scope", "bioprism-standards"],
+            "mcp_tools": ["oncoworlds_identity_join"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -39085,7 +37605,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "agent_orchestration",
             "domains": ["typed acts", "session types", "budgets", "sagas", "quorum"],
             "crates": ["bioprism-weave", "bioprism-weavelang", "bioprism-choreography", "bioprism-fabric", "bioprism-interweave"],
-            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "weavelang_computational_execution_assurance", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "interweave_workflow_execute", "interweave_workflow_execution_evidence", "interweave_workflow_execution_evidence_import", "interweave_workflow_execution_evidence_query", "interweave_workflow_execution_evidence_get", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
+            "mcp_tools": ["weave_protocol_catalog", "weavelang_compile", "choreography_check", "fabric_synthesize", "interweave_workflow_catalogue", "interweave_workflow_execute", "interweave_workflow_execution_evidence", "interweave_workflow_execution_evidence_import", "interweave_workflow_execution_evidence_query", "interweave_workflow_execution_evidence_get", "mission_evaluator_discover", "mission_evaluator_review", "mission_evaluator_replay", "mission_evaluator_replay_compare", "mission_evidence_bundle_verify", "mission_evidence_bundle_import", "mission_evidence_bundle_query", "mission_evidence_bundle_get"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -39102,7 +37622,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
-            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "registry_multimodal_scale_frontier_assurance", "registry_knowledge_representation_assurance", "ops_context_compilation_federated_control_plane", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_harmonization_coverage", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
+            "mcp_tools": ["registry_gate", "registry_lifecycle_simulate", "cache_invalidation_simulate", "storage_lifecycle_simulate", "release_audit", "operations_catalog", "ops_acceptance", "ops_capacity", "quality_gate_run", "ledger_ingest", "factory_lifecycle_simulate", "factory_authority_verify", "artifact_registry_audit", "domain_report_project", "domain_evidence_harmonize", "domain_evidence_harmonization_coverage", "domain_evidence_intake", "domain_evidence_coverage", "domain_evidence_source_plan", "domain_evidence_source_execute", "hub_search", "hub_resolve", "hub_lock", "telemetry_project"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -39166,7 +37686,7 @@ pub fn workspace_capabilities() -> Value {
             "id": "multimodal_ingestion",
             "domains": ["modality harmonization", "unit alignment", "coordinate systems", "semantic loss", "local research objects"],
             "crates": ["bioprism-adapter", "bioprism-modalities", "bioprism-foundation"],
-            "mcp_tools": ["multimodal_harmonize", "mcp_multimodal_ingestion_assurance", "multimodal_replication_evaluate", "quality_drift_evaluate"],
+            "mcp_tools": ["multimodal_harmonize", "multimodal_replication_evaluate", "quality_drift_evaluate"],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -39251,6 +37771,32 @@ pub fn workspace_capabilities() -> Value {
 }
 
 pub fn tool_definitions() -> Vec<Value> {
+    let mut definitions = tool_definitions_part_01();
+    definitions.extend(tool_definitions_part_02());
+    definitions.extend(tool_definitions_part_03());
+    definitions.extend(tool_definitions_part_04());
+    definitions.extend(tool_definitions_part_05());
+    definitions.extend(tool_definitions_part_06());
+    definitions.extend(tool_definitions_part_07());
+    definitions.extend(tool_definitions_part_08());
+    definitions.extend(tool_definitions_part_09());
+    definitions.extend(tool_definitions_part_10());
+    definitions.extend(tool_definitions_part_11());
+    definitions.extend(tool_definitions_part_12());
+    definitions.extend(tool_definitions_part_13());
+    definitions.extend(tool_definitions_part_14());
+    definitions.extend(tool_definitions_part_15());
+    definitions.extend(tool_definitions_part_16());
+    definitions.extend(tool_definitions_part_17());
+    definitions.extend(tool_definitions_part_18());
+    definitions.extend(tool_definitions_part_19());
+    definitions.extend(tool_definitions_part_20());
+    let mut control = crate::brain_control::tool_definitions();
+    control.extend(definitions);
+    control
+}
+
+fn tool_definitions_part_01() -> Vec<Value> {
     let world_and_query = json!({
         "type": "object",
         "properties": {
@@ -39260,7 +37806,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "required": ["world", "query"]
     });
 
-    let definitions = vec![
+    vec![
         json!({
             "name": "brain_model_select",
             "description": "Select an available provider/model from explicit capability, context-window, quality, latency, cost, reliability, and caller-owned online-learning observations. An optional min_selection_confidence floor abstains on near-tied eligible ranks. Every rejected candidate remains visible, along with normalized rank-separation confidence. This tool accepts no API key, opens no network connection, and does not claim that a future model response will be correct.",
@@ -39507,6 +38053,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["jobs", "workers", "actions"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_02() -> Vec<Value> {
+    vec![
         json!({
             "name": "factory_authority_verify",
             "description": "Verify a serialized factory execution-authority envelope, including the queue snapshot digest, transition-chain links, revision, and bounded lease/event counts. This audits durable state without dispatching workers or claiming provider-effect completion.",
@@ -39783,6 +38334,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["source_plan_digest"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_03() -> Vec<Value> {
+    vec![
         json!({
             "name": "domain_evidence_provider_normalize",
             "description": "Normalize caller-supplied literature, clinical-trial, FHIR, object-store, or provider-API payloads into the same catalogue-bound domain-evidence intake artifact used by bounded source reads. The route returns a structural-only shape audit with recognized-container, row, identifier-presence, and object-store digest-coverage facts plus a bounded digest-only record index for deduplication. It preserves explicit provider/payload/request digests and caller-supplied observed/partial/refused/error/unknown outcomes, but never contacts or authenticates a provider, interprets domain values, or claims provenance, scientific, clinical, or release validity.",
@@ -40165,6 +38721,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["world"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_04() -> Vec<Value> {
+    vec![
         json!({
             "name": "prism_minimize",
             "description": "Reduce a world, or an explicitly supplied fact subset, to a deterministic 1-minimal set preserving the oracle signature. Returns unjudged removals separately and independently re-checks preservation; it never claims global minimality.",
@@ -40396,6 +38957,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["output"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_05() -> Vec<Value> {
+    vec![
         json!({
             "name": "hub_search",
             "description": "Search caller-supplied bioprism-hubapi catalogs under an explicit federation and exact query facets. Returns matched features, excluded near misses, authority, trust tier, digest, freshness, bounded truncation, and the limits of in-memory lexical discovery; empty-facet searches are refused.",
@@ -40657,6 +39223,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["provenance", "claim"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_06() -> Vec<Value> {
+    vec![
         json!({
             "name": "trace_analyze",
             "description": "Ingest a failing decision trajectory from native JSONL, preserve every import loss, validate causal ordering, segment review candidates, and optionally compare a lossless passing trajectory to localize first divergence. Returns transparent score components and review-gated CellProposal previews; it never silently replays, minimizes state, or publishes a cell.",
@@ -40913,6 +39484,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["reference", "alternatives", "initial", "steps", "intervention", "outcome_compartment"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_07() -> Vec<Value> {
+    vec![
         json!({
             "name": "megafactory_placement_audit",
             "description": "Audit one distributed million-scale placement against declared worker capability, data locality, access tier, attestation, oracle-domain independence, enclave transfer rules, monotone fencing, and duplicate execution classes. It is a local predicate workflow and never moves data or schedules a real worker.",
@@ -41152,6 +39728,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["observations"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_08() -> Vec<Value> {
+    vec![
         json!({
             "name": "oracle_combine",
             "description": "Combine serialized oracle judgements under the real tiered mesh policy. It validates the UTC evaluation instant, applies admissibility and minimum-tier rules, preserves weaker and inadmissible evidence, reports suppressed overrides, and keeps same-tier disagreement set-valued. It never runs or authenticates an oracle and never chooses a biological truth by majority vote.",
@@ -41405,6 +39986,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["flows"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_09() -> Vec<Value> {
+    vec![
         json!({
             "name": "evaluation_worldline_audit",
             "description": "Audit a serialized bioevalx Worldline for future evidence leakage and dangling context references. It cuts admissibility on accessibility time, keeps missing references separate from future leakage, and optionally returns the evidence admissible at an explicit RFC-3339 decision instant.",
@@ -41487,198 +40073,6 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "ids_federated_resource_discovery_interoperability",
-            "description": "Interoperate typed resource registries across approved preclinical research peers. Deterministically qualifies local aggregate-only endpoints against semantic profile, protocol, capability, provenance, replay, policy, quorum, and locality gates while retaining unknown, stale, contradicted, and omitted resources.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ResourceNeed4 under request, ResourceEndpoint4 records under endpoints, and PeerResourceSummary4 records under peers." },
-                    "endpoints": { "type": "array", "description": "Institution-local typed endpoint manifests." },
-                    "peers": { "type": "array", "description": "Aggregate-only signed peer capability summaries." }
-                },
-                "required": ["request", "endpoints", "peers"]
-            }
-        }),
-        json!({
-            "name": "worldfactory_protocol_simulation_federated_control_plane",
-            "description": "Simulate a typed preclinical protocol state machine across bounded fault scenarios and federated peer summaries. The control plane preserves recovery, contradiction, uncertainty, quorum, replay, provenance, and policy evidence and never dispatches laboratory actions.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ProtocolDraft4 with stages, fault scenarios, peer summaries, checkpoint, budgets, policy, approval, federation, locality, and replay identity." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "atlashub_replication_negative_results_federated_control_plane",
-            "description": "Operate an institution-local replication and negative-results control plane over typed ClaimAndProtocol1 observations and aggregate-only peer summaries. Null, negative, inconclusive, contradictory, incomparable, and omitted evidence remains explicit; no raw measurements or laboratory action are performed.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request_id": { "type": "string", "minLength": 1 },
-                    "claim": { "type": "object", "description": "Serialized ClaimAndProtocol1 with protocol, semantic, provenance, replay, policy, approval, and locality declarations." },
-                    "observations": { "type": "array", "description": "Independent ReplicationObservation4 records." },
-                    "peers": { "type": "array", "description": "Signed aggregate-only PeerReplicationSummary4 records." }
-                },
-                "required": ["request_id", "claim", "observations", "peers"]
-            }
-        }),
-        json!({
-            "name": "epistemic_retrieval_synthesis_federated_control_plane",
-            "description": "Rank bounded typed retrieval candidates and aggregate-only peer synthesis summaries for preclinical research. The control plane preserves evidence state, omissions, contradictions, negative results, provenance, replay, source/peer quorums, and fail-closed policy gates without fetching raw documents or exporting raw data.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ScopedRetrievalQuery3 with semantic profile, required terms, checkpoint, budget, policy, approval, federation, locality, aggregate-only, and replay declarations." },
-                    "candidates": { "type": "array", "description": "Typed RetrievalCandidate4 evidence summaries; raw source content is not accepted." },
-                    "peers": { "type": "array", "description": "Signed aggregate-only PeerSynthesisSummary4 records." }
-                },
-                "required": ["request", "candidates", "peers"]
-            }
-        }),
-        json!({
-            "name": "ids_context_compilation_federated_control_plane",
-            "description": "Compile bounded typed decision facts and signed aggregate-only peer context summaries for preclinical research. The control plane preserves semantic, replay, provenance, policy, quorum, omission, contradiction, negative-evidence, locality, and protected-closure state without retrieving raw documents or making clinical decisions.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized DecisionQuery4 with required claims, semantic profile, checkpoint, budget, policy, approval, federation, locality, aggregate-only, and replay declarations." },
-                    "facts": { "type": "array", "description": "Typed ContextFact4 summaries; raw source content is not accepted." },
-                    "peers": { "type": "array", "description": "Signed aggregate-only ContextPeer4 attestations." }
-                },
-                "required": ["request", "facts", "peers"]
-            }
-        }),
-        json!({
-            "name": "ids_knowledge_representation_federated_control_plane",
-            "description": "Compile typed multimodal knowledge claims and signed aggregate-only peer world attestations into a content-addressed preclinical knowledge world. The route preserves semantic, provenance, replay, contradiction, omission, negative-evidence, quorum, policy, and locality gates without exporting raw imaging or omics data.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ScopedKnowledgeClaims4 with world, semantic, checkpoint, quorum, policy, approval, federation, locality, aggregate-only, budget, and replay declarations." },
-                    "claims": { "type": "array", "description": "Typed KnowledgeClaim4 records with modality and evidence summaries." },
-                    "peers": { "type": "array", "description": "Signed aggregate-only KnowledgePeer4 world attestations." }
-                },
-                "required": ["request", "claims", "peers"]
-            }
-        }),
-        json!({
-            "name": "ids_multimodal_ingestion_research_copilot",
-            "description": "Validate local multimodal imaging and omics manifests into a harmonized preclinical research-object receipt. The copilot enforces modality closure, quality, semantic/unit/coordinate profiles, replay, provenance, authorization, protected closure, policy, and raw-data locality while preserving unknown and negative evidence.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized MultimodalIngestionRequest4 with study, required modalities, quality threshold, budget, policy, approval, locality, and replay declarations." },
-                    "observations": { "type": "array", "description": "Typed ModalityObservation4 summaries; raw imaging or omics payloads are not accepted." }
-                },
-                "required": ["request", "observations"]
-            }
-        }),
-        json!({
-            "name": "ids_quality_control_assurance",
-            "description": "Evaluate typed multimodal QC metric summaries against thresholds and required modality closure for preclinical research. The assurance harness preserves failed, unknown, unmeasured, contradicted, omitted, and negative evidence and never reads raw experiment data.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized QualityControlBatch4 with required modalities, minimum pass fraction, checkpoint, budget, policy, approval, locality, and replay declarations." },
-                    "observations": { "type": "array", "description": "Typed QualityObservation4 metric summaries with modality, baseline, threshold, artifact, provenance, and evidence state." }
-                },
-                "required": ["request", "observations"]
-            }
-        }),
-        json!({
-            "name": "ids_mechanism_exploration_assurance",
-            "description": "Verify bounded multimodal mechanism candidates and aggregate-only peer portfolios for preclinical research. The harness ranks support and novelty, enforces study/modality comparability and governed release gates, and preserves competing explanations, contradictions, omissions, counterevidence, and negative results.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized MechanismQuestion2 with required studies/modalities, support threshold, checkpoint, quorum, policy, approval, federation, locality, budget, and replay declarations." },
-                    "candidates": { "type": "array", "description": "Typed MechanismCandidate4 summaries with support, novelty, modality/study closure, provenance, and evidence state." },
-                    "peers": { "type": "array", "description": "Signed aggregate-only PeerMechanismSummary4 attestations." }
-                },
-                "required": ["request", "candidates", "peers"]
-            }
-        }),
-        json!({
-            "name": "ids_experiment_design_workbench",
-            "description": "Rank typed local single-study experiment designs into a deterministic power-aware preclinical frontier. The workbench enforces required-control closure, minimum power, replay identity, authorization, raw-data locality, and explicit uncertainty without executing laboratory actions.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ExperimentDesignRequest4 with study identity, estimand purpose, control requirements, power threshold, budget, policy, approval, locality, and replay declarations." },
-                    "candidates": { "type": "array", "description": "Typed DesignCandidate4 summaries with controls, power/effect scores, provenance, evidence state, and authorization declarations." }
-                },
-                "required": ["request", "candidates"]
-            }
-        }),
-        json!({
-            "name": "ids_protocol_simulation_workbench",
-            "description": "Simulate a bounded prospective high-throughput preclinical protocol across declared stages, fault scenarios, batches, capacity budgets, and aggregate peer summaries. The workbench preserves unknown and negative evidence and fails closed before any laboratory effect.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ProtocolWorkbenchRequest5 containing protocol stages, scenario faults, peer attestations, batch size, budget, policy, approval, federation, locality, and replay declarations." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "ids_laboratory_integration_workflow_fabric",
-            "description": "Compile federated continual instrument and action attestations into a fail-closed preclinical laboratory-integration preflight. It checks calibration, firmware/provenance, interlocks, emergency stops, compensation, replay, signed approval, policy, quorum, locality, and budgets without sending hardware commands.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized LaboratoryIntegrationRequest6 containing instrument endpoints, actions, peer summaries, workflow identity, safety gates, policy, federation, locality, budget, and replay declarations." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "ids_computational_execution_workbench",
-            "description": "Compile federated continual workflow node attestations into a deterministic dry-run computational execution plan. It checks dependencies, cycles, missing nodes, budgets, retries, replay, provenance, policy, peer quorum, locality, and negative evidence without dispatching jobs.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ComputationalExecutionRequest6 containing typed nodes, dependency ids, peer attestations, engine version, budget, policy, federation, locality, and replay declarations." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "ids_statistical_causal_ml_research_copilot",
-            "description": "Compile local single-study statistical, causal, and ML analysis candidates into a deterministic qualified research plan. The bounded copilot scores robustness, uncertainty, missingness, sample support, replay, provenance, policy, and locality without fitting models or emitting clinical conclusions.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized AnalysisCopilotRequest7 containing study identity, model portfolio version, typed analysis candidates, thresholds, budget, policy, approval, locality, and replay declarations." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "ids_retrieval_synthesis_assurance_harness",
-            "description": "Verify a federated continual preclinical retrieval corpus and synthesis closure. The assurance harness checks evidence state, source closure, relevance, freshness, comparability, peer quorum, replay, provenance, policy, federation, budget, and locality while preserving omissions and negative evidence without fetching or exporting raw sources.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ScopedRetrievalQuery6 containing typed evidence candidates, aggregate peer summaries, query terms, thresholds, policy, approval, federation, locality, budget, and replay declarations." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "ids_replication_negative_results_interoperability_gateway",
-            "description": "Validate multimodal multi-study replication attestations and emit an interoperable negative-results record. The gateway preserves positive, null, negative, inconclusive, incomparable, contradictory, omitted, and uncertain outcomes while enforcing study/modality closure, provenance, replay, peer quorum, policy, federation, approval, budget, and aggregate-only locality without rerunning experiments.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ClaimAndProtocol7Request containing the typed claim/protocol, multimodal observations, aggregate peer summaries, checkpoint, policy, federation, approval, budget, and locality declarations." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
             "name": "governance_research_release_compile",
             "description": "Compile a governance-owned signed research-object envelope from a validated preclinical run. The route performs policy, provenance, locality, migration, and detached-signature gates without exporting raw data.",
             "inputSchema": {
@@ -41745,43 +40139,6 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "mcp_knowledge_representation_contract",
-            "description": "Compile purpose-bound federated continual research claims into a typed knowledge-world contract. It verifies semantic-profile, artifact/provenance/replay, evidence-state, peer-quorum, policy, protected-closure, aggregate-only, and raw-locality gates without inferring relations from raw studies.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized mcp KnowledgeRepresentationRequest." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "registry_multimodal_scale_frontier_assurance",
-            "description": "Evaluate a local multimodal multi-study registry workload against explicit capacity, modality-closure, provenance, replay, policy, locality, and adversarial gates. It returns a deterministic RegistryCapacityReport7 receipt without reading raw bytes or scheduling work.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized bioprism-registry RegistryScaleWorkload with required modality order, study workload manifests, capacity limits, replay identity, policy and protected-closure gates, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "registry_knowledge_representation_assurance",
-            "description": "Verify federated continual ScopedResearchClaims4 attestations and signed aggregate-only peer summaries into a deterministic TypedKnowledgeWorld7 receipt. The route enforces semantic-profile, provenance/replay, quorum, policy, approval, protected-closure, locality, and adversarial gates without moving raw studies or making biological or clinical decisions.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized bioprism-registry ScopedResearchClaims with required claims, peer summaries, minimum quorum, replay identity, policy and locality controls, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "ops_context_compilation_federated_control_plane",
-            "description": "Operate a prospective high-throughput context-compilation control plane over typed DecisionQuery3 context attestations and aggregate peer summaries. It verifies queue and active-run capacity, semantic closure, replay, policy, signed approval, federation, locality, and adversarial gates and emits deterministic CertifiedDecisionSection8 metadata without scheduling processes or moving raw data.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized bioprism-ops DecisionQuery with context attestations, peer operations summaries, capacity and queue bounds, replay identity, policy/approval/federation controls, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "oraclex_context_compilation_research_copilot",
-            "description": "Compile a federated continual DecisionQuery4 into a deterministic CertifiedDecisionSection3 and bounded declared-tool plan. The route checks scoped evidence, semantic profiles, peer quorum, provenance/replay, policy, approval, protected closure, locality, budgets, and adversarial events without retrieving evidence, invoking tools, moving raw data, or making a biological or clinical conclusion.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized bioprism-oraclex DecisionQuery with typed facts, aggregate-only peer context summaries, required fact order, tool limits, replay identity, policy and authority gates, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
             "name": "federated_resource_control_plane",
             "description": "Operate the federated continual resource-discovery control plane through A2 approval, policy, qualification, protected-closure, and local-only gates.",
             "inputSchema": {
@@ -41814,17 +40171,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["request"]
             }
         }),
-        json!({
-            "name": "megafactory_mechanism_exploration_federated_control_plane",
-            "description": "Operate the A2 Megafactory federated-continual mechanism-exploration control plane. Rank competing mechanism attestations and govern digest-only exchange with deterministic origin quorum, replay, evidence, policy, protected-closure, approval, locality, capacity, and negative-result gates; emit no experiment or clinical decision.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized bioprism-megafactory FederatedMechanismControlRequest with mechanism candidates, origin quorum, checkpoint, policy/approval/federation controls, raw-data locality, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
+    ]
+}
+
+fn tool_definitions_part_10() -> Vec<Value> {
+    vec![
         json!({
             "name": "federated_mechanism_gateway",
             "description": "Admit federated continual mechanism projections through source/target profile, interoperability, policy, locality, protected-closure, and omission gates.",
@@ -41843,284 +40194,6 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized EvidenceFeedRequest with study intent, source metadata, required source ids, policy decision, protected closure, locality, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "adapter_local_evidence_surveillance_research_copilot",
-            "description": "Run the A1 local evidence-surveillance research copilot through a declared bounded tool. Dry-run, replay, omission, negative-evidence, and policy/locality receipts remain explicit.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized LocalEvidenceSurveillanceResearchCopilotRequest with agent/tool declaration, dry_run, study intent, evidence observations, replay identity, policy, protected closure, locality, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "adapter_multimodal_evidence_surveillance_research_copilot",
-            "description": "Run the A2 multimodal multi-study evidence-surveillance copilot with deterministic study?modality closure, semantic comparability, declared-tool bounds, replay receipts, and fail-closed policy/locality gates.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized MultimodalEvidenceSurveillanceResearchCopilotRequest with required studies/modalities, semantic profile, evidence observations, declared tool, dry_run, approval, replay identity, policy, protected closure, locality, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "multimodal_retrieval_synthesis",
-            "description": "Compile a typed multimodal retrieval corpus with study scope, comparability, modality coverage, negative evidence, and fail-closed omission gates.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized EvidenceSynthesisRequest with scoped query, candidates, comparability profile, policy decision, protected closure, locality, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "adapter_local_retrieval_synthesis_research_copilot",
-            "description": "Run an A1 local evidence-ranked research copilot with read-only, approval-aware recommendations.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisResearchCopilotRequest with agent identity, recommendation mode, approval requirement, scoped evidence query, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_multimodal_retrieval_synthesis_research_copilot",
-            "description": "Run an A2 multimodal multi-study evidence-ranked research copilot with typed modality comparability and approval-gated tool intent.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalRetrievalSynthesisResearchCopilotRequest with at least two required modalities, comparability digest, tool identity, approval token, scoped evidence query, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_throughput_retrieval_synthesis_research_copilot",
-            "description": "Run an A2 prospective high-throughput retrieval and synthesis research copilot with bounded queue capacity, checkpoint identity, overflow retention, and approval-gated tool intent.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisResearchCopilotRequest with modality floor, batch/checkpoint/capacity admission, queue and checkpoint digests, tool identity, approval token, scoped evidence query, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_federated_continual_retrieval_synthesis_research_copilot",
-            "description": "Run an A2 federated continual retrieval and synthesis research copilot with purpose-bound peer quorum, aggregate-only exchange, bounded queue capacity, checkpoint identity, overflow retention, and approval-gated tool intent.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisResearchCopilotRequest with modality floor, batch/checkpoint/capacity admission, federation purpose/peers/quorum/aggregate-only endpoint, queue/checkpoint/federation digests, tool identity, approval token, scoped evidence query, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_local_retrieval_synthesis_contract_model",
-            "description": "Validate and materialize a deterministic local single-study retrieval corpus as a canonical typed data primitive.",
-            "inputSchema": {"type": "object", "required": ["request"], "properties": {"request": {"type": "object", "description": "Serialized LocalRetrievalSynthesisContractModelRequest with canonical schema profile, consumer identity, deterministic single-study evidence candidates, budget, replay identity, and preclinical boundary."}}}
-        }),
-        json!({
-            "name": "adapter_local_retrieval_synthesis_inference_engine",
-            "description": "Run an A0 local single-study retrieval and synthesis inference engine over a typed ScopedRetrievalQuery; preserve omission, uncertainty, contradiction, and negative evidence with deterministic local-only effects.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisInferenceEngineRequest with scoped synthesis request, engine identity/version, EvidenceSynthesis1 output selection, budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_local_retrieval_synthesis_workflow_fabric",
-            "description": "Run an A1 local single-study retrieval and synthesis workflow with canonical stages, durable checkpoint, budget enforcement, compensation, replay identity, and omission-preserving receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisWorkflowRequest with ScopedRetrievalQuery, canonical stage order, checkpoint, budget, replay identity, policy/protected-closure/locality, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_multimodal_retrieval_synthesis_workflow_fabric",
-            "description": "Run an A2 multimodal multi-study retrieval and synthesis workflow with comparability validation, checkpoints, budgets, compensation, replay, and omission-preserving receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalRetrievalSynthesisWorkflowRequest with multi-study ScopedRetrievalQuery, required modalities, comparability digest, canonical stage order, checkpoint, budget, replay identity, policy/protected-closure/locality, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_throughput_retrieval_synthesis_workflow_fabric",
-            "description": "Run an A2 prospective high-throughput retrieval and synthesis workflow with bounded queue admission, overflow retention, checkpoints, budget compensation, replay, and omission-preserving receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisWorkflowRequest with ScopedRetrievalQuery3, batch/capacity/checkpoint/queue admission, canonical stage order, budget, replay identity, policy/protected-closure/locality, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_federated_continual_retrieval_synthesis_workflow_fabric",
-            "description": "Run an A2 federated continual retrieval and synthesis workflow with purpose-bound peer quorum, aggregate-only federation, locality, checkpoints, budget compensation, replay, and omission-preserving receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisWorkflowRequest with ScopedRetrievalQuery4, federation purpose/peers/quorum, aggregate-only policy, batch/checkpoint/capacity, canonical stage order, budget, replay identity, policy/protected-closure/locality, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_local_retrieval_synthesis_research_workbench",
-            "description": "Render an A0 local retrieval and synthesis researcher workbench with canonical read-only views, omission/negative evidence panels, provenance, and replay receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisResearchWorkbenchRequest with ScopedRetrievalQuery, workspace scope, canonical view/panel order, local budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_multimodal_retrieval_synthesis_research_workbench",
-            "description": "Render an A1 multimodal retrieval and synthesis researcher workbench with comparability-aware views, omission/negative evidence panels, provenance, and replay receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalRetrievalSynthesisResearchWorkbenchRequest with multi-study ScopedRetrievalQuery, required modalities, comparability digest, workspace scope, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_throughput_retrieval_synthesis_research_workbench",
-            "description": "Render an A1 prospective high-throughput retrieval and synthesis researcher workbench with queue, overflow, omission, provenance, and replay receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisResearchWorkbenchRequest with batch/capacity/checkpoint/queue digests, workspace scope, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_federated_continual_retrieval_synthesis_research_workbench",
-            "description": "Render an A1 federated continual retrieval and synthesis workbench with purpose-bound quorum, aggregate-only peer views, omission/negative evidence, provenance, and replay receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisResearchWorkbenchRequest with federation purpose/peer quorum, aggregate-only policy, workspace scope, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_local_retrieval_synthesis_interoperability_gateway",
-            "description": "Negotiate a pinned local retrieval and synthesis protocol with explicit capability, semantic-loss, omission, migration, and content-addressed artifact receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisInteroperabilityGatewayRequest with endpoint capability versions, local workbench request, pinned schemas, migration policy, semantic-loss budget, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_multimodal_retrieval_synthesis_interoperability_gateway",
-            "description": "Negotiate a pinned multimodal retrieval and synthesis protocol with explicit comparability, capability, semantic-loss, omission, migration, and content-addressed artifact receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalRetrievalSynthesisInteroperabilityGatewayRequest with endpoint capability versions, multimodal workbench request, modality/comparability contract, migration policy, semantic-loss budget, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_throughput_retrieval_synthesis_interoperability_gateway",
-            "description": "Negotiate a pinned throughput retrieval and synthesis protocol with batch/checkpoint admission, capability and semantic-loss receipts, omission preservation, and content-addressed artifact exchange.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisInteroperabilityGatewayRequest with endpoint capability versions, throughput workbench request, batch/checkpoint/capacity admission, migration policy, semantic-loss budget, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_federated_continual_retrieval_synthesis_interoperability_gateway",
-            "description": "Negotiate a purpose-bound federated continual retrieval and synthesis protocol with peer quorum, aggregate-only locality, capability and semantic-loss receipts, omission preservation, and content-addressed artifact exchange.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest with federation purpose/peer quorum, aggregate-only policy, federated workbench request, pinned schemas, migration policy, semantic-loss budget, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_local_retrieval_synthesis_assurance_harness",
-            "description": "Verify a local retrieval and synthesis workbench against explicit policy, protected-closure, provenance, evidence-completeness, replay, and omission-aware release predicates.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisAssuranceHarnessRequest with local workbench request, baseline identity, policy and closure predicates, provenance/evidence completeness, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_multimodal_retrieval_synthesis_assurance_harness",
-            "description": "Verify a multimodal retrieval and synthesis workbench against modality closure, comparability, policy, protected-closure, provenance, evidence-completeness, replay, and omission-aware release predicates.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalRetrievalSynthesisAssuranceHarnessRequest with multimodal workbench request, baseline and modality/comparability contracts, policy and closure predicates, provenance/evidence completeness, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_throughput_retrieval_synthesis_assurance_harness",
-            "description": "Verify a prospective high-throughput retrieval and synthesis workbench against bounded batch, checkpoint, capacity, policy, protected-closure, provenance, evidence-completeness, replay, and omission-aware release predicates.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisAssuranceHarnessRequest with throughput workbench request, baseline/batch/checkpoint/capacity contracts, policy and closure predicates, provenance/evidence completeness, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_federated_continual_retrieval_synthesis_assurance_harness",
-            "description": "Verify a federated continual retrieval and synthesis workbench against purpose-bound peer quorum, aggregate-only locality, checkpoint/replay, policy, protected-closure, provenance, evidence-completeness, and omission-aware release predicates.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisAssuranceHarnessRequest with federated workbench request, baseline/purpose/quorum contracts, aggregate-only policy, closure predicates, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_local_retrieval_synthesis_federated_control_plane",
-            "description": "Operate a local retrieval and synthesis federated control plane with capacity, health, policy, signed-approval, federation-permission, replay, and local-data gates.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalRetrievalSynthesisFederatedControlPlaneRequest with local workbench request, service/node identity, capacity and active-run counts, health/replay digests, policy and federation permissions, signed approval, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_multimodal_retrieval_synthesis_federated_control_plane",
-            "description": "Operate an A2 multimodal multi-study retrieval and synthesis federated control plane with peer quorum, modality comparability, capacity, health, signed approval, protected-closure, replay, and aggregate-only locality gates.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalRetrievalSynthesisFederatedControlPlaneRequest with multimodal workbench request, service/federation/purpose/peer quorum, capacity and active-run counts, comparability and health/replay digests, policy/federation permissions, signed approval, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_throughput_retrieval_synthesis_federated_control_plane",
-            "description": "Operate an A2 prospective high-throughput retrieval and synthesis federated control plane with purpose-bound peer quorum, queue/checkpoint continuity, capacity, health, signed approval, protected-closure, replay, and aggregate-only locality gates.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisFederatedControlPlaneRequest with throughput workbench request, service/federation/purpose/peer quorum, batch/checkpoint/capacity, queue/health/replay digests, policy/federation permissions, signed approval, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_federated_continual_retrieval_synthesis_federated_control_plane",
-            "description": "Operate an A2 federated continual retrieval and synthesis control plane with purpose-bound peer quorum, checkpoint continuity, capacity, health, signed approval, protected-closure, replay, and aggregate-only locality gates.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualRetrievalSynthesisFederatedControlPlaneRequest with continual workbench request, service/federation/purpose/peer quorum, checkpoint/capacity, health/replay digests, policy/federation permissions, signed approval, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "foundation_mechanism_exploration_assurance",
-            "description": "Assure a prospective high-throughput mechanism-exploration candidate batch with typed evidence/provenance/comparability, baseline, replay, capacity, policy, approval, protected-closure, negative-result, and fail-closed release gates.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MechanismExplorationAssuranceRequest with candidate evidence digests, baseline/algorithm identity, support threshold, bounded capacity, required mechanisms, policy/approval/closure/locality controls, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "oraclex_publication_release",
-            "description": "Compile an A2 prospective high-throughput publication and research-object release receipt with typed digest, provenance, evaluation baseline, standards, reproducibility, policy, authority, locality, negative-result, and contract-migration gates.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized PublicationReleaseRequest with release candidates, content/provenance/workflow/evidence/evaluation digests, required standards, capacity, policy and protected-closure controls, signed approval, reproducibility and negative-result disclosure, federation permission, migration version, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "interweave_frontier_control",
-            "description": "Operate an A2 prospective high-throughput Interweave frontier control plane with pinned protocols, federated peer quorum, queue/checkpoint continuity, capacity and health admission, policy/protected-closure/signed-approval gates, deterministic replay, and aggregate-only locality.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized InterweaveControlPlaneRequest with service/federation identity, purpose and batch, pinned protocol/capabilities, jobs and peers, capacity/checkpoint controls, policy/approval/closure/locality permissions, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "influence_federated_continual_interpretation",
-            "description": "Run an A2 federated continual interpretation and visualization interoperability gateway over an institution-local typed region. Negotiate signed peer capabilities and quorum, compute sound influence bounds, retain unknown/negative/omitted evidence, and emit digest-only replayable InteractiveInterpretation6 receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized EvidenceBackedResult4 with local variables/factors/claims, pinned contract and required capabilities, peer capability envelopes, continual epoch, perturbation class, policy/protected-closure/signed approval, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_multimodal_retrieval_synthesis_inference_engine",
-            "description": "Run an A1 multimodal multi-study retrieval and synthesis inference engine over imaging and omics candidates with explicit comparability; preserve missing modality, uncertainty, contradiction, and negative evidence with deterministic local-only effects.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalRetrievalSynthesisInferenceEngineRequest with multi-study ScopedRetrievalQuery, comparability profile, engine identity/version, EvidenceSynthesis1 output selection, budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_throughput_retrieval_synthesis_contract_model",
-            "description": "Validate and materialize a deterministic prospective high-throughput retrieval corpus as a canonical typed data primitive.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisContractModelRequest with schema profile, canonicalization, consumer identity, batch/capacity/checkpoint admission, budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_throughput_retrieval_synthesis_inference_engine",
-            "description": "Run an A1 prospective high-throughput retrieval and synthesis inference engine with bounded batch admission, capacity, checkpoints, overflow receipts, and deterministic local-only effects.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputRetrievalSynthesisInferenceEngineRequest with scoped query, batch/checkpoint/capacity admission, engine identity/version, EvidenceSynthesis1 output selection, budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_federated_retrieval_synthesis_contract_model",
-            "description": "Validate and materialize a deterministic federated continual retrieval corpus as a canonical typed data primitive with purpose-bound aggregate-only federation.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedRetrievalSynthesisContractModelRequest with schema profile, canonicalization, consumer identity, federation purpose/peers/quorum, aggregate-only policy, bounded admission, envelope, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_federated_retrieval_synthesis_inference_engine",
-            "description": "Run an A1 federated continual retrieval and synthesis inference engine with purpose-bound peer quorum, aggregate-only federation, locality, policy, checkpoint, and deterministic envelope receipts.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedRetrievalSynthesisInferenceEngineRequest with scoped query, federation identity/purpose/peers, aggregate-only policy, bounded batch/checkpoint/capacity, engine identity/version, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_throughput_evidence_surveillance_research_copilot",
-            "description": "Run the A2 prospective high-throughput evidence-surveillance copilot with bounded EvidenceFeed3 capacity, checkpoint and queue digests, explicit overflow, declared-tool effects, replay, and fail-closed policy/locality gates.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ThroughputEvidenceSurveillanceResearchCopilotRequest with batch/checkpoint/capacity, evidence observations, declared tool, dry_run, approval, replay identity, policy, protected closure, locality, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "adapter_context_compilation_assurance",
-            "description": "Verify prospective decision-context closure with required fact identities, derivation receipt, admission reference, protected closure, and explicit unknown states.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ContextCompilationRequest with DecisionQuery, policy, protected closure, admission reference, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "adapter_federated_continual_evidence_surveillance_research_copilot",
-            "description": "Run the A2 federated continual evidence-surveillance copilot with purpose-bound signed aggregate-only envelopes, semantic-profile and peer-quorum gates, replay receipts, declared-tool effects, and fail-closed locality policy.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized FederatedContinualEvidenceSurveillanceResearchCopilotRequest with federation identity, allowed aggregate artifacts, peer contributions, quorum, declared tool, dry_run, approval, replay identity, policy, protected closure, locality, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "adapter_local_evidence_surveillance_research_workbench",
-            "description": "Render an A0 local single-study EvidenceFeed1 research workbench with canonical overview, evidence, omission, negative, unknown, qualified, and provenance panels; no external effects are scheduled.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized LocalEvidenceSurveillanceResearchWorkbenchRequest with local copilot request, workspace and study scope, canonical view/panel order, budget, replay identity, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "adapter_multimodal_evidence_surveillance_research_workbench",
-            "description": "Render an A1 multimodal multi-study EvidenceFeed2 research workbench with canonical study, modality, comparability, missing, incomparable, negative, selected, and provenance panels; no external effects are scheduled.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalEvidenceSurveillanceResearchWorkbenchRequest with multimodal copilot request, workbench scope, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_throughput_evidence_surveillance_research_workbench",
-            "description": "Render an A1 prospective high-throughput EvidenceFeed3 research workbench with canonical queue, capacity, checkpoint, overflow, negative, qualified, unknown, and provenance panels; no external effects are scheduled.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputEvidenceSurveillanceResearchWorkbenchRequest with throughput copilot request, batch/checkpoint/capacity, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "adapter_federated_continual_evidence_surveillance_research_workbench",
-            "description": "Render an A1 federated continual EvidenceFeed4 research workbench with peer, aggregate, omission, denied, negative, qualified, unknown, and provenance panels; only permitted aggregate evidence crosses institution boundaries and no raw observations move.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest with federated copilot contributions, workbench scope, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
-        json!({
-            "name": "multimodal_knowledge_workflow",
-            "description": "Run a typed multimodal claim-to-knowledge workflow with deterministic stages, evidence-derivation gates, omission preservation, and local-data boundaries.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized ClaimsWorkflowRequest with study scope, required/resolved claims, evidence receipt, policy, protected closure, locality, and preclinical boundary." }
                 },
                 "required": ["request"]
             }
@@ -42149,11 +40222,70 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "adapter_throughput_evidence_surveillance_workflow_fabric",
-            "description": "Schedule an A2 prospective high-throughput evidence-surveillance workflow with queue checkpoints, capacity admission, overflow compensation, replay, and institution-local artifacts.",
+            "description": "Schedule an A1 prospective high-throughput evidence-surveillance workflow with queue checkpoints, capacity admission, overflow compensation, replay identity, and institution-local artifacts.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "request": { "type": "object", "description": "Serialized ThroughputEvidenceSurveillanceWorkflowRequest with EvidenceFeed3 copilot request, workflow/checkpoint/stage metadata, budget, replay identity, and preclinical boundary." }
+                    "request": { "type": "object", "description": "Serialized ThroughputEvidenceSurveillanceWorkflowRequest with throughput copilot request, batch/capacity/checkpoint metadata, budget, replay identity, and preclinical boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "adapter_federated_continual_evidence_surveillance_workflow_fabric",
+            "description": "Schedule an A2 federated continual evidence-surveillance workflow with purpose-bound peer quorum, aggregate-only locality, canonical checkpoints, compensation, replay, and institution-local artifacts.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized FederatedContinualEvidenceSurveillanceWorkflowRequest with federated copilot request, peer/quorum/checkpoint metadata, budget, replay identity, and preclinical boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "adapter_local_evidence_surveillance_research_workbench",
+            "description": "Render an A0 local single-study EvidenceFeed1 research workbench with canonical overview, evidence, omission, negative, unknown, qualified, and provenance panels; no external effects are scheduled.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized LocalEvidenceSurveillanceResearchWorkbenchRequest with local copilot request, workspace/study scope, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "adapter_multimodal_evidence_surveillance_research_workbench",
+            "description": "Render an A1 multimodal multi-study EvidenceFeed2 research workbench with canonical study, modality, comparability, missing, incomparable, negative, selected, and provenance panels; no external effects are scheduled.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MultimodalEvidenceSurveillanceResearchWorkbenchRequest with multimodal copilot request, workbench scope, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "adapter_throughput_evidence_surveillance_research_workbench",
+            "description": "Render an A1 prospective high-throughput EvidenceFeed3 research workbench with canonical queue, capacity, checkpoint, overflow, negative, qualified, unknown, and provenance panels; no external effects are scheduled.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ThroughputEvidenceSurveillanceResearchWorkbenchRequest with throughput copilot request, batch/checkpoint/capacity, canonical view/panel order, budget, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "multimodal_retrieval_synthesis",
+            "description": "Compile a typed multimodal retrieval corpus with study scope, comparability, modality coverage, negative evidence, and fail-closed omission gates.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized EvidenceSynthesisRequest with scoped query, candidates, comparability profile, policy decision, protected closure, locality, and preclinical boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "adapter_context_compilation_assurance",
+            "description": "Verify prospective decision-context closure with required fact identities, derivation receipt, admission reference, protected closure, and explicit unknown states.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ContextCompilationRequest with DecisionQuery, policy, protected closure, admission reference, and preclinical boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "multimodal_knowledge_workflow",
+            "description": "Run a typed multimodal claim-to-knowledge workflow with deterministic stages, evidence-derivation gates, omission preservation, and local-data boundaries.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized ClaimsWorkflowRequest with study scope, required/resolved claims, evidence receipt, policy, protected closure, locality, and preclinical boundary." }
                 },
                 "required": ["request"]
             }
@@ -42204,6 +40336,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["request"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_11() -> Vec<Value> {
+    vec![
         json!({
             "name": "adapter_protocol_simulation",
             "description": "Simulate a prospective protocol state machine with deterministic budgets, injected failures, compensation records, preflight ordering, partition handling, and approval gates.",
@@ -42256,17 +40393,6 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized EvidenceBackedResult containing local evidence digests, required modalities, InterpretationClaim records, protected omissions, locality, and preclinical boundary." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "governance_federated_continual_interpretation_assurance",
-            "description": "Verify federated continual multimodal interpretation and visualization receipts for the governance release board. Preserve unknown, unmeasured, contradicted, omitted, uncertain, and negative evidence while enforcing provenance, baseline, replay, policy, approval, protected-closure, and local-data gates; never render, infer, or make clinical decisions.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized FederatedContinualInterpretationAssuranceRequest with EvidenceBackedResult candidates, policy and protected-closure controls, replay identity, budget, locality, and preclinical boundary." }
                 },
                 "required": ["request"]
             }
@@ -42392,6 +40518,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["request"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_12() -> Vec<Value> {
+    vec![
         json!({
             "name": "adapter_limitation_closure",
             "description": "Compile and validate a federated adapter limitation-closure receipt with explicit resolved, unresolved, omission, uncertainty, negative-evidence, policy, locality, and permitted-digest gates.",
@@ -42558,6 +40689,16 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "federated_publication_release_inference",
+            "description": "Rank digest-only federated continual research-object release attestations and emit a qualified, degraded, unknown, or blocked recommendation while preserving provenance, omissions, negative evidence, locality, and fail-closed gates. Signing and publication remain separate authorized effects.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedPublicationReleaseInferenceRequest with origin attestations, semantic profile, quorum, capacity/checkpoint, policy, locality, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+    ]
+}
+
+fn tool_definitions_part_13() -> Vec<Value> {
+    vec![
+        json!({
             "name": "instrument_preflight",
             "description": "Run deterministic A3 instrument preflight over a typed action plan. It checks policy, approvals, evidence for non-reversible actions, interlocks, emergency stop, and budgets without reaching hardware.",
             "inputSchema": {
@@ -42575,17 +40716,6 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-adapter MultimodalHarmonizationRequest." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
-            "name": "mcp_multimodal_ingestion_assurance",
-            "description": "Verify a local-first federated multimodal-ingestion manifest before exposing a harmonized research object. The assurance harness checks schema, semantic profile, QC/provenance/replay digests, protected closure, policy, aggregate-only federation, adversarial events, and peer quorum without reading or exporting raw imaging or omics bytes.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized mcp MultimodalIngestionRequest." }
                 },
                 "required": ["request"]
             }
@@ -42668,6 +40798,17 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "runtime_interpretation_assurance",
+            "description": "Assure a federated continual interpretation surface from typed evidence-backed results. It deterministically partitions qualified, unresolved, blocked, and incomparable candidates; preserves omissions, uncertainty, negative results, replay and provenance identities; and always emits a block:unsafe-release effect without rendering, inferring, moving raw data, or making clinical decisions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-runtime EvidenceBackedResult4 with semantic comparability, study/modality coverage, policy, protected-closure, signed-approval, federation, locality, and adversarial declarations." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
             "name": "runtime_effect_check",
             "description": "Authorize one serialized runtime EffectRequest under an explicit EffectPolicy. It exposes declaration, reversibility class, canonical path, network, and simulation decisions while performing no filesystem, network, process, model, message, or payment effect.",
             "inputSchema": {
@@ -42719,17 +40860,6 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "weavelang_computational_execution_assurance",
-            "description": "Verify a local single-study WeaveLang computational-execution graph before dispatch. It deterministically orders typed nodes, checks local-effect allow-lists, evidence closure, replay identity, dependencies, cycles, and budgets, and returns an ExecutionRun7 assurance receipt without invoking tools or moving data.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "request": { "type": "object", "description": "Serialized weavelang ResearchWorkflowSpec." }
-                },
-                "required": ["request"]
-            }
-        }),
-        json!({
             "name": "onco_boundary_check",
             "description": "Triage a serialized OncoWorld BoundaryRequest under the fixed research-only boundary. It preserves safe aggregate uses, refuses individualized clinical uses, escalates where required, and refuses direct identifiers before echoing them.",
             "inputSchema": {
@@ -42773,6 +40903,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["worldline"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_14() -> Vec<Value> {
+    vec![
         json!({
             "name": "onco_classification_check",
             "description": "Run the serialized OncoWorld integrated molecular classification table. Histology selects candidates, observed marker calls resolve or exclude them, and unobserved evidence becomes a prioritized obligation instead of a negative or a guessed entity.",
@@ -42985,6 +41120,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["plan"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_15() -> Vec<Value> {
+    vec![
         json!({
             "name": "bioethics_human_subject_screen",
             "description": "Screen a serialized study for human-subject engagement, check declared purposes against an optional policy Consent at an explicit RFC-3339 time, and check individual return of results against the research boundary. Undetermined is never emitted as an exemption or clearance.",
@@ -43223,6 +41363,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["problem", "belief", "evidence_pool", "criterion", "tolerance", "compatibility_floor"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_16() -> Vec<Value> {
+    vec![
         json!({
             "name": "epistemic_selection_audit",
             "description": "Plan decision-relative selection over an explicit observed EvidencePool. It validates protected closure and scalarized constraints, runs exhaustive submodularity checks when the ground set fits, compares plain and lazy greedy, and optionally computes the exact small-instance optimum; approximation factors and exactness are never inferred outside their caps.",
@@ -43457,15 +41602,15 @@ pub fn tool_definitions() -> Vec<Value> {
             "description": "Operate an A2 prospective high-throughput context-compilation federation control plane with pinned suite/protocol and fixture compatibility, peer quorum, capacity/checkpoint continuity, policy, protected-closure, signed approval, locality, replay, omission, uncertainty, and negative-result gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ContextCompilationFederatedControlRequest with suite/protocol identity, typed candidates and peers, capacity/checkpoint controls, policy/approval/closure/locality permissions, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
-        json!({
-            "name": "federated_publication_release_inference",
-            "description": "Rank digest-only federated continual research-object release attestations and emit a qualified, degraded, unknown, or blocked recommendation while preserving provenance, omissions, negative evidence, locality, and fail-closed gates. Signing and publication remain separate authorized effects.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized FederatedPublicationReleaseInferenceRequest with origin attestations, semantic profile, quorum, capacity/checkpoint, policy, locality, replay identity, and preclinical boundary."}},"required":["request"]}
-        }),
+    ]
+}
+
+fn tool_definitions_part_17() -> Vec<Value> {
+    vec![
         json!({
             "name": "mutation_knowledge_federated_control",
-            "description": "Operate an A2 federated continual mutation-knowledge control plane with typed lineage, oracle verification, origin quorum, deterministic admission ranking, checkpoint continuity, policy and protected-closure gates, explicit omission/uncertainty/negative evidence, and aggregate-only locality.",
-            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MutationKnowledgeFederatedControlRequest with typed mutation candidates, federation quorum, checkpoint/capacity controls, policy/approval/closure/locality permissions, replay identity, and preclinical boundary."}},"required":["request"]}
+            "description": "Admit mutation-derived knowledge through deterministic oracle, scope, provenance, policy, protected-closure, signed approval, origin-quorum, locality, and replay gates while preserving unknown, contradicted, omitted, and negative evidence.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MutationKnowledgeFederatedControlRequest with typed mutation digests, origin attestations, policy/approval/locality gates, quorum, checkpoint, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "provider_capability_gate",
@@ -43652,6 +41797,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["manifest"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_18() -> Vec<Value> {
+    vec![
         json!({
             "name": "capability_route",
             "description": "Batch multiple named cross-domain needs into one digest-bound candidate report. Each need preserves its bounded ranked discovery result and candidate-group artifact/workflow-reconciliation posture; explicit tool filters are distinguished from free-text/domain/group candidates. The route never executes tools, grants permission, validates domain arguments, or replaces review of an agent_mission allow-list.",
@@ -43906,6 +42056,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_19() -> Vec<Value> {
+    vec![
         json!({
             "name": "domain_workflow_portfolio_verify",
             "description": "Verify a retained domain_workflow_portfolio artifact as one bounded audit object. Recomputes the retained portfolio digest, checks coverage and aligned replay request digests, verifies every item independently, and adds authoritative no-dispatch mission preflight to structurally successful items. Blocked and mismatched items remain visible; this never dispatches, retries, resumes, grants readiness, or establishes semantic, scientific, clinical, provider, or release validity.",
@@ -44280,6 +42435,11 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["ci", "provider", "payload"]
             }
         }),
+    ]
+}
+
+fn tool_definitions_part_20() -> Vec<Value> {
+    vec![
         json!({
             "name": "ci_provider_evidence_import",
             "description": "Re-run ci_provider_evidence_audit and retain its complete provider/run/artifact/log/attestation report in the bounded shared registry. Failed and unknown runs remain explicit records; import never contacts a provider, executes checks, verifies signatures, or approves a release.",
@@ -44485,8 +42645,5 @@ pub fn tool_definitions() -> Vec<Value> {
                 "required": ["event", "policy", "trace"]
             }
         }),
-    ];
-    let mut control = crate::brain_control::tool_definitions();
-    control.extend(definitions);
-    control
+    ]
 }
