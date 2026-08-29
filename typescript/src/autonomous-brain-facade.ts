@@ -111,6 +111,20 @@ import {
   type AutonomousRunTraceStore,
   type AutonomousRunTraceSummary,
 } from "./autonomous-run-trace.js";
+import {
+  AutonomousRunTraceRegistry,
+  AutonomousRunTraceRegistryPersistenceCoordinator,
+  JsonAutonomousRunTraceRegistryPersistence,
+  publishAutonomousRunTraceRegistrySnapshot,
+  type AutonomousRunTraceRegistryEventQuery,
+  type AutonomousRunTraceRegistryImportReport,
+  type AutonomousRunTraceRegistryIntegrity,
+  type AutonomousRunTraceRegistryPage,
+  type AutonomousRunTraceRegistryPublication,
+  type AutonomousRunTraceRegistryQuery,
+  type AutonomousRunTraceRegistryRecord,
+  type AutonomousRunTraceRegistrySnapshot,
+} from "./autonomous-run-trace-registry.js";
 import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
 import type {
   AutonomousModelCandidate,
@@ -282,6 +296,7 @@ export const AUTONOMOUS_BRAIN_AUTO_CYCLE_BATCH_SCHEMA = "bioprism-typescript-aut
 export const AUTONOMOUS_BRAIN_AUTO_REPLAN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-replan-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_TRACED_AUTO_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-traced-auto-cycle-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_TRACED_AUTO_REPLAN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-traced-auto-replan-batch/0.1" as const;
+export const AUTONOMOUS_BRAIN_TRACE_REGISTRY_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-trace-registry-controller/0.1" as const;
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
 export const AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomous-brain-execution-policy/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-brain-auto-execution/0.1" as const;
@@ -1092,6 +1107,61 @@ export interface AutonomousBrainAutoReplanBatchControllerTraceRun {
 
 export type AutonomousBrainAutoCycleBatchControllerTraceRunOptions = Omit<AutonomousBrainAutoCycleBatchResumableTraceOptions, "checkpoint" | "checkpointSink">;
 export type AutonomousBrainAutoReplanBatchControllerTraceRunOptions = Omit<AutonomousBrainAutoReplanBatchResumableTraceOptions, "checkpoint" | "checkpointSink">;
+
+export type AutonomousBrainTraceRegistryControllerStatus =
+  | "empty"
+  | "restored"
+  | "flushed"
+  | "published"
+  | "compacted"
+  | "publication_failed"
+  | "persistence_failed";
+
+/** Construction controls for the facade-bound, metadata-only trace registry controller. */
+export interface AutonomousBrainTraceRegistryControllerOptions {
+  registry: AutonomousRunTraceRegistry;
+  persistence: JsonAutonomousRunTraceRegistryPersistence;
+}
+
+/** Operator-safe projection of the trace registry controller state. */
+export interface AutonomousBrainTraceRegistryControllerProjection extends JsonObject {
+  schema: typeof AUTONOMOUS_BRAIN_TRACE_REGISTRY_CONTROLLER_SCHEMA;
+  status: AutonomousBrainTraceRegistryControllerStatus;
+  snapshot_generation: number | null;
+  snapshot_digest: string | null;
+  runs: number;
+  events: number;
+  retained_event_count: number;
+  policy: AutonomousRunTraceRegistrySnapshot["policy"] | null;
+  persisted: boolean;
+  retention: AutonomousRunTraceRegistrySnapshot["retention"];
+  authority: AutonomousRunTraceRegistrySnapshot["authority"];
+  secret_material: AutonomousRunTraceRegistrySnapshot["secret_material"];
+}
+
+/** Publication result with persistence separated from in-memory registry ingestion. */
+export interface AutonomousBrainTraceRegistryPublicationRun extends JsonObject {
+  controller: AutonomousBrainTraceRegistryControllerProjection;
+  publication: AutonomousRunTraceRegistryPublication;
+  persisted: boolean;
+  persistence_error: { error_class: string; failure_code: string } | null;
+}
+
+/** Imported trace snapshot with an explicit persistence outcome. */
+export interface AutonomousBrainTraceRegistryImportRun extends JsonObject {
+  controller: AutonomousBrainTraceRegistryControllerProjection;
+  report: AutonomousRunTraceRegistryImportReport;
+  persisted: boolean;
+  persistence_error: { error_class: string; failure_code: string } | null;
+}
+
+/** Retention-compaction result with an explicit persistence outcome. */
+export interface AutonomousBrainTraceRegistryCompactRun extends JsonObject {
+  controller: AutonomousBrainTraceRegistryControllerProjection;
+  evicted_run_ids: string[];
+  persisted: boolean;
+  persistence_error: { error_class: string; failure_code: string } | null;
+}
 
 /** Options for the keyless readiness audit exposed at the application boundary. */
 export type AutonomousBrainReadinessOptions = Parameters<AutonomousAgent["readiness"]>[0];
@@ -2555,6 +2625,21 @@ export class AutonomousBrainFacade {
   get providerSetup(): ProviderSetup {
     this.provider_setup ??= new ProviderSetup(this.agent.llm);
     return this.provider_setup;
+  }
+
+  /**
+   * Create the application-facing operator projection for metadata-only run traces.
+   *
+   * The registry is deliberately supplied by the caller because retention, persistence, and
+   * operator authorization belong to the deployment. The controller binds it to this exact
+   * facade instance and exposes restore-before-query, CAS-aware flush, trace publication,
+   * bounded retention, and integrity inspection without gaining execution authority.
+   */
+  createTraceRegistryController(
+    options: AutonomousBrainTraceRegistryControllerOptions,
+  ): AutonomousBrainTraceRegistryController {
+    if (!isObject(options) || !(options.registry instanceof AutonomousRunTraceRegistry) || !(options.persistence instanceof JsonAutonomousRunTraceRegistryPersistence)) throw new ArgumentError("autonomous brain trace registry controller options are malformed");
+    return new AutonomousBrainTraceRegistryController(this, options.registry, options.persistence);
   }
 
   /**
@@ -6930,6 +7015,196 @@ export class AutonomousBrainFacade {
       ? await runAutonomousCrossDomainReplanCycle(this.agent, request.task, adaptiveOptions as AutonomousCrossDomainReplanCycleOptions)
       : await runAutonomousReplanCycle(this.agent, request.task, adaptiveOptions as AutonomousReplanCycleOptions);
     return base(adaptive.status, adaptive, connector, null);
+  }
+}
+
+/**
+ * Own the application lifecycle around the metadata-only trace registry projection.
+ *
+ * A trace journal remains the source of lifecycle events; this controller only indexes validated
+ * summaries and bounded event metadata. Restore is mandatory before reads or publication, all
+ * mutations are serialized, and a persistence failure is returned separately from a successful
+ * in-memory publication so operators never mistake an observability failure for an execution
+ * failure or trigger an unsafe provider retry.
+ */
+export class AutonomousBrainTraceRegistryController {
+  private readonly persistenceCoordinator: AutonomousRunTraceRegistryPersistenceCoordinator;
+  private restored = false;
+  private busy = false;
+  private persisted = false;
+
+  constructor(
+    readonly brain: AutonomousBrainFacade,
+    readonly registry: AutonomousRunTraceRegistry,
+    readonly persistence: JsonAutonomousRunTraceRegistryPersistence,
+  ) {
+    if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain trace registry controller requires an AutonomousBrainFacade");
+    if (!(registry instanceof AutonomousRunTraceRegistry)) throw new ArgumentError("autonomous brain trace registry controller requires an AutonomousRunTraceRegistry");
+    if (!(persistence instanceof JsonAutonomousRunTraceRegistryPersistence)) throw new ArgumentError("autonomous brain trace registry controller requires JSON registry persistence");
+    this.persistenceCoordinator = new AutonomousRunTraceRegistryPersistenceCoordinator(registry, persistence);
+  }
+
+  private requireRestored(): void {
+    if (!this.restored) throw new ArgumentError("autonomous brain trace registry controller must restore before use");
+  }
+
+  private requireIdle(): void {
+    if (this.busy) throw new ArgumentError("autonomous brain trace registry controller already has an operation in progress");
+  }
+
+  private projection(status: AutonomousBrainTraceRegistryControllerStatus): AutonomousBrainTraceRegistryControllerProjection {
+    const snapshot = this.registry.snapshot();
+    return {
+      schema: AUTONOMOUS_BRAIN_TRACE_REGISTRY_CONTROLLER_SCHEMA,
+      status,
+      snapshot_generation: snapshot.snapshot_generation,
+      snapshot_digest: snapshot.snapshot_digest,
+      runs: snapshot.record_count,
+      events: snapshot.event_count,
+      retained_event_count: snapshot.retained_event_count,
+      policy: structuredClone(snapshot.policy),
+      persisted: this.persisted,
+      retention: snapshot.retention,
+      authority: snapshot.authority,
+      secret_material: snapshot.secret_material,
+    };
+  }
+
+  /** Restore and validate the last registry snapshot before any operator read or mutation. */
+  async restore(): Promise<AutonomousBrainTraceRegistryControllerProjection> {
+    this.requireIdle();
+    const snapshot = await this.persistenceCoordinator.restore();
+    this.restored = true;
+    this.persisted = snapshot !== null;
+    return this.projection(snapshot === null ? "empty" : "restored");
+  }
+
+  /** Flush the verified registry through its caller-owned JSON/CAS persistence adapter. */
+  async flush(): Promise<AutonomousBrainTraceRegistryControllerProjection> {
+    this.requireRestored();
+    this.requireIdle();
+    this.busy = true;
+    try {
+      await this.persistenceCoordinator.flush();
+      this.persisted = true;
+      return this.projection("flushed");
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Publish one trace journal into the registry and persist it without coupling to execution. */
+  async publish(traceStore: AutonomousRunTraceStore, runId: string): Promise<AutonomousBrainTraceRegistryPublicationRun> {
+    this.requireRestored();
+    this.requireIdle();
+    if (!traceStore || typeof traceStore.snapshot !== "function") throw new ArgumentError("autonomous brain trace registry publication requires a trace store");
+    this.busy = true;
+    try {
+      const publication = await publishAutonomousRunTraceRegistrySnapshot(this.registry, traceStore, runId);
+      if (publication.status === "failed") {
+        return {
+          controller: this.projection("publication_failed"),
+          publication,
+          persisted: this.persisted,
+          persistence_error: null,
+        };
+      }
+      this.persisted = false;
+      try {
+        await this.persistenceCoordinator.flush();
+        this.persisted = true;
+        return {
+          controller: this.projection("published"),
+          publication,
+          persisted: true,
+          persistence_error: null,
+        };
+      } catch (error) {
+        return {
+          controller: this.projection("persistence_failed"),
+          publication,
+          persisted: false,
+          persistence_error: errorProjection(error),
+        };
+      }
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Import a validated trace snapshot, then persist the resulting retention projection. */
+  async importSnapshot(raw: unknown): Promise<AutonomousBrainTraceRegistryImportRun> {
+    this.requireRestored();
+    this.requireIdle();
+    this.busy = true;
+    try {
+      const report = this.registry.importSnapshot(raw);
+      this.persisted = false;
+      try {
+        await this.persistenceCoordinator.flush();
+        this.persisted = true;
+        return { controller: this.projection("published"), report, persisted: true, persistence_error: null };
+      } catch (error) {
+        return { controller: this.projection("persistence_failed"), report, persisted: false, persistence_error: errorProjection(error) };
+      }
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Compact eligible terminal records and persist the new bounded retention projection. */
+  async compact(): Promise<AutonomousBrainTraceRegistryCompactRun> {
+    this.requireRestored();
+    this.requireIdle();
+    this.busy = true;
+    try {
+      const compacted = this.registry.compact();
+      this.persisted = false;
+      try {
+        await this.persistenceCoordinator.flush();
+        this.persisted = true;
+        return { controller: this.projection("compacted"), evicted_run_ids: compacted.evicted_run_ids, persisted: true, persistence_error: null };
+      } catch (error) {
+        return { controller: this.projection("persistence_failed"), evicted_run_ids: compacted.evicted_run_ids, persisted: false, persistence_error: errorProjection(error) };
+      }
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /** Return one cloned metadata record after restore and idle checks. */
+  get(runId: string): AutonomousRunTraceRegistryRecord | null {
+    this.requireRestored();
+    this.requireIdle();
+    return this.registry.get(runId);
+  }
+
+  /** Query bounded run summaries and retained event metadata. */
+  query(query: AutonomousRunTraceRegistryQuery = {}): AutonomousRunTraceRegistryPage {
+    this.requireRestored();
+    this.requireIdle();
+    return this.registry.query(query);
+  }
+
+  /** Query retained lifecycle events without exposing source trace payloads. */
+  events(query: AutonomousRunTraceRegistryEventQuery = {}): ReturnType<AutonomousRunTraceRegistry["events"]> {
+    this.requireRestored();
+    this.requireIdle();
+    return this.registry.events(query);
+  }
+
+  /** Return the canonical registry snapshot for caller-owned export or inspection. */
+  snapshot(): AutonomousRunTraceRegistrySnapshot {
+    this.requireRestored();
+    this.requireIdle();
+    return this.registry.snapshot();
+  }
+
+  /** Revalidate every record, digest, count, retention, and snapshot lineage invariant. */
+  verifyIntegrity(): AutonomousRunTraceRegistryIntegrity {
+    this.requireRestored();
+    this.requireIdle();
+    return this.registry.verifyIntegrity();
   }
 }
 

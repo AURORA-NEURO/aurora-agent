@@ -5,6 +5,7 @@ import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
   AutonomousBrainFacade,
+  AutonomousBrainTraceRegistryController,
   AutonomousBrainBatchJobController,
   AutonomousBrainBatchProtectedRehydrator,
   AutonomousBrainAutoBatchProtectedRehydrator,
@@ -32,6 +33,9 @@ import {
   InMemoryAutonomousLearningFeedbackOutboxStore,
   InMemoryAutonomousConnectorReceiptJournal,
   InMemoryAutonomousRunTraceStore,
+  AutonomousRunTraceRegistry,
+  AutonomousRunTraceSession,
+  TransactionalJsonAutonomousRunTraceRegistryPersistence,
   InMemoryAutonomousWorkflowCheckpointStore,
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
@@ -2759,4 +2763,58 @@ test("brain facade exposes explicit adaptive settlement and per-store restart co
     new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime()) }).flushOnlineLearning(),
     /no AutonomousOnlineLearner/,
   );
+});
+
+test("brain facade owns a restart-safe metadata trace registry across every domain", async () => {
+  const brain = new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime()) });
+  const source = new InMemoryAutonomousRunTraceStore({ clock: (() => { let now = 4_000; return () => now++; })() });
+  const session = new AutonomousRunTraceSession(source, {
+    run_id: "facade-registry-all-domains",
+    task_digest: "a".repeat(64),
+    domains: [...AUTONOMOUS_DOMAIN_NAMES],
+  });
+  await session.started();
+  await session.record({ phase: "plan_compiled", status: "running", plan_digest: "b".repeat(64) });
+  await session.record({ phase: "provider_invocation_finished", status: "running", provider: "offline", model: "offline-model", input_tokens: 6, output_tokens: 4, tool_count: 2 });
+  await session.complete({ status: "completed", route_digest: "c".repeat(64), plan_digest: "b".repeat(64) });
+
+  const persistedStore = transactionalTextStore();
+  const registry = new AutonomousRunTraceRegistry({ max_runs: 16, max_events: 128, max_bytes: 250_000 });
+  const controller = brain.createTraceRegistryController({
+    registry,
+    persistence: new TransactionalJsonAutonomousRunTraceRegistryPersistence(persistedStore, { maxBytes: 250_000 }),
+  });
+  assert.throws(() => controller.query(), /must restore before use/);
+  assert.equal((await controller.restore()).status, "empty");
+
+  const published = await controller.publish(source, "facade-registry-all-domains");
+  assert.equal(published.publication.status, "published");
+  assert.equal(published.persisted, true);
+  assert.equal(published.controller.status, "published");
+  assert.equal(published.controller.runs, 1);
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    assert.equal(controller.query({ domain }).total_matches, 1, domain);
+  }
+  assert.equal(controller.query({ provider: "offline", model: "offline-model" }).total_matches, 1);
+  assert.equal(controller.events({ phase: "provider_invocation_finished" }).length, 1);
+  assert.equal(controller.get("facade-registry-all-domains").summary.domains.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(controller.verifyIntegrity().verified, true);
+  assert.doesNotMatch(JSON.stringify(controller.snapshot()), /private task|offline provider output|sk-[A-Za-z0-9]/i);
+
+  const restoredRegistry = new AutonomousRunTraceRegistry({ max_runs: 16, max_events: 128, max_bytes: 250_000 });
+  const restoredController = new AutonomousBrainTraceRegistryController(
+    brain,
+    restoredRegistry,
+    new TransactionalJsonAutonomousRunTraceRegistryPersistence(persistedStore, { maxBytes: 250_000 }),
+  );
+  const restored = await restoredController.restore();
+  assert.equal(restored.status, "restored");
+  assert.equal(restored.persisted, true);
+  assert.equal(restored.runs, 1);
+  assert.equal(restoredController.query({ domain: "neuroscience" }).records[0].run_id, "facade-registry-all-domains");
+
+  const failedPublication = await restoredController.publish({ snapshot: () => { throw new Error("source unavailable"); } }, "facade-registry-all-domains");
+  assert.equal(failedPublication.publication.status, "failed");
+  assert.equal(failedPublication.controller.status, "publication_failed");
+  assert.equal(restoredController.verifyIntegrity().verified, true);
 });

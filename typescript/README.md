@@ -818,6 +818,14 @@ metadata-only lifecycle envelope. A worker can restore once, serialize one activ
 every checkpoint through its own store, and select either the explicit callback or the matching
 protected rehydrator for settled items.
 
+For application-level operations, `brain.createTraceRegistryController()` binds an
+`AutonomousRunTraceRegistry` to JSON/CAS persistence and requires `restore()` before reads or
+publication. The controller exposes `publish()`, `importSnapshot()`, `compact()`, `query()`,
+`events()`, `get()`, `snapshot()`, and `verifyIntegrity()`; publication/import/compaction report
+in-memory success separately from persistence success, so a failed observability flush cannot be
+mistaken for a provider or task failure. Its projection contains only run counts, sequence/digest
+metadata, retention policy, and bounded lifecycle fields.
+
 ```typescript
 const batch = await brain.executeAutoReplanCycleBatch(requests, {
   maxParallelism: 4,
