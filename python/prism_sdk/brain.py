@@ -5351,6 +5351,8 @@ class AutonomousBrain:
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
     ) -> BrainLearningCycleResult:
         """Run, evaluate, remember, and boundedly replan a cross-domain mission.
 
@@ -5421,6 +5423,20 @@ class AutonomousBrain:
         options = {} if mission_options is None else dict(mission_options)
         if normalized_context_budget is not None:
             options["context_budget"] = normalized_context_budget
+        if authorization_context is not None:
+            options["authorization_context"] = authorization_context
+        if authorization_domain is not None:
+            if not isinstance(authorization_domain, str) or not authorization_domain.strip():
+                raise BrainRunError("authorization_domain must be a non-empty string or None")
+            options["authorization_domain"] = authorization_domain
+        authorization_context = options.get("authorization_context")
+        if authorization_context is not None and not isinstance(
+            authorization_context, AutonomousAuthorizationContext
+        ):
+            raise BrainRunError("mission_options.authorization_context must be an AutonomousAuthorizationContext or None")
+        authorization_domain = options.get("authorization_domain")
+        if authorization_domain is not None and not isinstance(authorization_domain, str):
+            raise BrainRunError("mission_options.authorization_domain must be a string or None")
         if provider_health is not None:
             overrides = options.get("selection_overrides", {})
             if not isinstance(overrides, Mapping):
@@ -5500,7 +5516,15 @@ class AutonomousBrain:
         else:
             resolved_query = memory_query
         try:
-            recalled = tuple(store.retrieve(resolved_query, limit=memory_limit))
+            recalled = tuple(
+                self.recall_memory(
+                    resolved_query,
+                    limit=memory_limit,
+                    memory=store,
+                    authorization_context=authorization_context,
+                    authorization_domain=authorization_domain,
+                )
+            )
         except BrainMemoryError as error:
             raise BrainRunError("episodic memory retrieval failed") from error
         base_prompt = self._append_memory_prompt(prompt, recalled)
@@ -5577,11 +5601,45 @@ class AutonomousBrain:
                     "replan_requested": decision.replan_requested,
                 },
                 memory=store,
+                authorization_context=authorization_context,
+                authorization_domain=authorization_domain,
             )
             if trajectory_mode:
                 memory_receipts.append(episode_receipt)
             else:
                 try:
+                    if authorization_context is not None:
+                        memory_domain = authorization_domain
+                        if memory_domain is None and isinstance(context, Mapping):
+                            candidate_domain = context.get("domain")
+                            if isinstance(candidate_domain, str) and candidate_domain.strip():
+                                memory_domain = candidate_domain
+                        if memory_domain is None and isinstance(result.route, Mapping):
+                            selected_domains = result.route.get("selected_domains")
+                            if isinstance(selected_domains, Sequence) and not isinstance(selected_domains, (str, bytes)):
+                                normalized_domains = [item for item in selected_domains if isinstance(item, str)]
+                                if len(normalized_domains) == 1:
+                                    memory_domain = normalized_domains[0]
+                                elif len(normalized_domains) > 1:
+                                    memory_domain = "cross_domain"
+                            if memory_domain is None:
+                                primary_domain = result.route.get("primary_domain")
+                                if isinstance(primary_domain, str) and primary_domain.strip():
+                                    memory_domain = primary_domain
+                        authorization_kwargs: dict[str, Any] = {
+                            "operation": "memory_write",
+                            "resource_digest": content_digest({
+                                "schema": "bioprism-autonomous-memory-authorization-resource/0.1",
+                                "episode_id": episode_id,
+                                "evaluation_digest": content_digest({
+                                    "decision": decision.to_dict(),
+                                    "kind": "evaluation",
+                                }),
+                            }),
+                        }
+                        if memory_domain is not None:
+                            authorization_kwargs["domain"] = memory_domain
+                        authorization_context.authorize_operation(**authorization_kwargs)
                     evaluation_receipt = store.record_evaluation(
                         episode_id,
                         {
@@ -5654,6 +5712,40 @@ class AutonomousBrain:
                     },
                 }
                 try:
+                    if authorization_context is not None:
+                        memory_domain = authorization_domain
+                        if memory_domain is None and isinstance(context, Mapping):
+                            candidate_domain = context.get("domain")
+                            if isinstance(candidate_domain, str) and candidate_domain.strip():
+                                memory_domain = candidate_domain
+                        if memory_domain is None and isinstance(attempts[index].route, Mapping):
+                            selected_domains = attempts[index].route.get("selected_domains")
+                            if isinstance(selected_domains, Sequence) and not isinstance(selected_domains, (str, bytes)):
+                                normalized_domains = [item for item in selected_domains if isinstance(item, str)]
+                                if len(normalized_domains) == 1:
+                                    memory_domain = normalized_domains[0]
+                                elif len(normalized_domains) > 1:
+                                    memory_domain = "cross_domain"
+                            if memory_domain is None:
+                                primary_domain = attempts[index].route.get("primary_domain")
+                                if isinstance(primary_domain, str) and primary_domain.strip():
+                                    memory_domain = primary_domain
+                        authorization_kwargs: dict[str, Any] = {
+                            "operation": "memory_write",
+                            "resource_digest": content_digest({
+                                "schema": "bioprism-autonomous-memory-authorization-resource/0.1",
+                                "episode_id": trajectory.episodes[index].episode_id,
+                                "evaluation_digest": content_digest({
+                                    "decision": decision.to_dict(),
+                                    "kind": "trajectory_evaluation",
+                                    "trajectory_id": trajectory.trajectory_id,
+                                    "trajectory_step": index,
+                                }),
+                            }),
+                        }
+                        if memory_domain is not None:
+                            authorization_kwargs["domain"] = memory_domain
+                        authorization_context.authorize_operation(**authorization_kwargs)
                     evaluation_receipt = store.record_evaluation(
                         trajectory.episodes[index].episode_id,
                         {

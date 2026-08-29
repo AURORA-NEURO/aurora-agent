@@ -12,6 +12,7 @@ import type { CredentialHandle, ProviderInvocationObserver } from "./llm.js";
 import { AutonomousCostBudget, type AutonomousModelCandidate } from "./llm.js";
 import { digestJson } from "./tooling.js";
 import type { JsonObject } from "./types.js";
+import type { AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import {
   AUTONOMOUS_DOMAIN_POLICY_MODES,
   autonomousDomainPolicy,
@@ -77,6 +78,8 @@ export interface AutonomousSemanticRouteOptions {
   executionLifecycle?: "managed" | "observe_only";
   signal?: AbortSignal;
   observer?: ProviderInvocationObserver;
+  /** Optional caller-issued grant enforced at the classifier provider boundary. */
+  authorizationContext?: AutonomousAuthorizationContext;
   domainPolicyMode?: AutonomousDomainPolicyExecutionMode;
   domainPolicyEvidenceReady?: boolean;
   domainPolicyEvaluatorConfigured?: boolean;
@@ -189,7 +192,7 @@ export async function semanticRouteAutonomousTask(agent: AutonomousAgent, task: 
   };
   let execution: Awaited<ReturnType<AutonomousAgent["runtime"]["invoke"]>>;
   try {
-    execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined });
+    execution = await agent.runtime.invoke({ task: taskText, domain: "cross_domain", capability: "routing", riskClass: "route_review", requiredCapabilities: ["reasoning"], maxCostPerMillionTokens: options.maxCostPerMillionTokens, maxLatencyMs: options.maxLatencyMs, minQuality: options.minQuality, candidates, request }, { credential: options.credential, credentialFor: options.credentialFor, signal: options.signal, observer: options.observer, execution: options.execution, executionAttempt: options.executionAttempt, maxProviderFailovers: options.maxProviderFailovers, reserveCost: costBudget ? (costUnits) => costBudget.reserve(costUnits) : undefined, authorizationContext: options.authorizationContext, authorizationDomain: "cross_domain" });
   } catch (error) {
     if (error instanceof ProviderRuntimeError && error.code === "invalid_response") return routeReviewResult(deterministic, "provider_invalid", promptDigest, null, null, [], [], 0, null, costBudget, domainPolicyAdmission);
     await failSemanticExecution(options);

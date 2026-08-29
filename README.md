@@ -143,6 +143,13 @@ cross-domain helpers, and rethrow typed authorization refusals instead of conver
 provider, memory, or persistence failures. Applications can therefore issue one twelve-domain
 grant for a complete run or narrow grants to each worker boundary.
 
+The same boundary is enforced by the high-level learning surfaces, not only by the primitive
+brain methods: workflow and mission learning, delayed trajectory settlement, cross-domain fan-out
+and synthesis, automatic decision cycles, replans, and consolidated-lesson recall all authorize
+the final memory operation immediately before it reaches a caller-owned store. Nested runs also
+forward the authorization context into each exact domain, so a convenience facade cannot silently
+turn a permitted provider call into an unscoped memory read or evaluation write.
+
 ## Status
 
 **83 crates, 538,938 lines, clippy -D warnings enforced in CI.** Byte-level parity with the

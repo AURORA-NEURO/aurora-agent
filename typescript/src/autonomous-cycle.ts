@@ -40,6 +40,7 @@ import type {
 } from "./autonomous-memory.js";
 import { taskFacetDigests } from "./autonomous-memory.js";
 import { digestJson } from "./tooling.js";
+import { AutonomousAuthorizationError, type AutonomousAuthorizationContext } from "./autonomous-authorization.js";
 import type { AutonomousCrossDomainPlanRefinementResult, AutonomousPlanRefinementResult, BrainEvaluatorAssessment, JsonObject } from "./types.js";
 import type { AutonomousDomainPolicyExecutionMode } from "./autonomous-domain-policy.js";
 import {
@@ -275,7 +276,37 @@ interface RecalledMemory {
   promptChunk: AutonomousPromptChunk | null;
 }
 
-async function recallMemory(memory: AutonomousDecisionCycleMemoryOptions | undefined, route: AutonomousRouteProposal, task: string, ranking: AutonomousMemoryQuery["ranking"] = "planning"): Promise<RecalledMemory> {
+function memoryAuthorizationDomains(route: AutonomousRouteProposal): readonly string[] {
+  if (route.selected_domains.length > 0) return route.selected_domains;
+  if (route.primary_domain) return [route.primary_domain];
+  throw new AutonomousAuthorizationError("memory operation requires a routed domain");
+}
+
+async function authorizeMemoryOperation(
+  authorizationContext: AutonomousAuthorizationContext | undefined,
+  route: AutonomousRouteProposal,
+  operation: "memory_retrieval" | "memory_write",
+  resource: Record<string, unknown>,
+): Promise<void> {
+  if (!authorizationContext) return;
+  authorizationContext.authorizeOperation({
+    operation,
+    domains: memoryAuthorizationDomains(route),
+    resourceDigest: await digestJson({
+      schema: "bioprism-typescript-autonomous-memory-authorization-resource/0.1",
+      operation,
+      ...resource,
+    }),
+  });
+}
+
+async function recallMemory(
+  memory: AutonomousDecisionCycleMemoryOptions | undefined,
+  route: AutonomousRouteProposal,
+  task: string,
+  ranking: AutonomousMemoryQuery["ranking"] = "planning",
+  authorizationContext?: AutonomousAuthorizationContext,
+): Promise<RecalledMemory> {
   if (!memory) return { episodes: [], projection: emptyMemoryProjection(), promptChunk: null };
   if (!memory.store || typeof memory.store.retrieve !== "function" || typeof memory.store.recordEpisode !== "function") throw new ArgumentError("autonomous cycle memory store is malformed");
   const query: AutonomousMemoryQuery = { ...(memory.query ?? {}) };
@@ -283,6 +314,11 @@ async function recallMemory(memory: AutonomousDecisionCycleMemoryOptions | undef
   if (query.task_digest === undefined && query.task_facets === undefined) query.task_facets = taskFacetDigests(task);
   if (query.ranking === undefined) query.ranking = ranking;
   if (memory.limit !== undefined) query.limit = memory.limit;
+  await authorizeMemoryOperation(authorizationContext, route, "memory_retrieval", {
+    queryDigest: await digestJson(query),
+    limit: query.limit ?? null,
+    ranking: query.ranking ?? null,
+  });
   const episodes = await memory.store.retrieve(query);
   const recallDigest = await digestJson(episodes.map((episode) => ({ episode_id: episode.episode_id, episode_digest: episode.episode_digest, evaluation_digest: episode.evaluation?.evaluation_digest ?? null })));
   const projection: AutonomousDecisionCycleMemoryProjection = { recalled_episode_ids: episodes.map((episode) => episode.episode_id), recall_digest: recallDigest, recorded_episode_ids: [], evaluation_recorded_episode_ids: [] };
@@ -307,9 +343,21 @@ function withMemoryContext(context: readonly AutonomousPromptChunk[] | undefined
   return [...(context ?? []), ...(memoryChunk ? [memoryChunk] : [])];
 }
 
-async function memoryPacketForRun(memory: AutonomousDecisionCycleMemoryOptions, run: AutonomousRunResult, episodeId: string, task: string): Promise<AutonomousMemoryEpisode | null> {
+async function memoryPacketForRun(
+  memory: AutonomousDecisionCycleMemoryOptions,
+  run: AutonomousRunResult,
+  episodeId: string,
+  task: string,
+  authorizationContext?: AutonomousAuthorizationContext,
+): Promise<AutonomousMemoryEpisode | null> {
   if (!run.blueprint || !run.selection?.selected_model) return null;
   const outcomeDigest = await digestJson({ status: run.status, route_digest: run.route.route_digest, selection: run.selection, response: run.response });
+  await authorizeMemoryOperation(authorizationContext, run.route, "memory_write", {
+    episodeId,
+    runId: episodeId,
+    taskDigest: run.blueprint.task_digest,
+    outcomeDigest,
+  });
   await memory.store.recordEpisode({
     episode_id: episodeId,
     run_id: episodeId,
@@ -329,8 +377,18 @@ async function memoryPacketForRun(memory: AutonomousDecisionCycleMemoryOptions, 
   return memory.store.get(episodeId);
 }
 
-async function recordMemoryEvaluation(memory: AutonomousDecisionCycleMemoryOptions, episodeId: string, assessment: BrainEvaluatorAssessment): Promise<void> {
+async function recordMemoryEvaluation(
+  memory: AutonomousDecisionCycleMemoryOptions,
+  episodeId: string,
+  assessment: BrainEvaluatorAssessment,
+  route: AutonomousRouteProposal,
+  authorizationContext?: AutonomousAuthorizationContext,
+): Promise<void> {
   const input: AutonomousMemoryEvaluationInput = { evaluator_id: assessment.evaluator_id, evaluator_version: assessment.evaluator_version, reward: assessment.reward, passed: assessment.passed, failed: assessment.failed, feedback_digest: assessment.feedback_digest, failure_class: assessment.failure_class, evidence_digest: assessment.evidence_digest };
+  await authorizeMemoryOperation(authorizationContext, route, "memory_write", {
+    episodeId,
+    decisionDigest: await digestJson(input),
+  });
   await memory.store.recordEvaluation(episodeId, input);
 }
 
@@ -888,6 +946,7 @@ function runOptions(options: AutonomousDecisionCycleOptions, route: AutonomousRo
     executionLifecycle: options.executionLifecycle,
     signal: options.signal,
     observer: options.observer,
+    authorizationContext: options.authorizationContext,
     acceptedSingleDomainPlanRefinement: options.acceptedSingleDomainPlanRefinement,
   };
 }
@@ -953,6 +1012,7 @@ export async function runAutonomousDecisionCycle(
       domainPolicyEffectsApproved: options.semanticRouting.domainPolicyEffectsApproved ?? options.domainPolicyEffectsApproved,
       signal: options.signal,
       observer: options.observer,
+      authorizationContext: options.authorizationContext,
     });
     route = semanticRoute.route;
     if (semanticRoute.status !== "completed") {
@@ -986,7 +1046,7 @@ export async function runAutonomousDecisionCycle(
     await commitDecisionPersistence(persistence, { phase: "terminal", route_digest: route.route_digest, selection_digest: null, outcome_digest: await digestJson({ status: reviewed.status, route_digest: route.route_digest }), evaluation_digest: null, learning_episode_ids: [], settlement_digests: [], terminal_status: reviewed.status });
     return reviewed;
   }
-  const recalledMemory = await recallMemory(options.memory, route, task, options.memoryRecall);
+  const recalledMemory = await recallMemory(options.memory, route, task, options.memoryRecall, options.authorizationContext);
   let planRefinement: AutonomousPlanRefinementResult | null = null;
   const persistedPlanRefinementDigest = persistence?.state.plan_refinement_digest ?? null;
   if (options.providerPlanning || options.acceptedSingleDomainPlanRefinement !== undefined || persistedPlanRefinementDigest !== null) {
@@ -1111,11 +1171,11 @@ export async function runAutonomousDecisionCycle(
     const memoryProjection = recalledMemory.projection;
     if (options.memory) {
       const memoryEpisodeId = options.memory.episodeId ?? `memory:${learningEpisodeId ?? `${run.blueprint!.task_digest}:${run.blueprint!.prompt.prompt_digest}`}`;
-      const memoryEpisode = await memoryPacketForRun(options.memory, run, memoryEpisodeId, task);
+      const memoryEpisode = await memoryPacketForRun(options.memory, run, memoryEpisodeId, task, options.authorizationContext);
       if (memoryEpisode) {
         memoryProjection.recorded_episode_ids.push(memoryEpisode.episode_id);
         if (settlement) {
-          await recordMemoryEvaluation(options.memory, memoryEpisode.episode_id, settlement.assessment);
+          await recordMemoryEvaluation(options.memory, memoryEpisode.episode_id, settlement.assessment, route, options.authorizationContext);
           memoryProjection.evaluation_recorded_episode_ids.push(memoryEpisode.episode_id);
         }
       }
@@ -1816,6 +1876,7 @@ export async function runAutonomousAutoDecisionCycle(
       executionLifecycle: options.semanticRouting.executionLifecycle ?? options.executionLifecycle,
       signal: options.signal,
       observer: options.observer,
+      authorizationContext: options.authorizationContext,
       domainPolicyMode: options.semanticRouting.domainPolicyMode ?? options.domainPolicyMode,
       domainPolicyEvidenceReady: options.semanticRouting.domainPolicyEvidenceReady ?? options.domainPolicyEvidenceReady,
       domainPolicyEvaluatorConfigured: options.semanticRouting.domainPolicyEvaluatorConfigured ?? options.domainPolicyEvaluatorConfigured,
@@ -1923,6 +1984,7 @@ export async function runAutonomousAutoReplanCycle(
       executionLifecycle: options.semanticRouting.executionLifecycle ?? options.executionLifecycle,
       signal: options.signal,
       observer: options.observer,
+      authorizationContext: options.authorizationContext,
       domainPolicyMode: options.semanticRouting.domainPolicyMode ?? options.domainPolicyMode,
       domainPolicyEvidenceReady: options.semanticRouting.domainPolicyEvidenceReady ?? options.domainPolicyEvidenceReady,
       domainPolicyEvaluatorConfigured: options.semanticRouting.domainPolicyEvaluatorConfigured ?? options.domainPolicyEvaluatorConfigured,
@@ -2013,6 +2075,7 @@ function crossRunOptions(options: AutonomousCrossDomainDecisionCycleOptions, rou
     executionLifecycle: options.executionLifecycle,
     signal: options.signal,
     observer: options.observer,
+    authorizationContext: options.authorizationContext,
     subtasks: options.subtasks,
     allowPartial: options.allowPartial,
     synthesize: options.synthesize,
@@ -2088,6 +2151,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
       domainPolicyEffectsApproved: options.semanticRouting.domainPolicyEffectsApproved ?? options.domainPolicyEffectsApproved,
       signal: options.signal,
       observer: options.observer,
+      authorizationContext: options.authorizationContext,
     });
     route = semanticRoute.route;
     if (semanticRoute.status !== "completed") {
@@ -2119,7 +2183,7 @@ export async function runAutonomousCrossDomainDecisionCycle(
     return reviewed;
   }
 
-  const recalledMemory = await recallMemory(options.memory, route, task, options.memoryRecall);
+  const recalledMemory = await recallMemory(options.memory, route, task, options.memoryRecall, options.authorizationContext);
   let planRefinement: AutonomousCrossDomainPlanRefinementResult | null = null;
   const persistedPlanRefinementDigest = persistence?.state.plan_refinement_digest ?? null;
   if (options.providerPlanning || options.acceptedCrossDomainPlanRefinement !== undefined || persistedPlanRefinementDigest !== null) {
@@ -2243,12 +2307,12 @@ export async function runAutonomousCrossDomainDecisionCycle(
         const explicitSingleId = options.memory.episodeId && completedRuns.length === 1 ? options.memory.episodeId : null;
         const prefix = options.memory.episodePrefix ?? options.memory.episodeId ?? "memory:cross";
         const memoryEpisodeId = explicitSingleId ?? `${prefix}:${learningEpisodeId ?? `${childRun.blueprint?.task_digest ?? index}:${childRun.blueprint?.prompt.prompt_digest ?? index}`}`;
-        const memoryEpisode = await memoryPacketForRun(options.memory, childRun, memoryEpisodeId, task);
+        const memoryEpisode = await memoryPacketForRun(options.memory, childRun, memoryEpisodeId, task, options.authorizationContext);
         if (!memoryEpisode) continue;
         memoryProjection.recorded_episode_ids.push(memoryEpisode.episode_id);
         const settlementItem = settlement?.trajectory.settlements.find((item) => item.episode.episode_id === learningEpisodeId);
         if (settlementItem) {
-          await recordMemoryEvaluation(options.memory, memoryEpisode.episode_id, settlementItem.assessment);
+          await recordMemoryEvaluation(options.memory, memoryEpisode.episode_id, settlementItem.assessment, childRun.route, options.authorizationContext);
           memoryProjection.evaluation_recorded_episode_ids.push(memoryEpisode.episode_id);
         }
       }
@@ -2792,7 +2856,7 @@ export async function runAutonomousCrossDomainReplanCycle(
             if (!memoryEpisodeId || !learningEpisodeId) continue;
             const settlementItem = settlementItems.find((item) => item.episode.episode_id === learningEpisodeId);
             if (!settlementItem) continue;
-            await recordMemoryEvaluation(options.memory, memoryEpisodeId, settlementItem.assessment);
+            await recordMemoryEvaluation(options.memory, memoryEpisodeId, settlementItem.assessment, cycle.route, options.authorizationContext);
             cycle.memory.evaluation_recorded_episode_ids.push(memoryEpisodeId);
           }
         }

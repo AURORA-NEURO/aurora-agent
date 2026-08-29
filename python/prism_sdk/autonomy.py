@@ -37,6 +37,7 @@ from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
 from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 from .autonomous_authorization import (
+    AutonomousAuthorizationError,
     AutonomousAuthorizationContext,
     AutonomousAuthorizationGate,
     AutonomousAuthorizationLedger,
@@ -93,9 +94,7 @@ from .autonomous_task_decision import (
     validate_autonomous_task_decision,
 )
 from .autonomous_task_clarification import (
-    AUTONOMOUS_TASK_CLARIFICATION_ANSWER_SCHEMA,
     AUTONOMOUS_TASK_CLARIFICATION_RECOMPILE_SCHEMA,
-    AUTONOMOUS_TASK_CLARIFICATION_SCHEMA,
     MAX_AUTONOMOUS_TASK_CLARIFICATION_QUESTIONS,
     AutonomousTaskClarificationPlan,
     AutonomousTaskClarificationResolution,
@@ -9868,6 +9867,7 @@ class AutonomousTaskOrchestrator:
         domain_policy_evaluator_configured: bool | None = None,
         domain_policy_effects_requested: bool | None = None,
         domain_policy_effects_approved: bool | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousSemanticRouteResult:
         """Use one approved provider call to improve routing, then reconcile it with the catalogue.
 
@@ -9999,6 +9999,8 @@ class AutonomousTaskOrchestrator:
             response_schema=route_schema,
             context=blueprint.selection_context,
             contextual_observations=contextual_observations,
+            authorization_context=authorization_context,
+            authorization_domain="cross_domain",
         )
         selection = run.selection
         selected_model = selection.get("selected_model")
@@ -12056,6 +12058,7 @@ class AutonomousTaskOrchestrator:
         domain: str,
         capability: str | None,
         risk_class: str | None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> tuple[BrainEpisodicMemory | None, tuple[Mapping[str, Any], ...]]:
         store = memory if memory is not None else brain.memory
         if store is None:
@@ -12093,10 +12096,53 @@ class AutonomousTaskOrchestrator:
                 limit=query.limit,
             )
         try:
-            episodes = tuple(store.retrieve(query, limit=memory_limit))
+            episodes = tuple(
+                brain.recall_memory(
+                    query,
+                    limit=memory_limit,
+                    memory=store,
+                    authorization_context=authorization_context,
+                    authorization_domain=domain,
+                    authorization_capability=capability,
+                    authorization_risk_class=risk_class,
+                )
+            )
         except BrainMemoryError as error:
             raise BrainRunError("autonomous memory retrieval failed") from error
         return store, episodes
+
+    @staticmethod
+    def _authorize_memory_evaluation(
+        authorization_context: AutonomousAuthorizationContext | None,
+        *,
+        domain: str,
+        episode_id: str,
+        decision_digest: str,
+        trajectory_id: str | None = None,
+        trajectory_step: int | None = None,
+    ) -> None:
+        """Authorize one metadata-only evaluation write immediately before persistence.
+
+        Episode writes and evaluation writes are separate durable operations.  Keeping this
+        check at the final write boundary prevents workflow, mission, and cross-domain helpers
+        from accidentally bypassing the same caller-issued memory grant used by ``remember_result``.
+        """
+
+        if authorization_context is None:
+            return
+        authorization_context.authorize_operation(
+            operation="memory_write",
+            domain=domain,
+            resource_digest=content_digest(
+                {
+                    "schema": "bioprism-autonomous-memory-evaluation-authorization-resource/0.1",
+                    "episode_id": episode_id,
+                    "decision_digest": decision_digest,
+                    "trajectory_id": trajectory_id,
+                    "trajectory_step": trajectory_step,
+                }
+            ),
+        )
 
     @staticmethod
     def _consolidated_memory(
@@ -12109,6 +12155,7 @@ class AutonomousTaskOrchestrator:
         limit: int,
         retrieve: bool,
         required: bool,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> tuple[Mapping[str, Any], ...]:
         """Resolve stable lesson digests into transient, domain-scoped prompt references."""
 
@@ -12134,6 +12181,20 @@ class AutonomousTaskOrchestrator:
         references: dict[tuple[str, str], Mapping[str, Any]] = {}
         try:
             for domain in dict.fromkeys(domains):
+                if authorization_context is not None:
+                    authorization_context.authorize_operation(
+                        operation="memory_retrieval",
+                        domain=domain,
+                        resource_digest=content_digest(
+                            {
+                                "schema": "bioprism-autonomous-consolidated-memory-authorization-resource/0.1",
+                                "domain": domain,
+                                "capability": capability,
+                                "limit": limit,
+                                "resolver": "lesson_context" if lesson_context_resolver is not None else "lesson",
+                            }
+                        ),
+                    )
                 for reference in consolidator.prompt_references(
                     domain=domain,
                     capability=capability,
@@ -12143,6 +12204,8 @@ class AutonomousTaskOrchestrator:
                 ):
                     key = (str(reference["lesson_id"]), str(reference["lesson_digest"]))
                     references.setdefault(key, dict(reference))
+        except AutonomousAuthorizationError:
+            raise
         except Exception as error:
             raise BrainRunError("autonomous consolidated memory retrieval failed") from error
         return tuple(list(references.values())[:MAX_AUTONOMOUS_MEMORY_CONSOLIDATION_PROMPT_LESSONS])
@@ -12175,6 +12238,8 @@ class AutonomousTaskOrchestrator:
         provider_tools: Sequence[ProviderTool],
         tool_choice: str | None,
         max_provider_failovers: int,
+        authorization_context: AutonomousAuthorizationContext | None,
+        authorization_domain: str,
     ) -> dict[str, Any]:
         if options is not None and not isinstance(options, Mapping):
             raise BrainRunError("mission_options must be a mapping or None")
@@ -12203,6 +12268,8 @@ class AutonomousTaskOrchestrator:
             "provider_tools": tuple(provider_tools),
             "tool_choice": tool_choice,
             "max_provider_failovers": max_provider_failovers,
+            "authorization_context": authorization_context,
+            "authorization_domain": authorization_domain,
         }
         for name, value in (
             ("max_cost_per_million_tokens", max_cost_per_million_tokens),
@@ -12442,6 +12509,7 @@ class AutonomousTaskOrchestrator:
             tool_choice=tool_choice,
             max_provider_failovers=max_provider_failovers,
             authorization_context=authorization_context,
+            authorization_domain=blueprint.spec.domain,
         )
         result = self.brain.run_adaptive_mission(
             task=blueprint.spec.task,
@@ -13276,6 +13344,7 @@ class AutonomousTaskOrchestrator:
             domain=domain,
             capability=capability,
             risk_class=risk_class,
+            authorization_context=authorization_context,
         )
         consolidated_references = self._consolidated_memory(
             memory_consolidator,
@@ -13286,6 +13355,7 @@ class AutonomousTaskOrchestrator:
             limit=consolidated_memory_limit,
             retrieve=retrieve_consolidated_memory,
             required=consolidated_memory_required,
+            authorization_context=authorization_context,
         )
         blueprint = self.prepare(
             task=task,
@@ -13477,6 +13547,7 @@ class AutonomousTaskOrchestrator:
                         "tool_choice": tool_choice,
                         "max_provider_failovers": max_provider_failovers,
                         "authorization_context": authorization_context,
+                        "authorization_domain": blueprint.spec.domain,
                     }
                 )
                 learning_cycle = self.brain.run_adaptive_mission_learning_cycle(
@@ -13813,6 +13884,7 @@ class AutonomousTaskOrchestrator:
         response_contradiction_confidence_threshold: float = 0.75,
         retry_synthesis_after_response_review: bool = False,
         execution_controller: AutonomousExecutionController | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousCrossDomainStepResult:
         """Execute exactly one child or the final synthesis for restart-safe fan-out.
 
@@ -13935,6 +14007,7 @@ class AutonomousTaskOrchestrator:
                 max_provider_failovers=max_provider_failovers,
                 tool_loop_options=tool_loop_options,
                 execution_controller=execution_controller,
+                authorization_context=authorization_context,
             )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("cross-domain step returned an unsupported brain result")
@@ -14199,6 +14272,7 @@ class AutonomousTaskOrchestrator:
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousWorkflowRun:
         """Execute a prepared domain workflow as a resumable, dependency-checked stage DAG.
 
@@ -14489,6 +14563,7 @@ class AutonomousTaskOrchestrator:
                 execution_controller=execution_controller,
                 invocation_observer=invocation_observer,
                 trace_event_callback=trace_event_callback,
+                authorization_context=authorization_context,
             )
             if not isinstance(stage_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
                 raise BrainRunError("workflow stage returned an unsupported result")
@@ -14761,6 +14836,9 @@ class AutonomousTaskOrchestrator:
         memory_store = memory if memory is not None else self.brain.memory
         if memory_store is not None and not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("workflow learning memory must be a BrainEpisodicMemory or None")
+        authorization_context = workflow_kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("workflow learning authorization_context must be an AutonomousAuthorizationContext or None")
         normalized_tags = _sequence("workflow learning memory_tags", memory_tags, maximum=32)
         blueprint = workflow_kwargs.get("blueprint")
         if not isinstance(blueprint, AutonomousTaskBlueprint):
@@ -14874,13 +14952,24 @@ class AutonomousTaskOrchestrator:
                             "task_decision_digest": _memory_task_decision_digest(blueprint),
                         },
                         memory=memory_store,
+                        authorization_context=authorization_context,
+                        authorization_domain=blueprint.spec.domain,
+                        authorization_capability=blueprint.spec.capability,
+                        authorization_risk_class=blueprint.spec.risk_class,
                     )
                     try:
+                        decision_digest = content_digest(decision.to_dict())
+                        self._authorize_memory_evaluation(
+                            authorization_context,
+                            domain=blueprint.spec.domain,
+                            episode_id=episode_id,
+                            decision_digest=decision_digest,
+                        )
                         evaluation_receipt = memory_store.record_evaluation(
                             episode_id,
                             {
                                 **decision.to_dict(),
-                                "decision_digest": content_digest(decision.to_dict()),
+                                "decision_digest": decision_digest,
                             },
                         ).to_dict()
                     except BrainMemoryError as error:
@@ -14962,6 +15051,9 @@ class AutonomousTaskOrchestrator:
         memory_store = memory if memory is not None else self.brain.memory
         if memory_store is not None and not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("workflow trajectory memory must be a BrainEpisodicMemory or None")
+        authorization_context = workflow_kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("workflow trajectory authorization_context must be an AutonomousAuthorizationContext or None")
         normalized_tags = _sequence("workflow trajectory memory_tags", memory_tags, maximum=32)
         blueprint = workflow_kwargs.get("blueprint")
         if not isinstance(blueprint, AutonomousTaskBlueprint):
@@ -15118,13 +15210,26 @@ class AutonomousTaskOrchestrator:
                             "task_decision_digest": _memory_task_decision_digest(blueprint),
                         },
                         memory=memory_store,
+                        authorization_context=authorization_context,
+                        authorization_domain=blueprint.spec.domain,
+                        authorization_capability=blueprint.spec.capability,
+                        authorization_risk_class=blueprint.spec.risk_class,
                     )
                     try:
+                        decision_digest = content_digest(decision.to_dict())
+                        self._authorize_memory_evaluation(
+                            authorization_context,
+                            domain=blueprint.spec.domain,
+                            episode_id=episode_id,
+                            decision_digest=decision_digest,
+                            trajectory_id=trajectory_result.trajectory.trajectory_id,
+                            trajectory_step=index,
+                        )
                         evaluation_receipt = memory_store.record_evaluation(
                             episode_id,
                             {
                                 **decision.to_dict(),
-                                "decision_digest": content_digest(decision.to_dict()),
+                                "decision_digest": decision_digest,
                             },
                         ).to_dict()
                     except BrainMemoryError as error:
@@ -15446,6 +15551,7 @@ class AutonomousTaskOrchestrator:
         execution_controller: AutonomousExecutionController | None = None,
         invocation_observer: ProviderInvocationObserver | None = None,
         trace_event_callback: Callable[..., Any] | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousCrossDomainResult:
         """Execute bounded domain specialists, then optionally synthesize their outputs.
 
@@ -15622,6 +15728,7 @@ class AutonomousTaskOrchestrator:
                     execution_controller=execution_controller,
                     invocation_observer=invocation_observer,
                     trace_event_callback=trace_event_callback,
+                    authorization_context=authorization_context,
                 )
             except (ProviderError, CredentialError) as error:
                 result = self._provider_failure_result(
@@ -15811,6 +15918,7 @@ class AutonomousTaskOrchestrator:
             execution_controller=execution_controller,
             invocation_observer=invocation_observer,
             trace_event_callback=trace_event_callback,
+            authorization_context=authorization_context,
             ),
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
@@ -15880,6 +15988,9 @@ class AutonomousTaskOrchestrator:
             raise BrainRunError("memory is required for cross-domain online learning")
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain learning memory must be a BrainEpisodicMemory")
+        authorization_context = kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("cross-domain learning authorization_context must be an AutonomousAuthorizationContext or None")
         if evaluator is not None and not isinstance(evaluator, BrainOutcomeEvaluator):
             raise BrainRunError("cross-domain evaluator must be a BrainOutcomeEvaluator or None")
         if evaluator_registry is not None and not isinstance(evaluator_registry, DomainEvaluatorRegistry):
@@ -15946,6 +16057,7 @@ class AutonomousTaskOrchestrator:
         allow_partial = take("allow_partial", False)
         execution_plan_context = take("execution_plan_context", None)
         execution_controller = take("execution_controller", None)
+        authorization_context = take("authorization_context", authorization_context)
         if kwargs:
             raise BrainRunError(
                 "unsupported cross-domain learning options: " + ", ".join(sorted(kwargs))
@@ -16055,11 +16167,25 @@ class AutonomousTaskOrchestrator:
                     "task_decision_digest": _memory_task_decision_digest(blueprint_item),
                 },
                 memory=memory_store,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint_item.spec.domain,
+                authorization_capability=blueprint_item.spec.capability,
+                authorization_risk_class=blueprint_item.spec.risk_class,
             )
-            evaluation_receipt = memory_store.record_evaluation(
-                episode_id,
-                {**decision.to_dict(), "decision_digest": content_digest(decision.to_dict())},
-            ).to_dict()
+            decision_digest = content_digest(decision.to_dict())
+            self._authorize_memory_evaluation(
+                authorization_context,
+                domain=blueprint_item.spec.domain,
+                episode_id=episode_id,
+                decision_digest=decision_digest,
+            )
+            try:
+                evaluation_receipt = memory_store.record_evaluation(
+                    episode_id,
+                    {**decision.to_dict(), "decision_digest": decision_digest},
+                ).to_dict()
+            except BrainMemoryError as error:
+                raise BrainRunError("cross-domain evaluation memory record failed") from error
             memory_receipts.extend((receipt, evaluation_receipt))
             evaluations.append(
                 {
@@ -16150,6 +16276,7 @@ class AutonomousTaskOrchestrator:
                 ),
                 bandit_state=state,
                 execution_controller=execution_controller,
+                authorization_context=authorization_context,
                 ),
             )
             if not isinstance(result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
@@ -16284,6 +16411,7 @@ class AutonomousTaskOrchestrator:
             ),
             bandit_state=state,
             execution_controller=execution_controller,
+            authorization_context=authorization_context,
             ),
         )
         if not isinstance(synthesis_result, (BrainRunResult, BrainToolLoopResult, BrainMissionResult)):
@@ -16320,6 +16448,7 @@ class AutonomousTaskOrchestrator:
         trajectory_terminal_reward: float | None = None,
         retain_replan_instruction: bool = True,
         ledger: BrainLearningLedger | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
     ) -> AutonomousCrossDomainTrajectoryLearningResult:
         """Settle delayed credit for already-executed caller-owned cross-domain results.
 
@@ -16352,6 +16481,8 @@ class AutonomousTaskOrchestrator:
         memory_store = memory if memory is not None else self.brain.memory
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain trajectory memory must be a BrainEpisodicMemory")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("cross-domain trajectory authorization_context must be an AutonomousAuthorizationContext or None")
         normalized_tags = _sequence("cross-domain trajectory memory_tags", memory_tags, maximum=32)
         items = self._cross_domain_trajectory_items(
             cross_domain,
@@ -16408,6 +16539,10 @@ class AutonomousTaskOrchestrator:
                     "task_decision_digest": _memory_task_decision_digest(blueprint_item),
                 },
                 memory=memory_store,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint_item.spec.domain,
+                authorization_capability=blueprint_item.spec.capability,
+                authorization_risk_class=blueprint_item.spec.risk_class,
             )
             try:
                 evaluation_record = decision.to_dict()
@@ -16418,11 +16553,20 @@ class AutonomousTaskOrchestrator:
                         else content_digest(decision.replan_instruction)
                     )
                     evaluation_record.pop("replan_instruction", None)
+                decision_digest = content_digest(evaluation_record)
+                self._authorize_memory_evaluation(
+                    authorization_context,
+                    domain=blueprint_item.spec.domain,
+                    episode_id=episode_id,
+                    decision_digest=decision_digest,
+                    trajectory_id=trajectory.trajectory_id,
+                    trajectory_step=index,
+                )
                 evaluation_receipt = memory_store.record_evaluation(
                     episode_id,
                     {
                         **evaluation_record,
-                        "decision_digest": content_digest(evaluation_record),
+                        "decision_digest": decision_digest,
                     },
                 ).to_dict()
             except BrainMemoryError as error:
@@ -16502,6 +16646,9 @@ class AutonomousTaskOrchestrator:
         memory_store = memory if memory is not None else self.brain.memory
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain trajectory memory must be a BrainEpisodicMemory")
+        authorization_context = kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("cross-domain trajectory authorization_context must be an AutonomousAuthorizationContext or None")
         normalized_tags = _sequence("cross-domain trajectory memory_tags", memory_tags, maximum=32)
         execution_options = dict(kwargs)
         execution_options.pop("bandit_state", None)
@@ -16571,13 +16718,26 @@ class AutonomousTaskOrchestrator:
                     "task_decision_digest": _memory_task_decision_digest(blueprint_item),
                 },
                 memory=memory_store,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint_item.spec.domain,
+                authorization_capability=blueprint_item.spec.capability,
+                authorization_risk_class=blueprint_item.spec.risk_class,
             )
             try:
+                decision_digest = content_digest(decision.to_dict())
+                self._authorize_memory_evaluation(
+                    authorization_context,
+                    domain=blueprint_item.spec.domain,
+                    episode_id=episode_id,
+                    decision_digest=decision_digest,
+                    trajectory_id=trajectory.trajectory_id,
+                    trajectory_step=index,
+                )
                 evaluation_receipt = memory_store.record_evaluation(
                     episode_id,
                     {
                         **decision.to_dict(),
-                        "decision_digest": content_digest(decision.to_dict()),
+                        "decision_digest": decision_digest,
                     },
                 ).to_dict()
             except BrainMemoryError as error:
@@ -16659,6 +16819,9 @@ class AutonomousTaskOrchestrator:
         memory_store = memory if memory is not None else self.brain.memory
         if not isinstance(memory_store, BrainEpisodicMemory):
             raise BrainRunError("cross-domain replan memory must be a BrainEpisodicMemory")
+        authorization_context = kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("cross-domain replan authorization_context must be an AutonomousAuthorizationContext or None")
         if evidence is not None:
             if not isinstance(evidence, Mapping) or any(
                 not isinstance(key, str) or not isinstance(value, Mapping)
@@ -16882,6 +17045,7 @@ class AutonomousTaskOrchestrator:
                 trajectory_terminal_reward=trajectory_terminal_reward,
                 retain_replan_instruction=False,
                 ledger=ledger,
+                authorization_context=authorization_context,
             )
             state = dict(trajectory_result.bandit_state)
             decisions = trajectory_result.trajectory_result.decisions
@@ -16976,6 +17140,9 @@ class AutonomousTaskOrchestrator:
     ) -> AutonomousLearningResult:
         if store is None:
             raise BrainRunError("memory is required for autonomous online learning")
+        authorization_context = execution_kwargs.get("authorization_context")
+        if authorization_context is not None and not isinstance(authorization_context, AutonomousAuthorizationContext):
+            raise BrainRunError("autonomous learning authorization_context must be an AutonomousAuthorizationContext or None")
         resolved_evaluator = evaluator
         if resolved_evaluator is None:
             registry = evaluator_registry or DomainEvaluatorRegistry.with_builtin_autonomous_profiles()
@@ -17069,11 +17236,22 @@ class AutonomousTaskOrchestrator:
                     "task_decision_digest": _memory_task_decision_digest(blueprint),
                 },
                 memory=store,
+                authorization_context=authorization_context,
+                authorization_domain=blueprint.spec.domain,
+                authorization_capability=blueprint.spec.capability,
+                authorization_risk_class=blueprint.spec.risk_class,
             )
             try:
+                decision_digest = content_digest(decision.to_dict())
+                self._authorize_memory_evaluation(
+                    authorization_context,
+                    domain=blueprint.spec.domain,
+                    episode_id=episode_id,
+                    decision_digest=decision_digest,
+                )
                 evaluation_receipt = store.record_evaluation(
                     episode_id,
-                    {**decision.to_dict(), "decision_digest": content_digest(decision.to_dict())},
+                    {**decision.to_dict(), "decision_digest": decision_digest},
                 ).to_dict()
             except BrainMemoryError as error:
                 raise BrainRunError("autonomous evaluation memory record failed") from error

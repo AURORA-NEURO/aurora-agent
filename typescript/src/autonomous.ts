@@ -10910,6 +10910,19 @@ export class AutonomousAgent {
       if (!Number.isSafeInteger(consolidatedLimit) || consolidatedLimit < 1 || consolidatedLimit > 32) throw new ArgumentError("autonomous consolidatedMemoryLimit must be between 1 and 32");
       try {
         for (const domain of [...new Set(domains)]) {
+          if (authorizationContext) {
+            await authorizationContext.authorizeOperation({
+              operation: "memory_retrieval",
+              domain,
+              resourceDigest: await digestJson({
+                schema: "bioprism-typescript-autonomous-consolidated-memory-authorization-resource/0.1",
+                domain,
+                capability: options.capability ?? null,
+                limit: consolidatedLimit,
+                resolver: options.memoryLessonContextResolver !== undefined ? "lesson_context" : "lesson",
+              }),
+            });
+          }
           const references = consolidator!.promptReferences({ domain, capability: options.capability, lessonResolver: options.memoryLessonResolver, lessonContextResolver: options.memoryLessonContextResolver, limit: consolidatedLimit });
           for (const reference of references) {
             const key = `${reference.lesson_digest}:${reference.lesson_id}`;
@@ -10917,6 +10930,7 @@ export class AutonomousAgent {
           }
         }
       } catch (error) {
+        if (error instanceof AutonomousAuthorizationError) throw error;
         if (options.consolidatedMemoryRequired === true) throw error;
         consolidatedErrorClass = memoryErrorClass(error);
       }

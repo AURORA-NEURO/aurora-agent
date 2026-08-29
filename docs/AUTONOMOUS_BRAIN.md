@@ -1821,6 +1821,13 @@ normalized values for caller-owned prompt formatting. Prompt text, raw values, p
 credentials, and keys remain outside the serialized result, and `run_options` still carries the
 existing memory and learning controls unchanged.
 
+High-level workflow, mission, trajectory, cross-domain, automatic-cycle, and replan helpers use
+the same authorization context at their nested run and final memory boundaries. Consolidated lesson
+lookups are also authorized per owning domain before prompt assembly; evaluation records receive a
+separate `memory_write` check immediately before persistence. A convenience facade therefore cannot
+silently bypass the caller's memory or provider grant while retaining the existing metadata-only,
+caller-owned storage contract.
+
 ```python
 result = agent.run_with_domain_evidence_catalogue(
     task="compare two bounded reproducibility claims",

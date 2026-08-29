@@ -3,13 +3,20 @@ import test from "node:test";
 
 import {
   AUTONOMOUS_DOMAIN_NAMES,
+  AutonomousAgent,
+  AutonomousAuthorizationError,
   AutonomousAuthorizationContext,
   AutonomousAuthorizationGate,
   AutonomousAuthorizationLedger,
+  CredentialStore,
+  InMemoryAutonomousEpisodicMemory,
+  LLMRuntime,
   AutonomousRunAnalyticsLedger,
   AutonomousRunTraceSession,
   InMemoryAutonomousRunTraceStore,
   analyzeAutonomousRunTrace,
+  openaiCompatibleProvider,
+  runAutonomousDecisionCycle,
 } from "../dist/index.js";
 
 const digest = (letter) => letter.repeat(64);
@@ -78,4 +85,33 @@ test("analytics ingestion authorizes the verified report before mutating the led
   assert.equal(analytics.ingest(report).status, "accepted");
   assert.equal(ledger.events().length, 2);
   assert.equal(analytics.summary().report_count, 1);
+});
+
+test("decision-cycle memory retrieval cannot bypass the caller authorization context", async () => {
+  const { context } = contextFor(["provider_invocation"]);
+  const llm = new LLMRuntime({ credentials: new CredentialStore(), fetch: async () => { throw new Error("provider must not be reached"); } });
+  llm.registerProvider(openaiCompatibleProvider("authorization-cycle-provider", "https://authorization-cycle.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel({
+    provider: "authorization-cycle-provider",
+    model: "authorization-cycle-model",
+    capabilities: ["reasoning", "code"],
+    context_window_tokens: 32_000,
+    max_output_tokens: 1_000,
+    quality: 0.9,
+    latency_ms: 10,
+    cost_per_million_tokens: 1,
+    reliability: 0.99,
+  });
+  const memory = new InMemoryAutonomousEpisodicMemory();
+  await assert.rejects(
+    () => runAutonomousDecisionCycle(agent, "review this coding change", {
+      domain: "coding",
+      approveProviderCall: true,
+      memory: { store: memory },
+      authorizationContext: context,
+    }),
+    AutonomousAuthorizationError,
+  );
+  assert.deepEqual(await memory.retrieve({}), []);
 });

@@ -3,12 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from prism_sdk import (
     AUTONOMOUS_AUTHORIZATION_OPERATIONS,
     AUTONOMOUS_DOMAIN_NAMES,
     AutonomousAuthorizationContext,
     AutonomousAuthorizationGate,
     AutonomousAuthorizationLedger,
+    AutonomousAuthorizationError,
     AutonomousRunTraceSession,
     InMemoryAutonomousRunTraceStore,
 )
@@ -155,3 +158,31 @@ def test_authorization_operation_catalogue_remains_complete() -> None:
         "trace_write",
         "analytics_write",
     }
+
+
+def test_mission_learning_cycle_cannot_bypass_memory_retrieval_authorization(tmp_path) -> None:
+    _ledger, context = _context(("memory_write", "evaluation", "learning"), max_uses=None)
+    memory = BrainEpisodicMemory(tmp_path / "mission-memory.sqlite3")
+    brain = AutonomousBrain(_Workspace(), LLMRuntime(), memory)
+    evaluator = BrainOutcomeEvaluator(
+        lambda _input: {"reward": 0.0, "passed": False, "failed": True},
+        evaluator_id="boundary-evaluator",
+        evaluator_version="1",
+    )
+
+    with pytest.raises(AutonomousAuthorizationError):
+        brain.run_adaptive_mission_learning_cycle(
+            task="inspect a bounded mission",
+            model_candidates=[],
+            prompt={"max_input_tokens": 100},
+            plan={"allowed_tools": ["provider.invoke"]},
+            credentials={},
+            mission_policy={"allowed_tools": ["developer_platform_status"]},
+            evaluator=evaluator,
+            bandit_state={"schema": "bioprism-brain-bandit/0.1", "generation": 0, "arms": []},
+            memory=memory,
+            authorization_context=context,
+            authorization_domain="coding",
+        )
+    assert memory.retrieve({"limit": 8}) == []
+    memory.close()

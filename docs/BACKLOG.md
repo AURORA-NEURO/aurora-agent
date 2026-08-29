@@ -9,6 +9,15 @@ and typed authorization refusals are preserved instead of being downgraded to pr
 failures. Boundary regressions exercise the twelve-domain portfolio without using credentials or
 network access.
 
+The high-level learning surfaces now share those checks all the way through their final sinks.
+Workflow and mission learning, immediate and delayed trajectory settlement, cross-domain
+specialist/synthesis fan-out, replan retries, automatic decision cycles, and consolidated lesson
+recall forward the caller context into nested runs and authorize each memory read, episode write,
+and evaluation write immediately before persistence or prompt assembly. TypeScript semantic routing
+also forwards the context into its classifier invocation. This closes the convenience-facade gap
+where a low-level boundary could be correct while a composed learning path still called a store or
+provider directly; focused Python and TypeScript regressions verify fail-closed refusal behavior.
+
 The high-level TypeScript facade now exposes evaluator-calibration registration, validation,
 per-domain learning admission, aggregate querying, and caller-owned restore/flush controls. The
 integration coverage builds a valid calibration report across all twelve domains, verifies that
