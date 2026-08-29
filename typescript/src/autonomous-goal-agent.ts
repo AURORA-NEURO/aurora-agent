@@ -326,6 +326,14 @@ export class AutonomousGoalAgentRuntime {
   private async executionOptions(goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow): Promise<Record<string, unknown>> {
     const value = this.run_options_factory === undefined ? {} : await this.run_options_factory(goal, row);
     const options = runOptions(value);
+    // Goal context is durable metadata and must reach the transient model/planner boundary. A
+    // factory may repeat it for explicitness, but cannot execute under a different admitted
+    // capability or risk class.
+    for (const [name, expected] of [["capability", goal.capability], ["risk_class", goal.risk_class]] as const) {
+      if (expected === null) continue;
+      if (options[name] !== undefined && options[name] !== expected) fail(`run options ${name} does not match goal ${name}`);
+      options[name] = expected;
+    }
     if (goal.domain === "cross_domain") options.subtasks = subtasks(options.subtasks);
     else if ("subtasks" in options) fail("single-domain run options cannot contain subtasks");
     return options;

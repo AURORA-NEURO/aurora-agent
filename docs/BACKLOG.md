@@ -2390,3 +2390,9 @@ the legacy domain arm. Both SDKs validate contextual arm identity, preserve valu
 restore legacy snapshots, and share deterministic cross-language state digests. Remaining
 deployment-owned work is unchanged: operator authentication, encrypted/shared persistence,
 distributed leases, and approval UX.
+
+The goal-agent execution bridge now forwards durable `capability` and `risk_class` context into the
+transient model/planner invocation for every domain and cross-domain goal. Caller factories may
+restate the context but cannot override it; conflicting values fail before dispatch. This closes
+the gap between contextual admission learning and the execution contract while keeping task text,
+credentials, prompts, and provider values outside durable state.

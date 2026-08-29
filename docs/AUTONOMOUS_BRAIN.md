@@ -13199,3 +13199,10 @@ canonical arm identity and snapshot/state digests are aligned, so a learner can 
 and TypeScript without silently mixing unrelated goal populations. This remains value-only admission
 priority adaptation: it does not grant permissions, choose credentials, bypass approvals, or treat
 an evaluator reward as scientific truth.
+
+The goal-agent bridge also binds this context into execution. For every admitted goal with a
+capability or risk class, Python and TypeScript inject the ledger value into the transient run
+options consumed by routing, prompt assembly, model selection, tool policy, and provider planning.
+A caller-owned options factory may repeat the same value, but a conflicting value is rejected before
+the provider/connector boundary. This keeps the durable goal identity, contextual bandit arm, and
+actual execution contract aligned across all twelve domains, including cross-domain synthesis.

@@ -348,6 +348,16 @@ class AutonomousGoalAgentRuntime:
     def _run_options(self, goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow) -> dict[str, Any]:
         supplied = {} if self.run_options_factory is None else self.run_options_factory(goal, row)
         options = _options(supplied)
+        # Goal context is durable metadata and must reach the transient model/planner boundary.
+        # A factory may repeat the values for explicitness, but it cannot silently execute a goal
+        # under a different capability or risk class than the one admitted by the ledger.
+        for name, expected in (("capability", goal.capability), ("risk_class", goal.risk_class)):
+            if expected is None:
+                continue
+            supplied_value = options.get(name)
+            if supplied_value is not None and supplied_value != expected:
+                _fail(f"run options {name} does not match goal {name}")
+            options[name] = expected
         if goal.domain == "cross_domain":
             options["subtasks"] = _subtasks(options.get("subtasks"))
         elif "subtasks" in options:

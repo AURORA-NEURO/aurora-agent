@@ -847,7 +847,14 @@ test("goal control checkpoint digest matches the Python reference", () => {
 test("goal agent runtime bridges the real facade across every domain without retaining runtime values", async () => {
   const domains = [...AUTONOMOUS_DOMAIN_NAMES];
   const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 600 });
-  for (const domain of domains) ledger.create({ goal_id: `agent-${domain}`, task_digest: goalTaskDigest(`private agent task ${domain}`), domain, now_ns: 0 });
+  for (const domain of domains) ledger.create({
+    goal_id: `agent-${domain}`,
+    task_digest: goalTaskDigest(`private agent task ${domain}`),
+    domain,
+    capability: `goal-${domain}-capability`,
+    risk_class: `goal-${domain}-risk`,
+    now_ns: 0,
+  });
   const agent = new AutonomousAgent(new LLMRuntime({ fetch: async () => { throw new Error("provider must not be reached in bridge test"); } }));
   const brain = new AutonomousBrainFacade({ agent });
   const calls = [];
@@ -877,6 +884,12 @@ test("goal agent runtime bridges the real facade across every domain without ret
   assert.deepEqual(new Set(calls.map((call) => call.kind)), new Set(["single", "cross"]));
   const crossCall = calls.find((call) => call.kind === "cross");
   assert.equal(crossCall.options.subtasks[0].task, "private child task");
+  const singleCalls = calls.filter((call) => call.kind === "single");
+  assert.equal(singleCalls.length, domains.length - 1);
+  assert.ok(singleCalls.every((call) => call.options.capability === `goal-${call.options.domain}-capability`));
+  assert.ok(singleCalls.every((call) => call.options.risk_class === `goal-${call.options.domain}-risk`));
+  assert.equal(crossCall.options.capability, "goal-cross_domain-capability");
+  assert.equal(crossCall.options.risk_class, "goal-cross_domain-risk");
   assert.deepEqual(new Set(ledger.list({ limit: domains.length }).map((goal) => goal.status)), new Set(["completed"]));
   const serialized = JSON.stringify(result.toJSON());
   assert.equal(serialized.includes("private agent task"), false);

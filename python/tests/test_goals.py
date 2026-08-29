@@ -1084,7 +1084,14 @@ def test_goal_agent_runtime_bridges_model_facade_across_every_domain_without_ret
     orchestrator.run_cross_domain = run_cross
     ledger = AutonomousGoalLedger(clock=lambda: 600, max_goals=len(AUTONOMOUS_DOMAINS))
     for domain in AUTONOMOUS_DOMAINS:
-        ledger.create(goal_id=f"agent-{domain}", task_digest=_digest(f"private agent task {domain}"), domain=domain, now_ns=0)
+        ledger.create(
+            goal_id=f"agent-{domain}",
+            task_digest=_digest(f"private agent task {domain}"),
+            domain=domain,
+            capability=f"goal-{domain}-capability",
+            risk_class=f"goal-{domain}-risk",
+            now_ns=0,
+        )
 
     def run_options(goal, _row):
         options = {"private_runtime_handle": object()}
@@ -1117,6 +1124,12 @@ def test_goal_agent_runtime_bridges_model_facade_across_every_domain_without_ret
     assert {kind for kind, _ in calls} == {"single", "cross"}
     cross_call = next(kwargs for kind, kwargs in calls if kind == "cross")
     assert cross_call["subtasks"][0]["task"] == "private child task"
+    single_calls = [kwargs for kind, kwargs in calls if kind == "single"]
+    assert len(single_calls) == len(AUTONOMOUS_DOMAINS) - 1
+    assert all(call["capability"] == f"goal-{call['domain']}-capability" for call in single_calls)
+    assert all(call["risk_class"] == f"goal-{call['domain']}-risk" for call in single_calls)
+    assert cross_call["capability"] == "goal-cross_domain-capability"
+    assert cross_call["risk_class"] == "goal-cross_domain-risk"
     assert all(record.status == "completed" for record in ledger.list(limit=len(AUTONOMOUS_DOMAINS)))
     serialized = json.dumps(result.to_dict(), sort_keys=True)
     assert "private agent task" not in serialized
