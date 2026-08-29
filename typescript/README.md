@@ -640,6 +640,16 @@ signals, prompts, responses, credentials, and provider payloads remain caller-ow
 registry or persistence configuration fails closed, duplicate imports are idempotent, and restoring
 the same snapshot after restart does not invoke a provider or silently grant evaluator reward.
 
+Adaptive state can also be managed directly through the facade: `recordEvaluatorReward()` applies
+only explicit evaluator credit to model arms, `promptLearningSelections()` and
+`settlePromptLearning()` close the prompt-choice feedback loop, and `toolSelectionState()` plus
+`recordToolSelectionReward()` expose the corresponding tool-bandit boundary. Separate restore and
+flush methods cover model learning, prompt learning, tool selection, and decision-cycle
+checkpoints, allowing an application to coordinate each CAS-fenced store with its own transaction.
+Every method preserves the lower-level binding checks, so a missing learner, unconfigured
+coordinator, foreign persistence object, stale snapshot, or malformed feedback fails closed before
+any provider or tool dispatch.
+
 For ambiguous or novel intake, `semanticRouteAutonomousTask()` adds an explicit provider-assisted
 classification pass. It sends the private task only through the caller's approved local provider,
 asks for structured domain scores against the reviewed twelve-domain catalogue, and maps the

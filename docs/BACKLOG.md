@@ -7,6 +7,13 @@ raw calibration cases and evidence never cross the persistence projection, check
 and proves sparse coverage holds learning. This makes calibration an explicit online-learning gate
 at the application boundary; it does not invoke providers, assign rewards, or persist caller data.
 
+The facade now also exposes the complete explicit adaptive-state handoff: evaluator reward
+recording, prompt-choice extraction and settlement, tool-bandit inspection and settlement, and
+individual restart controls for model, prompt, tool, and decision-cycle stores. A twelve-domain
+integration test proves each substrate can learn from caller feedback, flush through its own
+caller-owned CAS boundary, restore after restart, and remain redacted. Provider transport success
+still cannot become reward implicitly, and missing or foreign persistence configuration fails closed.
+
 The safe TypeScript `AutonomousBrainFacade` now owns the provider-free task-clarification loop
 already available on the lower-level agent. It can derive a bounded questionnaire for every
 single-domain profile (or accept only an unambiguous deterministic route when the domain is

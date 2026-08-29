@@ -2213,6 +2213,80 @@ export class AutonomousBrainFacade {
     return this.agent.flushEvaluatorCalibration();
   }
 
+  /** Restore digest-bound model-arm bandit state before admitting adaptive selection. */
+  async restoreOnlineLearning(): Promise<Awaited<ReturnType<AutonomousAgent["restoreOnlineLearning"]>>> {
+    return this.agent.restoreOnlineLearning();
+  }
+
+  /** Flush model-arm bandit state through the caller-owned CAS boundary. */
+  async flushOnlineLearning(): Promise<Awaited<ReturnType<AutonomousAgent["flushOnlineLearning"]>>> {
+    return this.agent.flushOnlineLearning();
+  }
+
+  /** Apply explicit evaluator credit to a model arm; transport success never becomes reward. */
+  async recordEvaluatorReward(
+    armId: Parameters<AutonomousAgent["recordEvaluatorReward"]>[0],
+    reward: Parameters<AutonomousAgent["recordEvaluatorReward"]>[1],
+    options: Parameters<AutonomousAgent["recordEvaluatorReward"]>[2] = {},
+  ): Promise<Awaited<ReturnType<AutonomousAgent["recordEvaluatorReward"]>>> {
+    return this.agent.recordEvaluatorReward(armId, reward, options);
+  }
+
+  /** Restore prompt-arm statistics without exposing rendered prompts or provider responses. */
+  async restorePromptLearning(): Promise<Awaited<ReturnType<AutonomousAgent["restorePromptLearning"]>>> {
+    return this.agent.restorePromptLearning();
+  }
+
+  /** Flush prompt-arm statistics through the caller-owned persistence boundary. */
+  async flushPromptLearning(): Promise<Awaited<ReturnType<AutonomousAgent["flushPromptLearning"]>>> {
+    return this.agent.flushPromptLearning();
+  }
+
+  /** Recover registry-bound prompt choices from a transient execution result for settlement. */
+  promptLearningSelections(result: unknown): ReturnType<AutonomousAgent["promptLearningSelections"]> {
+    return this.agent.promptLearningSelections(result);
+  }
+
+  /** Apply explicit evaluator credit to one prompt choice without retaining prompt text. */
+  async settlePromptLearning(
+    selection: Parameters<AutonomousAgent["settlePromptLearning"]>[0],
+    options: Parameters<AutonomousAgent["settlePromptLearning"]>[1],
+  ): Promise<Awaited<ReturnType<AutonomousAgent["settlePromptLearning"]>>> {
+    return this.agent.settlePromptLearning(selection, options);
+  }
+
+  /** Restore evaluator-approved tool-arm statistics before new tool selection. */
+  async restoreToolSelection(): Promise<Awaited<ReturnType<AutonomousAgent["restoreToolSelection"]>>> {
+    return this.agent.restoreToolSelection();
+  }
+
+  /** Flush evaluator-approved tool-arm statistics without persisting tool values or arguments. */
+  async flushToolSelection(): Promise<Awaited<ReturnType<AutonomousAgent["flushToolSelection"]>>> {
+    return this.agent.flushToolSelection();
+  }
+
+  /** Return a cloned value-only tool bandit state for an audit or explicit caller settlement. */
+  toolSelectionState(): ReturnType<AutonomousAgent["toolSelectionState"]> {
+    return this.agent.toolSelectionState();
+  }
+
+  /** Apply explicit evaluator credit to one tool arm; tool execution success is not inferred as reward. */
+  recordToolSelectionReward(
+    outcome: Parameters<AutonomousAgent["recordToolSelectionReward"]>[0],
+  ): ReturnType<AutonomousAgent["recordToolSelectionReward"]> {
+    return this.agent.recordToolSelectionReward(outcome);
+  }
+
+  /** Restore metadata-only decision-cycle checkpoints for route, planning, and settlement replay. */
+  async restoreDecisionCyclePersistence(): Promise<Awaited<ReturnType<AutonomousAgent["restoreDecisionCyclePersistence"]>>> {
+    return this.agent.restoreDecisionCyclePersistence();
+  }
+
+  /** Flush metadata-only decision-cycle checkpoints through the caller-owned persistence boundary. */
+  async flushDecisionCyclePersistence(): Promise<Awaited<ReturnType<AutonomousAgent["flushDecisionCyclePersistence"]>>> {
+    return this.agent.flushDecisionCyclePersistence();
+  }
+
   /**
    * Execute the complete facade boundary with deployment-managed credentials.
    *

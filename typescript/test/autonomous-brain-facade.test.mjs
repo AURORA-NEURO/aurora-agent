@@ -17,6 +17,12 @@ import {
   AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
   AutonomousValueEvaluatorRegistry,
   InMemoryAutonomousEvaluatorCalibrationStore,
+  AutonomousDecisionCyclePersistenceCoordinator,
+  AutonomousOnlineLearnerPersistenceCoordinator,
+  AutonomousPromptLearningPersistenceCoordinator,
+  TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence,
+  TransactionalJsonAutonomousPromptLearningSnapshotPersistence,
+  TransactionalJsonAutonomousToolSelectionPersistence,
   AutonomousLearningController,
   AutonomousOnlineLearner,
   InMemoryAutonomousDecisionCycleStateStore,
@@ -27,6 +33,7 @@ import {
   InMemoryAutonomousWorkflowCheckpointStore,
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
+  builtinAutonomousPromptRegistry,
   builtinAutonomousValueEvaluatorProfiles,
   LLMRuntime,
   createBuiltinAutonomousConnectorRuntime,
@@ -34,6 +41,7 @@ import {
   AutonomousProtectedRehydrationBoundary,
   AutonomousProtectedRehydrationContext,
   protectedValueDigest,
+  digestJsonSync,
 } from "../dist/index.js";
 
 const tasks = {
@@ -88,6 +96,20 @@ function calibrationCasesForDomains(domains = AUTONOMOUS_DOMAIN_NAMES) {
       { case_id: `${domain}-holdout-negative`, domain, evidence: makeEvidence(0), label: 0, split: "holdout" },
     ];
   });
+}
+
+function transactionalTextStore() {
+  let encoded = null;
+  return {
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const current = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (current !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  };
 }
 
 function localRuntime(onRequest = () => {}) {
@@ -2232,5 +2254,112 @@ test("brain facade exposes evaluator calibration admission and restart controls 
   await assert.rejects(
     new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime()) }).flushEvaluatorCalibration(),
     /evaluator calibration registry is not configured/,
+  );
+});
+
+test("brain facade exposes explicit adaptive settlement and per-store restart controls across every domain", async () => {
+  const learnerStore = transactionalTextStore();
+  const learner = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0.2, seed: 23 } });
+  const learnerPersistence = new AutonomousOnlineLearnerPersistenceCoordinator(
+    learner,
+    new TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence(learnerStore),
+  );
+  const toolStore = transactionalTextStore();
+  const toolPersistence = new TransactionalJsonAutonomousToolSelectionPersistence(toolStore);
+  const promptRegistry = builtinAutonomousPromptRegistry();
+  const promptStore = transactionalTextStore();
+  const promptPersistence = new TransactionalJsonAutonomousPromptLearningSnapshotPersistence(promptStore);
+  const promptCoordinator = new AutonomousPromptLearningPersistenceCoordinator(promptRegistry, { persistence: promptPersistence });
+  const decisionStore = new InMemoryAutonomousDecisionCycleStateStore();
+  const decisionSnapshotStore = transactionalTextStore();
+  const decisionPersistence = new AutonomousDecisionCyclePersistenceCoordinator(decisionStore, decisionSnapshotStore);
+  const agent = new AutonomousAgent(localRuntime(), {
+    learner,
+    learnerPersistence,
+    promptLearningCoordinator: promptCoordinator,
+    toolSelectionPersistence: toolPersistence,
+    decisionCyclePersistence: decisionPersistence,
+  });
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+
+  for (const [index, domain] of AUTONOMOUS_DOMAIN_NAMES.entries()) {
+    const reward = await brain.recordEvaluatorReward(`offline/${domain}-model`, 0.5 + index / 100, {
+      outcomeDigest: `${String(index + 1).padStart(2, "0")}${"a".repeat(62)}`,
+    });
+    assert.equal(reward.generation, index + 1, domain);
+    const toolState = brain.recordToolSelectionReward({
+      domain,
+      capability: "read_only_analysis",
+      tool: `fixture_${domain}`,
+      reward: 0.5 + index / 100,
+      outcomeDigest: `${String(index + 1).padStart(2, "0")}${"b".repeat(62)}`,
+    });
+    assert.equal(toolState.generation, index + 1, domain);
+
+    const execution = await brain.execute({ task: tasks[domain], domain }, { approveProviderCall: true });
+    assert.equal(execution.status, "completed", domain);
+    assert.ok(execution.run, domain);
+    const selections = brain.promptLearningSelections(execution.run);
+    assert.equal(selections.length, 1, domain);
+    const settled = await brain.settlePromptLearning(selections[0], {
+      armId: selections[0].armIds[0],
+      evaluatorId: `${domain}-facade-rubric`,
+      evaluatorVersion: "1",
+      reward: 0.8,
+      passed: true,
+      outcomeDigest: digestJsonSync({ domain, selection: selections[0].selectionDigest }),
+    });
+    assert.equal(settled.status, "settled", domain);
+  }
+
+  const learnerSnapshot = await brain.flushOnlineLearning();
+  assert.equal(learnerSnapshot.state.generation, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(JSON.stringify(learnerSnapshot), /debug and verify|credential|response/);
+  const toolSnapshot = await brain.flushToolSelection();
+  assert.equal(toolSnapshot.state.arms.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(JSON.stringify(toolSnapshot), /debug and verify|fixture_.*task/);
+  const promptSnapshot = await brain.flushPromptLearning();
+  assert.equal(promptSnapshot.state.generation, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(JSON.stringify(promptSnapshot), /debug and verify|offline:/);
+
+  const cycle = await brain.executeCycle(
+    { task: tasks.coding, domain: "coding" },
+    { approveProviderCall: true, cycle: { cycleId: "facade-decision-cycle", decisionStateStore: decisionStore } },
+  );
+  assert.equal(cycle.status, "completed", "decision-cycle persistence must be reachable through the facade");
+  const decisionSnapshot = await brain.flushDecisionCyclePersistence();
+  assert.equal(decisionSnapshot.cycles, 1);
+  assert.equal(decisionSnapshot.terminal_cycles, 1);
+  assert.doesNotMatch(JSON.stringify(decisionSnapshot), /debug and verify|offline:/);
+
+  const restoredLearner = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0.2, seed: 23 } });
+  const restoredLearnerPersistence = new AutonomousOnlineLearnerPersistenceCoordinator(
+    restoredLearner,
+    new TransactionalJsonAutonomousOnlineLearnerSnapshotPersistence(learnerStore),
+  );
+  const restoredPromptCoordinator = new AutonomousPromptLearningPersistenceCoordinator(promptRegistry, {
+    persistence: new TransactionalJsonAutonomousPromptLearningSnapshotPersistence(promptStore),
+  });
+  const restoredDecisionStore = new InMemoryAutonomousDecisionCycleStateStore();
+  const restoredDecisionPersistence = new AutonomousDecisionCyclePersistenceCoordinator(restoredDecisionStore, decisionSnapshotStore);
+  const restoredAgent = new AutonomousAgent(localRuntime(), {
+    learner: restoredLearner,
+    learnerPersistence: restoredLearnerPersistence,
+    promptLearningCoordinator: restoredPromptCoordinator,
+    toolSelectionPersistence: new TransactionalJsonAutonomousToolSelectionPersistence(toolStore),
+    decisionCyclePersistence: restoredDecisionPersistence,
+  });
+  const restoredBrain = new AutonomousBrainFacade({ agent: restoredAgent });
+  assert.deepEqual(await restoredBrain.restoreOnlineLearning(), learnerSnapshot);
+  assert.deepEqual(await restoredBrain.restoreToolSelection(), toolSnapshot);
+  assert.deepEqual((await restoredBrain.restorePromptLearning()).state, promptSnapshot.state);
+  const restoredDecision = await restoredBrain.restoreDecisionCyclePersistence();
+  assert.equal(restoredDecision.cycles, 1);
+  assert.equal(restoredDecision.terminal_cycles, 1);
+  assert.throws(() => new AutonomousAgent(new LLMRuntime(), { learner: restoredLearner, learnerPersistence }), /bound to the supplied learner/);
+  await assert.rejects(
+    new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime()) }).flushOnlineLearning(),
+    /no AutonomousOnlineLearner/,
   );
 });
