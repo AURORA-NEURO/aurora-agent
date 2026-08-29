@@ -1,7 +1,7 @@
 import { ArgumentError, CredentialError, ProviderRuntimeError } from "./errors.js";
 import type { ProviderErrorCode } from "./errors.js";
 import type { ApiClient } from "./client.js";
-import { AUTONOMOUS_DOMAIN_NAMES, autonomousWorkflowStageContractDigest, compileAutonomousWorkflowStageExecutionPlan, validateAutonomousRouteOverride } from "./autonomous.js";
+import { AUTONOMOUS_DOMAIN_NAMES, autonomousWorkflowStageContractDigest, compileAutonomousWorkflowStageExecutionPlan, validateAutonomousRouteOverride, validateAutonomousWorkflowStageExecutionPlan } from "./autonomous.js";
 import type { AutonomousLearningController } from "./autonomous-learning.js";
 import type {
   AutonomousAgent,
@@ -11,6 +11,7 @@ import type {
   AutonomousRouteProposal,
   AutonomousTaskBlueprint,
   AutonomousWorkflow,
+  AutonomousWorkflowStageExecutionPlan,
   AutonomousWorkflowToolContext,
   AutonomousWorkflowStage,
   AutonomousPromptChunk,
@@ -188,6 +189,8 @@ export interface AutonomousWorkflowStageExecutionContext {
   blueprint: AutonomousTaskBlueprint;
   workflow: AutonomousWorkflow;
   stage: AutonomousWorkflowStage;
+  /** Validated packet admitted for this attempt; never use the raw persisted blueprint packet. */
+  stage_plan: AutonomousWorkflowStageExecutionPlan;
   stage_attempt: number;
   execution_contract_digest: string;
   context: readonly AutonomousPromptChunk[];
@@ -1170,9 +1173,14 @@ async function acceptedWorkflowPlan(
   return { priority_stage_ids: [...priority], focus_stage_ids: [...focus], refinement_digest: await digestJson(refinement) };
 }
 
-async function runOptions(options: AutonomousWorkflowExecuteOptions, stage: AutonomousWorkflowStage, workflow: AutonomousWorkflow, blueprint: AutonomousTaskBlueprint, context: AutonomousRunOptions["context"]): Promise<AutonomousRunOptions> {
-  const stagePlan = blueprint.stage_execution_plans.find((candidate) => candidate.stage_id === stage.id)
-    ?? await compileAutonomousWorkflowStageExecutionPlan(blueprint, stage);
+async function stageExecutionPlanFor(blueprint: AutonomousTaskBlueprint, stage: AutonomousWorkflowStage): Promise<AutonomousWorkflowStageExecutionPlan> {
+  const persistedStagePlan = blueprint.stage_execution_plans.find((candidate) => candidate.stage_id === stage.id);
+  return persistedStagePlan === undefined
+    ? await compileAutonomousWorkflowStageExecutionPlan(blueprint, stage)
+    : await validateAutonomousWorkflowStageExecutionPlan(persistedStagePlan, { blueprint, stage });
+}
+
+async function runOptions(options: AutonomousWorkflowExecuteOptions, stage: AutonomousWorkflowStage, workflow: AutonomousWorkflow, stagePlan: AutonomousWorkflowStageExecutionPlan, context: AutonomousRunOptions["context"]): Promise<AutonomousRunOptions> {
   const stageContractDigest = await autonomousWorkflowStageContractDigest(workflow, stage.id);
   const workflowContext: AutonomousWorkflowToolContext = {
     domain: workflow.domain,
@@ -1481,20 +1489,25 @@ export class AutonomousWorkflowExecutor {
       const stage = stages.find((candidate) => candidate.id === checkpoint.next_stage_id);
       if (!stage) throw new ProviderRuntimeError(`workflow checkpoint references unknown stage ${checkpoint.next_stage_id}`);
       if (stage.depends_on.some((dependency) => !checkpoint.completed_stage_ids.includes(dependency))) throw new ProviderRuntimeError(`workflow stage ${stage.id} has incomplete dependencies`);
-      const stagePlanDigest = blueprint.stage_execution_plans.find((candidate) => candidate.stage_id === stage.id)?.stage_plan_digest ?? null;
       consumed += 1;
       const priorOutputs = await this.priorOutputs(checkpoint, stageResults, stages, options);
-      const context = [
-        ...(options.context ?? []),
-        { id: "workflow-checkpoint", content: JSON.stringify({ job_id: checkpoint.job_id, workflow_digest: checkpoint.workflow_digest, completed_stage_ids: checkpoint.completed_stage_ids, stage_outcomes: checkpoint.stage_outcomes, prior_outputs: priorOutputs }), required: true, priority: 100 },
-        { id: "workflow-stage-contract", content: JSON.stringify({ stage_id: stage.id, objective: stage.objective, required_capabilities: stage.required_capabilities, evidence_outputs: stage.evidence_outputs, evaluator_signals: stage.evaluator_signals, stage_plan_digest: stagePlanDigest, stage_selected_tool_names: blueprint.stage_execution_plans.find((candidate) => candidate.stage_id === stage.id)?.selected_tool_names ?? [] }), required: true, priority: 90 },
-        ...(acceptedPlan ? [{ id: "workflow-plan-refinement", content: JSON.stringify({ refinement_digest: acceptedPlan.refinement_digest, priority_rank: stageOrder.indexOf(stage.id), focus: acceptedPlan.focus_stage_ids.includes(stage.id) }), required: true, priority: 95 }] : []),
-      ];
+      let stagePlan: AutonomousWorkflowStageExecutionPlan | null = null;
+      let stagePlanDigest: string | null = null;
       let run: AutonomousRunResult;
       try {
+        // Persisted blueprints cross a caller-owned restart boundary. Validate the exact
+        // packet before it can shape provider context or reach a custom stage adapter.
+        stagePlan = await stageExecutionPlanFor(blueprint, stage);
+        stagePlanDigest = stagePlan.stage_plan_digest;
+        const context = [
+          ...(options.context ?? []),
+          { id: "workflow-checkpoint", content: JSON.stringify({ job_id: checkpoint.job_id, workflow_digest: checkpoint.workflow_digest, completed_stage_ids: checkpoint.completed_stage_ids, stage_outcomes: checkpoint.stage_outcomes, prior_outputs: priorOutputs }), required: true, priority: 100 },
+          { id: "workflow-stage-contract", content: JSON.stringify({ stage_id: stage.id, objective: stage.objective, required_capabilities: stage.required_capabilities, evidence_outputs: stage.evidence_outputs, evaluator_signals: stage.evaluator_signals, stage_plan_digest: stagePlanDigest, stage_selected_tool_names: [...stagePlan.selected_tool_names] }), required: true, priority: 90 },
+          ...(acceptedPlan ? [{ id: "workflow-plan-refinement", content: JSON.stringify({ refinement_digest: acceptedPlan.refinement_digest, priority_rank: stageOrder.indexOf(stage.id), focus: acceptedPlan.focus_stage_ids.includes(stage.id) }), required: true, priority: 95 }] : []),
+        ];
         run = this.stageExecutor
-          ? await this.stageExecutor({ job_id: checkpoint.job_id, task_digest: blueprint.task_digest, route, blueprint, workflow: blueprint.workflow, stage, stage_attempt: checkpoint.generation + consumed, execution_contract_digest: contractDigest, context })
-          : await this.agent.run(`Execute workflow stage ${stage.id} for task: ${task}`, await runOptions(options, stage, blueprint.workflow, blueprint, context));
+          ? await this.stageExecutor({ job_id: checkpoint.job_id, task_digest: blueprint.task_digest, route, blueprint, workflow: blueprint.workflow, stage, stage_plan: stagePlan, stage_attempt: checkpoint.generation + consumed, execution_contract_digest: contractDigest, context })
+          : await this.agent.run(`Execute workflow stage ${stage.id} for task: ${task}`, await runOptions(options, stage, blueprint.workflow, stagePlan, context));
       } catch (error) {
         const failure = stageFailure(error);
         checkpoint = await this.makeCheckpoint(checkpoint.job_id, blueprint, checkpoint.completed_stage_ids, [...checkpoint.stage_outcomes, { stage_id: stage.id, stage_plan_digest: stagePlanDigest, status: "failed", run_status: "exception", selection_digest: null, response_digest: null, output_bytes: 0, error_class: failure.error_class, error_code: failure.error_code, retryable: failure.retryable, status_code: failure.status_code, learning_episode_id: null }], "failed", contractDigest, checkpoint, stageOrder, planRefinementDigest);

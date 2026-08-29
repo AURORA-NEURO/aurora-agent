@@ -13383,3 +13383,22 @@ compiler returns a validator-normalized packet. Rehydration therefore proves pac
 without importing task text, arguments, provider values, credentials, or effect authority, and
 still leaves provider, tool, evidence, evaluator, learning, and effect approvals as independent
 gates.
+
+### Stage-plan admission in durable workflow execution
+
+TypeScript workflow execution now treats the stage packet as an admission object at the exact
+restart boundary where it can influence a provider or custom adapter. For each stage attempt, the
+executor resolves a missing packet through deterministic compilation or validates the persisted
+packet against its canonical digest, nested capability-contract digests, reviewed stage, live
+workflow, and blueprint. Only the validated normalized packet is used to build the provider-facing
+workflow context, and the same packet is supplied as `stage_plan` to connector, simulator, and
+local-worker stage executors.
+
+This check runs before dispatch and remains inside the existing stage-failure checkpoint path, so
+tampered or stale packets produce redacted typed failure metadata, never a provider call, connector
+call, tool selection, or effect. The checkpoint records a null stage-plan digest when no packet was
+admitted; it never treats a forged digest as evidence of execution. The stage packet remains
+metadata-only and cannot supply credentials, prompt text, provider payloads, tool arguments, or
+authority. Python stage results and TypeScript workflow execution therefore share the same
+cross-runtime replay rule, while caller-owned persistence and operator recovery remain explicit
+deployment responsibilities.

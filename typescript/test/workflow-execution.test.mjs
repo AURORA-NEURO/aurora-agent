@@ -204,6 +204,66 @@ test("workflow executor checkpoints stages, pauses at a bounded budget, and resu
   await assert.rejects(() => executor.resume("workflow-job-1", "A different task", { candidates: agent.models(), approveProviderCall: true }), /digest/);
 });
 
+test("workflow executor validates rehydrated stage packets before provider dispatch", async () => {
+  let providerCalls = 0;
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => {
+      providerCalls += 1;
+      return jsonResponse({ choices: [{ message: { role: "assistant", content: JSON.stringify(workflowStagePayload({}, "inspect")) }, finish_reason: "stop" }] });
+    },
+  });
+  llm.registerProvider(openaiCompatibleProvider("workflow", "https://workflow.test", { requiresCredential: false }));
+  const agent = new AutonomousAgent(llm);
+  agent.registerModel(model());
+  const originalBlueprint = agent.blueprint.bind(agent);
+  agent.blueprint = async (...args) => {
+    const envelope = await originalBlueprint(...args);
+    const tampered = structuredClone(envelope.blueprint);
+    tampered.stage_execution_plans[0].stage_plan_digest = "0".repeat(64);
+    return { ...envelope, blueprint: tampered };
+  };
+
+  const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore()).start(
+    "Reject a tampered staged workflow before dispatch",
+    { domain: "coding", jobId: "workflow-stage-packet-tamper-1", candidates: agent.models(), approveProviderCall: true, maxStages: 1 },
+  );
+  assert.equal(result.status, "failed");
+  assert.equal(result.checkpoint?.stage_outcomes[0]?.error_class, "ArgumentError");
+  assert.equal(result.checkpoint?.stage_outcomes[0]?.stage_plan_digest, null, "invalid packets must not be recorded as admitted plans");
+  assert.equal(providerCalls, 0, "tampered stage packets must fail before provider dispatch");
+});
+
+test("workflow adapters receive the admitted normalized stage packet", async () => {
+  let dispatches = 0;
+  let observedPlan = null;
+  const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }));
+  const adapter = async (context) => {
+    dispatches += 1;
+    observedPlan = context.stage_plan;
+    const structured = { stage_id: context.stage.id, status: "completed", evidence: [`adapter:${context.stage_plan.stage_plan_digest}`], uncertainty: [], notes: "adapter completed", next_actions: [] };
+    return {
+      schema: "bioprism-typescript-autonomous-run/0.1",
+      status: "completed",
+      route: context.route,
+      blueprint: context.blueprint,
+      plan_refinement_digest: null,
+      selection: null,
+      response: { text: JSON.stringify(structured), structured },
+      learning: "provider_health_feedback_only",
+      retention: "provider_response_local; value_only_learning_projection",
+    };
+  };
+  const result = await new AutonomousWorkflowExecutor(agent, new InMemoryAutonomousWorkflowCheckpointStore(), { stageExecutor: adapter }).start(
+    "Execute a stage through a local adapter",
+    { domain: "coding", jobId: "workflow-stage-packet-adapter-1", approveProviderCall: true, maxStages: 1 },
+  );
+  assert.equal(result.status, "paused");
+  assert.equal(dispatches, 1);
+  assert.deepEqual(observedPlan, result.blueprint.stage_execution_plans.find((candidate) => candidate.stage_id === "scope"));
+  assert.equal(result.stage_results[0].stage_plan_digest, observedPlan.stage_plan_digest);
+});
+
 test("durable workflows use approved semantic routing once and persist the route identity", async () => {
   let calls = 0;
   const bodies = [];

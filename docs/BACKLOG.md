@@ -2479,3 +2479,11 @@ stage. The compiler returns only validated packets, and Python stage-result cons
 caller-rehydrated packets before checkpointing. All twelve domains are covered by replay, tamper,
 marker, contract, workflow-drift, and stage-dispatch tests. The packet remains metadata-only: it
 contains no task text, provider output, credentials, arguments, or effect authority.
+
+The TypeScript durable workflow executor now validates the persisted stage packet at the final
+attempt admission boundary, before constructing provider/tool context or invoking a custom stage
+executor. The validated packet is also exposed on the stage-execution context so connector and
+local-worker adapters consume the same normalized identity rather than reaching back into the raw
+rehydrated blueprint. Invalid packets fail into the existing redacted stage-failure checkpoint,
+without recording an unadmitted digest or dispatching a provider/connector call. The remaining
+deployment work is caller-owned durable blueprint storage and operator-visible recovery UX.
