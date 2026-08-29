@@ -106,6 +106,16 @@ reported explicitly and never retriggers execution.
 When configured, its caller-owned alert sink receives only deterministic, digest-keyed threshold
 metadata; delivery failures are isolated from analytics and execution outcomes.
 
+Both SDKs also expose a tenant-scoped `AutonomousAuthorizationLedger` and fail-closed
+`AutonomousAuthorizationGate`. Caller-issued grants can cover one or all twelve domains and
+explicitly scope planning, provider invocation, evidence, connectors, tools, effects, evaluation,
+learning, memory, trace, or analytics by tenant, actor, session, capability, risk class, expiry,
+and bounded use count. The ledger is restart-safe and CAS-persistable, with hash-linked metadata
+events and request-digest replay protection. It never accepts task text, prompts, credentials,
+headers, provider payloads, tool arguments, or results; authentication, grant issuance, encrypted
+storage, distributed leases, and external effect reconciliation remain deployment-owned. See the
+[tenant authorization contract](docs/AUTONOMOUS_BRAIN.md#tenant-scoped-authorization-contract).
+
 ## Status
 
 **83 crates, 538,938 lines, clippy -D warnings enforced in CI.** Byte-level parity with the

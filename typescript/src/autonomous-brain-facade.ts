@@ -1,5 +1,6 @@
 import { ArgumentError, ProviderRuntimeError, isObject } from "./errors.js";
 import { AutonomousProtectedRehydrationAdapter } from "./autonomous-protected-rehydration.js";
+import { AutonomousAuthorizationGate, AutonomousAuthorizationLedger } from "./autonomous-authorization.js";
 import {
   ProviderSetup,
   type AutonomousProvisionedBrainAdaptiveCycleOptions,
@@ -2819,6 +2820,24 @@ export class AutonomousBrainFacade {
   ): AutonomousBrainRunAnalyticsController {
     if (!isObject(options) || !(options.ledger instanceof AutonomousRunAnalyticsLedger) || !(options.persistence instanceof JsonAutonomousRunAnalyticsLedgerPersistence)) throw new ArgumentError("autonomous brain run analytics controller options are malformed");
     return new AutonomousBrainRunAnalyticsController(this, options.ledger, options.persistence);
+  }
+
+  /**
+   * Create the caller-owned tenant/actor/session authorization boundary.
+   *
+   * Grants are issued by the application's identity system and checked immediately before a
+   * provider, source, connector, tool, learner, memory, trace, analytics, or effect boundary.
+   * This helper never receives task text, prompts, credentials, or provider values and does not
+   * treat a grant digest as proof of identity.
+   */
+  createAuthorizationLedger(options: { maxGrants?: number; maxEvents?: number } = {}): AutonomousAuthorizationLedger {
+    if (!isObject(options)) throw new ArgumentError("autonomous authorization ledger options are malformed");
+    return new AutonomousAuthorizationLedger(options.maxGrants, options.maxEvents);
+  }
+
+  /** Create the fail-closed operation wrapper for a caller-owned authorization ledger. */
+  createAuthorizationGate(ledger: AutonomousAuthorizationLedger): AutonomousAuthorizationGate {
+    return new AutonomousAuthorizationGate(ledger);
   }
 
   /**

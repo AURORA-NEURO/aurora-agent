@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 from .authoring import canonical_json, content_digest
 from .errors import ArgumentError
 from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
+from .autonomous_authorization import AutonomousAuthorizationGate, AutonomousAuthorizationLedger
 from .autonomous_evidence import (
     AutonomousEvidencePlan,
     build_autonomous_evidence_plan,
@@ -25885,6 +25886,30 @@ class AutonomousAgent:
 
         return AutonomousRunAnalyticsController(self, ledger, persistence)
 
+    @staticmethod
+    def create_authorization_ledger(
+        *,
+        max_grants: int = 4_096,
+        max_events: int = 32_768,
+    ) -> AutonomousAuthorizationLedger:
+        """Create the caller-owned tenant/actor/session authorization boundary.
+
+        The ledger is intentionally separate from task execution: applications issue grants
+        from their identity system, call ``authorize`` immediately before a provider/source/tool
+        or effect boundary, and persist the metadata-only snapshot through the authorization
+        persistence coordinator. No task, prompt, credential, or result is accepted here.
+        """
+
+        return AutonomousAuthorizationLedger(max_grants=max_grants, max_events=max_events)
+
+    @staticmethod
+    def create_authorization_gate(
+        ledger: AutonomousAuthorizationLedger,
+    ) -> AutonomousAuthorizationGate:
+        """Create the fail-closed gate used immediately before caller-owned dispatch."""
+
+        return AutonomousAuthorizationGate(ledger)
+
     def create_trace_registry_controller(
         self,
         registry: Any,
@@ -29756,6 +29781,8 @@ __all__ = [
     "AutonomousLearningResult",
     "AutonomousAgent",
     "AutonomousRunAnalyticsController",
+    "AutonomousAuthorizationLedger",
+    "AutonomousAuthorizationGate",
     "AutonomousRunTraceRegistryController",
     "AutonomousRunObservabilityController",
     "AutonomousWorkflowCheckpoint",

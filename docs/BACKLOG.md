@@ -2682,3 +2682,14 @@ replay, scopes acquisition to each item domain, propagates only predecessor evid
 keeps raw acquisition values, source credentials, projectors, evaluators, and journals caller
 owned. This closes the high-level application composition gap; remaining work is deployment-owned
 portfolio persistence, operator identity, and external trace/retention integration.
+
+The tenant/authority seam is now explicit in both SDKs through `AutonomousAuthorizationLedger`
+and `AutonomousAuthorizationGate`. Caller-issued grants can scope all twelve domains and the
+full planning/provider/evidence/connector/tool/effect/evaluation/learning/memory/observability
+operation surface, with tenant/actor/session binding, expiry, revocation, bounded use counts,
+request-digest replay protection, hash-linked audit events, and canonical CAS snapshots. The
+high-level Python agent and TypeScript facade expose factories for the ledger and gate. This
+reduces duplicated authorization glue without claiming identity authentication or external
+effect authority. Remaining deployment work is to connect the contract to the real identity
+provider, encrypted/shared persistence, distributed lease authority, grant rotation, and
+operator approval UX.

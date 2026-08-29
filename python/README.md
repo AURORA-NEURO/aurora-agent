@@ -100,6 +100,15 @@ all-domain projections without replaying the run.
 An optional alert sink receives only digest-keyed threshold metadata and must treat `alert_id` as
 its downstream idempotency key; sink failures are returned separately from trace and analytics
 results.
+
+For deployment-owned authority, `AutonomousAuthorizationLedger` binds caller-issued grants to a
+tenant, actor, session, authorization digest, domain set, operation, capability, risk class,
+expiry, and bounded use count. `AutonomousAuthorizationGate` performs the final fail-closed check
+before a caller-owned provider/source/tool/effect callback. The ledger supports hash-linked
+metadata events, request-digest replay protection, canonical restore, and optional CAS persistence
+across all twelve domains; it never receives prompts, task text, credentials, headers, payloads,
+arguments, or results. Identity authentication, grant issuance, encryption, and distributed
+coordination remain deployment responsibilities.
 evidence, tool payloads, credentials, or cost claims.
 
 For provider-backed evidence, `AutonomousConnectorRegistry` and `AutonomousConnectorRuntime`

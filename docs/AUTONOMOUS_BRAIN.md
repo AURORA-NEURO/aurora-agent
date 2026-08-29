@@ -13670,3 +13670,36 @@ become reward automatically. `evaluateProviderReceipts()` provides the parallel 
 settlement boundary. Capability journal restore/flush methods are also available from the facade,
 but persistence is still caller-owned and raw arguments, results, prompts, credentials, and
 evaluator payloads never enter the serialized projection.
+
+### Tenant-scoped authorization contract
+
+The Python and TypeScript SDKs provide a common `AutonomousAuthorizationLedger` for the
+deployment-facing authority seam. A caller-issued grant binds a tenant, actor, session,
+authorization digest, ordered domain scope, operation scope, optional capability and risk-class
+scope, an expiry, and a bounded use allowance. The operation vocabulary covers planning, provider
+invocation, evidence acquisition, connector dispatch, tool execution, effects, evaluation,
+learning, memory, trace, and analytics. Domain scope is checked as a set, so one grant can cover
+the complete twelve-domain portfolio while a narrower grant remains least-privilege.
+
+`AutonomousAuthorizationRequest` contains only bounded identity and operation metadata plus an
+optional resource digest. `authorize()` returns an explicit `allowed`, `already_allowed`,
+identity-mismatch, scope, expiry, revocation, or exhaustion result. A repeated request digest is
+idempotent and never consumes another allowance. `AutonomousAuthorizationGate` provides
+`require()` and a transient `execute()` wrapper for the final caller-owned provider/source/tool/
+effect callback; the callback is never invoked after a refused decision.
+
+Issuance and use events form a bounded hash chain. Canonical JSON persistence supports restore
+validation and optional compare-and-swap fencing, and snapshot validation checks grant issuance
+history, revocation semantics, request-use accounting, event sequence, predecessor links, and
+outer digests before replacing live state. The high-level Python agent exposes
+`create_authorization_ledger()` / `create_authorization_gate()` and the TypeScript facade exposes
+`createAuthorizationLedger()` / `createAuthorizationGate()` so applications do not need to
+reach below the application boundary to construct the contract.
+
+This is deliberately an authorization contract and enforcement seam, not an identity provider:
+the deployment still authenticates the caller, issues and protects the authorization digest,
+stores/encrypts snapshots, coordinates distributed writers, and decides which external action is
+actually safe. No task text, prompt, response, credential, authorization header, provider payload,
+tool argument, evidence body, or effect value is accepted or persisted by this module. The grant
+also does not promote a plan, evaluator result, route, model choice, or provider transport result
+into domain truth or execution authority.
