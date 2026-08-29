@@ -19,6 +19,7 @@ import {
 } from "./autonomous.js";
 import { canonicalJson, digestJson } from "./tooling.js";
 import type { AutonomousModelCandidate } from "./llm.js";
+import type { JsonObject } from "./types.js";
 
 /** Schema for a redacted provider inventory plus all-domain selection coverage. */
 export const AUTONOMOUS_MODEL_INVENTORY_SCHEMA = "bioprism-typescript-autonomous-model-inventory/0.1" as const;
@@ -51,7 +52,13 @@ export interface AutonomousModelInventoryCoverage {
 }
 
 /** Per-domain live model eligibility derived from capability, capacity, and runtime gates. */
-export interface AutonomousModelInventoryReadinessDomain {
+export interface AutonomousModelInventoryProviderReadiness extends JsonObject {
+  registered: boolean;
+  credential_ready: boolean;
+  circuit: string;
+}
+
+export interface AutonomousModelInventoryReadinessDomain extends JsonObject {
   schema: typeof AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA;
   domain: AutonomousDomainName;
   required_model_capabilities: string[];
@@ -60,15 +67,11 @@ export interface AutonomousModelInventoryReadinessDomain {
   compatible_model_count: number;
   eligible_model_count: number;
   coverage_state: AutonomousModelInventoryCoverageState;
-  provider_readiness: Record<string, {
-    registered: boolean;
-    credential_ready: boolean;
-    circuit: string;
-  }>;
+  provider_readiness: Record<string, AutonomousModelInventoryProviderReadiness>;
 }
 
 /** Digest-bound, metadata-only readiness report for the current model catalogue. */
-export interface AutonomousModelInventoryReadiness {
+export interface AutonomousModelInventoryReadiness extends JsonObject {
   schema: typeof AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA;
   models: AutonomousModelCandidate[];
   domains: AutonomousModelInventoryReadinessDomain[];
@@ -87,6 +90,8 @@ export interface AutonomousModelInventoryReadiness {
 export interface AutonomousModelInventoryReadinessOptions {
   /** Override requirements for a bounded subset; omitted means every built-in domain. */
   domainRequirements?: Partial<Record<AutonomousDomainName, readonly string[]>>;
+  /** Evaluate a transient candidate set without registering or mutating it. */
+  candidates?: readonly AutonomousModelCandidate[];
   estimatedInputTokens?: number;
   requestedOutputTokens?: number;
 }
@@ -458,7 +463,20 @@ export class AutonomousModelInventoryCoordinator {
       }
     }
     if (requirements.length < 1 || requirements.length > AUTONOMOUS_MODEL_INVENTORY_MAX_DOMAINS) throw new ArgumentError("model inventory readiness requires 1..=12 domain requirements");
-    const models = this.agent.models();
+    const rawModels = options.candidates === undefined ? this.agent.models() : [...options.candidates];
+    if (!Array.isArray(rawModels) || rawModels.length > AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS) throw new ArgumentError("model inventory readiness candidates exceed their bound");
+    const rawCatalogueDescriptor = {
+      schema: AUTONOMOUS_MODEL_CATALOGUE_SNAPSHOT_SCHEMA,
+      models: rawModels,
+      catalogue_digest: await digestJson(rawModels),
+      retention: "model_metadata_only_hash_bound" as const,
+      secret_material: "never_returned" as const,
+    };
+    const catalogue = await validateAutonomousModelCatalogueSnapshot({
+      ...rawCatalogueDescriptor,
+      snapshot_digest: await digestJson(rawCatalogueDescriptor),
+    });
+    const models = catalogue.models;
     const metadataByProvider = new Map(this.agent.llm.providerMetadata().map((row) => [String(row.provider), row]));
     const providerNames = [...new Set([...metadataByProvider.keys(), ...models.map((candidate) => candidate.provider)])].sort();
     const providerState = new Map<string, { registered: boolean; credentialReady: boolean; circuit: string }>();

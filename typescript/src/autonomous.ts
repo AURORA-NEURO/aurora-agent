@@ -799,6 +799,7 @@ export interface AutonomousReadinessReport extends JsonObject {
   workflows: AutonomousWorkflow[];
   domain_packs: AutonomousDomainPack[];
   model_capability_coverage: JsonObject;
+  model_inventory_readiness: AutonomousModelInventoryReadiness;
   model_health: JsonObject;
   learning: JsonObject;
   tooling: JsonObject;
@@ -6807,6 +6808,11 @@ export class AutonomousAgent {
       candidateIds.add(id);
     }
     const profiles = await builtinAutonomousDomainProfiles();
+    const modelInventoryReadiness = await this.modelInventoryReadiness({
+      candidates,
+      estimatedInputTokens,
+      requestedOutputTokens,
+    });
     let evidenceReadinessReport: import("./autonomous-evidence-readiness.js").AutonomousEvidenceReadinessReport | null = null;
     if (options.evidenceReadiness !== undefined) {
       const { AutonomousEvidenceReadinessAuditor } = await import("./autonomous-evidence-readiness.js");
@@ -6915,7 +6921,7 @@ export class AutonomousAgent {
     const connectorReadiness = this.connectorRegistry
       ? { configured: true, registry_digest: this.connectorRegistry.digest, connector_count: this.connectorRegistry.registrations().length, execution: "selection_and_dispatch_require_explicit_plan_and_approval", secret_material: "never_returned" as const }
       : { configured: false, registry_digest: null, connector_count: 0, execution: "caller_owned_connector_registry_not_configured", secret_material: "never_returned" as const };
-    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization", activation_status: activation.status }, ...(evidenceReadinessReport === null ? {} : { evidence: { configured: true, registry_digest: evidenceReadinessReport.registry_digest, report_digest: evidenceReadinessReport.report_digest, status: evidenceReadinessReport.status, ready_count: evidenceReadinessReport.ready_count, degraded_count: evidenceReadinessReport.degraded_count, blocked_count: evidenceReadinessReport.blocked_count, missing_count: evidenceReadinessReport.missing_count, domains: evidenceReadinessReport.domains.map((row) => row.toJSON()), execution: "readiness_projection_only;no_source_dispatch", secret_material: "never_returned" } }), connectors: connectorReadiness, activation, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
+    const descriptor = { schema: AUTONOMOUS_READINESS_SCHEMA, providers: providerRows, models: [...modelRows].sort((left, right) => `${left.provider}/${left.model}`.localeCompare(`${right.provider}/${right.model}`)), domains: domainRows, workflows: profiles.map((profile) => profile.workflow), domain_packs: domainPacks, model_capability_coverage: { domain_count: capabilityRows.length, rows: capabilityRows, evidence_posture: "static_caller_declared_capabilities_only" }, model_inventory_readiness: modelInventoryReadiness, model_health: this.llm.modelHealthSnapshot(), learning, tooling: { configured: this.toolCatalogue !== undefined, catalogue_digest: this.toolCatalogue?.digest ?? null, available_tool_count: toolNames.size, execution: "catalogue_metadata_only; registration_is_not_authorization", activation_status: activation.status }, ...(evidenceReadinessReport === null ? {} : { evidence: { configured: true, registry_digest: evidenceReadinessReport.registry_digest, report_digest: evidenceReadinessReport.report_digest, status: evidenceReadinessReport.status, ready_count: evidenceReadinessReport.ready_count, degraded_count: evidenceReadinessReport.degraded_count, blocked_count: evidenceReadinessReport.blocked_count, missing_count: evidenceReadinessReport.missing_count, domains: evidenceReadinessReport.domains.map((row) => row.toJSON()), execution: "readiness_projection_only;no_source_dispatch", secret_material: "never_returned" } }), connectors: connectorReadiness, activation, next_actions: [...nextActions].sort(), readiness_state: readinessState, execution: "not_started; no_provider_or_tool_calls" as const, credential_posture: "caller_supplied_opaque_handles" as const, secret_material: "never_returned" as const };
     return { ...descriptor, readiness_digest: await digestJson(descriptor) };
   }
 

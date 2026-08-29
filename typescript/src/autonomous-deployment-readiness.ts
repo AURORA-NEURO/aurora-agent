@@ -237,12 +237,17 @@ function policy(input: AutonomousDeploymentReadinessPolicy = {}): NormalizedPoli
 
 function validateAgent(report: unknown): AutonomousReadinessReport {
   if (!isObject(report)) throw new ArgumentError("deployment readiness agent report is malformed");
-  exactKeys(report, ["schema", "providers", "models", "domains", "workflows", "domain_packs", "model_capability_coverage", "model_health", "learning", "tooling", "evidence", "connectors", "activation", "next_actions", "readiness_state", "execution", "credential_posture", "secret_material", "readiness_digest"], "deployment readiness agent report");
+  exactKeys(report, ["schema", "providers", "models", "domains", "workflows", "domain_packs", "model_capability_coverage", "model_inventory_readiness", "model_health", "learning", "tooling", "evidence", "connectors", "activation", "next_actions", "readiness_state", "execution", "credential_posture", "secret_material", "readiness_digest"], "deployment readiness agent report");
   if (report.schema !== "bioprism-autonomous-agent-readiness/0.1") throw new ArgumentError("deployment readiness agent schema is unsupported");
   digest("deployment readiness agent digest", report.readiness_digest);
   const { readiness_digest: _digest, ...withoutDigest } = report;
   if (digestJsonSync(withoutDigest) !== report.readiness_digest) throw new ArgumentError("deployment readiness agent digest does not match its metadata");
   if (report.secret_material !== "never_returned" || report.execution !== "not_started; no_provider_or_tool_calls") throw new ArgumentError("deployment readiness agent report has an unsafe execution posture");
+  if (!isObject(report.model_inventory_readiness) || report.model_inventory_readiness.schema !== "bioprism-typescript-autonomous-model-inventory-readiness/0.1" || report.model_inventory_readiness.execution !== "provider_readiness_projection_only;no_discovery_or_invocation" || report.model_inventory_readiness.secret_material !== "never_returned") throw new ArgumentError("deployment readiness agent model inventory readiness is malformed");
+  if (!Array.isArray(report.model_inventory_readiness.domains) || report.model_inventory_readiness.domains.length !== AUTONOMOUS_DOMAIN_NAMES.length) throw new ArgumentError("deployment readiness agent model inventory readiness must cover all built-in domains");
+  if (typeof report.model_inventory_readiness.readiness_digest !== "string" || !/^[0-9a-f]{64}$/.test(report.model_inventory_readiness.readiness_digest)) throw new ArgumentError("deployment readiness agent model inventory readiness digest is malformed");
+  const { readiness_digest: _inventoryDigest, execution: _inventoryExecution, selection_posture: _inventorySelectionPosture, retention: _inventoryRetention, secret_material: _inventorySecretMaterial, ...withoutInventoryMarkers } = report.model_inventory_readiness;
+  if (digestJsonSync(withoutInventoryMarkers) !== report.model_inventory_readiness.readiness_digest) throw new ArgumentError("deployment readiness agent model inventory readiness digest does not match its metadata");
   if (!Array.isArray(report.domains) || report.domains.length !== AUTONOMOUS_DOMAIN_NAMES.length) throw new ArgumentError("deployment readiness agent report must cover all built-in domains");
   const seen = new Set<string>();
   for (const [index, row] of report.domains.entries()) {

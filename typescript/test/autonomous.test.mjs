@@ -2267,6 +2267,10 @@ test("keyless readiness audits every built-in domain without contacting provider
   assert.equal(new Set(report.domains.map((row) => row.domain)).size, 12);
   assert.ok(report.domains.every((row) => row.state === "ready_for_caller_approval"));
   assert.equal(report.readiness_state, "ready_for_caller_approval");
+  assert.equal(report.model_inventory_readiness.readiness, "ready");
+  assert.equal(report.model_inventory_readiness.domains.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(report.model_inventory_readiness.domains.every((row) => row.coverage_state === "complete" && row.eligible_model_count === 1));
+  assert.match(report.model_inventory_readiness.readiness_digest, /^[0-9a-f]{64}$/);
   assert.deepEqual(report.models[0].compatible_domains, profiles.map((profile) => profile.domain));
   assert.deepEqual(report.models[0].eligible_domains, profiles.map((profile) => profile.domain));
   assert.equal(report.learning.configured, false);

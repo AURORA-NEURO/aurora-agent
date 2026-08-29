@@ -8,6 +8,11 @@ digest-bound artifact that can be validated after restart. The projection is pro
 does not mutate the catalogue, invoke a model, or treat operational readiness as evaluator truth;
 the existing authenticated discovery snapshot remains a separate lifecycle.
 
+The canonical TypeScript agent readiness report now embeds that same inventory readiness artifact
+and binds its nested digest into the outer readiness digest. Deployment readiness and launch
+preflight therefore consume one coherent model gate, including transient candidate overrides,
+without introducing provider discovery or invocation into startup audits.
+
 The TypeScript `AutonomousBrainFacade` now exposes the protected BYOK model path: session-bound
 model discovery, candidate normalization, and digest-bound all-domain inventory reconciliation.
 This closes the user-facing bridge between credential collection and actual model selection

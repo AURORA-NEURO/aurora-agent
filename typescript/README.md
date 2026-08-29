@@ -305,6 +305,12 @@ exception. A model is eligible only when its provider is registered, its declare
 and token limits satisfy the domain, its provider circuit is not open, and its credential gate is
 ready. `ready_for_caller_approval` still does not authorize a provider call or an effect.
 
+The same report now embeds `model_inventory_readiness`, the canonical digest-bound inventory
+projection used by the readiness audit. Its twelve rows preserve the exact compatible and
+eligible `provider/model` IDs plus provider registration, credential, and circuit posture. This
+keeps a readiness screen from having to reconcile two independently generated model gates; the
+nested projection is still operational metadata only and does not claim evaluator quality.
+
 Tool names are compared against the caller-owned `ToolCatalogue` as metadata only. Missing tools
 are reported per domain, while catalogue registration remains separate from tool authorization and
 effect approval. Learning is likewise reported as configuration (`AutonomousOnlineLearner`) and
