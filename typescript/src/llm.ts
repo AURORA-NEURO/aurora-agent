@@ -2886,6 +2886,14 @@ export class LLMRuntime {
     }
     const started = nowMs();
     let outcome: ProviderInvocationOutcome | null = null;
+    let doneSeen = false;
+    let emittedEventCount = 0;
+    const validateEvent = (event: ProviderStreamEvent): ProviderStreamEvent => {
+      if (doneSeen) throw new ProviderRuntimeError("provider stream emitted an event after its terminal done event", { code: "invalid_response" });
+      emittedEventCount += 1;
+      if (event.done) doneSeen = true;
+      return event;
+    };
     try {
       if (config.transport) {
         const circuit = this.circuits.get(provider) ?? { consecutiveFailures: 0, openedUntil: null };
@@ -2894,7 +2902,8 @@ export class LLMRuntime {
         if (circuit.openedUntil !== null) { circuit.openedUntil = null; circuit.consecutiveFailures = 0; }
         try {
           quotaReservation?.markDispatched();
-          for await (const event of streamLocalTransport(config, request)) yield event;
+          for await (const event of streamLocalTransport(config, request)) yield validateEvent(event);
+          if (!doneSeen) throw new ProviderRuntimeError("provider stream ended without a done event", { retryable: emittedEventCount === 0, code: "invalid_response" });
           circuit.consecutiveFailures = 0;
           circuit.openedUntil = null;
           this.record(provider, request.model, true, Math.max(0, nowMs() - started), 200);
@@ -2931,10 +2940,16 @@ export class LLMRuntime {
             const parsed = parseSseFrame(frame);
             if (!parsed) continue;
             if (parsed.data === "[DONE]") {
+              // Chat Completions commonly emits a finish_reason terminal event followed by
+              // the [DONE] framing sentinel. The sentinel is not a second provider event.
+              if (doneSeen) continue;
               const calls = finalizeCalls(config.protocol === "anthropic_messages" ? state.anthropicCalls : state.calls);
+              for (const call of calls) {
+                state.sequence += 1;
+                yield validateEvent(streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", state.usage, false, call));
+              }
               state.sequence += 1;
-              yield streamEvent(provider, state.model, state.sequence, "stream.done", state.requestId, "", state.usage, true, undefined);
-              for (const call of calls) { state.sequence += 1; yield streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", state.usage, false, call); }
+              yield validateEvent(streamEvent(provider, state.model, state.sequence, "stream.done", state.requestId, "", state.usage, true, undefined));
               continue;
             }
             let payload: JsonObject;
@@ -2947,10 +2962,16 @@ export class LLMRuntime {
               state.sequence += 1;
               if (state.sequence > MAX_PROVIDER_STREAM_EVENTS) throw new ProviderRuntimeError("provider stream exceeded its event bound");
               if (projected.calls?.length) {
-                yield streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", projected.usage ?? state.usage, false, projected.calls[0]);
-                for (const call of projected.calls.slice(1)) { state.sequence += 1; yield streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", projected.usage ?? state.usage, false, call); }
+                for (const [index, call] of projected.calls.entries()) {
+                  if (index > 0) state.sequence += 1;
+                  yield validateEvent(streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", projected.usage ?? state.usage, false, call));
+                }
+                if (projected.done) {
+                  state.sequence += 1;
+                  yield validateEvent(streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, "", projected.usage ?? state.usage, true, undefined));
+                }
               } else {
-                yield streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, projected.text ?? "", projected.usage ?? state.usage, projected.done ?? false);
+                yield validateEvent(streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, projected.text ?? "", projected.usage ?? state.usage, projected.done ?? false));
               }
             }
           }
@@ -2958,18 +2979,38 @@ export class LLMRuntime {
             const final = decoder.decode();
             if (final) buffer += final;
             const parsed = parseSseFrame(buffer);
-            if (parsed && parsed.data !== "[DONE]") {
+            if (parsed?.data === "[DONE]" && !doneSeen) {
+              const calls = finalizeCalls(config.protocol === "anthropic_messages" ? state.anthropicCalls : state.calls);
+              for (const call of calls) {
+                state.sequence += 1;
+                yield validateEvent(streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", state.usage, false, call));
+              }
+              state.sequence += 1;
+              yield validateEvent(streamEvent(provider, state.model, state.sequence, "stream.done", state.requestId, "", state.usage, true, undefined));
+            } else if (parsed && parsed.data !== "[DONE]") {
               let payload: JsonObject;
               try { const decodedPayload: unknown = JSON.parse(parsed.data); if (!isObject(decodedPayload)) throw new Error(); payload = decodedPayload as JsonObject; } catch { throw new ProviderRuntimeError("provider stream contained invalid JSON"); }
               for (const projected of projectStreamPayload(config.protocol, parsed.event, payload, state, request)) {
                 state.sequence += 1;
-                yield streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, projected.text ?? "", projected.usage ?? state.usage, projected.done ?? false, projected.calls?.[0]);
+                if (projected.calls?.length) {
+                  for (const [index, call] of projected.calls.entries()) {
+                    if (index > 0) state.sequence += 1;
+                    yield validateEvent(streamEvent(provider, state.model, state.sequence, "tool_call", state.requestId, "", projected.usage ?? state.usage, false, call));
+                  }
+                  if (projected.done) {
+                    state.sequence += 1;
+                    yield validateEvent(streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, "", projected.usage ?? state.usage, true, undefined));
+                  }
+                } else {
+                  yield validateEvent(streamEvent(provider, state.model, state.sequence, projected.type, state.requestId, projected.text ?? "", projected.usage ?? state.usage, projected.done ?? false));
+                }
               }
             }
             break;
           }
         }
       } finally { reader.releaseLock(); }
+      if (!doneSeen) throw new ProviderRuntimeError("provider stream ended without a done event", { retryable: emittedEventCount === 0, code: "invalid_response" });
       this.record(provider, request.model, true, Math.max(0, nowMs() - started), 200);
       outcome = { success: true, status: "completed", latencyMs: Math.max(0, nowMs() - started), inputTokens: metadata.inputTokens, outputTokens: 0, statusCode: 200 };
     } catch (unknownError) {
@@ -3017,7 +3058,8 @@ export class LLMRuntime {
         requestId = event.requestId ?? requestId;
         done = done || event.done;
       }
-      if (!done && text.join("").length === 0 && calls.length === 0) throw new ProviderRuntimeError("provider stream contained no assistant output");
+      if (!done) throw new ProviderRuntimeError("provider stream ended without a done event", { retryable: text.length === 0 && calls.length === 0, code: "invalid_response" });
+      if (text.join("").length === 0 && calls.length === 0) throw new ProviderRuntimeError("provider stream contained no assistant output");
       const outputText = text.join("");
       let structured: JsonValue | null = null;
       if (!calls.length && dispatchedRequest.requireJson) {

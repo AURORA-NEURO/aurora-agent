@@ -183,6 +183,51 @@ def test_live_provider_stream_boundary_completes_only_after_exhaustion_and_block
         list(runtime.invoke_stream("offline-complete-stream", request))
 
 
+def test_collected_provider_stream_requires_a_terminal_done_event() -> None:
+    runtime = LLMRuntime()
+
+    def stream_handler(request: ProviderRequest):
+        yield ProviderStreamEvent(
+            provider="offline-incomplete-stream",
+            model=request.model,
+            sequence=0,
+            event_type="text",
+            text_delta="partial output",
+        )
+
+    runtime.register_in_memory_provider("offline-incomplete-stream", lambda _request: "unused", stream_handler=stream_handler)
+    with pytest.raises(ProviderError, match="ended without a done event"):
+        runtime.collect_stream(
+            "offline-incomplete-stream",
+            ProviderRequest(model="stream-model", messages=({"role": "user", "content": "prompt"},)),
+        )
+
+
+def test_provider_stream_terminal_event_can_finalize_tool_calls_without_post_terminal_events() -> None:
+    runtime = LLMRuntime()
+
+    def stream_handler(request: ProviderRequest):
+        yield ProviderStreamEvent(
+            provider="offline-tool-stream",
+            model=request.model,
+            sequence=0,
+            event_type="tool.done",
+            tool_call=ProviderToolCall(call_id="call-1", name="lookup", arguments={"query": "safe"}),
+            done=True,
+        )
+
+    runtime.register_in_memory_provider("offline-tool-stream", lambda _request: "unused", stream_handler=stream_handler)
+    response = runtime.collect_stream(
+        "offline-tool-stream",
+        ProviderRequest(
+            model="stream-model",
+            messages=({"role": "user", "content": "prompt"},),
+            tools=(ProviderTool("lookup", description="lookup", parameters={"type": "object"}),),
+        ),
+    )
+    assert [call.name for call in response.tool_calls] == ["lookup"]
+
+
 def test_live_provider_stream_boundary_marks_abandoned_iterator_uncertain() -> None:
     journal = InMemoryAutonomousEffectJournal(clock=lambda: 14)
     boundary = AutonomousEffectBoundary(journal=journal)

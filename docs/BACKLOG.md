@@ -1,5 +1,13 @@
 # Remaining backlog
 
+The provider runtime now enforces one terminal boundary across both SDKs. A stream that ends
+without a `done` event is rejected as an `invalid_response`, post-terminal events are refused,
+and provider finish frames plus `[DONE]` sentinels are normalized without duplicate completion.
+Finalized tool calls are delivered before the terminal event. This prevents partial provider
+responses from being reported as successful and gives every autonomous domain the same
+provider-neutral completion contract. Offline regression coverage exercises missing terminals,
+terminal tool calls, collection, and the existing live effect boundary.
+
 The TypeScript and Python provider bridges now expose a first-class autonomous live-stream
 contract. TypeScript performs one authoritative model selection, compacts the exact dispatch
 request, and opens a fixed continuation ladder; Python accepts the already-ranked arm order from

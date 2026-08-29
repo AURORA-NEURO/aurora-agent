@@ -612,6 +612,20 @@ test("stream collection projects SSE deltas and bounded completion", async () =>
   assert.equal(response.statusCode, 200);
 });
 
+test("stream collection accepts a terminal sentinel at body EOF", async () => {
+  const sse = [
+    'data: {"choices":[{"delta":{"content":"complete"}}]}',
+    "data: [DONE]",
+  ].join("\n\n");
+  const runtime = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => new Response(sse, { headers: { "content-type": "text/event-stream" } }),
+  });
+  runtime.registerProvider(openaiCompatibleProvider("stream-eof-gateway", "https://stream-eof.test", { requiresCredential: false }));
+  const response = await runtime.collectStream("stream-eof-gateway", request());
+  assert.equal(response.text, "complete");
+});
+
 test("provider invocation effect boundary projects transient responses and blocks blind replay", async () => {
   const journal = new InMemoryAutonomousEffectJournal();
   let calls = 0;
@@ -682,6 +696,39 @@ test("live provider stream boundary completes only after exhaustion and blocks r
   await assert.rejects(async () => {
     for await (const _event of runtime.invokeStream("offline-complete-stream", input)) { /* replay */ }
   }, AutonomousEffectReconciliationRequiredError);
+});
+
+test("collected provider streams require a terminal done event", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("offline-incomplete-stream", () => "unused", {
+    stream: (input) => [{ provider: "offline-incomplete-stream", model: input.model, sequence: 0, eventType: "text", textDelta: "partial output", requestId: null, usage: {}, done: false }],
+  });
+  await assert.rejects(
+    () => runtime.collectStream("offline-incomplete-stream", request("stream-model")),
+    (error) => error instanceof ProviderRuntimeError && error.code === "invalid_response" && error.message.includes("ended without a done event"),
+  );
+});
+
+test("provider stream terminal events may carry finalized tool calls", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("offline-tool-stream", () => "unused", {
+    stream: (input) => [{
+      provider: "offline-tool-stream",
+      model: input.model,
+      sequence: 0,
+      eventType: "tool.done",
+      textDelta: "",
+      requestId: null,
+      usage: {},
+      done: true,
+      toolCall: { id: "call-1", name: "lookup", arguments: { query: "safe" } },
+    }],
+  });
+  const response = await runtime.collectStream("offline-tool-stream", {
+    ...request("stream-model"),
+    tools: [{ name: "lookup", description: "lookup", parameters: { type: "object" } }],
+  });
+  assert.deepEqual(response.toolCalls.map((call) => call.name), ["lookup"]);
 });
 
 test("closing a dispatched live provider stream records uncertainty", async () => {

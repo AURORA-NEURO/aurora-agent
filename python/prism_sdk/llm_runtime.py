@@ -4447,6 +4447,12 @@ class LLMRuntime:
                 model = event.model or model
                 if event.done:
                     terminal_type = event.event_type
+            if terminal_type is None:
+                raise ProviderError(
+                    "provider stream ended without a done event",
+                    retryable=event_count == 0,
+                    code="invalid_response",
+                )
             if not text_parts and not tool_calls:
                 raise ProviderError("provider stream contained no assistant text or tool call")
             text = "".join(text_parts)
@@ -4656,7 +4662,24 @@ class LLMRuntime:
     ) -> Iterator[ProviderStreamEvent]:
         started = time.perf_counter()
         try:
-            yield from self._stream_with_circuit(config, body, headers, request)
+            done_seen = False
+            event_count = 0
+            for event in self._stream_with_circuit(config, body, headers, request):
+                if done_seen:
+                    raise ProviderError(
+                        "provider stream emitted an event after its terminal done event",
+                        code="invalid_response",
+                    )
+                event_count += 1
+                if event.done:
+                    done_seen = True
+                yield event
+            if not done_seen:
+                raise ProviderError(
+                    "provider stream ended without a done event",
+                    retryable=event_count == 0,
+                    code="invalid_response",
+                )
         except ProviderError as error:
             self._notify_observation(
                 config,
@@ -4751,9 +4774,15 @@ class LLMRuntime:
                 "request_id": None,
                 "calls": {},
             }
+            done_seen = False
             sequence = 0
             for event_name, data in _iter_sse_frames(response, config.max_response_bytes):
                 if data.strip() == "[DONE]":
+                    # Chat Completions commonly emits a finish_reason terminal event followed
+                    # by the [DONE] framing sentinel. The sentinel is not a second provider
+                    # event, so only synthesize a terminal event when one was not emitted.
+                    if done_seen:
+                        continue
                     specs = _finalize_stream_tool_calls(config.protocol, state)
                     specs.append({"event_type": "stream.done", "done": True})
                 else:
@@ -4780,6 +4809,8 @@ class LLMRuntime:
                         raise ProviderError("provider stream text exceeded the bounded size")
                     if event.tool_name is not None and event.tool_name not in {tool.name for tool in request.tools}:
                         raise ProviderError("provider returned an unrequested streamed tool call")
+                    if event.done:
+                        done_seen = True
                     yield event
         except (OSError, http.client.HTTPException) as error:
             raise ProviderError(
@@ -6580,6 +6611,9 @@ def _project_stream_payload(
                         }
                     )
                     handled = True
+            if isinstance(payload.get("usage"), Mapping):
+                specs.append({"event_type": event_type, "usage": dict(payload["usage"])})
+                handled = True
             finish_reason = choice.get("finish_reason")
             if finish_reason == "tool_calls":
                 specs.extend(_finalize_stream_tool_calls(protocol, state))
@@ -6588,9 +6622,6 @@ def _project_stream_payload(
             elif finish_reason is not None:
                 specs.append({"event_type": event_type, "done": True})
                 handled = True
-        if isinstance(payload.get("usage"), Mapping):
-            specs.append({"event_type": event_type, "usage": dict(payload["usage"])})
-            handled = True
     else:
         if event_type == "message_start":
             message = payload.get("message")

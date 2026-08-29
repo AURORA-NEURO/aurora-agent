@@ -5873,6 +5873,16 @@ after yielding deltas, or a process that disappears before exhaustion leaves the
 Completed streams are never replayed because deltas are intentionally not cached; applications
 must use a provider status endpoint or durable outbox to reconcile the remote outcome.
 
+The low-level provider stream boundary also enforces terminal integrity rather than trusting
+transport exhaustion. Every successful stream must contain exactly one provider-neutral `done`
+event; a body that ends after text or tool deltas without that event is classified as a redacted
+`invalid_response`, and any event after the terminal boundary is rejected. Provider protocols that
+use both a finish-reason frame and a `[DONE]` framing sentinel are normalized to one terminal
+event. Finalized tool calls are emitted before that terminal event, so consumers can persist or
+authorize the complete tool-call set without observing a false early completion. This invariant
+is implemented in both SDKs and is inherited by direct invocation, autonomous selection,
+continuation tool loops, cross-domain fan-out, and all twelve built-in domain adapters.
+
 The higher-level autonomous stream bridge now composes that transport boundary with model
 selection. TypeScript's `AutonomousRuntime.invokeStream()` selects once, compacts the exact
 request, compiles the same fixed continuation ladder used by direct invocations, and returns

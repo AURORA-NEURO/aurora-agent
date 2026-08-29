@@ -302,6 +302,7 @@ def _stream_payload(model: str, body: Mapping[str, Any]) -> bytes:
             + model
             + '","choices":[{"delta":{"content":"fixture-stream"}}]}\n\n',
             'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}\n\n',
+            "data: [DONE]\n\n",
         )
     return "".join(frames).encode("utf-8")
 
