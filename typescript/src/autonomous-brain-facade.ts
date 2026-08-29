@@ -116,7 +116,22 @@ import type {
   AutonomousWorkflowPortfolioAdmission,
   AutonomousWorkflowPortfolioAdmissionOptions,
 } from "./autonomous-workflow-portfolio-admission.js";
-import type { AutonomousWorkflowPortfolioItemRequest } from "./autonomous-workflow-portfolio.js";
+import type {
+  AutonomousWorkflowPortfolioItemRequest,
+  AutonomousWorkflowPortfolioPlan,
+  AutonomousWorkflowPortfolioPlanOptions,
+  AutonomousWorkflowPortfolioVerification,
+} from "./autonomous-workflow-portfolio.js";
+import type {
+  AutonomousWorkflowPortfolioExecutionOptions,
+  AutonomousWorkflowPortfolioExecutionResult,
+} from "./autonomous-workflow-portfolio-execution.js";
+import type { AutonomousWorkflowPortfolioResumableExecutionOptions } from "./autonomous-workflow-portfolio-resumable.js";
+import type {
+  AutonomousWorkflowPortfolioEvidenceExecutionResult,
+  AutonomousWorkflowPortfolioEvidenceSupervisorOptions,
+} from "./autonomous-workflow-portfolio-evidence.js";
+import type { AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions } from "./autonomous-workflow-portfolio-evidence-resumable.js";
 import {
   auditAutonomousDomainContracts,
   type AutonomousDomainAuditOptions,
@@ -828,6 +843,15 @@ export interface AutonomousBrainAdaptiveBatchResult {
 /** Options for the keyless readiness audit exposed at the application boundary. */
 export type AutonomousBrainReadinessOptions = Parameters<AutonomousAgent["readiness"]>[0];
 export type AutonomousBrainReadinessReport = Awaited<ReturnType<AutonomousAgent["readiness"]>>;
+export type AutonomousBrainWorkflowPortfolioPlanOptions = AutonomousWorkflowPortfolioPlanOptions;
+export type AutonomousBrainWorkflowPortfolioPlan = AutonomousWorkflowPortfolioPlan;
+export type AutonomousBrainWorkflowPortfolioVerification = AutonomousWorkflowPortfolioVerification;
+export type AutonomousBrainWorkflowPortfolioExecutionOptions = AutonomousWorkflowPortfolioExecutionOptions;
+export type AutonomousBrainWorkflowPortfolioExecutionResult = AutonomousWorkflowPortfolioExecutionResult;
+export type AutonomousBrainWorkflowPortfolioResumableExecutionOptions = AutonomousWorkflowPortfolioResumableExecutionOptions;
+export type AutonomousBrainWorkflowPortfolioEvidenceSupervisorOptions = AutonomousWorkflowPortfolioEvidenceSupervisorOptions;
+export type AutonomousBrainWorkflowPortfolioEvidenceResumableExecutionOptions = AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions;
+export type AutonomousBrainWorkflowPortfolioEvidenceExecutionResult = AutonomousWorkflowPortfolioEvidenceExecutionResult;
 export type AutonomousBrainWorkflowPortfolioAdmissionOptions = AutonomousWorkflowPortfolioAdmissionOptions;
 export type AutonomousBrainWorkflowPortfolioAdmission = AutonomousWorkflowPortfolioAdmission;
 export type AutonomousBrainActivationState = ReturnType<AutonomousAgent["activationState"]>;
@@ -1257,6 +1281,20 @@ function validateMissionForBrain(mission: AgentMissionArgs): AgentMissionArgs {
 function missionDomains(mission: AgentMissionArgs): AutonomousDomainName[] {
   const domains = [...new Set(validateMissionForBrain(mission).steps.map((step) => domain("autonomous brain mission domain", step.domain)))];
   if (domains.length === 0) throw new ArgumentError("autonomous brain mission must declare at least one supported domain");
+  return domains;
+}
+
+function workflowPortfolioDomains(plan: Pick<AutonomousWorkflowPortfolioPlan, "items">): AutonomousDomainName[] {
+  if (!plan || !Array.isArray(plan.items) || plan.items.length < 1) throw new ArgumentError("autonomous brain workflow portfolio launch admission requires a non-empty plan");
+  const domains = [...new Set(plan.items.map((item, index) => domain(`autonomous brain workflow portfolio item ${index} domain`, item.domain)))];
+  if (domains.length < 1) throw new ArgumentError("autonomous brain workflow portfolio plan must declare at least one domain");
+  return domains;
+}
+
+function workflowPortfolioExecutionDomains(execution: Pick<AutonomousWorkflowPortfolioExecutionResult, "items">): AutonomousDomainName[] {
+  if (!execution || !Array.isArray(execution.items) || execution.items.length < 1) throw new ArgumentError("autonomous brain workflow portfolio launch admission requires a non-empty execution");
+  const domains = [...new Set(execution.items.map((item, index) => domain(`autonomous brain workflow portfolio execution item ${index} domain`, item.domain)))];
+  if (domains.length < 1) throw new ArgumentError("autonomous brain workflow portfolio execution must declare at least one domain");
   return domains;
 }
 
@@ -3571,6 +3609,106 @@ export class AutonomousBrainFacade {
     options: AutonomousWorkflowPortfolioAdmissionOptions = {},
   ): Promise<AutonomousWorkflowPortfolioAdmission> {
     return this.agent.admitWorkflowPortfolio(requests, options);
+  }
+
+  /** Compile a dependency-aware portfolio of reviewed domain workflows without dispatch. */
+  async planWorkflowPortfolio(
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    options: AutonomousBrainWorkflowPortfolioPlanOptions = {},
+  ): Promise<AutonomousBrainWorkflowPortfolioPlan> {
+    return this.agent.planWorkflowPortfolio(requests, options);
+  }
+
+  /** Replay a caller-rehydrated workflow portfolio and report exact digest mismatches. */
+  async verifyWorkflowPortfolio(
+    plan: AutonomousBrainWorkflowPortfolioPlan,
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    options: AutonomousBrainWorkflowPortfolioPlanOptions = {},
+  ): Promise<AutonomousBrainWorkflowPortfolioVerification> {
+    return this.agent.verifyWorkflowPortfolio(plan, requests, options);
+  }
+
+  /** Execute a reviewed workflow portfolio in bounded dependency waves. */
+  async executeWorkflowPortfolio(
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    options: AutonomousBrainWorkflowPortfolioExecutionOptions = {},
+  ): Promise<AutonomousBrainWorkflowPortfolioExecutionResult> {
+    return this.agent.executeWorkflowPortfolio(requests, options);
+  }
+
+  /** Execute a workflow portfolio only after every planned domain passes launch admission. */
+  async executeWorkflowPortfolioWithLaunchAdmission(
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainWorkflowPortfolioExecutionOptions = {},
+  ): Promise<AutonomousBrainWorkflowPortfolioExecutionResult> {
+    const plan = options.plan ?? await this.agent.planWorkflowPortfolio(requests, options.planOptions);
+    const verification = await this.agent.verifyWorkflowPortfolio(plan, requests, options.planOptions);
+    if (verification.status !== "verified") throw new ProviderRuntimeError("autonomous brain workflow portfolio plan verification failed before launch admission", { code: "protocol", retryable: false, operation: "workflow_portfolio_verify" });
+    authorizeAutonomousLaunchDomains(admission, workflowPortfolioDomains(plan));
+    return this.agent.executeWorkflowPortfolio(requests, { ...options, plan });
+  }
+
+  /** Resume a workflow portfolio after caller-owned item rehydration and digest validation. */
+  async executeWorkflowPortfolioResumable(
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    options: AutonomousBrainWorkflowPortfolioResumableExecutionOptions,
+  ): Promise<AutonomousBrainWorkflowPortfolioExecutionResult> {
+    return this.agent.executeWorkflowPortfolioResumable(requests, options);
+  }
+
+  /** Resume a workflow portfolio only after every checkpointed domain passes launch admission. */
+  async executeWorkflowPortfolioResumableWithLaunchAdmission(
+    requests: readonly AutonomousWorkflowPortfolioItemRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainWorkflowPortfolioResumableExecutionOptions,
+  ): Promise<AutonomousBrainWorkflowPortfolioExecutionResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain resumable workflow portfolio options must be an object");
+    const plan = options.plan ?? await this.agent.planWorkflowPortfolio(requests, options.planOptions);
+    const verification = await this.agent.verifyWorkflowPortfolio(plan, requests, options.planOptions);
+    if (verification.status !== "verified") throw new ProviderRuntimeError("autonomous brain resumable workflow portfolio plan verification failed before launch admission", { code: "protocol", retryable: false, operation: "workflow_portfolio_verify" });
+    authorizeAutonomousLaunchDomains(admission, workflowPortfolioDomains(plan));
+    return this.agent.executeWorkflowPortfolioResumable(requests, { ...options, plan });
+  }
+
+  /** Supervise caller-owned evidence for a completed workflow portfolio without provider replay. */
+  async executeWorkflowPortfolioEvidence(
+    execution: AutonomousBrainWorkflowPortfolioExecutionResult,
+    options: AutonomousBrainWorkflowPortfolioEvidenceSupervisorOptions,
+  ): Promise<AutonomousBrainWorkflowPortfolioEvidenceExecutionResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain workflow portfolio evidence options must be an object");
+    return this.agent.executeWorkflowPortfolioEvidence(execution, options);
+  }
+
+  /** Supervise portfolio evidence only after every execution domain passes launch admission. */
+  async executeWorkflowPortfolioEvidenceWithLaunchAdmission(
+    execution: AutonomousBrainWorkflowPortfolioExecutionResult,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainWorkflowPortfolioEvidenceSupervisorOptions,
+  ): Promise<AutonomousBrainWorkflowPortfolioEvidenceExecutionResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain workflow portfolio evidence options must be an object");
+    authorizeAutonomousLaunchDomains(admission, workflowPortfolioExecutionDomains(execution));
+    return this.agent.executeWorkflowPortfolioEvidence(execution, options);
+  }
+
+  /** Resume portfolio evidence through caller-owned checkpoints and journal rehydration. */
+  async executeWorkflowPortfolioEvidenceResumable(
+    execution: AutonomousBrainWorkflowPortfolioExecutionResult,
+    options: AutonomousBrainWorkflowPortfolioEvidenceResumableExecutionOptions,
+  ): Promise<AutonomousBrainWorkflowPortfolioEvidenceExecutionResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain resumable workflow portfolio evidence options must be an object");
+    return this.agent.executeWorkflowPortfolioEvidenceResumable(execution, options);
+  }
+
+  /** Resume portfolio evidence only after every execution domain passes launch admission. */
+  async executeWorkflowPortfolioEvidenceResumableWithLaunchAdmission(
+    execution: AutonomousBrainWorkflowPortfolioExecutionResult,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainWorkflowPortfolioEvidenceResumableExecutionOptions,
+  ): Promise<AutonomousBrainWorkflowPortfolioEvidenceExecutionResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain resumable workflow portfolio evidence options must be an object");
+    authorizeAutonomousLaunchDomains(admission, workflowPortfolioExecutionDomains(execution));
+    return this.agent.executeWorkflowPortfolioEvidenceResumable(execution, options);
   }
 
   /**

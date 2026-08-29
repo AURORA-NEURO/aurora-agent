@@ -1896,6 +1896,19 @@ specialists to participate in one bounded workflow.
 
 ### Resumable workflow execution
 
+The application-facing `AutonomousBrainFacade` exposes the multi-domain continuation directly:
+`planWorkflowPortfolio()` compiles a provider-free dependency graph,
+`verifyWorkflowPortfolio()` replays its request/plan identity, and
+`executeWorkflowPortfolio()` runs the ready items in bounded waves. The resumable facade method
+`executeWorkflowPortfolioResumable()` adds digest-bound checkpoint and settled-item rehydration.
+Each launch-admitted form verifies the request list before authorizing every planned domain, so a
+held or stale deployment decision cannot reach provider dispatch. The evidence counterparts,
+`executeWorkflowPortfolioEvidence()` and `executeWorkflowPortfolioEvidenceResumable()`, reuse
+provider execution without replay and keep raw evidence values in caller-owned runtimes; their
+launch-admitted forms gate the execution domains before source acquisition. This is a composition
+layer over the existing portfolio kernels: plans, approvals, credential handles, persistence,
+journals, evaluator callbacks, and transient outputs remain explicit caller responsibilities.
+
 `AutonomousWorkflowExecutor` is the TypeScript stage-execution bridge for a single reviewed domain
 workflow. It consumes the blueprint DAG, invokes one stage at a time through `AutonomousAgent`,
 and saves a checkpoint after every completed stage. `maxStages` bounds one worker call; the executor

@@ -13463,3 +13463,33 @@ terminal statuses. If a cycle is held at route, plan, provider, or evaluator rev
 preserves that non-success state. The trace never stores evaluator evidence, retry guidance,
 learning values, stage output, task text, prompts, credentials, or tool payloads; caller-owned
 cycle state and trace persistence remain separate restart boundaries.
+
+### High-level workflow portfolio lifecycle
+
+The same facade now composes the complete multi-domain workflow portfolio lifecycle rather than
+exposing admission alone. `planWorkflowPortfolio()` builds a provider-free dependency graph and
+one digest-bound reviewed workflow item per request. `verifyWorkflowPortfolio()` replays the
+caller-rehydrated request list and returns exact item-level mismatch codes before any provider,
+connector, tool, credential, evaluator, or effect boundary. The compiler supports all twelve
+built-in domains, explicit cross-domain dependencies, bounded parallel waves, partial plans, and
+the `requireAllDomains` coverage policy while retaining no task or hint values.
+
+`executeWorkflowPortfolio()` delegates the reviewed plan to the existing dependency-wave
+executor, and `executeWorkflowPortfolioResumable()` delegates to the checkpoint/re-hydration
+controller. These facade methods do not create hidden persistence or approval state: the caller
+continues to own plans, admissions, model candidates, credential handles, provider approval,
+settled result rehydration, checkpoint sinks, and transient outputs. The launch-admitted variants
+verify the plan against the current request list first, then require every plan domain to be
+approved by the provider-free launch admission before passing the plan to execution. This keeps
+the final authorization check ahead of dispatch even when the wrapper must compile a missing
+plan.
+
+Portfolio evidence has a matching high-level continuation through
+`executeWorkflowPortfolioEvidence()` and `executeWorkflowPortfolioEvidenceResumable()`. The
+facade preserves the separation between provider execution and evidence truth: the evidence
+supervisor reuses successful provider metadata without replay, scopes the evidence plan to each
+item domain, forwards only predecessor evidence digests, and leaves raw acquisition values,
+source credentials, projectors, evaluators, and journals transient. Evidence launch-admission
+variants authorize the domains represented by the provider execution before any evidence adapter
+is called. A held or incomplete launch report therefore cannot be bypassed by submitting a
+portfolio evidence request directly to the high-level facade.

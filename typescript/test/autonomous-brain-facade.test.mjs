@@ -98,6 +98,62 @@ function perfectWorkflowEvidence(execution) {
   };
 }
 
+function workflowPortfolioRequests(domains = AUTONOMOUS_DOMAIN_NAMES) {
+  return domains.map((domain, index) => ({
+    id: `facade-portfolio-${domain}`,
+    task: `private portfolio task for ${domain} must remain transient`,
+    domain,
+    ...(index === 0 ? {} : { dependsOn: [`facade-portfolio-${domains[index - 1]}`] }),
+    hints: [`private portfolio hint for ${domain}`],
+  }));
+}
+
+function portfolioEvidenceRequests(evidencePlan, domains = AUTONOMOUS_DOMAIN_NAMES) {
+  return domains.map((domain) => ({
+    item_id: `facade-portfolio-${domain}`,
+    requests: evidencePlan.requirements
+      .filter((requirement) => requirement.domain === domain)
+      .map((requirement, index) => ({
+        requirement_id: requirement.requirement_id,
+        source_id: `facade-evidence-source-${domain}-${index}`,
+        request_id: `facade-evidence-request-${domain}-${index}`,
+        metadata: { purpose: "bounded-facade-portfolio-evidence" },
+      })),
+  }));
+}
+
+function portfolioEvidenceRuntime() {
+  return {
+    acquirer: {
+      async acquire(context) {
+        return {
+          transient_value: "caller-owned evidence",
+          item_id: context.request.metadata.portfolio_item_id,
+          requirement_id: context.requirement.requirement_id,
+        };
+      },
+    },
+    projector: {
+      project(_value, context) {
+        return [{ label: context.requirement.label, kind: "fact", status: "observed" }];
+      },
+    },
+    evaluator: {
+      evaluator_id: "facade-portfolio-evaluator",
+      evaluator_version: "1",
+      evaluate() {
+        return {
+          evaluator_id: "facade-portfolio-evaluator",
+          evaluator_version: "1",
+          verdict: "accepted",
+          score: 1,
+          evidence_digest: "d".repeat(64),
+        };
+      },
+    },
+  };
+}
+
 async function approvedLaunchAdmission(brain) {
   const profiles = await builtinAutonomousDomainProfiles();
   const ready = { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true };
@@ -442,6 +498,74 @@ test("brain facade exposes evaluator-guided workflow cycles across every built-i
     /not approved/,
   );
   assert.equal(requests.length, attempts);
+});
+
+test("brain facade composes the reviewed workflow portfolio lifecycle across every built-in domain", async () => {
+  let providerCalls = 0;
+  const agent = new AutonomousAgent(localRuntime(() => { providerCalls += 1; }));
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const requests = workflowPortfolioRequests();
+
+  const plan = await brain.planWorkflowPortfolio(requests, { requireAllDomains: true });
+  assert.equal(plan.status, "ready");
+  assert.equal(plan.coverage.complete, true);
+  assert.equal(plan.items.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.deepEqual([...new Set(plan.items.map((item) => item.domain))].sort(), [...AUTONOMOUS_DOMAIN_NAMES].sort());
+  assert.doesNotMatch(JSON.stringify(plan), /private portfolio task|private portfolio hint/);
+
+  const verified = await brain.verifyWorkflowPortfolio(plan, requests, { requireAllDomains: true });
+  assert.equal(verified.status, "verified");
+  assert.equal(verified.replayed_item_count, AUTONOMOUS_DOMAIN_NAMES.length);
+
+  const launchAdmission = await approvedLaunchAdmission(brain);
+  const execution = await brain.executeWorkflowPortfolioWithLaunchAdmission(requests, launchAdmission, {
+    plan,
+    approveProviderCall: true,
+    maxParallelism: 3,
+  });
+  assert.equal(execution.status, "completed");
+  assert.equal(execution.items.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(execution.items.every((item) => item.status === "succeeded" && item.run?.status === "completed"));
+  assert.equal(providerCalls, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.doesNotMatch(JSON.stringify(execution), /private portfolio task|private portfolio hint|offline:/);
+
+  const evidencePlan = await agent.evidencePlan(AUTONOMOUS_DOMAIN_NAMES);
+  const evidence = await brain.executeWorkflowPortfolioEvidenceWithLaunchAdmission(execution, launchAdmission, {
+    evidencePlan,
+    items: portfolioEvidenceRequests(evidencePlan),
+    runtime: portfolioEvidenceRuntime(),
+    maxParallelism: 3,
+  });
+  assert.equal(evidence.status, "completed");
+  assert.equal(evidence.items.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.ok(evidence.items.every((item) => item.status === "completed"));
+  assert.doesNotMatch(JSON.stringify(evidence), /caller-owned evidence|private portfolio task/);
+
+  let checkpoint = null;
+  const resumable = await brain.executeWorkflowPortfolioResumable(
+    [{ id: "facade-resumable-coding", task: "resume a bounded coding portfolio item", domain: "coding" }],
+    {
+      jobId: "facade-portfolio-resumable",
+      approveProviderCall: true,
+      checkpointSink: (value) => { checkpoint = value; },
+    },
+  );
+  assert.equal(resumable.status, "completed");
+  assert.ok(checkpoint?.checkpoint_digest?.length === 64);
+  assert.equal(providerCalls, AUTONOMOUS_DOMAIN_NAMES.length + 1);
+
+  const heldPreflight = await brain.launchPreflight();
+  const heldAdmission = brain.admitLaunchPreflight(heldPreflight, { decision: "hold" });
+  await assert.rejects(
+    () => brain.executeWorkflowPortfolioWithLaunchAdmission(
+      [{ id: "held-coding", task: "held portfolio task", domain: "coding" }],
+      heldAdmission,
+      { approveProviderCall: true },
+    ),
+    /launch admission is not approved/,
+  );
+  assert.equal(providerCalls, AUTONOMOUS_DOMAIN_NAMES.length + 1, "held admission must prevent dispatch");
 });
 
 test("brain facade traces durable workflow start and restart across every built-in domain", async () => {

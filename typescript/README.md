@@ -1885,6 +1885,38 @@ identity; evaluator evidence, retry instructions, learning values, and stage res
 caller-owned. A new trace `runId` should be used for each restart attempt so the append-only
 trace does not merge separate process lifecycles implicitly.
 
+The facade now exposes the complete dependency-aware portfolio surface as well. Use
+`planWorkflowPortfolio()` for provider-free composition across coding, browser, data, science,
+biomedical, neuroscience, operations, enterprise, multi-agent, multimodal, cross-domain, and
+evaluation items; `verifyWorkflowPortfolio()` replays a caller-rehydrated request list and
+returns per-item digest mismatches. `executeWorkflowPortfolio()` runs ready items in bounded
+dependency waves, while `executeWorkflowPortfolioResumable()` adds checkpointed settled-item
+rehydration. Every provider invocation remains per-item approved and all transient task,
+prompt, provider-output, credential, and evidence values remain caller-owned.
+
+The portfolio evidence continuation is available through
+`executeWorkflowPortfolioEvidence()` and `executeWorkflowPortfolioEvidenceResumable()`. It
+reuses the provider execution without replaying it, scopes each evidence runtime to its item
+domain, propagates only bounded predecessor evidence digests, and leaves acquisition values,
+projectors, evaluators, journals, and source credentials outside the metadata result. The
+`WithLaunchAdmission()` variants for portfolio execution and evidence first verify the exact
+portfolio plan or execution domains against the provider-free launch admission. They reject
+held, blocked, stale, or incomplete admission before dispatch, including when a plan is compiled
+inside the wrapper.
+
+```typescript
+const portfolio = await brain.planWorkflowPortfolio(requests, { requireAllDomains: true });
+const reviewed = await brain.verifyWorkflowPortfolio(portfolio, requests, { requireAllDomains: true });
+if (reviewed.status !== "verified") throw new Error("portfolio requires re-review");
+
+const execution = await brain.executeWorkflowPortfolioWithLaunchAdmission(requests, admission, {
+  plan: portfolio,
+  approveProviderCall: true,
+  maxParallelism: 4,
+});
+// Use execution.items' transient values only inside the caller's process.
+```
+
 ```typescript
 const first = await executor.start(task, {
   candidates: agent.models(),

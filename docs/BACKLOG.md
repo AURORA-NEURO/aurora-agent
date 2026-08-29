@@ -2526,3 +2526,18 @@ final cycle route/plan/checkpoint identity, and map bounded cycle statuses witho
 evaluator evidence or learning values into durable trace state. Future work is limited to
 deployment-owned trace export, operator identity, and retention policy rather than missing SDK
 execution coverage.
+
+The TypeScript `AutonomousBrainFacade` now exposes the full workflow portfolio lifecycle to match
+the lower-level agent and Python surface. `planWorkflowPortfolio()` and
+`verifyWorkflowPortfolio()` provide provider-free composition and restart replay across every
+built-in domain; `executeWorkflowPortfolio()` and
+`executeWorkflowPortfolioResumable()` provide bounded dependency-wave execution and settled-item
+rehydration. Portfolio execution launch-admission variants verify the exact request/plan identity
+before requiring all planned domains to pass the existing provider-free launch gate.
+
+The same facade boundary now exposes portfolio evidence supervision and its resumable form,
+including launch-admitted variants. Evidence execution reuses successful provider results without
+replay, scopes acquisition to each item domain, propagates only predecessor evidence digests, and
+keeps raw acquisition values, source credentials, projectors, evaluators, and journals caller
+owned. This closes the high-level application composition gap; remaining work is deployment-owned
+portfolio persistence, operator identity, and external trace/retention integration.
