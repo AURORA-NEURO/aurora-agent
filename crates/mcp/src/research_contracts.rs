@@ -393,6 +393,12 @@ use bioprism_atlashub::{
     synthesize_federated_continuum, FederatedContinualRetrievalReceipt,
     FederatedContinualRetrievalRequest, FEDERATED_CONTINUAL_RETRIEVAL_FEATURE_ID,
 };
+use bioprism_atlashub::{
+    assure_mechanism_exploration as assure_atlashub_mechanism_exploration,
+    MechanismExplorationAssuranceReceipt as AtlashubMechanismExplorationAssuranceReceipt,
+    MechanismExplorationAssuranceRequest as AtlashubMechanismExplorationAssuranceRequest,
+    MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID as ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
+};
 use bioprism_conformance::context_compilation_federated_control_plane::{
     operate_context_compilation_federated_control, ContextCompilationFederatedControlReceipt,
     ContextCompilationFederatedControlRequest,
@@ -403,7 +409,7 @@ use bioprism_conformance::{
     CertifiedDecisionSection7 as ConformanceCertifiedDecisionSection7,
     ContextPeer2 as ConformanceContextPeer2, DecisionFact2 as ConformanceDecisionFact2,
     DecisionQuery2 as ConformanceDecisionQuery2,
-    FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+    FEATURE_ID as CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
 };
 use bioprism_devplat::{
     assure_context_compilation, ContextCompilationAssuranceReceipt,
@@ -701,6 +707,8 @@ pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLAN
     "adapter_federated_continual_retrieval_synthesis_federated_control_plane";
 pub const FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_TOOL: &str =
     "foundation_mechanism_exploration_assurance";
+pub const ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_TOOL: &str =
+    "atlashub_mechanism_exploration_assurance";
 pub const ORACLEX_PUBLICATION_RELEASE_TOOL: &str = "oraclex_publication_release";
 pub const INTERWEAVE_FRONTIER_CONTROL_TOOL: &str = "interweave_frontier_control";
 pub const ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_TOOL: &str =
@@ -2309,6 +2317,28 @@ pub fn validate_foundation_mechanism_exploration_assurance_json(
     }
     Ok(receipt)
 }
+
+pub fn run_atlashub_mechanism_exploration_assurance_json(value: &Value) -> Result<Value, String> {
+    let request: AtlashubMechanismExplorationAssuranceRequest = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid atlashub mechanism assurance request: {error}"))?;
+    let receipt = assure_atlashub_mechanism_exploration(&request)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| {
+        format!("cannot serialize atlashub mechanism assurance receipt: {error}")
+    })
+}
+
+pub fn validate_atlashub_mechanism_exploration_assurance_json(
+    value: &Value,
+) -> Result<AtlashubMechanismExplorationAssuranceReceipt, String> {
+    let receipt: AtlashubMechanismExplorationAssuranceReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid atlashub mechanism assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID {
+        return Err("atlashub mechanism assurance feature id mismatch".into());
+    }
+    Ok(receipt)
+}
 pub fn run_oraclex_publication_release_json(value: &Value) -> Result<Value, String> {
     let request: PublicationReleaseRequest = serde_json::from_value(value.clone())
         .map_err(|error| format!("invalid oraclex publication release request: {error}"))?;
@@ -3453,7 +3483,7 @@ pub fn run_conformance_context_compilation_assurance_json(value: &Value) -> Resu
 pub fn validate_conformance_context_compilation_assurance_json(value: &Value) -> Result<ConformanceCertifiedDecisionSection7, String> {
     let receipt: ConformanceCertifiedDecisionSection7 = serde_json::from_value(value.clone()).map_err(|error| format!("invalid conformance context assurance receipt: {error}"))?;
     receipt.validate().map_err(|error| error.to_string())?;
-    if receipt.feature_id != CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID { return Err("conformance context assurance feature id mismatch".into()); }
+    if receipt.feature_id != CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID { return Err("conformance context assurance feature id mismatch".into()); }
     Ok(receipt)
 }
 

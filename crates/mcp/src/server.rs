@@ -2033,6 +2033,9 @@ impl Server {
             "foundation_mechanism_exploration_assurance" => {
                 self.foundation_mechanism_exploration_assurance(&arguments)
             }
+            "atlashub_mechanism_exploration_assurance" => {
+                self.atlashub_mechanism_exploration_assurance(&arguments)
+            }
             "oraclex_publication_release" => self.oraclex_publication_release(&arguments),
             "interweave_frontier_control" => self.interweave_frontier_control(&arguments),
             "influence_federated_continual_interpretation" => {
@@ -26219,6 +26222,33 @@ impl Server {
         )
     }
 
+    fn atlashub_mechanism_exploration_assurance(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be an Atlashub MechanismExplorationAssuranceRequest")?;
+        let receipt = crate::research_contracts::run_atlashub_mechanism_exploration_assurance_json(
+            request,
+        )?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_atlashub::MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "A1 assurance evaluates prospective high-throughput mechanism candidates against typed evidence, provenance, artifact, comparability, baseline, replay, policy, approval, protected-closure, and capacity gates",
+                "unknown, speculative, contradicted, below-threshold, omitted, negative, and required-but-not-admitted candidates remain explicit",
+                "non-qualified portfolios fail closed with block:unsafe-release and raw preclinical data remains local"
+            ],
+            "limitations": [
+                "the assurance harness is not a clinical decision system",
+                "operators remain responsible for independent replication, causal interpretation, baseline selection, and release governance"
+            ]
+        }))
+    }
+
     fn oraclex_publication_release(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -42062,6 +42092,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "foundation_mechanism_exploration_assurance",
             "description": "Assure a prospective high-throughput mechanism-exploration candidate batch with typed evidence/provenance/comparability, baseline, replay, capacity, policy, approval, protected-closure, negative-result, and fail-closed release gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MechanismExplorationAssuranceRequest with candidate evidence digests, baseline/algorithm identity, support threshold, bounded capacity, required mechanisms, policy/approval/closure/locality controls, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "atlashub_mechanism_exploration_assurance",
+            "description": "Assure an Atlashub prospective high-throughput mechanism-exploration candidate batch with typed evidence/provenance/comparability, baseline, replay, capacity, policy, approval, protected-closure, negative-result, and fail-closed release gates.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized Atlashub MechanismExplorationAssuranceRequest with candidate evidence digests, baseline/algorithm identity, support threshold, bounded capacity, required mechanisms, policy/approval/closure/locality controls, replay identity, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "oraclex_publication_release",
