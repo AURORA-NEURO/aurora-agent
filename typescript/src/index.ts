@@ -823,23 +823,30 @@ export type {
 } from "./autonomous-run-analytics-ledger.js";
 export {
   AUTONOMOUS_MODEL_INVENTORY_SCHEMA,
+  AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA,
   AUTONOMOUS_MODEL_INVENTORY_MAX_PROVIDERS,
   AUTONOMOUS_MODEL_INVENTORY_MAX_DOMAINS,
+  AUTONOMOUS_MODEL_INVENTORY_MAX_TOKENS,
   AUTONOMOUS_MODEL_INVENTORY_MAX_SNAPSHOT_BYTES,
   AutonomousModelInventoryCoordinator,
   JsonAutonomousModelInventorySnapshotPersistence,
   TransactionalJsonAutonomousModelInventorySnapshotPersistence,
+  validateAutonomousModelInventoryReadiness,
   validateAutonomousModelInventorySnapshot,
 } from "./autonomous-model-inventory.js";
 export type {
   AutonomousModelInventoryStatus,
   AutonomousModelInventoryCoverageState,
+  AutonomousModelInventoryReadinessState,
   AutonomousModelInventoryCoverage,
+  AutonomousModelInventoryReadinessDomain,
+  AutonomousModelInventoryReadiness,
   AutonomousModelInventorySnapshot,
   AutonomousModelInventoryPersistence,
   AutonomousModelInventorySnapshotTextStore,
   AutonomousModelInventoryTransactionalSnapshotTextStore,
   AutonomousModelInventoryRefreshOptions,
+  AutonomousModelInventoryReadinessOptions,
 } from "./autonomous-model-inventory.js";
 export {
   AUTONOMOUS_AGENT_LIFECYCLE_SCHEMA,
@@ -2335,6 +2342,8 @@ export type {
   AutonomousBrainModelCandidate,
   AutonomousBrainModelInventoryRefreshOptions,
   AutonomousBrainModelInventorySnapshot,
+  AutonomousBrainModelInventoryReadinessOptions,
+  AutonomousBrainModelInventoryReadiness,
   AutonomousBrainBatchItem,
   AutonomousBrainBatchResult,
   AutonomousBrainBatchCheckpointJSON,

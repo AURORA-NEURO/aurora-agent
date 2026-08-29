@@ -2657,3 +2657,11 @@ defaults)`, and `refreshModelInventory(session, specs)` keep the raw credential 
 protected session while producing sanitized discovery and all-domain inventory projections.
 Close the session after the request-scoped refresh; inventory registration does not authorize
 provider execution.
+
+For a credential-free live inventory gate, call `agent.modelInventoryReadiness()` or
+`brain.modelInventoryReadiness()`. The result is a digest-bound readiness artifact for every
+built-in domain. It separates models that are compatible by declared capability/capacity from
+models that are eligible after provider registration, opaque credential readiness, and circuit
+checks. It performs no discovery or provider invocation and never promotes compatibility into
+quality, evaluator approval, or execution authority. `validateAutonomousModelInventoryReadiness`
+can replay the metadata-only artifact after persistence or process restart.

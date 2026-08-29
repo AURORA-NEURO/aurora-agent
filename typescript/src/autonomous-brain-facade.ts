@@ -125,6 +125,8 @@ import type {
   AutonomousAgentPersistenceLifecycleReport,
 } from "./autonomous-agent-lifecycle.js";
 import type {
+  AutonomousModelInventoryReadiness,
+  AutonomousModelInventoryReadinessOptions,
   AutonomousModelInventoryRefreshOptions,
   AutonomousModelInventorySnapshot,
 } from "./autonomous-model-inventory.js";
@@ -962,6 +964,8 @@ export type AutonomousBrainModelCandidateDefaults = AutonomousModelCandidateDefa
 export type AutonomousBrainModelCandidate = AutonomousModelCandidate;
 export type AutonomousBrainModelInventoryRefreshOptions = Omit<AutonomousModelInventoryRefreshOptions, "credentialFor" | "credentialSession">;
 export type AutonomousBrainModelInventorySnapshot = AutonomousModelInventorySnapshot;
+export type AutonomousBrainModelInventoryReadinessOptions = AutonomousModelInventoryReadinessOptions;
+export type AutonomousBrainModelInventoryReadiness = AutonomousModelInventoryReadiness;
 
 export interface AutonomousBrainBatchItem {
   index: number;
@@ -2030,6 +2034,16 @@ export class AutonomousBrainFacade {
     options: AutonomousBrainModelInventoryRefreshOptions = {},
   ): Promise<AutonomousBrainModelInventorySnapshot> {
     return this.providerSetup.refreshModelInventory(this.agent, session, specs, options);
+  }
+
+  /**
+   * Project live model eligibility across every built-in domain without opening onboarding,
+   * discovering models, invoking a provider, or mutating the catalogue.
+   */
+  async modelInventoryReadiness(
+    options: AutonomousBrainModelInventoryReadinessOptions = {},
+  ): Promise<AutonomousBrainModelInventoryReadiness> {
+    return this.agent.modelInventoryReadiness(options);
   }
 
   /**

@@ -3349,6 +3349,31 @@ queue, and effect approvals remain independent.
 Admission-aware automatic execution uses provider-free routing; provider-assisted semantic routing
 must be reviewed as a separate classifier boundary before it can be combined with a launch record.
 
+The TypeScript inventory now has a matching provider-free live gate projection, independent of
+authenticated discovery. `agent.modelInventoryReadiness()` and
+`AutonomousBrainFacade.modelInventoryReadiness()` inspect the current registered catalogue and
+return compatible versus eligible arms for every built-in domain. Compatibility requires an
+enabled model with the reviewed capabilities and enough context/output capacity; eligibility also
+requires runtime provider registration, opaque credential readiness when required, and a circuit
+that is not open. The report is digest-bound under
+`bioprism-typescript-autonomous-model-inventory-readiness/0.1`, validates on replay, and performs
+no discovery, provider invocation, prompt construction, tool execution, evaluator settlement, or
+learner mutation:
+
+```typescript
+const readiness = await brain.modelInventoryReadiness({
+  estimatedInputTokens: 4_096,
+  requestedOutputTokens: 1_024,
+});
+// readiness.domains: all twelve built-in domains
+// readiness.domains[i].eligible_model_ids: provider/model arms safe to offer to selection
+```
+
+An arm can remain visible in `compatible_model_ids` while absent from `eligible_model_ids`, which
+lets an onboarding or operator surface distinguish insufficient model capacity from missing
+credentials, unregistered transports, or circuit holds. This is an operational gate only: it does
+not establish semantic quality, task correctness, evaluator approval, or effect authorization.
+
 ### Live model inventory synchronization
 
 `readiness()` intentionally does not contact providers. When an application wants to refresh the

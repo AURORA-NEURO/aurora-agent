@@ -1,5 +1,13 @@
 # Remaining backlog
 
+The TypeScript autonomous inventory now exposes the standalone live-readiness projection that
+Python already provides. `AutonomousAgent.modelInventoryReadiness()` and the high-level facade
+cover all twelve domains, enforce capability/capacity compatibility, join provider registration,
+opaque credential readiness, and circuit state into eligibility, and return a canonical
+digest-bound artifact that can be validated after restart. The projection is provider-free and
+does not mutate the catalogue, invoke a model, or treat operational readiness as evaluator truth;
+the existing authenticated discovery snapshot remains a separate lifecycle.
+
 The TypeScript `AutonomousBrainFacade` now exposes the protected BYOK model path: session-bound
 model discovery, candidate normalization, and digest-bound all-domain inventory reconciliation.
 This closes the user-facing bridge between credential collection and actual model selection

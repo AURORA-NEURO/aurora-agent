@@ -22,12 +22,16 @@ import type { AutonomousModelCandidate } from "./llm.js";
 
 /** Schema for a redacted provider inventory plus all-domain selection coverage. */
 export const AUTONOMOUS_MODEL_INVENTORY_SCHEMA = "bioprism-typescript-autonomous-model-inventory/0.1" as const;
+/** Schema for the live, provider-free eligibility projection. */
+export const AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA = "bioprism-typescript-autonomous-model-inventory-readiness/0.1" as const;
 export const AUTONOMOUS_MODEL_INVENTORY_MAX_PROVIDERS = AUTONOMOUS_MODEL_CATALOGUE_REFRESH_MAX_PROVIDERS;
 export const AUTONOMOUS_MODEL_INVENTORY_MAX_DOMAINS = AUTONOMOUS_DOMAIN_NAMES.length;
+export const AUTONOMOUS_MODEL_INVENTORY_MAX_TOKENS = 10_000_000;
 export const AUTONOMOUS_MODEL_INVENTORY_MAX_SNAPSHOT_BYTES = 8_000_000;
 
 export type AutonomousModelInventoryStatus = "completed" | "partial" | "failed";
 export type AutonomousModelInventoryCoverageState = "complete" | "partial" | "missing";
+export type AutonomousModelInventoryReadinessState = "ready" | "partial" | "missing";
 
 /** Domain-level model readiness derived from explicit model capabilities and provider status. */
 export interface AutonomousModelInventoryCoverage {
@@ -44,6 +48,47 @@ export interface AutonomousModelInventoryCoverage {
     credential_ready: boolean;
     circuit: string;
   }>;
+}
+
+/** Per-domain live model eligibility derived from capability, capacity, and runtime gates. */
+export interface AutonomousModelInventoryReadinessDomain {
+  schema: typeof AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA;
+  domain: AutonomousDomainName;
+  required_model_capabilities: string[];
+  compatible_model_ids: string[];
+  eligible_model_ids: string[];
+  compatible_model_count: number;
+  eligible_model_count: number;
+  coverage_state: AutonomousModelInventoryCoverageState;
+  provider_readiness: Record<string, {
+    registered: boolean;
+    credential_ready: boolean;
+    circuit: string;
+  }>;
+}
+
+/** Digest-bound, metadata-only readiness report for the current model catalogue. */
+export interface AutonomousModelInventoryReadiness {
+  schema: typeof AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA;
+  models: AutonomousModelCandidate[];
+  domains: AutonomousModelInventoryReadinessDomain[];
+  catalogue_digest: string;
+  domain_coverage_digest: string;
+  readiness: AutonomousModelInventoryReadinessState;
+  estimated_input_tokens: number;
+  requested_output_tokens: number;
+  readiness_digest: string;
+  execution: "provider_readiness_projection_only;no_discovery_or_invocation";
+  selection_posture: "capability_and_live_provider_gates_only;evaluator_evidence_still_required";
+  retention: "model_metadata_and_coverage_only;credentials_prompts_responses_not_retained";
+  secret_material: "never_returned";
+}
+
+export interface AutonomousModelInventoryReadinessOptions {
+  /** Override requirements for a bounded subset; omitted means every built-in domain. */
+  domainRequirements?: Partial<Record<AutonomousDomainName, readonly string[]>>;
+  estimatedInputTokens?: number;
+  requestedOutputTokens?: number;
 }
 
 /** Digest-bound metadata-only inventory snapshot suitable for caller-owned persistence. */
@@ -140,6 +185,139 @@ function candidateSupports(candidate: AutonomousModelCandidate, required: readon
   if (candidate.context_window_tokens < inputTokens + outputTokens || candidate.max_output_tokens < outputTokens) return false;
   const capabilities = new Set(candidate.capabilities ?? []);
   return required.every((capability) => capabilities.has(capability));
+}
+
+function readinessDigest(name: string, value: unknown): string {
+  return boundedDigest(name, value);
+}
+
+function readinessDescriptor(input: {
+  models: AutonomousModelCandidate[];
+  domains: AutonomousModelInventoryReadinessDomain[];
+  catalogue_digest: string;
+  domain_coverage_digest: string;
+  readiness: AutonomousModelInventoryReadinessState;
+  estimated_input_tokens: number;
+  requested_output_tokens: number;
+}) {
+  return {
+    schema: AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA,
+    models: input.models,
+    domains: input.domains,
+    catalogue_digest: input.catalogue_digest,
+    domain_coverage_digest: input.domain_coverage_digest,
+    readiness: input.readiness,
+    estimated_input_tokens: input.estimated_input_tokens,
+    requested_output_tokens: input.requested_output_tokens,
+  } as const;
+}
+
+/** Validate and canonicalize a live readiness projection before it crosses an application boundary. */
+export async function validateAutonomousModelInventoryReadiness(value: unknown): Promise<AutonomousModelInventoryReadiness> {
+  if (!isObject(value)) throw new ArgumentError("autonomous model inventory readiness must be an object");
+  const allowedKeys = new Set([
+    "schema", "models", "domains", "catalogue_digest", "domain_coverage_digest", "readiness",
+    "estimated_input_tokens", "requested_output_tokens", "readiness_digest", "execution",
+    "selection_posture", "retention", "secret_material",
+  ]);
+  if (Object.keys(value).some((key) => !allowedKeys.has(key))) throw new ArgumentError("autonomous model inventory readiness contains unsupported metadata");
+  if (
+    value.schema !== AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA
+    || value.execution !== "provider_readiness_projection_only;no_discovery_or_invocation"
+    || value.selection_posture !== "capability_and_live_provider_gates_only;evaluator_evidence_still_required"
+    || value.retention !== "model_metadata_and_coverage_only;credentials_prompts_responses_not_retained"
+    || value.secret_material !== "never_returned"
+  ) throw new ArgumentError("autonomous model inventory readiness markers are invalid");
+  if (!Array.isArray(value.models) || value.models.length > AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS) throw new ArgumentError("autonomous model inventory readiness models exceed their bound");
+  const rawModels = value.models as AutonomousModelCandidate[];
+  const catalogueDigest = readinessDigest("autonomous model inventory readiness catalogue_digest", value.catalogue_digest);
+  const catalogueDescriptor = {
+    schema: AUTONOMOUS_MODEL_CATALOGUE_SNAPSHOT_SCHEMA,
+    models: rawModels,
+    catalogue_digest: catalogueDigest,
+    retention: "model_metadata_only_hash_bound" as const,
+    secret_material: "never_returned" as const,
+  };
+  const catalogue = await validateAutonomousModelCatalogueSnapshot({
+    ...catalogueDescriptor,
+    snapshot_digest: await digestJson(catalogueDescriptor),
+  });
+  const models = catalogue.models;
+  if (!Array.isArray(value.domains) || value.domains.length > AUTONOMOUS_MODEL_INVENTORY_MAX_DOMAINS) throw new ArgumentError("autonomous model inventory readiness domains exceed their bound");
+  if (value.domains.length < 1) throw new ArgumentError("autonomous model inventory readiness requires at least one domain");
+  const domains: AutonomousModelInventoryReadinessDomain[] = [];
+  const domainIds = new Set<string>();
+  const catalogueIds = new Set(models.map((model) => `${model.provider}/${model.model}`));
+  for (const raw of value.domains) {
+    if (!isObject(raw)) throw new ArgumentError("autonomous model inventory readiness domain row is malformed");
+    const domain = raw.domain as AutonomousDomainName;
+    if (!AUTONOMOUS_DOMAIN_NAMES.includes(domain)) throw new ArgumentError("autonomous model inventory readiness contains an unknown domain");
+    if (domainIds.has(domain)) throw new ArgumentError("autonomous model inventory readiness domains must be unique");
+    domainIds.add(domain);
+    if (raw.schema !== AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA) throw new ArgumentError("autonomous model inventory readiness domain schema is invalid");
+    if (!Array.isArray(raw.required_model_capabilities)) throw new ArgumentError("autonomous model inventory readiness required capabilities are malformed");
+    const required = boundedCapabilities(`autonomous model inventory readiness ${domain} requirements`, raw.required_model_capabilities);
+    if (!Array.isArray(raw.compatible_model_ids) || !Array.isArray(raw.eligible_model_ids)) throw new ArgumentError("autonomous model inventory readiness model coverage is malformed");
+    const compatible = raw.compatible_model_ids.map((item) => boundedText("autonomous model inventory readiness compatible model id", item, 768));
+    const eligible = raw.eligible_model_ids.map((item) => boundedText("autonomous model inventory readiness eligible model id", item, 768));
+    if (new Set(compatible).size !== compatible.length || new Set(eligible).size !== eligible.length) throw new ArgumentError("autonomous model inventory readiness model coverage contains duplicate arms");
+    if (eligible.some((item) => !compatible.includes(item))) throw new ArgumentError("autonomous model inventory readiness eligible models must be compatible");
+    if (compatible.some((item) => !catalogueIds.has(item)) || eligible.some((item) => !catalogueIds.has(item))) throw new ArgumentError("autonomous model inventory readiness references an unknown model");
+    const compatibleCount = boundedNonNegativeInteger("autonomous model inventory readiness compatible_model_count", raw.compatible_model_count, AUTONOMOUS_MODEL_CATALOGUE_MAX_MODELS);
+    const eligibleCount = boundedNonNegativeInteger("autonomous model inventory readiness eligible_model_count", raw.eligible_model_count, compatibleCount);
+    if (compatibleCount !== compatible.length || eligibleCount !== eligible.length) throw new ArgumentError("autonomous model inventory readiness model counts do not match model ids");
+    const coverageState = raw.coverage_state;
+    if (coverageState !== "complete" && coverageState !== "partial" && coverageState !== "missing") throw new ArgumentError("autonomous model inventory readiness coverage state is invalid");
+    const expectedState: AutonomousModelInventoryCoverageState = eligible.length > 0 ? "complete" : compatible.length > 0 ? "partial" : "missing";
+    if (coverageState !== expectedState) throw new ArgumentError("autonomous model inventory readiness coverage state does not match model ids");
+    if (!isObject(raw.provider_readiness)) throw new ArgumentError("autonomous model inventory readiness provider readiness is malformed");
+    const providerReadiness: AutonomousModelInventoryReadinessDomain["provider_readiness"] = {};
+    for (const [provider, rawState] of Object.entries(raw.provider_readiness)) {
+      boundedIdentifier("autonomous model inventory readiness provider", provider);
+      if (!isObject(rawState) || typeof rawState.registered !== "boolean" || typeof rawState.credential_ready !== "boolean") throw new ArgumentError("autonomous model inventory readiness provider state is malformed");
+      if (Object.keys(rawState).some((key) => !new Set(["registered", "credential_ready", "circuit"]).has(key))) throw new ArgumentError("autonomous model inventory readiness provider state contains unsupported fields");
+      providerReadiness[provider] = {
+        registered: rawState.registered,
+        credential_ready: rawState.credential_ready,
+        circuit: boundedText("autonomous model inventory readiness provider circuit", rawState.circuit, 64),
+      };
+    }
+    if (Object.keys(providerReadiness).length > AUTONOMOUS_MODEL_INVENTORY_MAX_PROVIDERS) throw new ArgumentError("autonomous model inventory readiness provider state exceeds its bound");
+    domains.push({
+      schema: AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA,
+      domain,
+      required_model_capabilities: required,
+      compatible_model_ids: compatible,
+      eligible_model_ids: eligible,
+      compatible_model_count: compatibleCount,
+      eligible_model_count: eligibleCount,
+      coverage_state: coverageState,
+      provider_readiness: Object.fromEntries(Object.entries(providerReadiness).sort(([left], [right]) => left.localeCompare(right))),
+    });
+  }
+  const domainCoverageDigest = readinessDigest("autonomous model inventory readiness domain_coverage_digest", value.domain_coverage_digest);
+  if (await digestJson(domains) !== domainCoverageDigest) throw new ArgumentError("autonomous model inventory readiness domain coverage digest mismatch");
+  const estimatedInputTokens = boundedPositiveInteger("autonomous model inventory readiness estimated_input_tokens", value.estimated_input_tokens, AUTONOMOUS_MODEL_INVENTORY_MAX_TOKENS);
+  const requestedOutputTokens = boundedPositiveInteger("autonomous model inventory readiness requested_output_tokens", value.requested_output_tokens, AUTONOMOUS_MODEL_INVENTORY_MAX_TOKENS);
+  const readiness = value.readiness;
+  if (readiness !== "ready" && readiness !== "partial" && readiness !== "missing") throw new ArgumentError("autonomous model inventory readiness state is invalid");
+  const expectedReadiness: AutonomousModelInventoryReadinessState = domains.every((row) => row.coverage_state === "complete")
+    ? "ready"
+    : domains.some((row) => row.coverage_state !== "missing") ? "partial" : "missing";
+  if (readiness !== expectedReadiness) throw new ArgumentError("autonomous model inventory readiness state does not match domain coverage");
+  const descriptor = readinessDescriptor({ models, domains, catalogue_digest: catalogueDigest, domain_coverage_digest: domainCoverageDigest, readiness, estimated_input_tokens: estimatedInputTokens, requested_output_tokens: requestedOutputTokens });
+  const digest = readinessDigest("autonomous model inventory readiness readiness_digest", value.readiness_digest);
+  if (await digestJson(descriptor) !== digest) throw new ArgumentError("autonomous model inventory readiness digest mismatch");
+  const result: AutonomousModelInventoryReadiness = {
+    ...descriptor,
+    readiness_digest: digest,
+    execution: "provider_readiness_projection_only;no_discovery_or_invocation",
+    selection_posture: "capability_and_live_provider_gates_only;evaluator_evidence_still_required",
+    retention: "model_metadata_and_coverage_only;credentials_prompts_responses_not_retained",
+    secret_material: "never_returned",
+  };
+  if (new TextEncoder().encode(JSON.stringify(result) ?? "").byteLength > AUTONOMOUS_MODEL_INVENTORY_MAX_SNAPSHOT_BYTES) throw new ArgumentError("autonomous model inventory readiness exceeds its byte capacity");
+  return structuredClone(result);
 }
 
 /** Validate an inventory snapshot before it can be restored into a live model catalogue. */
@@ -245,6 +423,91 @@ export class AutonomousModelInventoryCoordinator {
   constructor(readonly agent: AutonomousAgent, readonly persistence?: AutonomousModelInventoryPersistence) {
     if (!(agent instanceof AutonomousAgent)) throw new ArgumentError("model inventory requires an AutonomousAgent");
     if (persistence !== undefined && (typeof persistence.read !== "function" || typeof persistence.write !== "function")) throw new ArgumentError("model inventory persistence adapter is malformed");
+  }
+
+  /**
+   * Project live model eligibility without discovery, invocation, or catalogue mutation.
+   *
+   * Compatibility is intentionally stricter than the historical refresh coverage: a candidate
+   * must be enabled, expose every reviewed capability, and fit the requested input/output
+   * budget. Eligibility then adds provider registration, opaque credential readiness, and
+   * circuit state. None of these signals establish task correctness or evaluator approval.
+   */
+  async readiness(options: AutonomousModelInventoryReadinessOptions = {}): Promise<AutonomousModelInventoryReadiness> {
+    return this.enqueue(() => this.readinessInternal(options));
+  }
+
+  private async readinessInternal(options: AutonomousModelInventoryReadinessOptions): Promise<AutonomousModelInventoryReadiness> {
+    if (!options || typeof options !== "object" || Array.isArray(options)) throw new ArgumentError("model inventory readiness options must be an object");
+    const estimatedInputTokens = boundedPositiveInteger("model inventory readiness estimatedInputTokens", options.estimatedInputTokens ?? 4_096, AUTONOMOUS_MODEL_INVENTORY_MAX_TOKENS);
+    const requestedOutputTokens = boundedPositiveInteger("model inventory readiness requestedOutputTokens", options.requestedOutputTokens ?? 1_024, AUTONOMOUS_MODEL_INVENTORY_MAX_TOKENS);
+    const profiles = await builtinAutonomousDomainProfiles();
+    const profileByDomain = new Map(profiles.map((profile) => [profile.domain, profile]));
+    const requestedRequirements = options.domainRequirements;
+    const requirements: Array<{ domain: AutonomousDomainName; required: string[] }> = [];
+    if (requestedRequirements === undefined) {
+      for (const profile of profiles) requirements.push({ domain: profile.domain, required: boundedCapabilities(`model inventory readiness ${profile.domain} requirements`, profile.required_model_capabilities) });
+    } else {
+      if (typeof requestedRequirements !== "object" || Array.isArray(requestedRequirements)) throw new ArgumentError("model inventory readiness domainRequirements must be an object");
+      for (const [rawDomain, rawCapabilities] of Object.entries(requestedRequirements)) {
+        if (!profileByDomain.has(rawDomain as AutonomousDomainName)) throw new ArgumentError("model inventory readiness contains an unknown domain");
+        if (!Array.isArray(rawCapabilities)) throw new ArgumentError("model inventory readiness domain capabilities must be an array");
+        const required = boundedCapabilities(`model inventory readiness ${rawDomain} requirements`, rawCapabilities);
+        if (required.length === 0) throw new ArgumentError("model inventory readiness domain requirements cannot be empty");
+        requirements.push({ domain: rawDomain as AutonomousDomainName, required });
+      }
+    }
+    if (requirements.length < 1 || requirements.length > AUTONOMOUS_MODEL_INVENTORY_MAX_DOMAINS) throw new ArgumentError("model inventory readiness requires 1..=12 domain requirements");
+    const models = this.agent.models();
+    const metadataByProvider = new Map(this.agent.llm.providerMetadata().map((row) => [String(row.provider), row]));
+    const providerNames = [...new Set([...metadataByProvider.keys(), ...models.map((candidate) => candidate.provider)])].sort();
+    const providerState = new Map<string, { registered: boolean; credentialReady: boolean; circuit: string }>();
+    for (const provider of providerNames) {
+      const metadata = metadataByProvider.get(provider);
+      const registered = metadata !== undefined;
+      const requiresCredential = typeof metadata?.requires_credential === "boolean" ? metadata.requires_credential : true;
+      const credential = this.agent.llm.credentials.status(provider, registered);
+      const health = registered ? this.agent.llm.providerStatus(provider) : null;
+      const circuit = typeof health?.circuit === "string" && health.circuit.trim() ? health.circuit : "unknown";
+      providerState.set(provider, { registered, credentialReady: !requiresCredential || credential.ready === true, circuit: health === null ? "unconfigured" : circuit });
+    }
+    const domains = requirements.map(({ domain, required }) => {
+      const compatible = models.filter((candidate) => candidateSupports(candidate, required, estimatedInputTokens, requestedOutputTokens));
+      const eligible = compatible.filter((candidate) => {
+        const state = providerState.get(candidate.provider);
+        return state?.registered === true && state.credentialReady && state.circuit !== "open";
+      });
+      const providers = Object.fromEntries([...new Set(compatible.map((candidate) => candidate.provider))].sort().map((provider) => {
+        const state = providerState.get(provider) ?? { registered: false, credentialReady: false, circuit: "unconfigured" };
+        return [provider, { registered: state.registered, credential_ready: state.credentialReady, circuit: state.circuit }];
+      }));
+      return {
+        schema: AUTONOMOUS_MODEL_INVENTORY_READINESS_SCHEMA,
+        domain,
+        required_model_capabilities: [...required],
+        compatible_model_ids: compatible.map((candidate) => `${candidate.provider}/${candidate.model}`).sort(),
+        eligible_model_ids: eligible.map((candidate) => `${candidate.provider}/${candidate.model}`).sort(),
+        compatible_model_count: compatible.length,
+        eligible_model_count: eligible.length,
+        coverage_state: eligible.length > 0 ? "complete" : compatible.length > 0 ? "partial" : "missing",
+        provider_readiness: providers,
+      } satisfies AutonomousModelInventoryReadinessDomain;
+    });
+    const catalogueDigest = await digestJson(models);
+    const domainCoverageDigest = await digestJson(domains);
+    const readiness: AutonomousModelInventoryReadinessState = domains.every((row) => row.coverage_state === "complete")
+      ? "ready"
+      : domains.some((row) => row.coverage_state !== "missing") ? "partial" : "missing";
+    const descriptor = readinessDescriptor({
+      models,
+      domains,
+      catalogue_digest: catalogueDigest,
+      domain_coverage_digest: domainCoverageDigest,
+      readiness,
+      estimated_input_tokens: estimatedInputTokens,
+      requested_output_tokens: requestedOutputTokens,
+    });
+    return validateAutonomousModelInventoryReadiness({ ...descriptor, readiness_digest: await digestJson(descriptor), execution: "provider_readiness_projection_only;no_discovery_or_invocation", selection_posture: "capability_and_live_provider_gates_only;evaluator_evidence_still_required", retention: "model_metadata_and_coverage_only;credentials_prompts_responses_not_retained", secret_material: "never_returned" });
   }
 
   async refresh(specs: readonly AutonomousModelRefreshSpec[], options: AutonomousModelInventoryRefreshOptions = {}): Promise<AutonomousModelInventorySnapshot> {

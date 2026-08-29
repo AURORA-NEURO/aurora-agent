@@ -94,7 +94,7 @@ import type {
   AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
   AutonomousEvaluatorCalibrationStoreSnapshot,
 } from "./autonomous-evaluator-calibration-store.js";
-import type { AutonomousModelInventoryRefreshOptions, AutonomousModelInventorySnapshot } from "./autonomous-model-inventory.js";
+import type { AutonomousModelInventoryReadiness, AutonomousModelInventoryReadinessOptions, AutonomousModelInventoryRefreshOptions, AutonomousModelInventorySnapshot } from "./autonomous-model-inventory.js";
 import type {
   AutonomousWorkflowPortfolioItemRequest,
   AutonomousWorkflowPortfolioPlan,
@@ -6632,6 +6632,18 @@ export class AutonomousAgent {
     const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
     const coordinator = this.modelInventoryCoordinator ??= new AutonomousModelInventoryCoordinator(this);
     return coordinator.refresh(specs, options);
+  }
+
+  /**
+   * Return the current model catalogue's live all-domain eligibility without discovery or
+   * invocation. This is safe for onboarding/readiness screens before a user supplies a key.
+   */
+  async modelInventoryReadiness(
+    options: AutonomousModelInventoryReadinessOptions = {},
+  ): Promise<AutonomousModelInventoryReadiness> {
+    const { AutonomousModelInventoryCoordinator } = await import("./autonomous-model-inventory.js");
+    const coordinator = this.modelInventoryCoordinator ??= new AutonomousModelInventoryCoordinator(this);
+    return coordinator.readiness(options);
   }
 
   /**
