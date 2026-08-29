@@ -326,6 +326,7 @@ import {
 import {
   planAutonomousTaskClarification,
   resolveAutonomousTaskClarification,
+  validateAutonomousTaskClarificationResolution,
   type AutonomousTaskClarificationPlan,
   type AutonomousTaskClarificationResolution,
 } from "./autonomous-task-clarification.js";
@@ -7800,6 +7801,14 @@ export class AutonomousAgent {
   ): Promise<AutonomousTaskClarificationResolution> {
     const taskText = boundedText("autonomous clarification task", task, 32_000);
     return resolveAutonomousTaskClarification(plan, { taskDigest: digestJsonSync({ task: taskText }), answers });
+  }
+
+  /** Rehydrate a persisted clarification receipt against its exact plan. */
+  async validateClarification(
+    plan: AutonomousTaskClarificationPlan | unknown,
+    receipt: AutonomousTaskClarificationResolution | unknown,
+  ): Promise<AutonomousTaskClarificationResolution> {
+    return validateAutonomousTaskClarificationResolution(receipt, plan);
   }
 
   /**

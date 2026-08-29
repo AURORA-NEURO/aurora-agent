@@ -13290,3 +13290,11 @@ valid answer digest proves only that the receipt metadata was not modified. It d
 answer, authorize a provider call, or replace intent/decision recompilation. A worker can therefore
 restore a durable UI handoff safely while still requiring the caller to rehydrate the transient
 answer values and repeat the execution gates.
+
+The high-level agents expose the same restart boundary as `agent.validate_clarification(...)` in
+Python and `agent.validateClarification(...)` in TypeScript. The façade requires both the
+persisted plan and receipt, validates them together, and returns a normalized metadata-only
+receipt. A malformed or cross-plan receipt is rejected before the caller can resume its UI or
+worker state. This does not turn a receipt into an execution authorization: after a caller
+rehydrates its answer values, it must incorporate them into a fresh task description and
+recompile intent, policy, and decision artifacts before invoking any provider or effect gate.

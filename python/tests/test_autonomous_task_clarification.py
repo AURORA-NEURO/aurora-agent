@@ -135,3 +135,7 @@ def test_agent_facade_uses_the_same_preflight_and_answer_receipt() -> None:
     answers = {question.question_id: "caller-owned boundary" for question in plan.questions}
     receipt = agent.resolve_clarification(plan=plan, task=task, answers=answers)
     assert receipt.status == "resolved"
+    restored = agent.validate_clarification(plan=plan.to_dict(), receipt=receipt.to_dict())
+    assert restored.resolution_digest == receipt.resolution_digest
+    with pytest.raises(AutonomousTaskClarificationError):
+        agent.validate_clarification(plan={**plan.to_dict(), "plan_digest": "0" * 64}, receipt=receipt.to_dict())

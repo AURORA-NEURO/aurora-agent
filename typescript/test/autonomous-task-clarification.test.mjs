@@ -92,4 +92,7 @@ test("agent facade uses the same preflight and answer receipt", async () => {
   const answers = Object.fromEntries(plan.questions.map((question) => [question.question_id, "caller-owned boundary"]));
   const receipt = await agent.resolveClarification(plan, task, answers);
   assert.equal(receipt.status, "resolved");
+  const restored = await agent.validateClarification(plan, receipt);
+  assert.equal(restored.resolution_digest, receipt.resolution_digest);
+  await assert.rejects(() => agent.validateClarification({ ...plan, plan_digest: "0".repeat(64) }, receipt), AutonomousTaskClarificationError);
 });

@@ -91,6 +91,7 @@ from .autonomous_task_clarification import (
     AutonomousTaskClarificationResolution,
     plan_autonomous_task_clarification,
     resolve_autonomous_task_clarification,
+    validate_autonomous_task_clarification_resolution,
 )
 from .autonomous_domain_response import (
     AutonomousDomainResponseContract,
@@ -21542,6 +21543,23 @@ class AutonomousAgent:
             task_digest=content_digest({"task": task_text}),
             answers=answers,
         )
+
+    def validate_clarification(
+        self,
+        *,
+        plan: AutonomousTaskClarificationPlan | Mapping[str, Any],
+        receipt: AutonomousTaskClarificationResolution | Mapping[str, Any],
+    ) -> AutonomousTaskClarificationResolution:
+        """Rehydrate a persisted clarification receipt against its exact plan.
+
+        This is intentionally a validation boundary rather than an execution shortcut. It
+        verifies receipt integrity, question identity, answer counts, and blocked/resolved
+        invariants, but it cannot recover answer values and does not authorize a provider,
+        source, tool, evaluator, credential, or external effect. Callers must still recompile
+        task intent and decision artifacts after incorporating any material answer.
+        """
+
+        return validate_autonomous_task_clarification_resolution(receipt, plan=plan)
 
     def route(self, *, task: str, **kwargs: Any) -> AutonomousRouteProposal:
         """Return an auditable domain proposal without contacting a provider."""

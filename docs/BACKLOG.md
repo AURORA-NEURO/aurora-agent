@@ -2426,3 +2426,9 @@ Because answer values are deliberately absent, validation proves metadata integr
 promotes an answer digest into evidence or truth. This closes the persisted UI/worker handoff seam
 while leaving encrypted storage, operator identity, and caller-owned answer rehydration outside the
 SDK boundary.
+
+The high-level Python and TypeScript agents now expose matching `validate_clarification()` /
+`validateClarification()` methods for this restart path. They require the persisted plan and
+receipt together, reject cross-plan or tampered metadata before resuming a worker, and preserve
+the existing requirement to recompile intent and decision artifacts after answer values are
+rehydrated by the caller.
