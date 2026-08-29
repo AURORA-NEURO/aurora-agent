@@ -7835,3 +7835,15 @@ __all__ += [
     "interoperate_ids_replication",
     "idsReplicationInteroperabilityDigest",
 ]
+
+from .conformance_context_compilation_assurance import (
+    CertifiedDecisionSection7 as ConformanceCertifiedDecisionSection7,
+    assure_context_compilation as assure_conformance_context_compilation,
+    conformance_context_compilation_assurance_manifest,
+)
+
+__all__ += [
+    "ConformanceCertifiedDecisionSection7",
+    "assure_conformance_context_compilation",
+    "conformance_context_compilation_assurance_manifest",
+]

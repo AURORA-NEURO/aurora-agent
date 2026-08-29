@@ -398,6 +398,13 @@ use bioprism_conformance::context_compilation_federated_control_plane::{
     ContextCompilationFederatedControlRequest,
     FEATURE_ID as CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID,
 };
+use bioprism_conformance::{
+    assure_context_compilation as assure_conformance_context_compilation,
+    CertifiedDecisionSection7 as ConformanceCertifiedDecisionSection7,
+    ContextPeer2 as ConformanceContextPeer2, DecisionFact2 as ConformanceDecisionFact2,
+    DecisionQuery2 as ConformanceDecisionQuery2,
+    FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+};
 use bioprism_devplat::{
     assure_context_compilation, ContextCompilationAssuranceReceipt,
     ContextCompilationAssuranceRequest, CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
@@ -3427,6 +3434,26 @@ pub fn validate_context_compilation_federated_control_json(
     if receipt.feature_id != CONTEXT_COMPILATION_FEDERATED_CONTROL_FEATURE_ID {
         return Err("conformance context control feature id mismatch".into());
     }
+    Ok(receipt)
+}
+
+pub const CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_TOOL: &str = "conformance_context_compilation_assurance";
+
+pub fn run_conformance_context_compilation_assurance_json(value: &Value) -> Result<Value, String> {
+    let request: ConformanceDecisionQuery2 = serde_json::from_value(value.get("request").cloned().ok_or("request is required")?)
+        .map_err(|error| format!("invalid conformance context assurance request: {error}"))?;
+    let facts: Vec<ConformanceDecisionFact2> = serde_json::from_value(value.get("facts").cloned().ok_or("facts are required")?)
+        .map_err(|error| format!("invalid conformance context facts: {error}"))?;
+    let peers: Vec<ConformanceContextPeer2> = serde_json::from_value(value.get("peers").cloned().ok_or("peers are required")?)
+        .map_err(|error| format!("invalid conformance context peers: {error}"))?;
+    let receipt = assure_conformance_context_compilation(&request, &facts, &peers).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize conformance context assurance receipt: {error}"))
+}
+
+pub fn validate_conformance_context_compilation_assurance_json(value: &Value) -> Result<ConformanceCertifiedDecisionSection7, String> {
+    let receipt: ConformanceCertifiedDecisionSection7 = serde_json::from_value(value.clone()).map_err(|error| format!("invalid conformance context assurance receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID { return Err("conformance context assurance feature id mismatch".into()); }
     Ok(receipt)
 }
 

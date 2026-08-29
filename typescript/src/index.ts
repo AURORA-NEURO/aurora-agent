@@ -4467,3 +4467,14 @@ export {
   validateIdsReplicationRecord9,
 } from "./research-contracts.js";
 export type { IdsReplicationRecord9 } from "./research-contracts.js";
+
+export {
+  CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+  CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+  CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_INPUT_SCHEMA,
+  CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_OUTPUT_SCHEMA,
+  CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_CONTENT_TYPE,
+  conformanceContextCompilationAssuranceDigest,
+  validateConformanceCertifiedDecisionSection7,
+} from "./research-contracts.js";
+export type { ConformanceCertifiedDecisionSection7 } from "./research-contracts.js";

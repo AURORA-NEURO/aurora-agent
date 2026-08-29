@@ -81,6 +81,7 @@
 
 pub mod case;
 pub mod context_compilation_federated_control_plane;
+pub mod context_compilation_assurance;
 pub mod error;
 pub mod fiber_suite;
 pub mod fixture;
@@ -111,6 +112,16 @@ pub use knowledge_world_assurance::{
     KnowledgeWorldDisposition, ScopedResearchClaim, ScopedResearchClaimsRequest,
     TypedKnowledgeWorldReceipt, CONTRACT_VERSION as KNOWLEDGE_WORLD_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as KNOWLEDGE_WORLD_ASSURANCE_FEATURE_ID,
+};
+pub use context_compilation_assurance::{
+    assure_context_compilation, context_compilation_assurance_manifest,
+    CertifiedDecisionSection7, CertifiedDecisionSection7Artifact, ContextCompilationAssuranceError,
+    ContextPeer2, DecisionFact2, DecisionQuery2,
+    CONTENT_TYPE as CONTEXT_COMPILATION_ASSURANCE_CONTENT_TYPE,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
+    INPUT_SCHEMA as CONTEXT_COMPILATION_ASSURANCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as CONTEXT_COMPILATION_ASSURANCE_OUTPUT_SCHEMA,
 };
 pub use pyramid::{ImbalanceFinding, PyramidBalance, PyramidShape};
 pub use suite::{

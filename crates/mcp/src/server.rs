@@ -2194,6 +2194,9 @@ impl Server {
             "conformance_context_compilation_federated_control" => {
                 self.conformance_context_compilation_federated_control(&arguments)
             }
+            "conformance_context_compilation_assurance" => {
+                self.conformance_context_compilation_assurance(&arguments)
+            }
             "federated_publication_release_inference" => {
                 self.federated_publication_release_inference(&arguments)
             }
@@ -31162,6 +31165,28 @@ impl Server {
         }))
     }
 
+    fn conformance_context_compilation_assurance(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt = crate::research_contracts::run_conformance_context_compilation_assurance_json(arguments)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_conformance::context_compilation_assurance::FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "multimodal facts and federation peers are deterministically partitioned into selected, unresolved, blocked, and missing closure states",
+                "semantic profile, replay, provenance, policy, protected-closure, locality, aggregate-only, and adversarial gates fail closed",
+                "omissions, uncertainty, contradictions, negative evidence, and missing study/modality/peer coverage remain explicit"
+            ],
+            "limitations": [
+                "the harness validates caller-supplied summaries and does not retrieve evidence, execute workflows, or move raw data",
+                "the capability is preclinical research infrastructure only and never makes clinical decisions"
+            ]
+        }))
+    }
+
     fn conformance_run(&self, arguments: &Value) -> Result<Value, String> {
         let include_details = arguments
             .get("include_details")
@@ -43490,6 +43515,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "conformance_context_compilation_federated_control",
             "description": "Operate an A2 prospective high-throughput context-compilation federation control plane with pinned suite/protocol and fixture compatibility, peer quorum, capacity/checkpoint continuity, policy, protected-closure, signed approval, locality, replay, omission, uncertainty, and negative-result gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ContextCompilationFederatedControlRequest with suite/protocol identity, typed candidates and peers, capacity/checkpoint controls, policy/approval/closure/locality permissions, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "conformance_context_compilation_assurance",
+            "description": "Validate multimodal multi-study context compilation against typed fact, study, modality, peer, replay, evidence, policy, protected-closure, locality, aggregate-only, budget, and adversarial gates. Emits an omission-aware CertifiedDecisionSection7 receipt and never retrieves or exports raw data.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized DecisionQuery2 with required facts, studies, modalities, peers, policy, replay, locality, budget, and preclinical boundary."},"facts":{"type":"array","description":"Serialized DecisionFact2 summaries."},"peers":{"type":"array","description":"Serialized ContextPeer2 aggregate attestations."}},"required":["request","facts","peers"]}
         }),
         json!({
             "name": "federated_publication_release_inference",

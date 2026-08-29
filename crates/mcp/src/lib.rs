@@ -318,6 +318,11 @@ pub use research_contracts::{
     CONTEXT_COMPILATION_FEDERATED_CONTROL_TOOL,
 };
 pub use research_contracts::{
+    run_conformance_context_compilation_assurance_json,
+    validate_conformance_context_compilation_assurance_json,
+    CONFORMANCE_CONTEXT_COMPILATION_ASSURANCE_TOOL,
+};
+pub use research_contracts::{
     run_federated_publication_release_inference_json,
     validate_federated_publication_release_inference_json,
     FEDERATED_PUBLICATION_RELEASE_INFERENCE_TOOL,
