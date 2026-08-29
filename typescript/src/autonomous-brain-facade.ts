@@ -1080,6 +1080,19 @@ export interface AutonomousBrainAutoReplanBatchControllerRun {
 export type AutonomousBrainAutoCycleBatchControllerRunOptions = Omit<AutonomousBrainAutoCycleBatchResumableOptions, "checkpoint" | "checkpointSink">;
 export type AutonomousBrainAutoReplanBatchControllerRunOptions = Omit<AutonomousBrainAutoReplanBatchResumableOptions, "checkpoint" | "checkpointSink">;
 
+export interface AutonomousBrainAutoCycleBatchControllerTraceRun {
+  controller: AutonomousBrainBatchControllerProjection;
+  traced: AutonomousBrainTracedAutoCycleBatchResult;
+}
+
+export interface AutonomousBrainAutoReplanBatchControllerTraceRun {
+  controller: AutonomousBrainBatchControllerProjection;
+  traced: AutonomousBrainTracedAutoReplanBatchResult;
+}
+
+export type AutonomousBrainAutoCycleBatchControllerTraceRunOptions = Omit<AutonomousBrainAutoCycleBatchResumableTraceOptions, "checkpoint" | "checkpointSink">;
+export type AutonomousBrainAutoReplanBatchControllerTraceRunOptions = Omit<AutonomousBrainAutoReplanBatchResumableTraceOptions, "checkpoint" | "checkpointSink">;
+
 /** Options for the keyless readiness audit exposed at the application boundary. */
 export type AutonomousBrainReadinessOptions = Parameters<AutonomousAgent["readiness"]>[0];
 export type AutonomousBrainReadinessReport = Awaited<ReturnType<AutonomousAgent["readiness"]>>;
@@ -7101,6 +7114,64 @@ export class AutonomousBrainBatchJobController {
         },
       });
       return { controller: this.projection(batch.status, inputs.length, options.jobId), batch };
+    } finally {
+      this.running = false;
+    }
+  }
+
+  /** Run automatic evaluator cycles with controller-owned checkpoints and one redacted trace. */
+  async runAutomaticCycleWithTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoCycleBatchControllerTraceRunOptions,
+  ): Promise<AutonomousBrainAutoCycleBatchControllerTraceRun> {
+    this.requireRestored();
+    this.requireIdle();
+    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain automatic cycle traced controller run requires jobId");
+    const runtimeOptions = options as AutonomousBrainAutoCycleBatchResumableTraceOptions & Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain automatic cycle traced controller owns checkpoint and checkpointSink");
+    const rehydrateCycle = options.rehydrateCycle ?? (this.options.automaticCycleProtectedRehydration === undefined ? undefined : this.options.automaticCycleProtectedRehydration.resolve.bind(this.options.automaticCycleProtectedRehydration));
+    this.running = true;
+    try {
+      const traced = await this.brain.executeAutoCycleBatchResumableWithTrace(inputs, {
+        ...options,
+        ...(rehydrateCycle === undefined ? {} : { rehydrateCycle }),
+        checkpoint: this.checkpoint ?? undefined,
+        checkpointSink: async (checkpoint) => {
+          const verified = validateBrainBatchCheckpoint(checkpoint);
+          await this.persistence.write(verified);
+          this.checkpoint = verified;
+        },
+      });
+      return { controller: this.projection(traced.batch.status, inputs.length, options.jobId), traced };
+    } finally {
+      this.running = false;
+    }
+  }
+
+  /** Run automatic evaluator/replan cycles with controller-owned checkpoints and one trace. */
+  async runAutomaticReplanWithTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoReplanBatchControllerTraceRunOptions,
+  ): Promise<AutonomousBrainAutoReplanBatchControllerTraceRun> {
+    this.requireRestored();
+    this.requireIdle();
+    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain automatic replan traced controller run requires jobId");
+    const runtimeOptions = options as AutonomousBrainAutoReplanBatchResumableTraceOptions & Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain automatic replan traced controller owns checkpoint and checkpointSink");
+    const rehydrateReplan = options.rehydrateReplan ?? (this.options.automaticReplanProtectedRehydration === undefined ? undefined : this.options.automaticReplanProtectedRehydration.resolve.bind(this.options.automaticReplanProtectedRehydration));
+    this.running = true;
+    try {
+      const traced = await this.brain.executeAutoReplanCycleBatchResumableWithTrace(inputs, {
+        ...options,
+        ...(rehydrateReplan === undefined ? {} : { rehydrateReplan }),
+        checkpoint: this.checkpoint ?? undefined,
+        checkpointSink: async (checkpoint) => {
+          const verified = validateBrainBatchCheckpoint(checkpoint);
+          await this.persistence.write(verified);
+          this.checkpoint = verified;
+        },
+      });
+      return { controller: this.projection(traced.batch.status, inputs.length, options.jobId), traced };
     } finally {
       this.running = false;
     }

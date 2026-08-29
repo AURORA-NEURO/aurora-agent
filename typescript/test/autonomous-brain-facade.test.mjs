@@ -2270,6 +2270,35 @@ test("brain batch controller restores automatic cycle and replan checkpoints as 
   });
   assert.equal(replanned.batch.status, "completed");
   assert.equal(replanStore.read().mode, "automatic_replan");
+
+  const tracedStore = new InMemoryAutonomousBrainBatchCheckpointStore();
+  const tracedController = new AutonomousBrainBatchJobController(brain, tracedStore);
+  await tracedController.restore();
+  const traced = await tracedController.runAutomaticCycleWithTrace(inputs.slice(0, 1), {
+    jobId: "controller-traced-cycle",
+    maxParallelism: 1,
+    cycle,
+    traceStore: new InMemoryAutonomousRunTraceStore(),
+    runId: "controller-traced-cycle-run",
+  });
+  assert.equal(traced.traced.trace.status, "completed");
+  assert.equal(traced.controller.completed_items, 1);
+
+  const tracedReplanStore = new InMemoryAutonomousBrainBatchCheckpointStore();
+  const tracedReplanController = new AutonomousBrainBatchJobController(brain, tracedReplanStore);
+  await tracedReplanController.restore();
+  const tracedReplan = await tracedReplanController.runAutomaticReplanWithTrace(inputs.slice(0, 1), {
+    jobId: "controller-traced-replan",
+    maxParallelism: 1,
+    replan: {
+      approveProviderCall: true,
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: "controller-traced-replan-reviewer", evaluator_version: "1", reward: 0.87, passed: true, replan_requested: false }),
+    },
+    traceStore: new InMemoryAutonomousRunTraceStore(),
+    runId: "controller-traced-replan-run",
+  });
+  assert.equal(tracedReplan.traced.trace.status, "completed");
 });
 
 test("brain facade exposes a keyless readiness and activation lifecycle for onboarding", async () => {
