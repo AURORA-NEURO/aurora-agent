@@ -63,16 +63,19 @@ from .autonomous_domain_policy import (
     AutonomousDomainPolicyError,
     autonomous_domain_policy,
     evaluate_autonomous_domain_policy,
+    validate_autonomous_domain_policy,
 )
 from .autonomous_task_lens import (
     AUTONOMOUS_TASK_LENS_SCHEMA,
     AutonomousDomainTaskLens,
     autonomous_domain_task_lens,
+    validate_autonomous_domain_task_lens,
 )
 from .autonomous_task_intent import (
     AUTONOMOUS_TASK_INTENT_SCHEMA,
     AutonomousTaskIntent,
     infer_autonomous_task_intent,
+    validate_autonomous_task_intent,
 )
 from .autonomous_capability_routing import (
     AutonomousCapabilityRoute,
@@ -21646,6 +21649,41 @@ class AutonomousAgent:
 
         return validate_autonomous_task_clarification_resolution(receipt, plan=plan)
 
+    def validate_task_lens(
+        self,
+        *,
+        value: AutonomousDomainTaskLens | Mapping[str, Any],
+        expected_domain: str | None = None,
+    ) -> AutonomousDomainTaskLens:
+        """Validate a persisted domain lens before task classification or planning resumes."""
+
+        return validate_autonomous_domain_task_lens(value, expected_domain=expected_domain)
+
+    def validate_task_intent(
+        self,
+        *,
+        value: AutonomousTaskIntent | Mapping[str, Any],
+        lens: AutonomousDomainTaskLens | Mapping[str, Any] | None = None,
+        expected_task_digest: str | None = None,
+    ) -> AutonomousTaskIntent:
+        """Validate persisted intent metadata and optionally bind it to the current task/lens."""
+
+        return validate_autonomous_task_intent(
+            value,
+            lens=lens,
+            expected_task_digest=expected_task_digest,
+        )
+
+    def validate_domain_policy(
+        self,
+        *,
+        value: AutonomousDomainPolicy | Mapping[str, Any],
+        expected_domain: str | None = None,
+    ) -> AutonomousDomainPolicy:
+        """Validate a persisted domain policy before a resumed decision replay."""
+
+        return validate_autonomous_domain_policy(value, expected_domain=expected_domain)
+
     def validate_task_decision(
         self,
         *,
@@ -29379,6 +29417,8 @@ __all__ = [
     "AUTONOMOUS_WORKFLOW_STAGE_STATUSES",
     "AutonomousDomainProfile",
     "AutonomousDomainTaskLens",
+    "validate_autonomous_domain_task_lens",
+    "validate_autonomous_domain_policy",
     "AutonomousDomainRegistry",
     "AutonomousDomainPack",
     "AutonomousDomainPackRegistry",
@@ -29390,6 +29430,7 @@ __all__ = [
     "AutonomousRouteProposal",
     "AutonomousTaskRouter",
     "AutonomousTaskIntent",
+    "validate_autonomous_task_intent",
     "infer_autonomous_task_intent",
     "AutonomousTaskDecision",
     "infer_autonomous_task_decision",

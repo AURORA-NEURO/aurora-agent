@@ -1,6 +1,6 @@
-import { ArgumentError } from "./errors.js";
+import { ArgumentError, isObject } from "./errors.js";
 import type { AutonomousDomainName } from "./autonomous.js";
-import type { AutonomousDomainTaskLens } from "./autonomous-task-lens.js";
+import { validateAutonomousDomainTaskLens, type AutonomousDomainTaskLens } from "./autonomous-task-lens.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
@@ -110,8 +110,66 @@ function descriptorDigest(descriptor: IntentDescriptor): string {
   return digestJsonSync(descriptor);
 }
 
+/** Validate persisted intent metadata and optionally bind it to a live task and lens. */
+export function validateAutonomousTaskIntent(value: unknown, options: { lens?: AutonomousDomainTaskLens; taskDigest?: string } = {}): AutonomousTaskIntent {
+  if (!isObject(value)) throw new ArgumentError("task intent must be an object");
+  const allowed = new Set([
+    "schema", "intent_version", "domain", "capability", "risk_class", "workflow_id", "task_digest", "lens_digest",
+    "intent_id", "action_mode", "alternative_action_modes", "requested_effect", "evidence_mode", "ambiguity_flags",
+    "planning_signals", "success_signals", "risk_signals", "requested_output_count", "desired_outputs_digest",
+    "constraints_digest", "intent_digest", "retention", "authorization", "secret_material",
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw new ArgumentError("task intent contains unsupported fields");
+  if (Object.keys(value).length !== allowed.size || [...allowed].some((key) => !(key in value))) throw new ArgumentError("task intent is missing required fields");
+  if (value.schema !== AUTONOMOUS_TASK_INTENT_SCHEMA || value.intent_version !== AUTONOMOUS_TASK_INTENT_VERSION) throw new ArgumentError("task intent schema or version is invalid");
+  if (value.retention !== "value_only_intent_metadata;task_text_not_retained" || value.authorization !== "classification_only;no_provider_tool_or_effect_authority" || value.secret_material !== "never_returned") throw new ArgumentError("task intent retention markers are invalid");
+  if (typeof value.domain !== "string" || !AUTONOMOUS_TASK_INTENT_DOMAINS.includes(value.domain as AutonomousDomainName)) throw new ArgumentError("task intent domain is unsupported");
+  const itemList = (name: string): string[] => inputItems(`task intent ${name}`, value[name]);
+  const digestValue = (name: string, candidate: unknown): string => digest(`task intent ${name}`, candidate);
+  const actionMode = value.action_mode;
+  const requestedEffect = value.requested_effect;
+  const evidenceMode = value.evidence_mode;
+  if (!(AUTONOMOUS_TASK_INTENT_ACTION_MODES as readonly unknown[]).includes(actionMode)) throw new ArgumentError("task intent action_mode is unsupported");
+  if (!(AUTONOMOUS_TASK_INTENT_EFFECTS as readonly unknown[]).includes(requestedEffect)) throw new ArgumentError("task intent requested_effect is unsupported");
+  if (!(AUTONOMOUS_TASK_INTENT_EVIDENCE_MODES as readonly unknown[]).includes(evidenceMode)) throw new ArgumentError("task intent evidence_mode is unsupported");
+  if (!Number.isSafeInteger(value.requested_output_count) || (value.requested_output_count as number) < 0 || (value.requested_output_count as number) > 64) throw new ArgumentError("task intent requested_output_count is outside its bounds");
+  const desiredOutputsDigest = value.desired_outputs_digest === null ? null : digestValue("desired_outputs_digest", value.desired_outputs_digest);
+  const constraintsDigest = value.constraints_digest === null ? null : digestValue("constraints_digest", value.constraints_digest);
+  if ((desiredOutputsDigest === null) !== (value.requested_output_count === 0)) throw new ArgumentError("task intent output digest and count are inconsistent");
+  const descriptor: IntentDescriptor = {
+    schema: AUTONOMOUS_TASK_INTENT_SCHEMA,
+    intent_version: AUTONOMOUS_TASK_INTENT_VERSION,
+    domain: value.domain as AutonomousDomainName,
+    capability: text("task intent capability", value.capability, 256),
+    risk_class: text("task intent risk_class", value.risk_class, 256),
+    workflow_id: text("task intent workflow_id", value.workflow_id, 256),
+    task_digest: digestValue("task_digest", value.task_digest),
+    lens_digest: digestValue("lens_digest", value.lens_digest),
+    intent_id: text("task intent intent_id", value.intent_id, 256),
+    action_mode: actionMode as AutonomousTaskIntent["action_mode"],
+    alternative_action_modes: itemList("alternative_action_modes"),
+    requested_effect: requestedEffect as AutonomousTaskIntent["requested_effect"],
+    evidence_mode: evidenceMode as AutonomousTaskIntent["evidence_mode"],
+    ambiguity_flags: itemList("ambiguity_flags"),
+    planning_signals: itemList("planning_signals"),
+    success_signals: itemList("success_signals"),
+    risk_signals: itemList("risk_signals"),
+    requested_output_count: value.requested_output_count as number,
+    desired_outputs_digest: desiredOutputsDigest,
+    constraints_digest: constraintsDigest,
+  };
+  const intentDigest = digestValue("intent_digest", value.intent_digest);
+  if (intentDigest !== descriptorDigest(descriptor)) throw new ArgumentError("task intent digest does not match its metadata");
+  if (options.taskDigest !== undefined && digestValue("expected task digest", options.taskDigest) !== descriptor.task_digest) throw new ArgumentError("task intent task digest does not match the expected task");
+  if (options.lens !== undefined) {
+    const lens = validateAutonomousDomainTaskLens(options.lens, value.domain as AutonomousDomainName);
+    if (descriptor.lens_digest !== lens.lens_digest) throw new ArgumentError("task intent lens digest does not match the reviewed lens");
+  }
+  return Object.freeze({ ...descriptor, intent_digest: intentDigest, retention: "value_only_intent_metadata;task_text_not_retained", authorization: "classification_only;no_provider_tool_or_effect_authority", secret_material: "never_returned" }) as AutonomousTaskIntent;
+}
+
 export function autonomousTaskIntentPromptContract(intent: AutonomousTaskIntent, compact = false): JsonObject {
-  if (!intent || intent.schema !== AUTONOMOUS_TASK_INTENT_SCHEMA) throw new ArgumentError("task intent prompt contract requires a valid intent");
+  intent = validateAutonomousTaskIntent(intent);
   if (compact) {
     return {
       schema: AUTONOMOUS_TASK_INTENT_SCHEMA,
@@ -161,7 +219,8 @@ export function inferAutonomousTaskIntent(args: {
   const taskText = text("task intent task", args.task, MAX_TASK_INTENT_TASK_BYTES);
   const taskDigest = digest("task intent taskDigest", args.taskDigest);
   if (taskDigest !== digestJsonSync({ task: taskText })) throw new ArgumentError("task intent taskDigest does not match task text");
-  if (!AUTONOMOUS_TASK_INTENT_DOMAINS.includes(args.domain) || args.lens.domain !== args.domain) throw new ArgumentError("task intent domain and lens must agree");
+  const lens = validateAutonomousDomainTaskLens(args.lens, args.domain);
+  if (!AUTONOMOUS_TASK_INTENT_DOMAINS.includes(args.domain) || lens.domain !== args.domain) throw new ArgumentError("task intent domain and lens must agree");
   const capability = text("task intent capability", args.capability, 256);
   const riskClass = text("task intent riskClass", args.riskClass, 256);
   const workflowId = text("task intent workflowId", args.workflowId, 256);
@@ -188,7 +247,7 @@ export function inferAutonomousTaskIntent(args: {
   const domainRisk = domainRiskSignals[args.domain];
   if (domainRisk) riskSignals.push(domainRisk);
   if (!desiredOutputs.length) riskSignals.push("output_contract_missing");
-  const successSignals = ["workflow_completion_contract", ...args.lens.evaluator_signals, ...(desiredOutputs.length ? ["caller_outputs_requested"] : [])];
+  const successSignals = ["workflow_completion_contract", ...lens.evaluator_signals, ...(desiredOutputs.length ? ["caller_outputs_requested"] : [])];
   const constraintsDigest = constraints.length ? digestJsonSync([...constraints]) : null;
   const desiredOutputsDigest = desiredOutputs.length ? digestJsonSync([...desiredOutputs]) : null;
   const descriptor: IntentDescriptor = {
@@ -199,14 +258,14 @@ export function inferAutonomousTaskIntent(args: {
     risk_class: riskClass,
     workflow_id: workflowId,
     task_digest: taskDigest,
-    lens_digest: args.lens.lens_digest,
+    lens_digest: lens.lens_digest,
     intent_id: `${args.domain}:${workflowId}:${actionMode}`,
     action_mode: actionMode,
     alternative_action_modes: alternatives,
     requested_effect: requestedEffect,
     evidence_mode: EVIDENCE_MODES[args.domain],
     ambiguity_flags: unique(ambiguity),
-    planning_signals: unique([`action:${actionMode}`, ...args.lens.planning_dimensions]),
+    planning_signals: unique([`action:${actionMode}`, ...lens.planning_dimensions]),
     success_signals: unique(successSignals),
     risk_signals: unique(riskSignals),
     requested_output_count: desiredOutputs.length,

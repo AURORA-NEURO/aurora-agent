@@ -10,6 +10,7 @@ import {
   builtinAutonomousDomainProfiles,
   builtinAutonomousDomainTaskLenses,
   compileAutonomousPlan,
+  validateAutonomousDomainTaskLens,
 } from "../dist/index.js";
 
 test("built-in task lenses cover all domains with canonical cross-runtime digests", () => {
@@ -75,4 +76,12 @@ test("every built-in domain plan exposes deterministic bounded execution waves",
       for (const dependency of step.depends_on) assert.ok(waveById.get(dependency) < waveById.get(step.id), `${profile.domain}: dependency wave`);
     }
   }
+});
+
+test("task lens replay validation rejects tampering and cross-domain use", () => {
+  const coding = autonomousDomainTaskLens("coding");
+  assert.deepEqual(validateAutonomousDomainTaskLens(coding, "coding"), coding);
+  assert.throws(() => validateAutonomousDomainTaskLens({ ...coding, objective: "silently widen the change surface" }));
+  assert.throws(() => validateAutonomousDomainTaskLens(coding, "science"));
+  assert.throws(() => validateAutonomousDomainTaskLens({ ...coding, unexpected: true }));
 });

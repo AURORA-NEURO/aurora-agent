@@ -1,7 +1,7 @@
 import { ArgumentError } from "./errors.js";
-import type { AutonomousDomainPolicy } from "./autonomous-domain-policy.js";
-import type { AutonomousDomainTaskLens } from "./autonomous-task-lens.js";
-import { AUTONOMOUS_TASK_INTENT_DOMAINS, type AutonomousTaskIntent } from "./autonomous-task-intent.js";
+import { validateAutonomousDomainPolicy, type AutonomousDomainPolicy } from "./autonomous-domain-policy.js";
+import { validateAutonomousDomainTaskLens, type AutonomousDomainTaskLens } from "./autonomous-task-lens.js";
+import { AUTONOMOUS_TASK_INTENT_DOMAINS, validateAutonomousTaskIntent, type AutonomousTaskIntent } from "./autonomous-task-intent.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
 
@@ -200,7 +200,7 @@ export function validateAutonomousTaskDecision(
   options: {
     intent?: AutonomousTaskIntent;
     lens?: AutonomousDomainTaskLens;
-    policy?: AutonomousDomainPolicy;
+    policy?: AutonomousDomainPolicy | JsonObject;
     requiredModelCapabilities?: readonly string[];
   } = {},
 ): AutonomousTaskDecision {
@@ -279,10 +279,13 @@ export function validateAutonomousTaskDecision(
   const supplied = [options.intent, options.lens, options.policy];
   if (supplied.some((entry) => entry !== undefined)) {
     if (!options.intent || !options.lens || !options.policy) throw new ArgumentError("task decision replay requires intent, lens, and policy together");
+    const reviewedLens = validateAutonomousDomainTaskLens(options.lens);
+    const reviewedIntent = validateAutonomousTaskIntent(options.intent, { lens: reviewedLens });
+    const reviewedPolicy = validateAutonomousDomainPolicy(options.policy, reviewedIntent.domain);
     const replay = inferAutonomousTaskDecision({
-      intent: options.intent,
-      lens: options.lens,
-      policy: options.policy,
+      intent: reviewedIntent,
+      lens: reviewedLens,
+      policy: reviewedPolicy,
       requiredModelCapabilities: options.requiredModelCapabilities ?? decision.required_model_capabilities,
     });
     if (JSON.stringify(descriptorFor(replay)) !== JSON.stringify(descriptorFor(decision))) throw new ArgumentError("task decision does not match the supplied intent, lens, and policy");

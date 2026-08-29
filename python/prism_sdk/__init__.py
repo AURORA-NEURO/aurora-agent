@@ -796,6 +796,7 @@ from .autonomous_domain_policy import (
     autonomous_domain_policy,
     builtin_autonomous_domain_policies,
     evaluate_autonomous_domain_policy,
+    validate_autonomous_domain_policy,
 )
 from .autonomous_task_lens import (
     AUTONOMOUS_TASK_LENS_SCHEMA,
@@ -805,6 +806,7 @@ from .autonomous_task_lens import (
     AutonomousDomainTaskLens,
     builtin_autonomous_domain_task_lenses,
     autonomous_domain_task_lens,
+    validate_autonomous_domain_task_lens,
 )
 from .autonomous_task_intent import (
     AUTONOMOUS_TASK_INTENT_SCHEMA,
@@ -816,6 +818,7 @@ from .autonomous_task_intent import (
     MAX_AUTONOMOUS_TASK_INTENT_ITEMS,
     AutonomousTaskIntent,
     infer_autonomous_task_intent,
+    validate_autonomous_task_intent,
 )
 from .autonomous_capability_routing import (
     AUTONOMOUS_CAPABILITY_ROUTE_SCHEMA,
@@ -7237,6 +7240,7 @@ __all__ = [
     "autonomous_domain_policy",
     "builtin_autonomous_domain_policies",
     "evaluate_autonomous_domain_policy",
+    "validate_autonomous_domain_policy",
     "AUTONOMOUS_TASK_LENS_SCHEMA",
     "AUTONOMOUS_TASK_LENS_VERSION",
     "AUTONOMOUS_TASK_LENS_DOMAINS",
@@ -7244,6 +7248,7 @@ __all__ = [
     "AutonomousDomainTaskLens",
     "builtin_autonomous_domain_task_lenses",
     "autonomous_domain_task_lens",
+    "validate_autonomous_domain_task_lens",
     "AUTONOMOUS_TASK_INTENT_SCHEMA",
     "AUTONOMOUS_TASK_INTENT_VERSION",
     "AUTONOMOUS_TASK_INTENT_DOMAINS",
@@ -7253,6 +7258,7 @@ __all__ = [
     "MAX_AUTONOMOUS_TASK_INTENT_ITEMS",
     "AutonomousTaskIntent",
     "infer_autonomous_task_intent",
+    "validate_autonomous_task_intent",
     "AUTONOMOUS_CAPABILITY_ROUTE_SCHEMA",
     "AUTONOMOUS_CAPABILITY_ROUTE_SOURCE",
     "AUTONOMOUS_CAPABILITY_ROUTE_REASONS",

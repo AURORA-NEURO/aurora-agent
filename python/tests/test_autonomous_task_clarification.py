@@ -155,6 +155,15 @@ def test_agent_facade_uses_the_same_preflight_and_answer_receipt() -> None:
     assert blueprint.domain_policy is not None
     assert blueprint.task_decision is not None
     assert plan.intent_digest == blueprint.task_intent.intent_digest
+    assert agent.validate_task_lens(
+        value=blueprint.task_lens.to_dict(),
+        expected_domain="data",
+    ).lens_digest == blueprint.task_lens.lens_digest
+    assert agent.validate_task_intent(
+        value=blueprint.task_intent.to_dict(),
+        lens=blueprint.task_lens.to_dict(),
+        expected_task_digest=blueprint.spec.task_digest,
+    ).intent_digest == blueprint.task_intent.intent_digest
     assert agent.validate_task_decision(
         value=blueprint.task_decision.to_dict(),
         intent=blueprint.task_intent,

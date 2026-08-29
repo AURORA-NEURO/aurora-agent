@@ -1,4 +1,4 @@
-import { ArgumentError } from "./errors.js";
+import { ArgumentError, isObject } from "./errors.js";
 import type { AutonomousDomainName } from "./autonomous.js";
 import { digestJsonSync } from "./tooling.js";
 import type { JsonObject } from "./types.js";
@@ -102,6 +102,57 @@ export interface AutonomousDomainPolicyAdmission extends JsonObject {
 }
 
 type PolicyDescriptor = Omit<AutonomousDomainPolicy, "policy_digest">;
+
+function policyText(name: string, value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || value.includes("\u0000") || new TextEncoder().encode(value).byteLength > 256) throw new ArgumentError(`${name} is outside its bounds`);
+  return value;
+}
+
+/** Validate a persisted policy and prove its digest still matches its controls. */
+export function validateAutonomousDomainPolicy(value: unknown, expectedDomain?: AutonomousDomainName): AutonomousDomainPolicy {
+  if (!isObject(value)) throw new ArgumentError("domain policy must be an object");
+  const allowed = new Set([
+    "schema", "domain", "policy_id", "policy_version", "max_input_tokens", "max_output_tokens",
+    "max_provider_attempts", "max_tool_turns", "max_total_cost_units", "min_route_confidence",
+    "min_selection_confidence", "min_selection_margin", "response_mode", "evidence_mode", "effect_mode",
+    "learning_mode", "evaluator_required", "plan_acceptance_required", "policy_digest", "retention", "secret_material",
+  ]);
+  const keys = Object.keys(value);
+  if (keys.length !== allowed.size || keys.some((key) => !allowed.has(key))) throw new ArgumentError("domain policy contains missing or unsupported fields");
+  if (value.schema !== AUTONOMOUS_DOMAIN_POLICY_SCHEMA || value.policy_version !== AUTONOMOUS_DOMAIN_POLICY_VERSION || value.retention !== "value_only_policy_metadata" || value.secret_material !== "never_returned") throw new ArgumentError("domain policy markers are invalid");
+  if (typeof value.domain !== "string" || !POLICY_DOMAINS.includes(value.domain as AutonomousDomainName)) throw new ArgumentError("domain policy domain is unsupported");
+  if (expectedDomain !== undefined && value.domain !== expectedDomain) throw new ArgumentError("domain policy domain does not match the expected domain");
+  const descriptor: PolicyDescriptor = {
+    schema: AUTONOMOUS_DOMAIN_POLICY_SCHEMA,
+    domain: value.domain as AutonomousDomainName,
+    policy_id: policyText("domain policy policy_id", value.policy_id),
+    policy_version: AUTONOMOUS_DOMAIN_POLICY_VERSION,
+    max_input_tokens: finiteNumber("domain policy max_input_tokens", value.max_input_tokens, 1, 1_000_000, true),
+    max_output_tokens: finiteNumber("domain policy max_output_tokens", value.max_output_tokens, 1, 1_000_000, true),
+    max_provider_attempts: finiteNumber("domain policy max_provider_attempts", value.max_provider_attempts, 1, 1_000_000, true),
+    max_tool_turns: finiteNumber("domain policy max_tool_turns", value.max_tool_turns, 1, 1_000_000, true),
+    max_total_cost_units: finiteNumber("domain policy max_total_cost_units", value.max_total_cost_units, 1, 1_000_000, true),
+    min_route_confidence: finiteNumber("domain policy min_route_confidence", value.min_route_confidence, 0, 1),
+    min_selection_confidence: finiteNumber("domain policy min_selection_confidence", value.min_selection_confidence, 0, 1),
+    min_selection_margin: finiteNumber("domain policy min_selection_margin", value.min_selection_margin, 0, 1),
+    response_mode: value.response_mode as AutonomousDomainPolicyResponseMode,
+    evidence_mode: value.evidence_mode as AutonomousDomainPolicyEvidenceMode,
+    effect_mode: value.effect_mode as AutonomousDomainPolicyEffectMode,
+    learning_mode: value.learning_mode as AutonomousDomainPolicyLearningMode,
+    evaluator_required: value.evaluator_required as boolean,
+    plan_acceptance_required: value.plan_acceptance_required as boolean,
+    retention: "value_only_policy_metadata",
+    secret_material: "never_returned",
+  };
+  if (!(["freeform_allowed", "structured_required"] as readonly unknown[]).includes(descriptor.response_mode)) throw new ArgumentError("domain policy response_mode is unsupported");
+  if (!(["optional", "required_before_provider"] as readonly unknown[]).includes(descriptor.evidence_mode)) throw new ArgumentError("domain policy evidence_mode is unsupported");
+  if (!( ["read_only", "approval_gated", "forbidden"] as readonly unknown[]).includes(descriptor.effect_mode)) throw new ArgumentError("domain policy effect_mode is unsupported");
+  if (!( ["health_only", "evaluator_credit", "evaluator_credit_and_trajectory"] as readonly unknown[]).includes(descriptor.learning_mode)) throw new ArgumentError("domain policy learning_mode is unsupported");
+  if (typeof descriptor.evaluator_required !== "boolean" || typeof descriptor.plan_acceptance_required !== "boolean") throw new ArgumentError("domain policy boolean controls are malformed");
+  const policyDigest = value.policy_digest;
+  if (typeof policyDigest !== "string" || !/^[0-9a-f]{64}$/.test(policyDigest) || digestJsonSync(descriptor) !== policyDigest) throw new ArgumentError("domain policy digest does not match its controls");
+  return Object.freeze({ ...descriptor, policy_digest: policyDigest }) as AutonomousDomainPolicy;
+}
 
 const POLICY_SEEDS: Record<AutonomousDomainName, Omit<PolicyDescriptor, "schema" | "domain" | "policy_id" | "policy_version" | "retention" | "secret_material">> = {
   coding: { max_input_tokens: 16_000, max_output_tokens: 6_000, max_provider_attempts: 3, max_tool_turns: 12, max_total_cost_units: 16, min_route_confidence: 0.55, min_selection_confidence: 0.58, min_selection_margin: 0.06, response_mode: "structured_required", evidence_mode: "optional", effect_mode: "approval_gated", learning_mode: "evaluator_credit", evaluator_required: true, plan_acceptance_required: true },

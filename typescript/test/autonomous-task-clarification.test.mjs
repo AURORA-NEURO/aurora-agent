@@ -100,6 +100,11 @@ test("agent facade uses the same preflight and answer receipt", async () => {
   const blueprint = await agent.blueprint(task, { domain: "data" });
   assert.ok(blueprint.blueprint);
   assert.equal(plan.intent_digest, blueprint.blueprint.task_intent.intent_digest);
+  assert.equal(agent.validateTaskLens(blueprint.blueprint.task_lens, "data").lens_digest, blueprint.blueprint.task_lens.lens_digest);
+  assert.equal(agent.validateTaskIntent(blueprint.blueprint.task_intent, {
+    lens: blueprint.blueprint.task_lens,
+    taskDigest: blueprint.blueprint.task_digest,
+  }).intent_digest, blueprint.blueprint.task_intent.intent_digest);
   assert.equal(agent.validateTaskDecision(blueprint.blueprint.task_decision, {
     intent: blueprint.blueprint.task_intent,
     lens: blueprint.blueprint.task_lens,

@@ -13,7 +13,11 @@ import re
 from typing import Any, Mapping, Sequence
 
 from .authoring import content_digest
-from .autonomous_task_lens import AutonomousDomainTaskLens, AUTONOMOUS_TASK_LENS_DOMAINS
+from .autonomous_task_lens import (
+    AutonomousDomainTaskLens,
+    AUTONOMOUS_TASK_LENS_DOMAINS,
+    validate_autonomous_domain_task_lens,
+)
 from .errors import ArgumentError
 
 
@@ -263,6 +267,93 @@ class AutonomousTaskIntent:
         return result
 
 
+def validate_autonomous_task_intent(
+    value: AutonomousTaskIntent | Mapping[str, Any],
+    *,
+    lens: AutonomousDomainTaskLens | Mapping[str, Any] | None = None,
+    expected_task_digest: str | None = None,
+) -> AutonomousTaskIntent:
+    """Validate persisted intent metadata and optionally bind it to live intake artifacts.
+
+    The task text is intentionally not required for replay.  The caller can nevertheless bind
+    the intent to its current task digest and reviewed lens, which is enough to prevent a stale
+    or cross-domain classification from silently reaching model selection or provider planning.
+    """
+
+    raw: Mapping[str, Any]
+    if isinstance(value, AutonomousTaskIntent):
+        raw = value.to_dict()
+    elif isinstance(value, Mapping):
+        raw = value
+    else:
+        raise ArgumentError("task intent must be an object")
+    allowed = {
+        "schema", "intent_version", "domain", "capability", "risk_class", "workflow_id",
+        "task_digest", "lens_digest", "intent_id", "action_mode", "alternative_action_modes",
+        "requested_effect", "evidence_mode", "ambiguity_flags", "planning_signals", "success_signals",
+        "risk_signals", "requested_output_count", "desired_outputs_digest", "constraints_digest",
+        "intent_digest", "retention", "authorization", "secret_material",
+    }
+    if set(raw).difference(allowed):
+        raise ArgumentError("task intent contains unsupported fields")
+    missing = sorted(allowed.difference(raw))
+    if missing:
+        raise ArgumentError("task intent is missing required fields: " + ", ".join(missing))
+    if raw.get("schema") != AUTONOMOUS_TASK_INTENT_SCHEMA:
+        raise ArgumentError("task intent schema is invalid")
+    if (
+        raw.get("retention") != "value_only_intent_metadata;task_text_not_retained"
+        or raw.get("authorization") != "classification_only;no_provider_tool_or_effect_authority"
+        or raw.get("secret_material") != "never_returned"
+    ):
+        raise ArgumentError("task intent retention markers are invalid")
+
+    def items(name: str) -> tuple[str, ...]:
+        raw_items = raw.get(name)
+        if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)):
+            raise ArgumentError(f"task intent {name} must be a sequence")
+        return tuple(raw_items)
+
+    try:
+        intent = AutonomousTaskIntent(
+            domain=raw.get("domain"),
+            capability=raw.get("capability"),
+            risk_class=raw.get("risk_class"),
+            workflow_id=raw.get("workflow_id"),
+            task_digest=raw.get("task_digest"),
+            lens_digest=raw.get("lens_digest"),
+            intent_id=raw.get("intent_id"),
+            action_mode=raw.get("action_mode"),
+            alternative_action_modes=items("alternative_action_modes"),
+            requested_effect=raw.get("requested_effect"),
+            evidence_mode=raw.get("evidence_mode"),
+            ambiguity_flags=items("ambiguity_flags"),
+            planning_signals=items("planning_signals"),
+            success_signals=items("success_signals"),
+            risk_signals=items("risk_signals"),
+            requested_output_count=raw.get("requested_output_count"),
+            desired_outputs_digest=raw.get("desired_outputs_digest"),
+            constraints_digest=raw.get("constraints_digest"),
+            intent_version=raw.get("intent_version"),
+        )
+    except (TypeError, ValueError) as error:
+        raise ArgumentError("task intent fields are malformed") from error
+    if (intent.desired_outputs_digest is None) != (intent.requested_output_count == 0):
+        raise ArgumentError("task intent output digest and count are inconsistent")
+    supplied_digest = _digest(raw.get("intent_digest"), "task intent intent_digest")
+    if supplied_digest != intent.intent_digest:
+        raise ArgumentError("task intent digest does not match its metadata")
+    if expected_task_digest is not None:
+        expected = _digest(expected_task_digest, "expected task digest")
+        if intent.task_digest != expected:
+            raise ArgumentError("task intent task digest does not match the expected task")
+    if lens is not None:
+        reviewed_lens = validate_autonomous_domain_task_lens(lens, expected_domain=intent.domain)
+        if intent.lens_digest != reviewed_lens.lens_digest:
+            raise ArgumentError("task intent lens digest does not match the reviewed lens")
+    return intent
+
+
 AUTONOMOUS_TASK_INTENT_DOMAINS = AUTONOMOUS_TASK_LENS_DOMAINS
 
 
@@ -284,6 +375,7 @@ def infer_autonomous_task_intent(
     _digest(task_digest, "task intent task_digest")
     if task_digest != content_digest({"task": task_text}):
         raise ArgumentError("task intent task_digest does not match task text")
+    lens = validate_autonomous_domain_task_lens(lens, expected_domain=domain)
     if domain not in AUTONOMOUS_TASK_INTENT_DOMAINS or lens.domain != domain:
         raise ArgumentError("task intent domain and lens must agree")
     _bounded_text("task intent capability", capability, maximum=256)
@@ -372,5 +464,6 @@ __all__ = [
     "AUTONOMOUS_TASK_INTENT_EVIDENCE_MODES",
     "MAX_AUTONOMOUS_TASK_INTENT_ITEMS",
     "AutonomousTaskIntent",
+    "validate_autonomous_task_intent",
     "infer_autonomous_task_intent",
 ]

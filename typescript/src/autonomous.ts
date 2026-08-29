@@ -307,11 +307,13 @@ import type { AutonomousDomainResponseContract, AutonomousDomainResponseEvaluati
 import {
   autonomousDomainTaskLens,
   autonomousTaskLensPromptContract,
+  validateAutonomousDomainTaskLens,
   type AutonomousDomainTaskLens,
 } from "./autonomous-task-lens.js";
 import {
   autonomousTaskIntentPromptContract,
   inferAutonomousTaskIntent,
+  validateAutonomousTaskIntent,
   type AutonomousTaskIntent,
 } from "./autonomous-task-intent.js";
 import {
@@ -343,6 +345,7 @@ import { ToolCatalogue, canonicalJson, digestBytesSync, digestCanonicalJsonText,
 import {
   autonomousDomainPolicy,
   evaluateAutonomousDomainPolicy,
+  validateAutonomousDomainPolicy,
   type AutonomousDomainPolicy,
   type AutonomousDomainPolicyAdmission,
   type AutonomousDomainPolicyExecutionMode,
@@ -7851,6 +7854,24 @@ export class AutonomousAgent {
     receipt: AutonomousTaskClarificationResolution | unknown,
   ): Promise<AutonomousTaskClarificationResolution> {
     return validateAutonomousTaskClarificationResolution(receipt, plan);
+  }
+
+  /** Validate a persisted domain lens before task classification or planning resumes. */
+  validateTaskLens(value: AutonomousDomainTaskLens | unknown, expectedDomain?: AutonomousDomainName): AutonomousDomainTaskLens {
+    return validateAutonomousDomainTaskLens(value, expectedDomain);
+  }
+
+  /** Validate persisted intent metadata and optionally bind it to the current task/lens. */
+  validateTaskIntent(
+    value: AutonomousTaskIntent | unknown,
+    options: { lens?: AutonomousDomainTaskLens; taskDigest?: string } = {},
+  ): AutonomousTaskIntent {
+    return validateAutonomousTaskIntent(value, options);
+  }
+
+  /** Validate a persisted domain policy before a resumed decision replay. */
+  validateDomainPolicy(value: AutonomousDomainPolicy | unknown, expectedDomain?: AutonomousDomainName): AutonomousDomainPolicy {
+    return validateAutonomousDomainPolicy(value, expectedDomain);
   }
 
   /** Validate a persisted task decision before a resumed execution boundary. */

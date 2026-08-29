@@ -13,13 +13,14 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from .authoring import content_digest
-from .autonomous_domain_policy import AutonomousDomainPolicy
+from .autonomous_domain_policy import AutonomousDomainPolicy, validate_autonomous_domain_policy
 from .autonomous_task_intent import (
     AUTONOMOUS_TASK_INTENT_DOMAINS,
     AUTONOMOUS_TASK_INTENT_EFFECTS,
     AutonomousTaskIntent,
+    validate_autonomous_task_intent,
 )
-from .autonomous_task_lens import AutonomousDomainTaskLens
+from .autonomous_task_lens import AutonomousDomainTaskLens, validate_autonomous_domain_task_lens
 from .errors import ArgumentError
 
 
@@ -304,9 +305,9 @@ def infer_autonomous_task_decision(
 def validate_autonomous_task_decision(
     value: AutonomousTaskDecision | Mapping[str, Any],
     *,
-    intent: AutonomousTaskIntent | None = None,
-    lens: AutonomousDomainTaskLens | None = None,
-    policy: AutonomousDomainPolicy | None = None,
+    intent: AutonomousTaskIntent | Mapping[str, Any] | None = None,
+    lens: AutonomousDomainTaskLens | Mapping[str, Any] | None = None,
+    policy: AutonomousDomainPolicy | Mapping[str, Any] | None = None,
     required_model_capabilities: Sequence[str] | None = None,
 ) -> AutonomousTaskDecision:
     """Validate a persisted decision and optionally replay it against live task artifacts.
@@ -376,12 +377,15 @@ def validate_autonomous_task_decision(
 
     bindings = (intent, lens, policy)
     if any(item is not None for item in bindings):
-        if not all(isinstance(item, expected) for item, expected in zip(bindings, (AutonomousTaskIntent, AutonomousDomainTaskLens, AutonomousDomainPolicy))):
+        if not all(item is not None for item in bindings):
             raise ArgumentError("task decision replay requires intent, lens, and policy together")
+        reviewed_lens = validate_autonomous_domain_task_lens(lens)
+        reviewed_intent = validate_autonomous_task_intent(intent, lens=reviewed_lens)
+        reviewed_policy = validate_autonomous_domain_policy(policy, expected_domain=reviewed_intent.domain)
         replay = infer_autonomous_task_decision(
-            intent=intent,
-            lens=lens,
-            policy=policy,
+            intent=reviewed_intent,
+            lens=reviewed_lens,
+            policy=reviewed_policy,
             required_model_capabilities=(
                 decision.required_model_capabilities
                 if required_model_capabilities is None

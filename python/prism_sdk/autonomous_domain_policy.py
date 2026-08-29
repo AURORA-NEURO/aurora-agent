@@ -181,6 +181,74 @@ def _policy_descriptor(policy: AutonomousDomainPolicy) -> dict[str, Any]:
     return value
 
 
+def validate_autonomous_domain_policy(
+    value: AutonomousDomainPolicy | Mapping[str, Any],
+    *,
+    expected_domain: str | None = None,
+) -> AutonomousDomainPolicy:
+    """Validate a persisted policy and prove its digest matches its controls.
+
+    Policy metadata crosses restart and process boundaries as ordinary JSON.  Shape validation
+    alone is not enough because a caller could otherwise replace a limit or safety mode while
+    retaining the original digest.  This validator reconstructs the immutable policy, checks its
+    canonical descriptor, and optionally binds it to the domain currently being resumed.
+    """
+
+    if isinstance(value, AutonomousDomainPolicy):
+        policy = value
+        if policy.policy_version != AUTONOMOUS_DOMAIN_POLICY_VERSION:
+            raise AutonomousDomainPolicyError("domain policy version is unsupported")
+    else:
+        if not isinstance(value, Mapping):
+            raise AutonomousDomainPolicyError("domain policy must be an object")
+        allowed = {
+            "schema", "domain", "policy_id", "policy_version", "max_input_tokens", "max_output_tokens",
+            "max_provider_attempts", "max_tool_turns", "max_total_cost_units", "min_route_confidence",
+            "min_selection_confidence", "min_selection_margin", "response_mode", "evidence_mode",
+            "effect_mode", "learning_mode", "evaluator_required", "plan_acceptance_required",
+            "policy_digest", "retention", "secret_material",
+        }
+        if set(value).difference(allowed) or set(value) != allowed:
+            raise AutonomousDomainPolicyError("domain policy contains missing or unsupported fields")
+        if (
+            value.get("schema") != AUTONOMOUS_DOMAIN_POLICY_SCHEMA
+            or value.get("policy_version") != AUTONOMOUS_DOMAIN_POLICY_VERSION
+            or value.get("retention") != "value_only_policy_metadata"
+            or value.get("secret_material") != "never_returned"
+        ):
+            raise AutonomousDomainPolicyError("domain policy markers are invalid")
+        try:
+            policy = AutonomousDomainPolicy(
+                domain=value.get("domain"),
+                policy_id=value.get("policy_id"),
+                max_input_tokens=value.get("max_input_tokens"),
+                max_output_tokens=value.get("max_output_tokens"),
+                max_provider_attempts=value.get("max_provider_attempts"),
+                max_tool_turns=value.get("max_tool_turns"),
+                max_total_cost_units=value.get("max_total_cost_units"),
+                min_route_confidence=value.get("min_route_confidence"),
+                min_selection_confidence=value.get("min_selection_confidence"),
+                min_selection_margin=value.get("min_selection_margin"),
+                response_mode=value.get("response_mode"),
+                evidence_mode=value.get("evidence_mode"),
+                effect_mode=value.get("effect_mode"),
+                learning_mode=value.get("learning_mode"),
+                evaluator_required=value.get("evaluator_required"),
+                plan_acceptance_required=value.get("plan_acceptance_required"),
+                policy_digest=value.get("policy_digest"),
+                policy_version=value.get("policy_version"),
+            )
+        except (TypeError, ValueError) as error:
+            raise AutonomousDomainPolicyError("domain policy fields are malformed") from error
+        if value.get("policy_digest") != content_digest(_policy_descriptor(policy)):
+            raise AutonomousDomainPolicyError("domain policy digest does not match its controls")
+    if expected_domain is not None and policy.domain != expected_domain:
+        raise AutonomousDomainPolicyError("domain policy domain does not match the expected domain")
+    if policy.policy_digest != content_digest(_policy_descriptor(policy)):
+        raise AutonomousDomainPolicyError("domain policy digest does not match its controls")
+    return policy
+
+
 def _make_policy(domain: str, overrides: Mapping[str, Any] | None = None) -> AutonomousDomainPolicy:
     if domain not in AUTONOMOUS_DOMAIN_POLICY_DOMAINS:
         raise AutonomousDomainPolicyError(f"unsupported autonomous domain policy domain: {domain!r}")

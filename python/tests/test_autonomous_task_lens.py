@@ -11,6 +11,7 @@ from prism_sdk import (
     autonomous_domain_task_lens,
     builtin_autonomous_domain_task_lenses,
     content_digest,
+    validate_autonomous_domain_task_lens,
 )
 from prism_sdk.errors import ArgumentError
 
@@ -53,3 +54,25 @@ def test_task_lens_validation_rejects_unknown_domains_and_duplicate_guidance() -
         replace(coding, planning_dimensions=("scope", "scope"))
 
     assert set(AUTONOMOUS_TASK_LENS_DOMAINS) == set(AUTONOMOUS_DOMAINS)
+
+
+def test_task_lens_replay_validation_rejects_tampering_and_cross_domain_use() -> None:
+    coding = autonomous_domain_task_lens("coding")
+    restored = validate_autonomous_domain_task_lens(coding.to_dict(), expected_domain="coding")
+    assert restored == coding
+
+    tampered = coding.to_dict()
+    tampered["objective"] = "silently widen the change surface"
+    with pytest.raises(ArgumentError):
+        validate_autonomous_domain_task_lens(tampered)
+
+    with pytest.raises(ArgumentError):
+        validate_autonomous_domain_task_lens(coding.to_dict(), expected_domain="science")
+
+    with pytest.raises(ArgumentError):
+        validate_autonomous_domain_task_lens({**coding.to_dict(), "unexpected": True})
+
+    malformed = coding.to_dict()
+    malformed["planning_dimensions"] = "scope"
+    with pytest.raises(ArgumentError):
+        validate_autonomous_domain_task_lens(malformed)

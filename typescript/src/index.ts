@@ -109,6 +109,7 @@ export {
   autonomousDomainPolicy,
   builtinAutonomousDomainPolicies,
   evaluateAutonomousDomainPolicy,
+  validateAutonomousDomainPolicy,
 } from "./autonomous-domain-policy.js";
 export type {
   AutonomousDomainPolicy,
@@ -130,6 +131,7 @@ export {
   builtinAutonomousDomainTaskLenses,
   autonomousDomainTaskLens,
   autonomousTaskLensPromptContract,
+  validateAutonomousDomainTaskLens,
 } from "./autonomous-task-lens.js";
 export type { AutonomousDomainTaskLens } from "./autonomous-task-lens.js";
 export {
@@ -142,6 +144,7 @@ export {
   MAX_AUTONOMOUS_TASK_INTENT_ITEMS,
   autonomousTaskIntentPromptContract,
   inferAutonomousTaskIntent,
+  validateAutonomousTaskIntent,
 } from "./autonomous-task-intent.js";
 export type { AutonomousTaskIntent } from "./autonomous-task-intent.js";
 export {

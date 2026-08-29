@@ -2447,3 +2447,18 @@ markers, then optionally recomputes the decision against the live intent, domain
 to reject stale guidance before a resumed execution boundary. High-level agents expose the same
 check. This is still guidance validation, not authorization: provider/source/tool/evaluator/
 learner/effect approvals and caller-owned persistence remain separate deployment responsibilities.
+
+Task-intent and domain-lens replay is now independently validated in both SDKs. Persisted lenses
+and intents are reconstructed from allow-listed metadata, their canonical digests are checked,
+retention markers and bounded fields are enforced, and optional task/lens bindings reject
+cross-domain or stale intake artifacts before decision replay. High-level agents expose matching
+validation methods, and decision replay runs these checks before recomputation. This closes the
+remaining intake-object integrity seam without retaining task text or turning classification
+metadata into provider, source, tool, evaluator, learner, credential, or effect authority.
+
+Domain-policy replay is now covered by the same integrity boundary. Both SDKs reconstruct
+allow-listed policy metadata, recompute the canonical digest over limits and safety modes, reject
+marker/shape/tampering drift, and optionally bind the policy to the resumed domain. Decision replay
+normalizes this policy before recomputing approval posture, and high-level agents expose matching
+policy validation helpers. This prevents a stale or modified budget/effect/evidence policy from
+crossing a restart boundary under an otherwise valid digest.

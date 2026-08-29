@@ -41,6 +41,12 @@ def _bounded_items(name: str, values: Any) -> tuple[str, ...]:
     return result
 
 
+def _digest(name: str, value: Any) -> str:
+    if not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+        raise ArgumentError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousDomainTaskLens:
     """A bounded domain strategy used by planning and model-selection projections."""
@@ -120,6 +126,74 @@ class AutonomousDomainTaskLens:
         }
 
 
+def validate_autonomous_domain_task_lens(
+    value: AutonomousDomainTaskLens | Mapping[str, Any],
+    *,
+    expected_domain: str | None = None,
+) -> AutonomousDomainTaskLens:
+    """Validate a lens crossing a process boundary.
+
+    Built-in lenses are immutable strategy metadata, but callers commonly persist their
+    ``to_dict()`` projection and rehydrate it in another worker.  Reconstructing the dataclass
+    alone is not sufficient: it would accept a forged digest and would not reject unknown fields
+    or altered retention markers.  This validator therefore checks the complete canonical
+    descriptor before returning a normalized lens.
+    """
+
+    raw: Mapping[str, Any]
+    if isinstance(value, AutonomousDomainTaskLens):
+        raw = value.to_dict()
+    elif isinstance(value, Mapping):
+        raw = value
+    else:
+        raise ArgumentError("task lens must be an object")
+    allowed = {
+        "schema", "domain", "lens_id", "lens_version", "objective", "planning_dimensions",
+        "decision_checks", "evidence_priorities", "evaluator_signals", "model_capability_hints",
+        "output_sections", "failure_modes", "lens_digest", "retention", "secret_material",
+    }
+    if set(raw).difference(allowed):
+        raise ArgumentError("task lens contains unsupported fields")
+    required = allowed
+    missing = sorted(required.difference(raw))
+    if missing:
+        raise ArgumentError("task lens is missing required fields: " + ", ".join(missing))
+    if raw.get("schema") != AUTONOMOUS_TASK_LENS_SCHEMA:
+        raise ArgumentError("task lens schema is invalid")
+    if raw.get("retention") != "value_only_strategy_metadata" or raw.get("secret_material") != "never_returned":
+        raise ArgumentError("task lens retention markers are invalid")
+    domain = raw.get("domain")
+    if expected_domain is not None and domain != expected_domain:
+        raise ArgumentError("task lens domain does not match the expected domain")
+
+    def items(name: str) -> tuple[str, ...]:
+        raw_items = raw.get(name)
+        if not isinstance(raw_items, (list, tuple)):
+            raise ArgumentError(f"task lens {name} must be an array")
+        return tuple(raw_items)
+
+    try:
+        lens = AutonomousDomainTaskLens(
+            domain=domain,
+            lens_id=raw.get("lens_id"),
+            lens_version=raw.get("lens_version"),
+            objective=raw.get("objective"),
+            planning_dimensions=items("planning_dimensions"),
+            decision_checks=items("decision_checks"),
+            evidence_priorities=items("evidence_priorities"),
+            evaluator_signals=items("evaluator_signals"),
+            model_capability_hints=items("model_capability_hints"),
+            output_sections=items("output_sections"),
+            failure_modes=items("failure_modes"),
+        )
+    except (TypeError, ValueError) as error:
+        raise ArgumentError("task lens fields are malformed") from error
+    supplied_digest = _digest("task lens lens_digest", raw.get("lens_digest"))
+    if supplied_digest != lens.lens_digest:
+        raise ArgumentError("task lens digest does not match its metadata")
+    return lens
+
+
 _LENS_SEEDS: Mapping[str, Mapping[str, Any]] = {
     "coding": {"lens_id": "coding-change-verification", "objective": "make the smallest verifiable change that satisfies the requested behavior", "planning_dimensions": ("scope", "dependency_impact", "implementation", "verification"), "decision_checks": ("reproduce_or_localize_before_changing", "minimize_change_surface", "preserve_existing_contracts", "run_relevant_checks"), "evidence_priorities": ("repository_state", "diff_impact", "test_or_ci_output"), "evaluator_signals": ("correctness", "regression_safety", "scope_discipline"), "model_capability_hints": ("code", "reasoning", "tool_use"), "output_sections": ("diagnosis", "change_plan", "implementation", "verification", "limitations"), "failure_modes": ("unreproduced_failure", "unverified_fix", "scope_creep")},
     "browser": {"lens_id": "browser-source-grounding", "objective": "acquire and compare bounded sources while preserving provenance and freshness", "planning_dimensions": ("source_discovery", "navigation", "provenance", "comparison"), "decision_checks": ("identify_source_scope", "separate_observation_from_inference", "record_freshness", "surface_conflict"), "evidence_priorities": ("source_identity", "retrieval_metadata", "cross_source_agreement"), "evaluator_signals": ("source_relevance", "provenance_completeness", "conflict_visibility"), "model_capability_hints": ("web_research", "reasoning", "structured_output"), "output_sections": ("sources", "observations", "comparison", "uncertainty", "next_queries"), "failure_modes": ("unsupported_source", "stale_source", "citation_overreach")},
@@ -158,6 +232,7 @@ __all__ = [
     "AUTONOMOUS_TASK_LENS_DOMAINS",
     "MAX_AUTONOMOUS_TASK_LENS_ITEMS",
     "AutonomousDomainTaskLens",
+    "validate_autonomous_domain_task_lens",
     "builtin_autonomous_domain_task_lenses",
     "autonomous_domain_task_lens",
 ]

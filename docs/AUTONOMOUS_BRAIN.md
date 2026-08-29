@@ -13327,3 +13327,28 @@ boundary merely because its outer JSON parses. A validated decision remains guid
 not satisfy any approval requirement or authorize execution. Tests cover canonical replay,
 tampering, incomplete replay bindings, stale model-capability requirements, high-level agent
 access, and the shared all-domain intake path.
+
+### Restart-safe task-intent and domain-lens replay
+
+Task lenses and task intents are now independently validated before they participate in decision
+replay. `validate_autonomous_domain_task_lens(...)` / `validateAutonomousDomainTaskLens(...)`
+reconstruct every bounded strategy field, reject unknown fields and invalid retention markers,
+and recompute the lens digest. `validate_autonomous_task_intent(...)` /
+`validateAutonomousTaskIntent(...)` perform the equivalent check for action mode, effect posture,
+evidence taxonomy, bounded signals, output-count invariants, and the intent digest.
+
+Both validators can bind a persisted artifact to the expected domain, reviewed lens, and current
+task digest without requiring the task text to enter durable state. The high-level agents expose
+`validate_task_lens` / `validateTaskLens` and `validate_task_intent` / `validateTaskIntent` for
+worker handoffs. Decision replay now invokes these validators first, so a forged or cross-domain
+intent/lens cannot influence recomputation merely because its object shape looks correct. The
+validators remain classification guidance, not authorization: provider, source, tool, evaluator,
+credential, learner, and effect gates are still independent.
+
+Domain-policy replay now follows the same rule. `validate_autonomous_domain_policy(...)` /
+`validateAutonomousDomainPolicy(...)` reconstructs persisted limits and safety modes, requires the
+complete allow-listed metadata shape, verifies the policy digest against the actual controls, and
+can bind the policy to the resumed domain. Decision replay normalizes this policy before deriving
+approval requirements, so changing a token budget, evidence requirement, effect mode, or learning
+mode while preserving the old digest is rejected. High-level agents expose matching
+`validate_domain_policy(...)` / `validateDomainPolicy(...)` helpers for worker and UI restart paths.
