@@ -90,6 +90,10 @@ import {
   runAutonomousCrossDomainReplanCycle,
   runAutonomousDecisionCycle,
   runAutonomousReplanCycle,
+  type AutonomousAutoDecisionCycleOptions,
+  type AutonomousAutoDecisionCycleResult,
+  type AutonomousAutoReplanCycleOptions,
+  type AutonomousAutoReplanCycleResult,
   type AutonomousCrossDomainDecisionCycleOptions,
   type AutonomousCrossDomainDecisionCycleResult,
   type AutonomousDecisionCycleSemanticOptions,
@@ -821,6 +825,16 @@ export interface AutonomousBrainCycleOptions {
 export type AutonomousBrainCycleResult = AutonomousDecisionCycleResult | AutonomousCrossDomainDecisionCycleResult;
 export type AutonomousBrainCycleStatus = AutonomousBrainCycleResult["status"] | "connector_blocked";
 
+type AutonomousBrainAutomaticCycleBoundKeys = "domain" | "routeOverride" | "capability" | "context" | "hints" | "allowCrossDomain";
+
+/** Automatic evaluator-backed cycle controls with route identity owned by the request. */
+export type AutonomousBrainAutoCycleOptions = Omit<AutonomousAutoDecisionCycleOptions, AutonomousBrainAutomaticCycleBoundKeys>;
+export type AutonomousBrainAutoCycleResult = AutonomousAutoDecisionCycleResult;
+
+/** Automatic evaluator-guided replan controls with route identity owned by the request. */
+export type AutonomousBrainAutoReplanCycleOptions = Omit<AutonomousAutoReplanCycleOptions, AutonomousBrainAutomaticCycleBoundKeys>;
+export type AutonomousBrainAutoReplanCycleResult = AutonomousAutoReplanCycleResult;
+
 export interface AutonomousBrainCycleExecution {
   schema: typeof AUTONOMOUS_BRAIN_FACADE_SCHEMA;
   status: AutonomousBrainCycleStatus;
@@ -1307,6 +1321,29 @@ function digest(name: string, value: unknown): string {
 function domain(name: string, value: unknown): AutonomousDomainName {
   if (typeof value !== "string" || !AUTONOMOUS_DOMAIN_NAMES.includes(value as AutonomousDomainName)) throw new ArgumentError(`${name} is not a supported autonomous domain`);
   return value as AutonomousDomainName;
+}
+
+function bindAutomaticCycleOptions(request: AutonomousBrainRequest, options: unknown): Record<string, unknown> {
+  if (!isObject(options) || Array.isArray(options)) throw new ArgumentError("autonomous brain automatic cycle options must be an object");
+  const raw = options as Record<string, unknown>;
+  if (raw.routeOverride !== undefined) throw new ArgumentError("autonomous brain automatic cycle owns routeOverride; provide route fields on the request");
+  const {
+    domain: _domain,
+    routeOverride: _routeOverride,
+    capability: _capability,
+    context: _context,
+    hints: _hints,
+    allowCrossDomain: _allowCrossDomain,
+    ...cycleOptions
+  } = raw;
+  return {
+    ...cycleOptions,
+    domain: request.domain,
+    capability: request.capability,
+    context: request.context,
+    hints: request.hints,
+    allowCrossDomain: request.allow_cross_domain,
+  };
 }
 
 function errorProjection(error: unknown): { error_class: string; failure_code: string } {
@@ -3792,6 +3829,52 @@ export class AutonomousBrainFacade {
   async executeCycle(input: AutonomousBrainRequest, options: AutonomousBrainCycleOptions = {}): Promise<AutonomousBrainCycleExecution> {
     const prepared = await this.prepare(input, options.semanticRouting, options.cycle, options.approveProviderCall);
     return this.executeCyclePrepared(prepared, options);
+  }
+
+  /** Execute the automatic evaluator-backed cycle with request-owned route fields. */
+  async executeAutoCycle(
+    input: AutonomousBrainRequest,
+    options: AutonomousBrainAutoCycleOptions = {},
+  ): Promise<AutonomousBrainAutoCycleResult> {
+    const request = validateRequest(input);
+    if (request.connector !== undefined) throw new ArgumentError("autonomous brain automatic cycle does not skip connector execution; use executeCycle() for connector-bearing requests");
+    return this.agent.runAutoCycle(request.task, bindAutomaticCycleOptions(request, options) as AutonomousAutoDecisionCycleOptions);
+  }
+
+  /** Execute an automatic evaluator-backed cycle only after provider-free launch admission. */
+  async executeAutoCycleWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoCycleOptions = {},
+  ): Promise<AutonomousBrainAutoCycleResult> {
+    const request = validateRequest(input);
+    if (request.connector !== undefined) throw new ArgumentError("autonomous brain launch-admitted automatic cycle does not skip connector execution; use executeCycleWithLaunchAdmission() for connector-bearing requests");
+    const bound = bindAutomaticCycleOptions(request, options);
+    if (isObject(bound.semanticRouting) && bound.semanticRouting.enabled === true) throw new ArgumentError("launch-admitted automatic cycle requires provider-free routing; admit semantic routing separately before enabling it");
+    return this.agent.runAutoCycleWithLaunchAdmission(request.task, admission, bound as AutonomousAutoDecisionCycleOptions);
+  }
+
+  /** Execute the automatic evaluator-guided replan cycle with request-owned route fields. */
+  async executeAutoReplanCycle(
+    input: AutonomousBrainRequest,
+    options: AutonomousBrainAutoReplanCycleOptions,
+  ): Promise<AutonomousBrainAutoReplanCycleResult> {
+    const request = validateRequest(input);
+    if (request.connector !== undefined) throw new ArgumentError("autonomous brain automatic replan cycle does not skip connector execution; use executeAdaptiveCycle() for connector-bearing requests");
+    return this.agent.runAutoReplanCycle(request.task, bindAutomaticCycleOptions(request, options) as AutonomousAutoReplanCycleOptions);
+  }
+
+  /** Execute the automatic replan cycle only after provider-free launch admission. */
+  async executeAutoReplanCycleWithLaunchAdmission(
+    input: AutonomousBrainRequest,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoReplanCycleOptions,
+  ): Promise<AutonomousBrainAutoReplanCycleResult> {
+    const request = validateRequest(input);
+    if (request.connector !== undefined) throw new ArgumentError("autonomous brain launch-admitted automatic replan cycle does not skip connector execution; use executeAdaptiveCycleWithLaunchAdmission() for connector-bearing requests");
+    const bound = bindAutomaticCycleOptions(request, options);
+    if (isObject(bound.semanticRouting) && bound.semanticRouting.enabled === true) throw new ArgumentError("launch-admitted automatic replan cycle requires provider-free routing; admit semantic routing separately before enabling it");
+    return this.agent.runAutoReplanCycleWithLaunchAdmission(request.task, admission, bound as AutonomousAutoReplanCycleOptions);
   }
 
   /** Run the closed-loop cycle only when the reviewed route is covered by launch admission. */

@@ -14,6 +14,16 @@ integration test proves each substrate can learn from caller feedback, flush thr
 caller-owned CAS boundary, restore after restart, and remain redacted. Provider transport success
 still cannot become reward implicitly, and missing or foreign persistence configuration fails closed.
 
+The high-level facade now also exposes the automatic evaluator-backed decision and replan kernels
+through request-oriented methods. `executeAutoCycle()` and `executeAutoReplanCycle()` bind route
+identity exactly once from the validated request, dispatch single-domain or bounded cross-domain
+execution, and return the lower-level evaluator/learning projection without weakening provider,
+planning, effect, or restart gates. Launch-admitted variants authorize the frozen provider-free
+route before execution and refuse semantic classifier calls until separately admitted. The
+integration suite covers all built-in domains, cross-domain fan-out, bounded evaluator replanning,
+launch admission, route-override tampering, and semantic-routing refusal; connector-bearing input
+continues through the connector-aware facade boundary.
+
 The safe TypeScript `AutonomousBrainFacade` now owns the provider-free task-clarification loop
 already available on the lower-level agent. It can derive a bounded questionnaire for every
 single-domain profile (or accept only an unambiguous deterministic route when the domain is

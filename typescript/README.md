@@ -1152,6 +1152,33 @@ the metadata-only `AutonomousCycleReplanStateStore`, and all explicit rehydrator
 unchanged, so a terminal restart replay returns its projection without rerouting or replaying the
 provider.
 
+The application-facing `AutonomousBrainFacade` exposes the same kernels as
+`executeAutoCycle()`, `executeAutoCycleWithLaunchAdmission()`,
+`executeAutoReplanCycle()`, and `executeAutoReplanCycleWithLaunchAdmission()`. These methods bind
+the request's validated `domain`, `capability`, `context`, `hints`, and `allow_cross_domain` fields
+into the lower-level cycle, so callers cannot accidentally route one task and execute another.
+Connector-bearing requests remain on the connector-aware `executeCycle()` or
+`executeAdaptiveCycle()` boundary, and launch-admitted variants reject semantic routing until its
+classifier call has its own admission. The methods return the route, selected kernel, evaluator
+projection, settlement metadata, and next action without retaining task text, prompts, provider
+responses, credentials, or evaluator evidence.
+
+```typescript
+const cycle = await brain.executeAutoCycle(
+  { task: "review this biomedical evidence and its EEG confounds", domain: "biomedical" },
+  { approveProviderCall: true },
+);
+const admitted = await brain.executeAutoReplanCycleWithLaunchAdmission(
+  { task: "verify this reproducible experiment", domain: "science" },
+  launchAdmission,
+  {
+    approveProviderCall: true,
+    maxReplans: 1,
+    evaluate: (run) => evaluateWithCallerOwnedEvidence(run),
+  },
+);
+```
+
 For applications using the reviewed built-in value evaluators, `createAutonomousCycleEvaluatorBridge()`
 removes repetitive callback plumbing without making provider success authoritative:
 

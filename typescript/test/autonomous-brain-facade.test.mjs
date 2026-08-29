@@ -1468,6 +1468,118 @@ test("brain facade exposes bounded evaluator-guided replanning across every buil
   assert.equal(runtime.providerStatus("offline").successes, AUTONOMOUS_DOMAIN_NAMES.length);
 });
 
+test("brain facade exposes automatic decision and replan kernels with route binding across every domain", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime, { learner: new AutonomousOnlineLearner() });
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const learning = new AutonomousLearningController(agent);
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await brain.executeAutoCycle(
+      { task: tasks[domain], domain },
+      {
+        approveProviderCall: true,
+        learning: {
+          controller: learning,
+          episodeId: `facade-auto-cycle-${domain}`,
+          evaluate: () => ({ evaluator_id: "facade-auto-cycle-reviewer", evaluator_version: "1", reward: 0.83, passed: true }),
+        },
+      },
+    );
+    assert.equal(result.schema, "bioprism-typescript-autonomous-auto-decision-cycle/0.1", domain);
+    assert.equal(result.mode, "single_domain", domain);
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.next_action, "complete", domain);
+    assert.equal(result.route.primary_domain, domain, domain);
+    assert.equal(result.cycle.settlement.episode.status, "settled", domain);
+  }
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const result = await brain.executeAutoReplanCycle(
+      { task: tasks[domain], domain },
+      {
+        approveProviderCall: true,
+        maxReplans: 0,
+        evaluate: () => ({ evaluator_id: "facade-auto-replan-reviewer", evaluator_version: "1", reward: 0.84, passed: true, replan_requested: false }),
+      },
+    );
+    assert.equal(result.schema, "bioprism-typescript-autonomous-auto-replan-cycle/0.1", domain);
+    assert.equal(result.mode, "single_domain", domain);
+    assert.equal(result.status, "completed", domain);
+    assert.equal(result.next_action, "complete", domain);
+    assert.equal(result.route.primary_domain, domain, domain);
+    assert.equal(result.cycle.attempts.length, 1, domain);
+  }
+
+  const cross = await brain.executeAutoCycle(
+    { task: "research a biomedical neuroscience experiment with patient EEG evidence", allow_cross_domain: true },
+    {
+      approveProviderCall: true,
+      synthesize: false,
+      maxParallelChildren: 2,
+      subtasks: [
+        { id: "bio", domain: "biomedical", task: "review biomedical evidence" },
+        { id: "neuro", domain: "neuroscience", task: "analyze EEG limitations" },
+      ],
+    },
+  );
+  assert.equal(cross.mode, "cross_domain");
+  assert.ok(["completed", "children_completed"].includes(cross.status));
+  assert.equal(cross.cycle.run.child_runs.length, 2);
+
+  const crossReplan = await brain.executeAutoReplanCycle(
+    { task: "research a biomedical neuroscience experiment with patient EEG evidence", allow_cross_domain: true },
+    {
+      approveProviderCall: true,
+      synthesize: false,
+      maxParallelChildren: 2,
+      maxReplans: 0,
+      subtasks: [
+        { id: "bio", domain: "biomedical", task: "review biomedical evidence" },
+        { id: "neuro", domain: "neuroscience", task: "analyze EEG limitations" },
+      ],
+      evaluate: () => ({ evaluator_id: "facade-cross-replan-reviewer", evaluator_version: "1", reward: 0.82, passed: true, replan_requested: false, rewards: {} }),
+    },
+  );
+  assert.equal(crossReplan.mode, "cross_domain");
+  assert.equal(crossReplan.status, "completed");
+  assert.equal(crossReplan.cycle.final.run.child_runs.length, 2);
+
+  const admission = await approvedLaunchAdmission(brain);
+  const admitted = await brain.executeAutoCycleWithLaunchAdmission(
+    { task: tasks.coding, domain: "coding" },
+    admission,
+    { approveProviderCall: true },
+  );
+  assert.equal(admitted.status, "completed");
+
+  const admittedReplan = await brain.executeAutoReplanCycleWithLaunchAdmission(
+    { task: tasks.science, domain: "science" },
+    admission,
+    {
+      approveProviderCall: true,
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: "facade-admitted-replan-reviewer", evaluator_version: "1", reward: 0.9, passed: true, replan_requested: false }),
+    },
+  );
+  assert.equal(admittedReplan.status, "completed");
+
+  await assert.rejects(
+    () => brain.executeAutoCycle({ task: tasks.coding, domain: "coding" }, { routeOverride: {} }),
+    /owns routeOverride/,
+  );
+  await assert.rejects(
+    () => brain.executeAutoCycleWithLaunchAdmission(
+      { task: tasks.coding, domain: "coding" },
+      admission,
+      { semanticRouting: { enabled: true, approveProviderCall: true }, approveProviderCall: true },
+    ),
+    /requires provider-free routing/,
+  );
+  assert.equal(runtime.providerStatus("offline").attempts, runtime.providerStatus("offline").successes);
+});
+
 test("brain facade keeps adaptive replanning bounded and routes cross-domain fan-out through the same boundary", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);
