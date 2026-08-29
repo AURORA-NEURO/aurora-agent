@@ -40,6 +40,7 @@ from prism_sdk.autonomous_goal_preview import (
     AutonomousGoalPreviewAdmissionPersistenceCoordinator,
     TransactionalJsonAutonomousGoalPreviewAdmissionSnapshotPersistence,
     create_autonomous_goal_preview_admission_record,
+    revoke_autonomous_goal_preview_admission_record,
     verify_autonomous_goal_preview_approval,
 )
 from prism_sdk.autonomous_goal_recovery import AutonomousGoalRecoveryCoordinator, validate_autonomous_goal_recovery_report
@@ -255,6 +256,24 @@ def test_goal_preview_admission_is_operator_reviewed_expiring_persisted_and_all_
     with pytest.raises(AutonomousGoalError, match="not approved"):
         verify_autonomous_goal_preview_approval(rejected, current_preview_digest=preview.preview_digest, now_ns=100)
 
+    revoked = admissions.revoke(
+        "all-domain-preview",
+        reviewer_digest=content_digest("operator-reviewer"),
+        reason="operator policy changed before dispatch",
+        expected_record_digest=approved["record_digest"],
+    )
+    assert revoked["status"] == "revoked"
+    assert revoke_autonomous_goal_preview_admission_record(
+        approved,
+        reviewer_digest=content_digest("operator-reviewer"),
+        reason="operator policy changed before dispatch",
+        expected_record_digest=approved["record_digest"],
+    )["record_digest"] == revoked["record_digest"]
+    with pytest.raises(AutonomousGoalError, match="not approved"):
+        verify_autonomous_goal_preview_approval(revoked, current_preview_digest=preview.preview_digest, now_ns=100)
+    with pytest.raises(AutonomousGoalError, match="only an approved"):
+        admissions.revoke("all-domain-preview", reviewer_digest=content_digest("operator-reviewer"), reason="duplicate revoke")
+
     stale = dict(approved)
     stale["preview_digest"] = "0" * 64
     with pytest.raises(AutonomousGoalError, match="digest"):
@@ -290,16 +309,29 @@ def test_goal_preview_admission_is_operator_reviewed_expiring_persisted_and_all_
     with pytest.raises(AutonomousGoalError, match="compare-and-swap"):
         stale_coordinator.flush()
 
+    gated_ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=len(domains))
+    for domain in domains:
+        gated_ledger.create(goal_id=f"approval-{domain}", task_digest=_digest(f"approval task {domain}"), domain=domain, now_ns=0)
+    gated_loop = AutonomousGoalControlLoop(
+        AutonomousGoalWorker(gated_ledger, resolver=resolve, executor=execute),
+        preview_admission_ledger=admissions,
+    )
+    with pytest.raises(AutonomousGoalError, match="stale relative to the live admission ledger"):
+        gated_loop.run(schedule_options=options, max_cycles=1, max_total_runs=len(domains), preview_approval=approved)
+    assert calls == {"resolve": 0, "execute": 0}
+
     ledger.transition("approval-coding", "running", expected_revision=0, now_ns=101)
     with pytest.raises(AutonomousGoalError, match="expected_preview_digest|current preview"):
-        loop.run(schedule_options=options, max_total_runs=len(domains), preview_approval=approved)
+        loop.run(schedule_options=options, max_cycles=1, max_total_runs=len(domains), preview_approval=approved)
     assert calls == {"resolve": 0, "execute": 0}
+    with pytest.raises(AutonomousGoalError, match="scoped to one scheduler cycle"):
+        loop.run(schedule_options=options, max_cycles=2, max_total_runs=len(domains), preview_approval=approved)
 
     fresh_ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=len(domains))
     for domain in domains:
         fresh_ledger.create(goal_id=f"approval-{domain}", task_digest=_digest(f"approval task {domain}"), domain=domain, now_ns=0)
     fresh_loop = AutonomousGoalControlLoop(AutonomousGoalWorker(fresh_ledger, resolver=resolve, executor=execute))
-    result = fresh_loop.run(schedule_options=options, max_total_runs=len(domains), preview_approval=approved)
+    result = fresh_loop.run(schedule_options=options, max_cycles=1, max_total_runs=len(domains), preview_approval=approved)
     assert result.stop_reason == "all_terminal"
     assert calls == {"resolve": len(domains), "execute": len(domains)}
 

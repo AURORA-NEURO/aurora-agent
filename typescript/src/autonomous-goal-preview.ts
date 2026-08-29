@@ -17,8 +17,8 @@ export const MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_ID_BYTES = 256;
 export const MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_REASON_BYTES = 4_096;
 export const MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_TTL_NS = 7 * 24 * 60 * 60 * 1_000_000_000;
 
-export type AutonomousGoalPreviewAdmissionStatus = "pending_review" | "approved" | "rejected";
-export type AutonomousGoalPreviewAdmissionDecision = "submitted" | "approved" | "rejected";
+export type AutonomousGoalPreviewAdmissionStatus = "pending_review" | "approved" | "rejected" | "revoked";
+export type AutonomousGoalPreviewAdmissionDecision = "submitted" | "approved" | "rejected" | "revoked";
 
 export interface AutonomousGoalPreviewAdmissionRecord extends JsonObject {
   schema: typeof AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA;
@@ -64,6 +64,12 @@ export interface AutonomousGoalPreviewAdmissionReviewOptions {
   approved: boolean;
   reviewer_digest: string;
   reason?: string | null;
+  expected_record_digest?: string | null;
+}
+
+export interface AutonomousGoalPreviewAdmissionRevokeOptions {
+  reviewer_digest: string;
+  reason: string;
   expected_record_digest?: string | null;
 }
 
@@ -250,7 +256,7 @@ export function validateAutonomousGoalPreviewAdmissionRecord(value: unknown): Au
   if (value.preview_digest !== preview.preview_digest) fail("record preview digest does not match the preview");
   const status = value.status as AutonomousGoalPreviewAdmissionStatus;
   const decision = value.decision as AutonomousGoalPreviewAdmissionDecision;
-  if (!["pending_review", "approved", "rejected"].includes(status) || !["submitted", "approved", "rejected"].includes(decision) || (status === "pending_review" && decision !== "submitted") || (status === "approved" && decision !== "approved") || (status === "rejected" && decision !== "rejected")) fail("record status or decision is invalid");
+  if (!["pending_review", "approved", "rejected", "revoked"].includes(status) || !["submitted", "approved", "rejected", "revoked"].includes(decision) || (status === "pending_review" && decision !== "submitted") || (status === "approved" && decision !== "approved") || (status === "rejected" && decision !== "rejected") || (status === "revoked" && decision !== "revoked")) fail("record status or decision is invalid");
   const body = recordBody({ admissionId: value.admission_id, revision: value.revision, status, decision, preview, requestedByDigest: value.requested_by_digest, reviewerDigest: value.reviewer_digest, issuedAtNs: value.issued_at_ns, expiresAtNs: value.expires_at_ns, reasonDigest: value.reason_digest, previousRecordDigest: value.previous_record_digest });
   const supplied = digest("record_digest", value.record_digest)!;
   if (supplied !== digestJsonSync(body)) fail("record digest does not match metadata");
@@ -274,6 +280,17 @@ export function reviewAutonomousGoalPreviewAdmissionRecord(source: AutonomousGoa
   const decision = options.approved ? "approved" : "rejected" as const;
   const reasonDigest = options.reason === undefined || options.reason === null ? null : digestJsonSync(text("reason", options.reason, MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_REASON_BYTES));
   const body = recordBody({ admissionId: current.admission_id, revision: current.revision + 1, status: decision, decision, preview: current.preview, requestedByDigest: current.requested_by_digest, reviewerDigest: options.reviewer_digest, issuedAtNs: current.issued_at_ns, expiresAtNs: current.expires_at_ns, reasonDigest, previousRecordDigest: current.record_digest });
+  return clone({ ...body, record_digest: digestJsonSync(body) } as AutonomousGoalPreviewAdmissionRecord);
+}
+
+/** Append a hash-linked revocation revision to an approved preview admission. */
+export function revokeAutonomousGoalPreviewAdmissionRecord(source: AutonomousGoalPreviewAdmissionRecord, options: AutonomousGoalPreviewAdmissionRevokeOptions): AutonomousGoalPreviewAdmissionRecord {
+  const current = validateAutonomousGoalPreviewAdmissionRecord(source);
+  if (current.status !== "approved") fail("only an approved preview admission can be revoked");
+  if (!options || typeof options !== "object") fail("revoke options are malformed");
+  if (options.expected_record_digest !== undefined && options.expected_record_digest !== null && options.expected_record_digest !== current.record_digest) fail("revoke expected_record_digest does not match the current record");
+  const reasonDigest = digestJsonSync(text("reason", options.reason, MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_REASON_BYTES));
+  const body = recordBody({ admissionId: current.admission_id, revision: current.revision + 1, status: "revoked", decision: "revoked", preview: current.preview, requestedByDigest: current.requested_by_digest, reviewerDigest: options.reviewer_digest, issuedAtNs: current.issued_at_ns, expiresAtNs: current.expires_at_ns, reasonDigest, previousRecordDigest: current.record_digest });
   return clone({ ...body, record_digest: digestJsonSync(body) } as AutonomousGoalPreviewAdmissionRecord);
 }
 
@@ -359,6 +376,12 @@ export class InMemoryAutonomousGoalPreviewAdmissionLedger {
     const current = this.get(admissionId);
     if (current === null) fail("cannot review an unknown preview admission");
     return this.put(reviewAutonomousGoalPreviewAdmissionRecord(current, options));
+  }
+
+  revoke(admissionId: string, options: AutonomousGoalPreviewAdmissionRevokeOptions): AutonomousGoalPreviewAdmissionRecord {
+    const current = this.get(admissionId);
+    if (current === null) fail("cannot revoke an unknown preview admission");
+    return this.put(revokeAutonomousGoalPreviewAdmissionRecord(current, options));
   }
 
   get(admissionId: string): AutonomousGoalPreviewAdmissionRecord | null {

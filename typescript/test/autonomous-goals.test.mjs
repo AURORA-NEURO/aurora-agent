@@ -50,6 +50,7 @@ import {
   AutonomousGoalPreviewAdmissionPersistenceCoordinator,
   createAutonomousGoalPreviewAdmissionRecord,
   reviewAutonomousGoalPreviewAdmissionRecord,
+  revokeAutonomousGoalPreviewAdmissionRecord,
   verifyAutonomousGoalPreviewApproval,
 } from "../dist/index.js";
 
@@ -201,6 +202,20 @@ test("goal preview admission is operator-reviewed, expiring, persisted, and all-
   const rejected = admissions.review("rejected-preview", { approved: false, reviewer_digest: digestJsonSync("operator-reviewer"), expected_record_digest: rejectedSubmitted.record_digest });
   assert.throws(() => verifyAutonomousGoalPreviewApproval(rejected, { current_preview_digest: preview.preview_digest, now_ns: 100 }), /not approved/);
 
+  const revoked = admissions.revoke("all-domain-preview", {
+    reviewer_digest: digestJsonSync("operator-reviewer"),
+    reason: "operator policy changed before dispatch",
+    expected_record_digest: approved.record_digest,
+  });
+  assert.equal(revoked.status, "revoked");
+  assert.equal(revokeAutonomousGoalPreviewAdmissionRecord(approved, {
+    reviewer_digest: digestJsonSync("operator-reviewer"),
+    reason: "operator policy changed before dispatch",
+    expected_record_digest: approved.record_digest,
+  }).record_digest, revoked.record_digest);
+  assert.throws(() => verifyAutonomousGoalPreviewApproval(revoked, { current_preview_digest: preview.preview_digest, now_ns: 100 }), /not approved/);
+  assert.throws(() => admissions.revoke("all-domain-preview", { reviewer_digest: digestJsonSync("operator-reviewer"), reason: "duplicate revoke" }), /only an approved/);
+
   const tampered = structuredClone(approved);
   tampered.preview_digest = "0".repeat(64);
   assert.throws(() => admissions.put(tampered), /digest/);
@@ -227,13 +242,23 @@ test("goal preview admission is operator-reviewed, expiring, persisted, and all-
   await coordinator.flush();
   await assert.rejects(() => staleCoordinator.flush(), /compare-and-swap/);
 
-  ledger.transition("approval-coding", "running", { expected_revision: 0, now_ns: 101 });
-  await assert.rejects(() => loop.run({ schedule_options, max_total_runs: domains.length, preview_approval: approved }), /expected_preview_digest|current preview/);
+  const gatedLedger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 100 });
+  for (const domain of domains) gatedLedger.create({ goal_id: `approval-${domain}`, task_digest: goalTaskDigest(`approval task ${domain}`), domain, now_ns: 0 });
+  const gatedLoop = new AutonomousGoalControlLoop({
+    worker: new AutonomousGoalWorker({ ledger: gatedLedger, resolver: resolve, executor: execute }),
+    preview_admission_ledger: admissions,
+  });
+  await assert.rejects(() => gatedLoop.run({ schedule_options, max_cycles: 1, max_total_runs: domains.length, preview_approval: approved }), /stale relative to the live admission ledger/);
   assert.deepEqual(calls, { resolve: 0, execute: 0 });
+
+  ledger.transition("approval-coding", "running", { expected_revision: 0, now_ns: 101 });
+  await assert.rejects(() => loop.run({ schedule_options, max_cycles: 1, max_total_runs: domains.length, preview_approval: approved }), /expected_preview_digest|current preview/);
+  assert.deepEqual(calls, { resolve: 0, execute: 0 });
+  await assert.rejects(() => loop.run({ schedule_options, max_cycles: 2, max_total_runs: domains.length, preview_approval: approved }), /scoped to one scheduler cycle/);
 
   const freshLedger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 100 });
   for (const domain of domains) freshLedger.create({ goal_id: `approval-${domain}`, task_digest: goalTaskDigest(`approval task ${domain}`), domain, now_ns: 0 });
-  const result = await new AutonomousGoalControlLoop({ worker: new AutonomousGoalWorker({ ledger: freshLedger, resolver: resolve, executor: execute }) }).run({ schedule_options, max_total_runs: domains.length, preview_approval: approved });
+  const result = await new AutonomousGoalControlLoop({ worker: new AutonomousGoalWorker({ ledger: freshLedger, resolver: resolve, executor: execute }) }).run({ schedule_options, max_cycles: 1, max_total_runs: domains.length, preview_approval: approved });
   assert.equal(result.stop_reason, "all_terminal");
   assert.deepEqual(calls, { resolve: domains.length, execute: domains.length });
 });

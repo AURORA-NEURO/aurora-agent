@@ -1,6 +1,6 @@
 import { ArgumentError, isObject } from "./errors.js";
 import { AutonomousGoalWorker, type AutonomousGoalWorkerBatch } from "./autonomous-goal-worker.js";
-import { validateAutonomousGoalPreviewAdmissionRecord, verifyAutonomousGoalPreviewApproval, type AutonomousGoalPreviewAdmissionRecord } from "./autonomous-goal-preview.js";
+import { InMemoryAutonomousGoalPreviewAdmissionLedger, validateAutonomousGoalPreviewAdmissionRecord, verifyAutonomousGoalPreviewApproval, type AutonomousGoalPreviewAdmissionRecord } from "./autonomous-goal-preview.js";
 import type { AutonomousGoalRecord, InMemoryAutonomousGoalLedger } from "./autonomous-goals.js";
 import type { AutonomousGoalSchedule, AutonomousGoalSchedulingSignal } from "./autonomous-goal-scheduler.js";
 import { digestJsonSync } from "./tooling.js";
@@ -426,16 +426,19 @@ export class AutonomousGoalControlLoop {
   readonly batch_id_prefix: string;
   readonly evaluator: AutonomousGoalControlLoopEvaluator | null;
   readonly learner: AutonomousGoalControlLoopLearner | AutonomousGoalBanditLearner | null;
+  readonly preview_admission_ledger: InMemoryAutonomousGoalPreviewAdmissionLedger | undefined;
 
-  constructor(options: { worker: AutonomousGoalWorker; batch_id_prefix?: string; evaluator?: AutonomousGoalControlLoopEvaluator; learner?: AutonomousGoalControlLoopLearner | AutonomousGoalBanditLearner | null }) {
+  constructor(options: { worker: AutonomousGoalWorker; batch_id_prefix?: string; evaluator?: AutonomousGoalControlLoopEvaluator; learner?: AutonomousGoalControlLoopLearner | AutonomousGoalBanditLearner | null; preview_admission_ledger?: InMemoryAutonomousGoalPreviewAdmissionLedger }) {
     if (!(options?.worker instanceof AutonomousGoalWorker)) fail("worker must be an AutonomousGoalWorker");
     this.worker = options.worker;
     this.batch_id_prefix = prefix(options.batch_id_prefix ?? "autonomous-goal-loop");
     if (options.evaluator !== undefined && typeof options.evaluator !== "function") fail("evaluator must be callable or undefined");
     if (options.learner !== undefined && options.learner !== null && typeof options.learner !== "function" && !(options.learner instanceof AutonomousGoalBanditLearner)) fail("learner must be callable, an AutonomousGoalBanditLearner, or null");
     if (options.learner !== undefined && options.learner !== null && options.evaluator === undefined) fail("learner requires an explicit evaluator");
+    if (options.preview_admission_ledger !== undefined && !(options.preview_admission_ledger instanceof InMemoryAutonomousGoalPreviewAdmissionLedger)) fail("preview_admission_ledger must be an InMemoryAutonomousGoalPreviewAdmissionLedger or undefined");
     this.evaluator = options.evaluator ?? null;
     this.learner = this.evaluator === null ? null : options.learner ?? new AutonomousGoalBanditLearner();
+    this.preview_admission_ledger = options.preview_admission_ledger;
   }
 
   /**
@@ -523,8 +526,14 @@ export class AutonomousGoalControlLoop {
     let expectedPreviewDigest = options.expected_preview_digest;
     const previewApproval = options.preview_approval === undefined ? null : validateAutonomousGoalPreviewAdmissionRecord(options.preview_approval);
     if (previewApproval !== null) {
+      if (this.preview_admission_ledger !== undefined) {
+        const liveRecord = this.preview_admission_ledger.get(previewApproval.admission_id);
+        if (liveRecord === null) fail("preview approval is no longer present in the live admission ledger");
+        if (liveRecord.record_digest !== previewApproval.record_digest) fail("preview approval is stale relative to the live admission ledger");
+      }
       if (expectedPreviewDigest !== undefined && expectedPreviewDigest !== previewApproval.preview_digest) fail("expected_preview_digest does not match preview_approval");
       expectedPreviewDigest = previewApproval.preview_digest;
+      if ((options.max_cycles ?? AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES) !== 1) fail("preview_approval is scoped to one scheduler cycle; re-preview and re-approve each continuation");
     }
     if (expectedPreviewDigest !== undefined) {
       if (options.options_factory !== undefined) fail("expected_preview_digest cannot be combined with options_factory");

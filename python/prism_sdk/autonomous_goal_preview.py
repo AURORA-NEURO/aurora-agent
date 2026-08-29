@@ -39,8 +39,8 @@ _RECORD_KEYS = {
     "previous_record_digest", "authority", "retention", "execution", "secret_material",
 }
 _SNAPSHOT_KEYS = {"schema", "generation", "records", "previous_snapshot_digest", "retention", "secret_material"}
-_STATUSES = {"pending_review", "approved", "rejected"}
-_DECISIONS = {"submitted", "approved", "rejected"}
+_STATUSES = {"pending_review", "approved", "rejected", "revoked"}
+_DECISIONS = {"submitted", "approved", "rejected", "revoked"}
 _PREVIEW_KEYS = {
     "schema", "schedule", "status", "eligible_goal_count", "decision_counts", "reason_counts",
     "status_counts", "dependency_blocked_goal_ids", "learning_state_digest", "retention",
@@ -196,7 +196,7 @@ def _record_body(
     reviewer = _digest(reviewer_digest, name="reviewer_digest", allow_none=True)
     if status == "pending_review" and reviewer is not None:
         _fail("pending review cannot contain a reviewer")
-    if status in {"approved", "rejected"} and reviewer is None:
+    if status in {"approved", "rejected", "revoked"} and reviewer is None:
         _fail("reviewed approval records require a reviewer digest")
     return {
         "schema": AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA,
@@ -230,7 +230,7 @@ def validate_autonomous_goal_preview_admission_record(value: Mapping[str, Any]) 
         _fail("record preview digest does not match the preview")
     status = value["status"]
     decision = value["decision"]
-    if status not in _STATUSES or decision not in _DECISIONS or (status == "pending_review" and decision != "submitted") or (status == "approved" and decision != "approved") or (status == "rejected" and decision != "rejected"):
+    if status not in _STATUSES or decision not in _DECISIONS or (status == "pending_review" and decision != "submitted") or (status == "approved" and decision != "approved") or (status == "rejected" and decision != "rejected") or (status == "revoked" and decision != "revoked"):
         _fail("record status or decision is invalid")
     body = _record_body(
         admission_id=value["admission_id"], revision=value["revision"], status=status, decision=decision,
@@ -283,6 +283,35 @@ def review_autonomous_goal_preview_admission_record(
     decision = "approved" if approved else "rejected"
     body = _record_body(
         admission_id=current["admission_id"], revision=current["revision"] + 1, status=decision, decision=decision,
+        preview=current["preview"], requested_by_digest=current["requested_by_digest"], reviewer_digest=reviewer_digest,
+        issued_at_ns=current["issued_at_ns"], expires_at_ns=current["expires_at_ns"], reason_digest=reason_digest,
+        previous_record_digest=current["record_digest"],
+    )
+    return _clone({**body, "record_digest": content_digest(body)})
+
+
+def revoke_autonomous_goal_preview_admission_record(
+    record: Mapping[str, Any],
+    *,
+    reviewer_digest: str,
+    reason: str,
+    expected_record_digest: str | None = None,
+) -> dict[str, Any]:
+    """Append an immutable revocation revision to an approved preview admission.
+
+    Revocation is deliberately a new hash-linked record rather than an in-place flag.  A caller
+    that introspects the live ledger can therefore distinguish a never-approved, rejected, expired,
+    and explicitly revoked decision while preserving the complete operator audit chain.
+    """
+
+    current = validate_autonomous_goal_preview_admission_record(record)
+    if current["status"] != "approved":
+        _fail("only an approved preview admission can be revoked")
+    if expected_record_digest is not None and expected_record_digest != current["record_digest"]:
+        _fail("revoke expected_record_digest does not match the current record")
+    reason_digest = content_digest(_text(reason, name="reason", maximum=MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_REASON_BYTES))
+    body = _record_body(
+        admission_id=current["admission_id"], revision=current["revision"] + 1, status="revoked", decision="revoked",
         preview=current["preview"], requested_by_digest=current["requested_by_digest"], reviewer_digest=reviewer_digest,
         issued_at_ns=current["issued_at_ns"], expires_at_ns=current["expires_at_ns"], reason_digest=reason_digest,
         previous_record_digest=current["record_digest"],
@@ -397,6 +426,12 @@ class InMemoryAutonomousGoalPreviewAdmissionLedger:
             _fail("cannot review an unknown preview admission")
         return self.put(review_autonomous_goal_preview_admission_record(current, **kwargs))
 
+    def revoke(self, admission_id: str, **kwargs: Any) -> dict[str, Any]:
+        current = self.get(admission_id)
+        if current is None:
+            _fail("cannot revoke an unknown preview admission")
+        return self.put(revoke_autonomous_goal_preview_admission_record(current, **kwargs))
+
     def get(self, admission_id: str) -> dict[str, Any] | None:
         value = self._records.get(_identifier(admission_id, name="admission_id"))
         return None if value is None else _clone(value)
@@ -501,3 +536,31 @@ class AutonomousGoalPreviewAdmissionPersistenceCoordinator:
         self.expected_snapshot_digest = snapshot["snapshot_digest"]
         self.expected_generation = snapshot["generation"]
         return snapshot
+
+
+__all__ = [
+    "AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORD_SCHEMA",
+    "AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_SCHEMA",
+    "AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RETENTION",
+    "AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SECRET_MATERIAL",
+    "AUTONOMOUS_GOAL_PREVIEW_ADMISSION_AUTHORITY",
+    "AUTONOMOUS_GOAL_PREVIEW_ADMISSION_EXECUTION",
+    "MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_RECORDS",
+    "MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_SNAPSHOT_BYTES",
+    "MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_ID_BYTES",
+    "MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_REASON_BYTES",
+    "MAX_AUTONOMOUS_GOAL_PREVIEW_ADMISSION_TTL_NS",
+    "validate_autonomous_goal_preview_admission_record",
+    "create_autonomous_goal_preview_admission_record",
+    "review_autonomous_goal_preview_admission_record",
+    "revoke_autonomous_goal_preview_admission_record",
+    "verify_autonomous_goal_preview_approval",
+    "validate_autonomous_goal_preview_admission_snapshot",
+    "seal_autonomous_goal_preview_admission_snapshot",
+    "InMemoryAutonomousGoalPreviewAdmissionLedger",
+    "AutonomousGoalPreviewAdmissionSnapshotTextStore",
+    "TransactionalAutonomousGoalPreviewAdmissionSnapshotTextStore",
+    "JsonAutonomousGoalPreviewAdmissionSnapshotPersistence",
+    "TransactionalJsonAutonomousGoalPreviewAdmissionSnapshotPersistence",
+    "AutonomousGoalPreviewAdmissionPersistenceCoordinator",
+]

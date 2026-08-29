@@ -24,6 +24,7 @@ from .autonomous_goal_control_persistence import (
 )
 from .goals import AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord
 from .autonomous_goal_preview import (
+    InMemoryAutonomousGoalPreviewAdmissionLedger,
     validate_autonomous_goal_preview_admission_record,
     verify_autonomous_goal_preview_approval,
 )
@@ -449,6 +450,7 @@ class AutonomousGoalControlLoop:
         batch_id_prefix: str = "autonomous-goal-loop",
         evaluator: GoalLoopEvaluator | None = None,
         learner: GoalLoopLearner | AutonomousGoalBanditLearner | None = None,
+        preview_admission_ledger: InMemoryAutonomousGoalPreviewAdmissionLedger | None = None,
     ) -> None:
         if not isinstance(worker, AutonomousGoalWorker):
             _fail("worker must be an AutonomousGoalWorker")
@@ -460,8 +462,11 @@ class AutonomousGoalControlLoop:
             _fail("learner must be callable, an AutonomousGoalBanditLearner, or None")
         if learner is not None and evaluator is None:
             _fail("learner requires an explicit evaluator")
+        if preview_admission_ledger is not None and not isinstance(preview_admission_ledger, InMemoryAutonomousGoalPreviewAdmissionLedger):
+            _fail("preview_admission_ledger must be an InMemoryAutonomousGoalPreviewAdmissionLedger or None")
         self.evaluator = evaluator
         self.learner = AutonomousGoalBanditLearner() if evaluator is not None and learner is None else learner
+        self.preview_admission_ledger = preview_admission_ledger
 
     def preview(self, *, schedule_options: Mapping[str, Any] | None = None) -> AutonomousGoalControlLoopPreview:
         """Explain the next admission decision without entering the execution boundary.
@@ -560,10 +565,19 @@ class AutonomousGoalControlLoop:
         normalized_preview_approval: dict[str, Any] | None = None
         if preview_approval is not None:
             normalized_preview_approval = validate_autonomous_goal_preview_admission_record(preview_approval)
+            if self.preview_admission_ledger is not None:
+                live_record = self.preview_admission_ledger.get(normalized_preview_approval["admission_id"])
+                if live_record is None:
+                    _fail("preview approval is no longer present in the live admission ledger")
+                if live_record["record_digest"] != normalized_preview_approval["record_digest"]:
+                    _fail("preview approval is stale relative to the live admission ledger")
+                normalized_preview_approval = live_record
             approval_digest = normalized_preview_approval["preview_digest"]
             if expected_preview_digest is not None and expected_preview_digest != approval_digest:
                 _fail("expected_preview_digest does not match preview_approval")
             expected_preview_digest = approval_digest
+            if max_cycles != 1:
+                _fail("preview_approval is scoped to one scheduler cycle; re-preview and re-approve each continuation")
         if expected_preview_digest is not None:
             if options_factory is not None:
                 _fail("expected_preview_digest cannot be combined with options_factory")

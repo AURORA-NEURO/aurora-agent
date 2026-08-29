@@ -2375,3 +2375,11 @@ receipt is accepted only after live preview recomputation and expiry validation 
 goal claim/resolution; it cannot authorize providers, credentials, connectors, tools, evaluators,
 learners, sources, or effects. The remaining deployment responsibilities are external operator
 authentication, encrypted/shared storage, distributed leases, and approval UX.
+
+The next preview-admission hardening increment is complete: approved receipts can now be revoked
+through an immutable hash-linked revision, and a goal control loop can bind execution to a live
+in-memory admission ledger so copied or stale approved JSON cannot bypass a later revocation or
+replacement. Receipt-authorized runs are also fenced to one scheduler cycle; each continuation
+must be previewed and approved again. Deployment-owned work remains operator authentication,
+encrypted/shared persistence, distributed leases, and an approval UX that surfaces revocation and
+staleness clearly.

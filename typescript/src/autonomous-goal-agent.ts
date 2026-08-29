@@ -31,7 +31,7 @@ import {
   type AutonomousGoalRecoveryReport,
 } from "./autonomous-goal-recovery.js";
 import type { AutonomousGoalControlLoopCheckpoint } from "./autonomous-goal-control-persistence.js";
-import type { AutonomousGoalPreviewAdmissionRecord } from "./autonomous-goal-preview.js";
+import { InMemoryAutonomousGoalPreviewAdmissionLedger, type AutonomousGoalPreviewAdmissionRecord } from "./autonomous-goal-preview.js";
 import {
   AutonomousGoalWorker,
   type AutonomousGoalExecutionRequest,
@@ -127,6 +127,7 @@ export interface AutonomousGoalAgentRuntimeOptions {
   learner?: AutonomousGoalControlLoopLearner | AutonomousGoalBanditLearner | null;
   journal?: AutonomousGoalWorkerJournal;
   recovery?: AutonomousGoalRecoveryCoordinator;
+  preview_admission_ledger?: InMemoryAutonomousGoalPreviewAdmissionLedger;
   batch_id_prefix?: string;
 }
 
@@ -275,6 +276,7 @@ export class AutonomousGoalAgentRuntime {
     if (options.action_handoff_resolver !== undefined && typeof options.action_handoff_resolver !== "function") fail("action_handoff_resolver must be callable or undefined");
     if (options.brain !== undefined && !(options.brain instanceof AutonomousBrainFacade)) fail("brain must be an AutonomousBrainFacade or undefined");
     if (options.brain !== undefined && options.brain.agent !== options.agent) fail("brain must be bound to the supplied agent");
+    if (options.preview_admission_ledger !== undefined && !(options.preview_admission_ledger instanceof InMemoryAutonomousGoalPreviewAdmissionLedger)) fail("preview_admission_ledger must be an InMemoryAutonomousGoalPreviewAdmissionLedger or undefined");
     if (options.action_handoff_resolver !== undefined && options.brain === undefined) fail("action_handoff_resolver requires a brain facade");
     const batchIdPrefix = options.batch_id_prefix ?? "autonomous-goal-agent";
     if (typeof batchIdPrefix !== "string" || !batchIdPrefix.trim() || batchIdPrefix.includes("\u0000") || new TextEncoder().encode(batchIdPrefix).byteLength > 128) fail("batch_id_prefix is outside its bounded contract");
@@ -318,7 +320,7 @@ export class AutonomousGoalAgentRuntime {
       executor: (request) => this.execute(request),
       journal: options.journal,
     });
-    this.loop = new AutonomousGoalControlLoop({ worker: this.worker, batch_id_prefix: this.batch_id_prefix, evaluator: options.evaluator, learner: options.learner });
+    this.loop = new AutonomousGoalControlLoop({ worker: this.worker, batch_id_prefix: this.batch_id_prefix, evaluator: options.evaluator, learner: options.learner, preview_admission_ledger: options.preview_admission_ledger });
   }
 
   private async executionOptions(goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow): Promise<Record<string, unknown>> {

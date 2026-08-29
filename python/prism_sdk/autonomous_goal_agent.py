@@ -30,6 +30,7 @@ from .autonomous_goal_recovery import AutonomousGoalRecoveryCoordinator
 from .autonomous_goal_scheduler import AutonomousGoalScheduleRow
 from .autonomous_goal_worker import AutonomousGoalExecutionRequest, AutonomousGoalWorker
 from .autonomous_goal_worker_journal import AutonomousGoalWorkerJournal
+from .autonomous_goal_preview import InMemoryAutonomousGoalPreviewAdmissionLedger
 from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 from .autonomous_run_trace import (
     AutonomousRunTraceSession,
@@ -249,6 +250,7 @@ class AutonomousGoalAgentRuntime:
         learner: GoalLoopLearner | AutonomousGoalBanditLearner | None = None,
         journal: AutonomousGoalWorkerJournal | None = None,
         recovery: AutonomousGoalRecoveryCoordinator | None = None,
+        preview_admission_ledger: InMemoryAutonomousGoalPreviewAdmissionLedger | None = None,
         batch_id_prefix: str = "autonomous-goal-agent",
     ) -> None:
         if not isinstance(orchestrator, AutonomousTaskOrchestrator):
@@ -280,6 +282,8 @@ class AutonomousGoalAgentRuntime:
             _fail("recovery coordinator must own the supplied ledger")
         if recovery is not None and (journal is None or recovery.journal.journal is not journal):
             _fail("recovery coordinator must own the supplied worker journal")
+        if preview_admission_ledger is not None and not isinstance(preview_admission_ledger, InMemoryAutonomousGoalPreviewAdmissionLedger):
+            _fail("preview_admission_ledger must be an InMemoryAutonomousGoalPreviewAdmissionLedger or None")
         if not isinstance(batch_id_prefix, str) or not batch_id_prefix.strip() or "\x00" in batch_id_prefix or len(batch_id_prefix.encode("utf-8")) > 128:
             _fail("batch_id_prefix is outside its bounded contract")
         self.orchestrator = orchestrator
@@ -290,6 +294,7 @@ class AutonomousGoalAgentRuntime:
         self.run_options_factory = run_options_factory
         self.action_handoff_resolver = action_handoff_resolver
         self.recovery = recovery
+        self.preview_admission_ledger = preview_admission_ledger
         self.batch_id_prefix = batch_id_prefix.strip()
         self._trace_context: dict[str, Any] | None = None
         self.worker = AutonomousGoalWorker(
@@ -303,6 +308,7 @@ class AutonomousGoalAgentRuntime:
             batch_id_prefix=self.batch_id_prefix,
             evaluator=evaluator,
             learner=learner,
+            preview_admission_ledger=preview_admission_ledger,
         )
 
     def _resolve(self, goal: AutonomousGoalRecord, row: AutonomousGoalScheduleRow) -> Mapping[str, Any]:

@@ -119,6 +119,17 @@ authorize credentials, providers, sources, connectors, tools, evaluators, learne
 those gates remain independent. Recovery-owned resume is intentionally incompatible with a new
 preview approval, because restored execution must use its checkpoint's own admission identity.
 
+An approved receipt is also a revocable capability record. `admissions.revoke()` in Python and
+`ledger.revoke()` in TypeScript append a hash-linked `revoked` revision with a bounded reason
+digest; they never mutate or delete the approved predecessor. A control loop may be given the same
+admission ledger through `preview_admission_ledger`, in which case it performs a live admission-ID
+and record-digest lookup immediately before verification. A copied approved JSON receipt therefore
+cannot survive a later operator revocation or replacement in the live ledger. When a receipt is
+supplied, the run is deliberately fenced to exactly one scheduler cycle (`max_cycles: 1`);
+continuation requires a fresh provider-free preview and a new approval. This prevents a one-time
+review from silently authorizing an unbounded sequence of changing claims, resolutions, evaluator
+calls, learner updates, or effects.
+
 Persisted `AutonomousBrainPlan` values have an equivalent replay boundary. The
 `executePlanned*WithLaunchAdmission` methods canonicalize and revalidate the plan, recompute its
 provider-free route/blueprint identity against the current catalogue, and authorize the exact
