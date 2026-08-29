@@ -16,12 +16,15 @@ from dataclasses import dataclass
 import json
 import threading
 import time
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
 from .authoring import canonical_json, content_digest
 from .autonomous_protected_rehydration import AutonomousProtectedRehydrationAdapter
 from .autonomous_evidence import AutonomousEvidencePlan, AutonomousEvidenceRequirement
 from .errors import ArgumentError
+
+if TYPE_CHECKING:
+    from .autonomous_authorization import AutonomousAuthorizationContext
 
 
 AUTONOMOUS_EVIDENCE_RUNTIME_SCHEMA = "bioprism-python-autonomous-evidence-runtime/0.1"
@@ -858,6 +861,41 @@ class AutonomousEvidenceRuntime:
             raise ArgumentError("evidence runtime evaluator must return a mapping")
         return result
 
+    def _authorize_operation(
+        self,
+        authorization_context: "AutonomousAuthorizationContext | None",
+        *,
+        operation: str,
+        requirement: AutonomousEvidenceRequirement,
+        resource_digest: str,
+        authorization_domain: str | None,
+        authorization_capability: str | None,
+        authorization_risk_class: str | None,
+    ) -> None:
+        """Authorize a live evidence boundary without placing values in the request.
+
+        Acquisition and evaluation are intentionally separate operations.  This lets a caller
+        grant read access to a source while requiring a second, independently auditable grant
+        before an evaluator is invoked.  The digest is metadata only: it binds the authorization
+        decision to the request or receipt, never to a raw value.
+        """
+
+        if authorization_context is None:
+            return
+        authorize = getattr(authorization_context, "authorize_operation", None)
+        if not callable(authorize):
+            raise ArgumentError("evidence runtime authorization_context must implement authorize_operation")
+        values: dict[str, Any] = {
+            "operation": operation,
+            "domain": authorization_domain or requirement.domain,
+            "resource_digest": resource_digest,
+        }
+        if authorization_capability is not None:
+            values["capability"] = authorization_capability
+        if authorization_risk_class is not None:
+            values["risk_class"] = authorization_risk_class
+        authorize(**values)
+
     def _reconcile_prior(
         self,
         entry: AutonomousEvidenceRuntimeJournalEntry,
@@ -866,11 +904,24 @@ class AutonomousEvidenceRuntime:
         evaluator: Any,
         evaluator_id: str,
         evaluator_version: str,
+        authorization_context: "AutonomousAuthorizationContext | None",
+        authorization_domain: str | None,
+        authorization_capability: str | None,
+        authorization_risk_class: str | None,
     ) -> tuple[AutonomousEvidenceReceipt, AutonomousEvidenceAssessment | None] | None:
         prior = entry.receipt
         if prior.status not in {"observed", "partial"} or requirement.requirement_id not in prior.observed_requirement_ids or prior.evaluator_status not in {"not_evaluated", "indeterminate", "failed"}:
             return None
         replay_base = self._make_receipt(**{**prior.to_dict(), "receipt_digest": None, "replay": "replayed", "evaluator_status": "not_evaluated", "assessment_digest": None})
+        self._authorize_operation(
+            authorization_context,
+            operation="evaluation",
+            requirement=requirement,
+            resource_digest=replay_base.receipt_digest,
+            authorization_domain=authorization_domain,
+            authorization_capability=authorization_capability,
+            authorization_risk_class=authorization_risk_class,
+        )
         try:
             decision = self._call_evaluator(
                 evaluator,
@@ -908,9 +959,28 @@ class AutonomousEvidenceRuntime:
             self._append(receipt, None)
             return receipt, None
 
-    def execute(self, requests: Sequence[Mapping[str, Any]], *, acquirer: Any, projector: Any | None = None, evaluator: Any | None = None, rehydrate_value: Callable[[Mapping[str, Any]], Any] | None = None, parent_evidence_digests: Sequence[str] = (), stop_on_failure: bool = False, reevaluate_pending: bool = False) -> AutonomousEvidenceRuntimeResult:
+    def execute(
+        self,
+        requests: Sequence[Mapping[str, Any]],
+        *,
+        acquirer: Any,
+        projector: Any | None = None,
+        evaluator: Any | None = None,
+        rehydrate_value: Callable[[Mapping[str, Any]], Any] | None = None,
+        parent_evidence_digests: Sequence[str] = (),
+        stop_on_failure: bool = False,
+        reevaluate_pending: bool = False,
+        authorization_context: "AutonomousAuthorizationContext | None" = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
+    ) -> AutonomousEvidenceRuntimeResult:
         if not isinstance(requests, Sequence) or isinstance(requests, (str, bytes, bytearray)) or not 1 <= len(requests) <= MAX_AUTONOMOUS_EVIDENCE_RUNTIME_REQUESTS:
             raise ArgumentError(f"evidence runtime requests must contain 1..{MAX_AUTONOMOUS_EVIDENCE_RUNTIME_REQUESTS} entries")
+        if authorization_context is None and any(value is not None for value in (authorization_domain, authorization_capability, authorization_risk_class)):
+            raise ArgumentError("evidence runtime authorization overrides require authorization_context")
+        if authorization_context is not None and not callable(getattr(authorization_context, "authorize_operation", None)):
+            raise ArgumentError("evidence runtime authorization_context must implement authorize_operation")
         parents = _list("evidence runtime parent_evidence_digests", parent_evidence_digests, 64)
         if evaluator is not None:
             evaluator_id = _identifier("configured evidence runtime evaluator_id", getattr(evaluator, "evaluator_id", None))
@@ -958,7 +1028,18 @@ class AutonomousEvidenceRuntime:
                     replayed = self._make_receipt(**{**replayed.to_dict(), "receipt_digest": None, "replay": "replayed"})
                 reconciled = None
                 if reevaluate_pending and evaluator is not None and value is not None:
-                    reconciled = self._reconcile_prior(prior, requirement, value, evaluator, evaluator_id, evaluator_version)
+                    reconciled = self._reconcile_prior(
+                        prior,
+                        requirement,
+                        value,
+                        evaluator,
+                        evaluator_id,
+                        evaluator_version,
+                        authorization_context,
+                        authorization_domain,
+                        authorization_capability,
+                        authorization_risk_class,
+                    )
                 if reconciled is not None:
                     replayed, replay_assessment = reconciled
                 else:
@@ -981,6 +1062,15 @@ class AutonomousEvidenceRuntime:
                 continue
             started = time.monotonic()
             context = {"plan_digest": self.plan.plan_digest, "requirement": requirement, "request": request, "attempt": 1, "parent_evidence_digests": list(parents), "execution": "caller_owned_adapter;raw_value_transient"}
+            self._authorize_operation(
+                authorization_context,
+                operation="evidence_acquisition",
+                requirement=requirement,
+                resource_digest=request_digest,
+                authorization_domain=authorization_domain,
+                authorization_capability=authorization_capability,
+                authorization_risk_class=authorization_risk_class,
+            )
             try:
                 raw_value = self._call_acquirer(acquirer, context)
                 _json_bytes(raw_value, "evidence runtime acquisition value")
@@ -1015,6 +1105,15 @@ class AutonomousEvidenceRuntime:
             receipt = base
             assessment: AutonomousEvidenceAssessment | None = None
             if evaluator is not None and observed_ids:
+                self._authorize_operation(
+                    authorization_context,
+                    operation="evaluation",
+                    requirement=requirement,
+                    resource_digest=base.receipt_digest,
+                    authorization_domain=authorization_domain,
+                    authorization_capability=authorization_capability,
+                    authorization_risk_class=authorization_risk_class,
+                )
                 try:
                     decision = self._call_evaluator(evaluator, {"requirement": requirement, "receipt": base.to_dict(), "observations": [item.to_dict() for item in observations], "value": raw_value})
                     decision_id = _identifier("evidence runtime evaluator_id", decision.get("evaluator_id"))

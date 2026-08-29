@@ -11539,6 +11539,10 @@ class AutonomousTaskOrchestrator:
         available_evidence: Sequence[str] = (),
         completed_stages: Mapping[str, Sequence[str]] | None = None,
         journal: AutonomousEvidenceRuntimeJournal | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousEvidenceRuntimeResult:
         """Acquire and optionally evaluate evidence through application-owned adapters.
 
@@ -11560,6 +11564,10 @@ class AutonomousTaskOrchestrator:
             rehydrate_value=rehydrate_value,
             parent_evidence_digests=parent_evidence_digests,
             stop_on_failure=stop_on_failure,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
+            authorization_capability=authorization_capability,
+            authorization_risk_class=authorization_risk_class,
         )
 
     @staticmethod
@@ -18719,6 +18727,10 @@ class AutonomousAgent:
         available_evidence: Sequence[str] = (),
         completed_stages: Mapping[str, Sequence[str]] | None = None,
         journal: AutonomousEvidenceRuntimeJournal | None = None,
+        authorization_context: AutonomousAuthorizationContext | None = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousEvidenceRuntimeResult:
         """Run evidence acquisition through explicit caller-owned adapters."""
 
@@ -18734,6 +18746,10 @@ class AutonomousAgent:
             available_evidence=available_evidence,
             completed_stages=completed_stages,
             journal=journal,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
+            authorization_capability=authorization_capability,
+            authorization_risk_class=authorization_risk_class,
         )
 
     def prepare_reviewed_evidence(

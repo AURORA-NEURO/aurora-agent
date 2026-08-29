@@ -125,6 +125,15 @@ exhausted grant therefore cannot contact a provider, while failover and streamin
 tenant/session boundary. The context never carries a key, prompt, message, response, or tool
 result; credentials remain caller-supplied opaque handles.
 
+The same context can be passed to `AutonomousEvidenceRuntime.execute()` or the reviewed evidence
+execution controller. It authorizes `evidence_acquisition` immediately before each source adapter
+and `evaluation` immediately before each evaluator callback, binding the decision to a request or
+receipt digest rather than a raw value. Journal replay does not reacquire or consume an acquisition
+grant; `reevaluatePending` authorizes the fresh evaluator revision separately. A refusal raises the
+typed authorization error before the callback and does not create a misleading failed-evidence
+receipt. The Python high-level `acquire_evidence()` facade forwards the same options, preserving
+least-privilege behavior across direct, reviewed, resumable, and facade entry points.
+
 ## Status
 
 **83 crates, 538,938 lines, clippy -D warnings enforced in CI.** Byte-level parity with the

@@ -2717,3 +2717,11 @@ cross-language regression matrix covers all twelve domains, blocked grants, repl
 Python/TypeScript high-level propagation. Remaining deployment work is still caller-owned
 identity authentication, encrypted/shared grant persistence, distributed leasing, key/session
 rotation, and operator approval UX.
+
+Evidence source and evaluator callbacks are now also covered by the authorization context. Both
+SDKs authorize `evidence_acquisition` and `evaluation` at the final callback boundary, bind each
+decision to metadata-only request/receipt digests, preserve uncharged journal replay, and fail
+closed before denied callbacks. High-level reviewed and Python facade paths forward the same
+context and the cross-domain runtime tests cover the full built-in portfolio. Deployment-owned
+identity verification, encrypted/shared persistence, leasing, rotation, and approval UX remain
+outside the SDK contract.

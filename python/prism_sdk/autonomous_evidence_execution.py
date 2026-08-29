@@ -12,7 +12,10 @@ payloads stay with the caller.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
+
+if TYPE_CHECKING:
+    from .autonomous_authorization import AutonomousAuthorizationContext
 
 from .authoring import canonical_json, content_digest
 from .autonomous_evidence import AutonomousEvidencePlan
@@ -711,6 +714,10 @@ class AutonomousEvidenceExecutionController:
         observe_attempt: Callable[[Any], Any] | None = None,
         clock: Callable[[], float] | None = None,
         sleep: Callable[[int], Any] | None = None,
+        authorization_context: "AutonomousAuthorizationContext | None" = None,
+        authorization_domain: str | None = None,
+        authorization_capability: str | None = None,
+        authorization_risk_class: str | None = None,
     ) -> AutonomousEvidenceExecutionResult:
         if not isinstance(execution_plan, AutonomousEvidenceExecutionPlan) or not isinstance(evidence_plan, AutonomousEvidencePlan):
             raise ArgumentError("evidence execution requires typed plans")
@@ -742,7 +749,20 @@ class AutonomousEvidenceExecutionController:
         )
         runtime = AutonomousEvidenceRuntime(evidence_plan, journal=journal)
         runtime.rehydrate()
-        result = runtime.execute(requests, acquirer=acquirer, projector=projector, evaluator=evaluator, rehydrate_value=rehydrate_value, parent_evidence_digests=parent_evidence_digests, stop_on_failure=stop_on_failure, reevaluate_pending=reevaluate_pending)
+        result = runtime.execute(
+            requests,
+            acquirer=acquirer,
+            projector=projector,
+            evaluator=evaluator,
+            rehydrate_value=rehydrate_value,
+            parent_evidence_digests=parent_evidence_digests,
+            stop_on_failure=stop_on_failure,
+            reevaluate_pending=reevaluate_pending,
+            authorization_context=authorization_context,
+            authorization_domain=authorization_domain,
+            authorization_capability=authorization_capability,
+            authorization_risk_class=authorization_risk_class,
+        )
         return AutonomousEvidenceExecutionResult(execution_plan, current, result)
 
 

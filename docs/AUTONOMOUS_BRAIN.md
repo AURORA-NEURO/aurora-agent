@@ -13761,3 +13761,39 @@ actually safe. No task text, prompt, response, credential, authorization header,
 tool argument, evidence body, or effect value is accepted or persisted by this module. The grant
 also does not promote a plan, evaluator result, route, model choice, or provider transport result
 into domain truth or execution authority.
+
+### Evidence acquisition and evaluator authorization
+
+Evidence has two additional live callback boundaries. `AutonomousEvidenceRuntime` accepts an
+optional `authorization_context` / `authorizationContext` and, when present, requests
+`evidence_acquisition` immediately before the caller-owned acquirer runs and `evaluation`
+immediately before the caller-owned evaluator runs. The acquisition request is bound to the
+metadata-only evidence request digest. The evaluation request is bound to the receipt digest,
+which contains observation and provenance digests but never the raw acquired value. These
+resource bindings make authorization decisions auditable without leaking source payloads,
+evaluator input, credentials, or prompt material into the authorization ledger.
+
+The runtime passes the exact requirement domain to the authorization context by default. A
+caller may provide `authorization_domain` / `authorizationDomain` for a deliberately narrowed
+or remapped deployment boundary; the context still rejects a domain outside its grant scope.
+Capability and risk-class overrides are also optional and are omitted when unset so the context's
+defaults remain authoritative. A context spanning several domains therefore remains fail-closed:
+every live callback carries its requirement's exact domain instead of relying on an ambiguous
+multi-domain request.
+
+Authorization is checked outside the acquisition and evaluator failure-conversion blocks. A
+refusal raises the typed `AutonomousAuthorizationError`, the callback is not invoked, and no
+synthetic failed evidence receipt is appended. This distinction is important operationally:
+an unavailable source or broken evaluator is an execution failure, while an authorization refusal
+is a policy decision that must remain visible to the caller and should not be mistaken for bad
+evidence. Projection remains a separate caller-owned transformation, so deployments can grant
+acquisition and evaluation independently while retaining the existing metadata-only journal.
+
+Replay is intentionally cheaper and safer. Returning a journaled receipt does not reacquire the
+source or consume an acquisition grant. `reevaluate_pending` is different: it invokes a fresh
+evaluator callback and therefore requires a new `evaluation` authorization request tied to the
+replayed receipt. This preserves append-only evaluator revisions, grant-use accounting, and
+restart behavior across the direct runtime, reviewed evidence execution controller, resumable
+execution, and the high-level Python facade. Omitting the context remains compatible with local
+caller-owned integrations; grant-controlled deployments should pass it through every external
+boundary and test the denial path as part of their integration contract.
