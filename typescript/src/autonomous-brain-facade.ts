@@ -120,6 +120,17 @@ import { AutonomousCostBudget } from "./llm.js";
 import type { AgentMissionArgs, JsonObject, JsonValue } from "./types.js";
 import type { AutonomousMissionReplanResult } from "./mission-replan.js";
 import {
+  autonomousEvaluatorCalibrationAdmission,
+  validateAutonomousEvaluatorCalibrationReport,
+  type AutonomousEvaluatorCalibrationAdmission,
+  type AutonomousEvaluatorCalibrationReport,
+} from "./autonomous-evaluator-calibration.js";
+import type {
+  AutonomousEvaluatorCalibrationImport,
+  AutonomousEvaluatorCalibrationQueryOptions,
+  AutonomousEvaluatorCalibrationStoreSnapshot,
+} from "./autonomous-evaluator-calibration-store.js";
+import {
   AutonomousJointExecutionPolicy,
   type AutonomousExecutionPolicyCandidateInput,
   type AutonomousExecutionPolicyDecision,
@@ -2162,6 +2173,44 @@ export class AutonomousBrainFacade {
     options: AutonomousBrainModelInventoryReadinessOptions = {},
   ): Promise<AutonomousBrainModelInventoryReadiness> {
     return this.agent.modelInventoryReadiness(options);
+  }
+
+  /** Validate and register one aggregate evaluator-calibration report for later learning gates. */
+  registerEvaluatorCalibration(report: AutonomousEvaluatorCalibrationReport): AutonomousEvaluatorCalibrationImport {
+    return this.agent.registerEvaluatorCalibration(report);
+  }
+
+  /** Retrieve one registered calibration report by its content digest. */
+  evaluatorCalibrationReport(reportDigest: string): AutonomousEvaluatorCalibrationReport | null {
+    return this.agent.evaluatorCalibrationReport(reportDigest);
+  }
+
+  /** Query aggregate calibration metadata without exposing caller-owned calibration cases. */
+  evaluatorCalibrationReports(options: AutonomousEvaluatorCalibrationQueryOptions = {}): AutonomousEvaluatorCalibrationReport[] {
+    return this.agent.evaluatorCalibrationReports(options);
+  }
+
+  /** Validate a calibration report before it is used as a learning-admission input. */
+  validateEvaluatorCalibration(report: AutonomousEvaluatorCalibrationReport): AutonomousEvaluatorCalibrationReport {
+    return validateAutonomousEvaluatorCalibrationReport(report);
+  }
+
+  /** Derive the explicit per-domain decision that admits or holds evaluator-driven learning. */
+  evaluatorCalibrationAdmission(
+    report: AutonomousEvaluatorCalibrationReport,
+    domain: AutonomousDomainName,
+  ): AutonomousEvaluatorCalibrationAdmission {
+    return autonomousEvaluatorCalibrationAdmission(report, domain);
+  }
+
+  /** Restore calibration reports through the agent-bound caller-owned persistence coordinator. */
+  async restoreEvaluatorCalibration(): Promise<AutonomousEvaluatorCalibrationStoreSnapshot | null> {
+    return this.agent.restoreEvaluatorCalibration();
+  }
+
+  /** Flush calibration reports through the agent-bound caller-owned CAS coordinator. */
+  async flushEvaluatorCalibration(): Promise<AutonomousEvaluatorCalibrationStoreSnapshot> {
+    return this.agent.flushEvaluatorCalibration();
   }
 
   /**

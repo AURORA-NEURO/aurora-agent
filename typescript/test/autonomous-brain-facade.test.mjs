@@ -12,6 +12,11 @@ import {
   AutonomousBrainPlan,
   AutonomousCapabilityActivation,
   AutonomousCapabilityActivationStore,
+  AutonomousEvaluatorCalibrationHarness,
+  AutonomousEvaluatorCalibrationRegistry,
+  AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator,
+  AutonomousValueEvaluatorRegistry,
+  InMemoryAutonomousEvaluatorCalibrationStore,
   AutonomousLearningController,
   AutonomousOnlineLearner,
   InMemoryAutonomousDecisionCycleStateStore,
@@ -22,6 +27,7 @@ import {
   InMemoryAutonomousWorkflowCheckpointStore,
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
+  builtinAutonomousValueEvaluatorProfiles,
   LLMRuntime,
   createBuiltinAutonomousConnectorRuntime,
   AutonomousProtectedRehydrationAdapter,
@@ -59,6 +65,30 @@ const model = {
   cost_per_million_tokens: 0,
   reliability: 0.99,
 };
+
+function calibrationCasesForDomains(domains = AUTONOMOUS_DOMAIN_NAMES) {
+  const profiles = new Map(builtinAutonomousValueEvaluatorProfiles().map((profile) => [profile.domain, profile]));
+  return domains.flatMap((domain) => {
+    const profile = profiles.get(domain);
+    const makeEvidence = (value) => ({
+      schema: "bioprism-brain-domain-evaluator/0.1",
+      domain,
+      capability: "calibration-fixture",
+      risk_class: "read_only",
+      signals: Object.fromEntries(profile.required_signals.map((signal) => [signal, value])),
+      references: [],
+      limitations: [],
+      retention: "value_only_digests_and_signal_scores",
+    });
+    return [
+      { case_id: `${domain}-calibration-positive`, domain, evidence: makeEvidence(1), label: 1, split: "calibration" },
+      { case_id: `${domain}-calibration-negative`, domain, evidence: makeEvidence(0), label: 0, split: "calibration" },
+      { case_id: `${domain}-calibration-reference-abstained`, domain, evidence: makeEvidence(1), label: null, split: "calibration" },
+      { case_id: `${domain}-holdout-positive`, domain, evidence: makeEvidence(1), label: 1, split: "holdout" },
+      { case_id: `${domain}-holdout-negative`, domain, evidence: makeEvidence(0), label: 0, split: "holdout" },
+    ];
+  });
+}
 
 function localRuntime(onRequest = () => {}) {
   const runtime = new LLMRuntime({ fetch: async () => { throw new Error("HTTP must not be reached"); } });
@@ -2148,5 +2178,59 @@ test("brain facade mission boundary rejects malformed graphs and unadmitted sema
   assert.throws(
     () => brain.authorizeMissionLaunchAdmission({ ...validMission, steps: [{ ...validMission.steps[0], id: "step" }, { ...validMission.steps[0], id: "step" }] }, {}),
     /duplicate step id/,
+  );
+});
+
+test("brain facade exposes evaluator calibration admission and restart controls across every domain", async () => {
+  const report = new AutonomousEvaluatorCalibrationHarness(
+    AutonomousValueEvaluatorRegistry.withBuiltinProfiles(),
+  ).run({
+    cases: calibrationCasesForDomains(),
+    bins: 5,
+    minCalibrationCasesPerDomain: 2,
+    minHoldoutCasesPerDomain: 2,
+    maxExpectedCalibrationError: 0.01,
+    maxBrierScore: 0.01,
+  });
+  const store = new InMemoryAutonomousEvaluatorCalibrationStore();
+  const registry = new AutonomousEvaluatorCalibrationRegistry();
+  const persistence = new AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator(registry, store);
+  const agent = new AutonomousAgent(new LLMRuntime(), {
+    evaluatorCalibrationRegistry: registry,
+    evaluatorCalibrationPersistence: persistence,
+  });
+  const brain = new AutonomousBrainFacade({ agent });
+
+  const imported = brain.registerEvaluatorCalibration(report);
+  assert.equal(imported.created, true);
+  assert.deepEqual(brain.evaluatorCalibrationReport(report.report_digest), report);
+  assert.equal(brain.evaluatorCalibrationReports({ decision: "admit_learning" }).length, 1);
+  assert.deepEqual(brain.validateEvaluatorCalibration(report), report);
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    assert.equal(brain.evaluatorCalibrationAdmission(report, domain).decision, "admit_learning", domain);
+  }
+
+  const flushed = await brain.flushEvaluatorCalibration();
+  assert.equal(flushed.reports.length, 1);
+  assert.doesNotMatch(JSON.stringify(flushed), /calibration-positive|calibration-fixture|signals/);
+
+  const restoredRegistry = new AutonomousEvaluatorCalibrationRegistry();
+  const restoredPersistence = new AutonomousEvaluatorCalibrationRegistryPersistenceCoordinator(restoredRegistry, store);
+  const restoredAgent = new AutonomousAgent(new LLMRuntime(), {
+    evaluatorCalibrationRegistry: restoredRegistry,
+    evaluatorCalibrationPersistence: restoredPersistence,
+  });
+  const restoredBrain = new AutonomousBrainFacade({ agent: restoredAgent });
+  const restored = await restoredBrain.restoreEvaluatorCalibration();
+  assert.equal(restored?.reports.length, 1);
+  assert.deepEqual(restoredBrain.evaluatorCalibrationReport(report.report_digest), report);
+
+  const sparse = new AutonomousEvaluatorCalibrationHarness(
+    AutonomousValueEvaluatorRegistry.withBuiltinProfiles(),
+  ).run({ cases: calibrationCasesForDomains(["coding"]), domains: AUTONOMOUS_DOMAIN_NAMES });
+  assert.equal(brain.evaluatorCalibrationAdmission(sparse, "science").decision, "hold_learning");
+  await assert.rejects(
+    new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime()) }).flushEvaluatorCalibration(),
+    /evaluator calibration registry is not configured/,
   );
 });

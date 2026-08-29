@@ -631,6 +631,15 @@ any provider, source, tool, evaluator, learner, credential, or effect boundary. 
 still planning metadata: normal route, model, evidence, approval, provider, tool, evaluator, and
 effect gates must be passed before execution.
 
+The same facade exposes the evaluator-calibration control plane used by online learning. Register
+an aggregate `AutonomousEvaluatorCalibrationReport`, query it by digest or readiness metadata,
+derive the explicit per-domain `admit_learning`/`hold_learning` decision, and flush or restore the
+caller-owned registry through a compare-and-swap persistence coordinator. Calibration reports retain
+digests, bounded metrics, evaluator versions, and domain coverage only; raw cases, labels, evidence,
+signals, prompts, responses, credentials, and provider payloads remain caller-owned. Missing
+registry or persistence configuration fails closed, duplicate imports are idempotent, and restoring
+the same snapshot after restart does not invoke a provider or silently grant evaluator reward.
+
 For ambiguous or novel intake, `semanticRouteAutonomousTask()` adds an explicit provider-assisted
 classification pass. It sends the private task only through the caller's approved local provider,
 asks for structured domain scores against the reviewed twelve-domain catalogue, and maps the

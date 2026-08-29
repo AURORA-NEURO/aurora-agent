@@ -1,5 +1,12 @@
 # Remaining backlog
 
+The high-level TypeScript facade now exposes evaluator-calibration registration, validation,
+per-domain learning admission, aggregate querying, and caller-owned restore/flush controls. The
+integration coverage builds a valid calibration report across all twelve domains, verifies that
+raw calibration cases and evidence never cross the persistence projection, checks restart recovery,
+and proves sparse coverage holds learning. This makes calibration an explicit online-learning gate
+at the application boundary; it does not invoke providers, assign rewards, or persist caller data.
+
 The safe TypeScript `AutonomousBrainFacade` now owns the provider-free task-clarification loop
 already available on the lower-level agent. It can derive a bounded questionnaire for every
 single-domain profile (or accept only an unambiguous deterministic route when the domain is
