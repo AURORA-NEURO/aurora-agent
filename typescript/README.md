@@ -600,6 +600,14 @@ policies, applies explicit failure-rate penalties, and records exploration metad
 replay an adaptive decision without hidden randomness. Thompson rankings include bounded
 Beta-posterior alpha, beta, and sample evidence. All three policies consume only explicit
 evaluator rewards; provider transport success is never silently converted into learning credit.
+The learner warm-starts each eligible arm from the canonical quality/reliability/cost/latency
+utility as a bounded four-pull evaluator-equivalent prior, then lets contextual, global, or
+request-supplied evaluator observations override that prior over time. This prevents cold-start
+lexical ties from selecting an arbitrary model while preserving fast adaptation, and exposes
+`static_base_score`, `static_prior_reward`, `adapted_mean`, `exploration_bonus`, and history-source
+reasons in the metadata-only ranking. A confidence floor is evaluated against the final selector
+decision, so a learned promotion can resolve a tied cold-start prior while an actually ambiguous
+post-learning decision still abstains.
 
 For ambiguous or novel intake, `semanticRouteAutonomousTask()` adds an explicit provider-assisted
 classification pass. It sends the private task only through the caller's approved local provider,

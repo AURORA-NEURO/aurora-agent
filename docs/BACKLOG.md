@@ -1,5 +1,16 @@
 # Remaining backlog
 
+The TypeScript local online learner now composes model metadata and evaluator feedback instead of
+discarding the canonical utility after eligibility filtering. Each eligible arm receives a
+deterministic four-pull prior from quality, reliability, cost, and latency; request-supplied
+observations are honored, contextual/global precedence remains explicit, and UCB/epsilon/Thompson
+adaptation is still bounded by failure penalties and replay-safe evaluator state. Selector
+confidence floors are applied after a caller selector returns, allowing learned evidence to break
+a cold-start tie while preserving fail-closed abstention for genuinely ambiguous decisions. The
+new all-domain and adversarial TypeScript coverage verifies cold-start ranking, supplied
+observations, negative-reward promotion, and post-selector confidence gating. This remains
+provider-free and does not claim task correctness or authorize a provider call.
+
 The TypeScript autonomous inventory now exposes the standalone live-readiness projection that
 Python already provides. `AutonomousAgent.modelInventoryReadiness()` and the high-level facade
 cover all twelve domains, enforce capability/capacity compatibility, join provider registration,

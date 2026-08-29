@@ -3675,7 +3675,11 @@ export class AutonomousRuntime {
       if (!ranking.some((row) => row.eligible)) {
         return finishSelection({ selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: ranking.flatMap((row) => row.reasons).join("; ") || "no eligible model candidate", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence });
       }
-      if (minimumConfidence !== null && selectionConfidence < minimumConfidence) {
+      // A caller-owned selector may improve confidence with contextual or evaluator-backed
+      // evidence that is not present in the canonical cold-start ranking. Defer this gate until
+      // after selector validation; otherwise an attached learner can never promote a model from
+      // an initially tied prior.
+      if (!this.selector && minimumConfidence !== null && selectionConfidence < minimumConfidence) {
         return finishSelection({ selected_model: null, strategy: this.selector ? "caller_selector" : "deterministic_health_utility", ranking, abstention_reason: `selection confidence ${selectionConfidence.toFixed(6)} is below caller floor ${minimumConfidence.toFixed(6)}`, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence });
       }
       if (this.selector) {
@@ -3684,11 +3688,16 @@ export class AutonomousRuntime {
         const projectedRanking = selectorRankingProjection(selected.ranking, ranking);
         const exploration = selectorExplorationProjection(selected);
         const selectedModel = selected.selected_model;
-        if (selectedModel === null) return finishSelection({ selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: typeof selected.abstention_reason === "string" ? selected.abstention_reason : "caller selector abstained", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, ...exploration });
+        const selectorConfidence = selected.selection_confidence === undefined || selected.selection_confidence === null
+          ? selectionConfidence
+          : selected.selection_confidence;
+        if (typeof selectorConfidence !== "number" || !Number.isFinite(selectorConfidence) || selectorConfidence < 0 || selectorConfidence > 1) throw new ProviderRuntimeError("autonomous model selector returned an invalid selection_confidence");
+        if (selectedModel === null) return finishSelection({ selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: typeof selected.abstention_reason === "string" ? selected.abstention_reason : "caller selector abstained", selection_confidence: selectorConfidence, min_selection_confidence: minimumConfidence, ...exploration });
         if (!isObject(selectedModel) || typeof selectedModel.provider !== "string" || typeof selectedModel.model !== "string") throw new ProviderRuntimeError("autonomous selector returned an invalid selected_model");
         const chosen = ranking.find((row) => row.provider === selectedModel.provider && row.model === selectedModel.model);
         if (!chosen || !chosen.eligible) throw new ProviderRuntimeError("autonomous selector chose an ineligible model");
-        return finishSelection({ selected_model: { provider: chosen.provider, model: chosen.model }, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: null, selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence, ...exploration });
+        if (minimumConfidence !== null && selectorConfidence < minimumConfidence) return finishSelection({ selected_model: null, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: `selection confidence ${selectorConfidence.toFixed(6)} is below caller floor ${minimumConfidence.toFixed(6)}`, selection_confidence: selectorConfidence, min_selection_confidence: minimumConfidence, ...exploration, exploration_taken: false });
+        return finishSelection({ selected_model: { provider: chosen.provider, model: chosen.model }, strategy: "caller_selector", ranking: projectedRanking, abstention_reason: null, selection_confidence: selectorConfidence, min_selection_confidence: minimumConfidence, ...exploration });
       }
       const chosen = ranking.find((row) => row.eligible);
       return finishSelection({ selected_model: chosen ? { provider: chosen.provider, model: chosen.model } : null, strategy: "deterministic_health_utility", ranking, abstention_reason: chosen ? null : "no eligible model candidate", selection_confidence: selectionConfidence, min_selection_confidence: minimumConfidence });

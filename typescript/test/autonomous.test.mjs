@@ -1974,6 +1974,90 @@ test("online learner adapts only from explicit evaluator rewards", async () => {
   assert.throws(() => learner.select({ ...request, min_quality: 2 }), /min_quality is outside its bounds/);
 });
 
+test("online learner warm-starts every domain from model utility and consumes supplied observations", () => {
+  const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
+  for (const domain of domains) {
+    const learner = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0, seed: 31 } });
+    const baseRequest = {
+      task: `choose a model for ${domain}`,
+      domain,
+      capability: "reasoning",
+      risk_class: "review_required",
+      required_capabilities: ["reasoning"],
+      estimated_input_tokens: 10,
+      requested_output_tokens: 50,
+      candidates: [
+        { ...candidate("a", "quality"), quality: 0.95, reliability: 0.95, cost_per_million_tokens: 2, latency_ms: 20 },
+        { ...candidate("b", "cheap"), quality: 0.55, reliability: 0.55, cost_per_million_tokens: 20, latency_ms: 200 },
+      ],
+      provider_health: {
+        a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true },
+        b: { provider: "b", circuit: "closed", credential_required: false, credential_ready: true },
+      },
+      model_health: {},
+    };
+    const coldStart = learner.select(baseRequest);
+    assert.deepEqual(coldStart.selected_model, { provider: "a", model: "quality" }, domain);
+    assert.ok(coldStart.ranking[0].reasons.some((reason) => reason.startsWith("static_prior_reward=")), domain);
+    assert.equal(coldStart.ranking[0].observed_pulls, 0, domain);
+  }
+
+  const requestWithObservation = {
+    task: "honor a caller-owned evaluator observation",
+    domain: "coding",
+    capability: "reasoning",
+    risk_class: "review_required",
+    required_capabilities: ["reasoning"],
+    estimated_input_tokens: 10,
+    requested_output_tokens: 50,
+    candidates: [candidate("a", "one"), candidate("b", "two")],
+    provider_health: {
+      a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true },
+      b: { provider: "b", circuit: "closed", credential_required: false, credential_ready: true },
+    },
+    model_health: {},
+    observations: [{ arm_id: "b/two", pulls: 4, reward_sum: 4, failures: 0 }],
+  };
+  const observed = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0, seed: 31 } }).select(requestWithObservation);
+  assert.deepEqual(observed.selected_model, { provider: "b", model: "two" });
+  assert.ok(observed.ranking.find((row) => row.model === "two").reasons.includes("history=request"));
+
+  const adapting = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0, seed: 31 } });
+  for (let index = 0; index < 8; index += 1) {
+    adapting.update({ arm_id: "a/quality", reward: -1, failed: true, outcome_digest: index.toString(16).padStart(64, "0") });
+  }
+  const promoted = adapting.select({ ...requestWithObservation, observations: [], candidates: [
+    { ...candidate("a", "quality"), quality: 0.95, reliability: 0.95, cost_per_million_tokens: 2, latency_ms: 20 },
+    { ...candidate("b", "cheap"), quality: 0.55, reliability: 0.55, cost_per_million_tokens: 20, latency_ms: 200 },
+  ], provider_health: {
+    a: { provider: "a", circuit: "closed", credential_required: false, credential_ready: true },
+    b: { provider: "b", circuit: "closed", credential_required: false, credential_ready: true },
+  } });
+  assert.deepEqual(promoted.selected_model, { provider: "b", model: "cheap" });
+});
+
+test("runtime evaluates the confidence floor after learner evidence", async () => {
+  const llm = new LLMRuntime({
+    credentials: new CredentialStore(),
+    fetch: async () => jsonResponse({ choices: [{ message: { role: "assistant", content: "learner-selected" }, finish_reason: "stop" }] }),
+  });
+  llm.registerProvider(openaiCompatibleProvider("a", "https://confidence-a.test", { requiresCredential: false }));
+  llm.registerProvider(openaiCompatibleProvider("b", "https://confidence-b.test", { requiresCredential: false }));
+  const learner = new AutonomousOnlineLearner({ policy: { strategy: "ucb1", exploration: 0, seed: 41 } });
+  const agent = new AutonomousAgent(llm, { learner });
+  agent.registerModel(candidate("a", "one"));
+  agent.registerModel(candidate("b", "two"));
+  learner.update({ arm_id: "a/one", reward: 0, outcome_digest: "a".repeat(64) });
+  learner.update({ arm_id: "b/two", reward: 1, outcome_digest: "b".repeat(64) });
+  const result = await agent.run("Select using evaluator evidence despite a tied cold-start prior.", {
+    domain: "coding",
+    minSelectionConfidence: 0.09,
+    approveProviderCall: true,
+  });
+  assert.deepEqual(result.selection.selected_model, { provider: "b", model: "two" });
+  assert.ok(result.selection.selection_confidence >= 0.09);
+});
+
 test("selection confidence abstains on ambiguous ranking across every built-in domain", () => {
   const domains = ["coding", "browser", "data", "science", "biomedical", "neuroscience", "operations", "enterprise", "multi_agent", "multimodal", "cross_domain", "evaluation"];
   for (const domain of domains) {

@@ -5281,6 +5281,13 @@ function deterministicBanditDrawWithCounter(seed: number, generation: number, la
   return (Number(firstWord) + 0.5) / (Number(0xffff_ffff_ffff_ffffn) + 1);
 }
 
+/**
+ * Evaluator-equivalent observations used to warm-start an arm from its static utility.
+ * Keeping this explicit and immutable prevents a cold-start decision from depending on hidden
+ * process state, while still letting real evaluator feedback take over after a small sample.
+ */
+const AUTONOMOUS_LEARNER_PRIOR_PSEUDO_PULLS = 4;
+
 function standardNormalFromUniforms(first: number, second: number): number {
   return Math.sqrt(-2 * Math.log(first)) * Math.cos(2 * Math.PI * second);
 }
@@ -5314,19 +5321,47 @@ function deterministicBetaSample(alpha: number, beta: number, seed: number, gene
   return Number.isFinite(total) && total > 0 ? Math.min(1, Math.max(0, left / total)) : alpha / (alpha + beta);
 }
 
-function thompsonPosterior(arm: BrainBanditArm | undefined, policy: BrainBanditPolicy, seed: number, generation: number, armId: string): { alpha: number; beta: number; sample: number; sampledReward: number } {
+function thompsonPosterior(
+  arm: BrainBanditArm | undefined,
+  policy: BrainBanditPolicy,
+  seed: number,
+  generation: number,
+  armId: string,
+  priorReward?: number,
+): { alpha: number; beta: number; sample: number; sampledReward: number } {
   const minimum = policy.min_reward ?? -1;
   const maximum = policy.max_reward ?? 1;
   const span = maximum - minimum;
   const pulls = arm?.pulls ?? 0;
   const rewardSum = arm?.reward_sum ?? 0;
   const failures = arm?.failures ?? 0;
-  const normalizedSuccessMass = pulls === 0 ? 0 : Math.min(pulls, Math.max(0, (rewardSum - minimum * pulls) / span));
-  const normalizedFailureMass = Math.max(0, pulls - normalizedSuccessMass + (policy.failure_penalty ?? 0.25) * failures);
+  const priorMass = priorReward === undefined ? 0 : AUTONOMOUS_LEARNER_PRIOR_PSEUDO_PULLS;
+  const normalizedPriorSuccessMass = priorReward === undefined
+    ? 0
+    : priorMass * Math.min(1, Math.max(0, (priorReward - minimum) / span));
+  const observedSuccessMass = pulls === 0 ? 0 : Math.min(pulls, Math.max(0, (rewardSum - minimum * pulls) / span));
+  const normalizedSuccessMass = normalizedPriorSuccessMass + observedSuccessMass;
+  const normalizedFailureMass = Math.max(0, priorMass - normalizedPriorSuccessMass + pulls - observedSuccessMass + (policy.failure_penalty ?? 0.25) * failures);
   const alpha = 1 + normalizedSuccessMass;
   const beta = 1 + normalizedFailureMass;
   const sample = deterministicBetaSample(alpha, beta, seed, generation, armId);
   return { alpha, beta, sample, sampledReward: minimum + sample * span };
+}
+
+function autonomousLearnerPriorReward(staticBaseScore: number, weights: AutonomousSelectionWeights, policy: BrainBanditPolicy): number {
+  // Selection weights are coefficients rather than probabilities. Normalize by their static
+  // magnitude before mapping utility into the configured evaluator-reward range; otherwise a
+  // caller using weights above 1 could permanently drown out online feedback.
+  const staticWeightScale = Math.max(1, weights.quality + weights.reliability + weights.cost + weights.latency);
+  const normalizedUtility = Math.max(-1, Math.min(1, staticBaseScore / staticWeightScale));
+  const minimum = policy.min_reward ?? -1;
+  const maximum = policy.max_reward ?? 1;
+  return minimum + ((normalizedUtility + 1) / 2) * (maximum - minimum);
+}
+
+function autonomousLearnerAdaptedMean(priorReward: number, meanReward: number, pulls: number): number {
+  return (priorReward * AUTONOMOUS_LEARNER_PRIOR_PSEUDO_PULLS + meanReward * pulls)
+    / (AUTONOMOUS_LEARNER_PRIOR_PSEUDO_PULLS + pulls);
 }
 
 function learnerContext(request: AutonomousSelectionRequest): { context_digest: string; context: BrainBanditContext } | null {
@@ -5393,17 +5428,32 @@ export class AutonomousOnlineLearner {
     return this.snapshot();
   }
 
-  /** Select the best eligible model using persisted pulls/rewards; deterministic ties are by arm id. */
+  /**
+   * Select the best eligible model using static utility plus caller-owned evaluator evidence.
+   * Static utility is treated as a bounded four-pull prior, while contextual, global, and
+   * request-supplied observations progressively adapt the decision; deterministic ties are by
+   * arm id.
+   */
   select(request: AutonomousSelectionRequest): AutonomousSelectionDecision {
     validateOnlineSelectionConstraints(request);
     const canonicalRanking = rankAutonomousModels(request);
+    // The canonical ranker intentionally mixes caller-supplied observations into its score.
+    // Keep that ranking for hard gates and audit context, but derive the learner prior from a
+    // score with no observations so the same evaluator evidence is not counted twice.
+    const selectionWeights = normalizeAutonomousSelectionWeights(request.weights);
+    const staticRanking = rankAutonomousModels({ ...request, weights: selectionWeights, observations: [] });
+    const staticRankingByArm = new Map(staticRanking.map((row) => [`${row.provider}/${row.model}`, row]));
+    const suppliedObservations = normalizeAutonomousModelObservations(request.observations);
+    const suppliedObservationByArm = new Map(suppliedObservations.map((observation) => [observation.arm_id, observation]));
     const context = learnerContext(request);
     const contextualState = context ? this.stateValue.contextual_states?.find((state) => state.context_digest === context.context_digest) : undefined;
-    const observationFor = (armId: string): { arm: BrainBanditArm | undefined; source: "contextual" | "global" | "prior" } => {
+    const observationFor = (armId: string): { arm: BrainBanditArm | undefined; source: "contextual" | "global" | "request" | "prior" } => {
       const contextualArm = contextualState?.arms.find((arm) => arm.arm_id === armId);
       if (contextualArm) return { arm: contextualArm, source: "contextual" };
       const globalArm = this.stateValue.arms.find((arm) => arm.arm_id === armId);
-      if (globalArm) return { arm: globalArm, source: context ? "global" : "prior" };
+      if (globalArm) return { arm: globalArm, source: context ? "global" : "global" };
+      const suppliedArm = suppliedObservationByArm.get(armId);
+      if (suppliedArm) return { arm: suppliedArm, source: "request" };
       return { arm: undefined, source: "prior" };
     };
     const eligible = canonicalRanking.filter((row) => row.eligible && !observationFor(`${row.provider}/${row.model}`).arm?.disabled);
@@ -5415,15 +5465,19 @@ export class AutonomousOnlineLearner {
       const arm = observation.arm;
       const pulls = arm?.pulls ?? 0;
       const mean = pulls ? (arm?.reward_sum ?? 0) / pulls : 0;
+      const staticRow = staticRankingByArm.get(armId);
+      const staticBaseScore = staticRow?.base_score ?? 0;
+      const priorReward = autonomousLearnerPriorReward(staticBaseScore, selectionWeights, this.policy);
+      const adaptedMean = autonomousLearnerAdaptedMean(priorReward, mean, pulls);
       const failureRate = pulls ? (arm?.failures ?? 0) / pulls : 0;
-      const posterior = this.policy.strategy === "thompson_sampling" ? thompsonPosterior(arm, this.policy, this.policy.seed ?? 0, this.stateValue.generation ?? 0, armId) : null;
+      const posterior = this.policy.strategy === "thompson_sampling" ? thompsonPosterior(arm, this.policy, this.policy.seed ?? 0, this.stateValue.generation ?? 0, armId, priorReward) : null;
       const bonus = posterior
-        ? posterior.sampledReward - mean
+        ? posterior.sampledReward - adaptedMean
         : this.policy.strategy === "ucb1"
           ? (pulls ? Math.sqrt(Math.log(totalPulls + 1) / pulls) * (this.policy.exploration ?? 0.5) : (this.policy.exploration ?? 0.5))
           : 0;
-      const score = (posterior ? posterior.sampledReward : mean + bonus) - (this.policy.failure_penalty ?? 0.25) * failureRate;
-      return { candidate, armId, pulls, source: observation.source, score, mean, bonus, failureRate, posterior };
+      const score = (posterior ? posterior.sampledReward : adaptedMean + bonus) - (this.policy.failure_penalty ?? 0.25) * failureRate;
+      return { candidate, armId, pulls, source: observation.source, score, mean, adaptedMean, priorReward, staticBaseScore, bonus, failureRate, posterior };
     }).sort((left, right) => right.score - left.score || left.armId.localeCompare(right.armId));
     const explorationDraw = this.policy.strategy === "epsilon_greedy" ? deterministicBanditDraw(this.policy.seed ?? 0, this.stateValue.generation ?? 0, "epsilon") : null;
     const explorationTaken = explorationDraw !== null && explorationDraw < (this.policy.epsilon ?? 0.1);
@@ -5434,7 +5488,7 @@ export class AutonomousOnlineLearner {
       .filter((row) => row.eligible && observationFor(`${row.provider}/${row.model}`).arm?.disabled)
       .map((row) => ({ ...row, eligible: false, reasons: [...row.reasons, "bandit arm is disabled"] }));
     const ranking = [
-      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number(row.score.toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`, `mean_reward=${row.mean.toFixed(6)}`, `failure_rate=${row.failureRate.toFixed(6)}`, `exploration_bonus=${row.bonus.toFixed(6)}`, ...(row.posterior ? [`posterior_alpha=${row.posterior.alpha.toFixed(6)}`, `posterior_beta=${row.posterior.beta.toFixed(6)}`, `posterior_sample=${row.posterior.sample.toFixed(6)}`] : []), `history=${row.source}`, ...(context ? [`context_digest=${context.context_digest}`] : [])] })),
+      ...scoredEligible.map((row) => ({ provider: row.candidate.provider, model: row.candidate.model, score: Number(row.score.toFixed(12)), eligible: true, reasons: [`arm_id=${row.armId}`, `pulls=${row.pulls}`, `mean_reward=${row.mean.toFixed(6)}`, `adapted_mean=${row.adaptedMean.toFixed(6)}`, `static_prior_reward=${row.priorReward.toFixed(6)}`, `static_base_score=${row.staticBaseScore.toFixed(6)}`, `failure_rate=${row.failureRate.toFixed(6)}`, `exploration_bonus=${row.bonus.toFixed(6)}`, ...(row.posterior ? [`posterior_alpha=${row.posterior.alpha.toFixed(6)}`, `posterior_beta=${row.posterior.beta.toFixed(6)}`, `posterior_sample=${row.posterior.sample.toFixed(6)}`] : []), `history=${row.source}`, ...(context ? [`context_digest=${context.context_digest}`] : [])], base_score: Number((row.adaptedMean - (this.policy.failure_penalty ?? 0.25) * row.failureRate).toFixed(12)), exploration_bonus: Number(row.bonus.toFixed(12)), observed_pulls: row.pulls })),
       ...disabledRanking,
       ...canonicalRanking.filter((row) => !row.eligible),
     ];
