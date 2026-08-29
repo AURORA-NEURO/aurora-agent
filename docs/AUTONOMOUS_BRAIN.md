@@ -13402,3 +13402,28 @@ metadata-only and cannot supply credentials, prompt text, provider payloads, too
 authority. Python stage results and TypeScript workflow execution therefore share the same
 cross-runtime replay rule, while caller-owned persistence and operator recovery remain explicit
 deployment responsibilities.
+
+### High-level durable workflow lifecycle
+
+The TypeScript `AutonomousBrainFacade` now binds the durable workflow executor to its exact agent
+through `runWorkflow()` and `resumeWorkflow()`. This is the task-driven application entry point
+for a bounded, structured, single-domain workflow: the caller supplies the transient task and
+execution policy on every call, while the caller-owned checkpoint store retains only route,
+workflow, stage, selection, and failure digests. A fresh executor per call avoids hidden worker
+state and keeps learning controllers, stage adapters, private credential handles, and recovery
+responsibility explicit.
+
+The launch-admitted forms, `runWorkflowWithLaunchAdmission()` and
+`resumeWorkflowWithLaunchAdmission()`, resolve the provider-free route before invoking the
+executor and bind every selected domain to an approved launch record. Held, blocked, or
+domain-mismatched records fail before provider dispatch. Provider-assisted semantic routing is
+not silently included in this admission: it is a distinct classifier boundary and must be
+reviewed separately before its digest-bound `routeOverride` is supplied. The executor then
+repeats its normal route, blueprint, execution-contract, stage-plan, structured-output, and
+checkpoint gates, so facade convenience does not weaken restart or stage admission.
+
+This closes the application composition gap for coding, browser, data, science, biomedical,
+neuroscience, operations, enterprise, multi-agent, multimodal, cross-domain, and evaluation
+profiles while preserving the current single-domain workflow limitation. Distributed checkpoint
+storage, task/credential rehydration, evaluator settlement, operator identity, and durable
+workflow traces remain deployment-owned follow-up surfaces.

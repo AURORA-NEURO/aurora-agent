@@ -2487,3 +2487,15 @@ local-worker adapters consume the same normalized identity rather than reaching 
 rehydrated blueprint. Invalid packets fail into the existing redacted stage-failure checkpoint,
 without recording an unadmitted digest or dispatching a provider/connector call. The remaining
 deployment work is caller-owned durable blueprint storage and operator-visible recovery UX.
+
+The TypeScript `AutonomousBrainFacade` now exposes the durable workflow lifecycle directly through
+`runWorkflow()` / `resumeWorkflow()` and their launch-admitted variants. Applications can start or
+continue the same bounded, structured, checkpointed stage execution without reaching below the
+facade to construct an executor. The checkpoint store, task and credential rehydration, model
+policy, provider approval, and operator recovery remain caller-owned. Launch admission resolves
+the route provider-free and checks the exact selected domains before dispatch; provider-assisted
+semantic routing is rejected until its separate classifier boundary is reviewed. Integration
+coverage runs real structured provider fixtures across all twelve built-in domains, verifies
+restart completion and checkpoint redaction, and proves held admission prevents dispatch. Future
+deployment work remains persistence adapters, operator-facing recovery UX, and a caller-owned
+workflow trace/settlement surface for long-running workers.

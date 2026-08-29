@@ -1794,6 +1794,41 @@ returns `route_review_required` before a stage is dispatched. This same path is 
 reviewed single-domain profiles, including coding, browser, data, science, biomedical,
 neuroscience, operations, enterprise, multi-agent, multimodal, and evaluation.
 
+Applications that already use `AutonomousBrainFacade` can reach this durable path without
+constructing a lower-level executor. `runWorkflow()` and `resumeWorkflow()` create a fresh
+executor bound to the facade's exact agent, while the caller supplies the checkpoint store,
+private task/credential rehydration, model candidates, and provider approval. This keeps the
+high-level entry point useful for ordinary task-driven applications without hiding the durable
+authority boundary:
+
+```typescript
+const first = await brain.runWorkflow(task, {
+  checkpointStore,
+  domain: "science",
+  candidates: agent.models(),
+  approveProviderCall: true,
+  maxStages: 2,
+  jobId: "experiment-42",
+});
+
+// Store only first.checkpoint and first.events in the caller's durable system.
+const resumed = await brain.resumeWorkflow(first.job_id!, task, {
+  checkpointStore,
+  domain: "science",
+  candidates: agent.models(),
+  approveProviderCall: true,
+});
+```
+
+`runWorkflowWithLaunchAdmission()` and `resumeWorkflowWithLaunchAdmission()` add the same
+provider-free deployment admission used by the other facade boundaries. They resolve or validate
+the route, require every selected domain to be approved, and perform that check before the
+workflow can dispatch a stage. A held, blocked, or domain-mismatched admission produces no
+provider call. Provider-assisted semantic routing is intentionally refused on these methods;
+admit that classifier as a separate provider boundary first, then pass its reviewed
+`routeOverride` to the workflow. All four methods preserve the executor's metadata-only
+checkpoint contract and are covered across every built-in domain.
+
 ```typescript
 const first = await executor.start(task, {
   candidates: agent.models(),

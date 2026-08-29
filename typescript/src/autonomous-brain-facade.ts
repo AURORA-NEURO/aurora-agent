@@ -161,6 +161,13 @@ import {
   type AutonomousRecoveryObservation,
   type AutonomousRecoveryPlan,
 } from "./autonomous-recovery.js";
+import {
+  AutonomousWorkflowExecutor,
+  type AutonomousWorkflowCheckpointStore,
+  type AutonomousWorkflowExecuteOptions,
+  type AutonomousWorkflowExecutorOptions,
+  type AutonomousWorkflowExecutionResult,
+} from "./workflow-execution.js";
 
 /**
  * The application-facing composition boundary for the autonomous brain.
@@ -206,6 +213,26 @@ export interface AutonomousBrainRequest {
   /** Optional caller-owned evidence operation to run before provider invocation. */
   connector?: AutonomousConnectorOperationInput;
 }
+
+/**
+ * Task-driven durable workflow controls exposed by the high-level facade.
+ *
+ * Checkpoint persistence, task/credential rehydration, and provider/effect approvals remain
+ * caller-owned. The facade only binds the existing workflow executor to this exact agent.
+ */
+export interface AutonomousBrainWorkflowOptions extends AutonomousWorkflowExecuteOptions {
+  checkpointStore: AutonomousWorkflowCheckpointStore;
+  executorOptions?: AutonomousWorkflowExecutorOptions;
+}
+
+/** Resume controls for an already checkpointed task-driven workflow. */
+export interface AutonomousBrainWorkflowResumeOptions extends Omit<AutonomousWorkflowExecuteOptions, "jobId"> {
+  checkpointStore: AutonomousWorkflowCheckpointStore;
+  executorOptions?: AutonomousWorkflowExecutorOptions;
+}
+
+/** Result of one bounded workflow start or resume operation. */
+export type AutonomousBrainWorkflowResult = AutonomousWorkflowExecutionResult;
 
 export interface AutonomousBrainExecutionPolicyOptions {
   candidates: readonly AutonomousExecutionPolicyCandidateInput[];
@@ -2087,6 +2114,58 @@ export class AutonomousBrainFacade {
     const request = validateRequest(input);
     const route = await this.agent.route(request.task, { domain: request.domain, hints: request.hints, allowCrossDomain: request.allow_cross_domain ?? true });
     return this.buildPlanForRoute(request, route, null);
+  }
+
+  /**
+   * Start a task-driven durable workflow through the high-level facade.
+   *
+   * The task is intentionally supplied only to the executor and is never copied into the
+   * checkpoint store. A fresh executor is created for each call so learning and stage-adapter
+   * ownership stay explicit while the caller controls the durable store and private rehydration.
+   */
+  async runWorkflow(task: string, options: AutonomousBrainWorkflowOptions): Promise<AutonomousBrainWorkflowResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain workflow options must be an object");
+    const { checkpointStore, executorOptions, ...workflowOptions } = options;
+    const executor = new AutonomousWorkflowExecutor(this.agent, checkpointStore, executorOptions);
+    return executor.start(task, workflowOptions);
+  }
+
+  /** Resume a task-driven durable workflow from caller-owned metadata-only checkpoint state. */
+  async resumeWorkflow(
+    jobId: string,
+    task: string,
+    options: AutonomousBrainWorkflowResumeOptions,
+  ): Promise<AutonomousBrainWorkflowResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain workflow options must be an object");
+    const { checkpointStore, executorOptions, ...workflowOptions } = options;
+    const executor = new AutonomousWorkflowExecutor(this.agent, checkpointStore, executorOptions);
+    return executor.resume(jobId, task, workflowOptions);
+  }
+
+  /**
+   * Start a workflow only after a provider-free launch admission covers its resolved domain.
+   * Semantic routing is rejected because its classifier needs its own explicit admission.
+   */
+  async runWorkflowWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainWorkflowOptions,
+  ): Promise<AutonomousBrainWorkflowResult> {
+    const domains = await this.workflowLaunchDomains(task, options);
+    if (domains.length > 0) authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWorkflow(task, options);
+  }
+
+  /** Resume a workflow only after its caller-owned launch admission covers the resolved domain. */
+  async resumeWorkflowWithLaunchAdmission(
+    jobId: string,
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainWorkflowResumeOptions,
+  ): Promise<AutonomousBrainWorkflowResult> {
+    const domains = await this.workflowLaunchDomains(task, options);
+    if (domains.length > 0) authorizeAutonomousLaunchDomains(admission, domains);
+    return this.resumeWorkflow(jobId, task, options);
   }
 
   /**
@@ -4110,6 +4189,17 @@ export class AutonomousBrainFacade {
 
   private rejectLaunchAdmittedSemanticRouting(value: unknown, message: string): void {
     if (value === true || (isObject(value) && value.enabled === true)) throw new ArgumentError(message);
+  }
+
+  private async workflowLaunchDomains(
+    task: string,
+    options: Pick<AutonomousBrainWorkflowOptions, "domain" | "hints" | "routeOverride" | "semanticRouting">,
+  ): Promise<AutonomousDomainName[]> {
+    this.rejectLaunchAdmittedSemanticRouting(options.semanticRouting, "launch-admitted workflow execution requires provider-free routing; admit semantic routing separately before enabling it");
+    const route = options.routeOverride
+      ? await validateAutonomousRouteOverride(task, options.routeOverride)
+      : await this.agent.route(task, { domain: options.domain, hints: options.hints });
+    return route.abstained ? [] : [...route.selected_domains];
   }
 
   /** Rehydrate a plan through its canonical projection so caller mutations cannot widen replay. */

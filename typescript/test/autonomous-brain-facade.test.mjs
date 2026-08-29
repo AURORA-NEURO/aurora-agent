@@ -19,6 +19,7 @@ import {
   InMemoryAutonomousLearningFeedbackOutboxStore,
   InMemoryAutonomousConnectorReceiptJournal,
   InMemoryAutonomousRunTraceStore,
+  InMemoryAutonomousWorkflowCheckpointStore,
   ToolCatalogue,
   builtinAutonomousDomainProfiles,
   LLMRuntime,
@@ -64,6 +65,26 @@ function localRuntime(onRequest = () => {}) {
   runtime.registerInMemoryProvider("offline", (request) => {
     onRequest(request);
     return { output_text: `offline:${request.model}` };
+  });
+  return runtime;
+}
+
+function workflowRuntime(onRequest = () => {}) {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("workflow HTTP must not be reached"); } });
+  runtime.registerInMemoryProvider("offline", (request) => {
+    onRequest(request);
+    const prompt = JSON.stringify(request.messages);
+    const stageId = prompt.match(/Execute workflow stage ([A-Za-z0-9_.:-]+) for task/)?.[1] ?? "unknown-stage";
+    return {
+      structured: {
+        stage_id: stageId,
+        status: "completed",
+        evidence: [`evidence-${stageId}`],
+        uncertainty: [],
+        notes: `completed ${stageId}`,
+        next_actions: [],
+      },
+    };
   });
   return runtime;
 }
@@ -276,6 +297,103 @@ test("brain facade exposes automatic route-to-invocation execution across every 
     assert.ok(completed.plan.domain_plan || completed.plan.cross_domain_plan, domain);
     assert.ok(!JSON.stringify(completed.plan).includes(tasks[domain]), domain);
   }
+});
+
+test("brain facade exposes durable task workflows across every built-in domain", async () => {
+  const requests = [];
+  const runtime = workflowRuntime((request) => requests.push(request));
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  let expectedDispatches = 0;
+
+  for (const [index, domain] of AUTONOMOUS_DOMAIN_NAMES.entries()) {
+    const task = `Run a bounded ${domain} workflow`;
+    const store = new InMemoryAutonomousWorkflowCheckpointStore();
+    const first = await brain.runWorkflow(task, {
+      checkpointStore: store,
+      domain,
+      candidates: [model],
+      approveProviderCall: true,
+      maxStages: 1,
+      jobId: `facade-workflow-${domain}-${index}`,
+    });
+    expectedDispatches += 1;
+    assert.equal(first.status, first.total_stage_count > 1 ? "paused" : "completed", domain);
+    assert.equal(first.completed_stage_count, 1, domain);
+    assert.equal(first.blueprint?.domain_profile.domain, domain, domain);
+    assert.equal(JSON.stringify(first.checkpoint).includes(task), false, domain);
+
+    const resumed = await brain.resumeWorkflow(first.job_id, task, {
+      checkpointStore: store,
+      domain,
+      candidates: [model],
+      approveProviderCall: true,
+      maxStages: 32,
+    });
+    assert.equal(resumed.status, "completed", domain);
+    assert.equal(resumed.completed_stage_count, first.total_stage_count, domain);
+    expectedDispatches += first.total_stage_count - 1;
+  }
+
+  assert.equal(requests.length, expectedDispatches);
+  assert.equal(runtime.providerStatus("offline").successes, expectedDispatches);
+});
+
+test("brain facade durable workflow launch admission gates dispatch and resume", async () => {
+  const requests = [];
+  const runtime = workflowRuntime((request) => requests.push(request));
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const store = new InMemoryAutonomousWorkflowCheckpointStore();
+  const task = "run an admitted coding workflow";
+  const held = brain.admitLaunchPreflight(await brain.launchPreflight(), { decision: "hold" });
+
+  await assert.rejects(
+    () => brain.runWorkflowWithLaunchAdmission(task, held, {
+      checkpointStore: store,
+      domain: "coding",
+      candidates: [model],
+      approveProviderCall: true,
+      maxStages: 1,
+      jobId: "held-facade-workflow",
+    }),
+    /not approved/,
+  );
+  assert.equal(requests.length, 0);
+
+  const admission = await approvedLaunchAdmission(brain);
+  const first = await brain.runWorkflowWithLaunchAdmission(task, admission, {
+    checkpointStore: store,
+    domain: "coding",
+    candidates: [model],
+    approveProviderCall: true,
+    maxStages: 1,
+    jobId: "admitted-facade-workflow",
+  });
+  assert.equal(first.status, "paused");
+  assert.equal(requests.length, 1);
+
+  const resumed = await brain.resumeWorkflowWithLaunchAdmission(first.job_id, task, admission, {
+    checkpointStore: store,
+    domain: "coding",
+    candidates: [model],
+    approveProviderCall: true,
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(requests.length, first.total_stage_count);
+
+  await assert.rejects(
+    () => brain.runWorkflowWithLaunchAdmission("semantic route must be separately admitted", admission, {
+      checkpointStore: new InMemoryAutonomousWorkflowCheckpointStore(),
+      semanticRouting: { enabled: true, approveProviderCall: true },
+      candidates: [model],
+      approveProviderCall: true,
+    }),
+    /provider-free routing/,
+  );
+  assert.equal(requests.length, first.total_stage_count);
 });
 
 test("brain facade automatic execution preserves the separate provider-planning acceptance gate", async () => {
