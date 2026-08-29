@@ -786,6 +786,27 @@ rehydration. `executeCycleBatchWithLaunchAdmission()` and
 `executeAdaptiveCycleBatchWithLaunchAdmission()` extend the same gate to feedback batches;
 provider-assisted semantic routing is refused until its classifier boundary is reviewed separately.
 
+For evaluator-driven automatic work, `executeAutoCycleBatch()` and
+`executeAutoReplanCycleBatch()` provide the same bounded fan-out at the cycle boundary. Each item
+gets its own request-owned route, evaluator/learning policy, result status, and task digest while
+the returned array stays in input order. `maxParallelism` is capped by the facade, and
+`stopOnError` converts work not yet started into explicit `omitted` items rather than silently
+claiming completion. The admission-aware variants union every provider-free selected domain before
+the first execution and reject semantic routing until its classifier call is separately admitted.
+Batch digests cover only item status, task/result digests, route identity, mode, and cycle status;
+nested cycle execution values remain caller-owned and transient.
+
+```typescript
+const batch = await brain.executeAutoReplanCycleBatch(requests, {
+  maxParallelism: 4,
+  replan: (request) => ({
+    approveProviderCall: true,
+    maxReplans: 1,
+    evaluate: (run) => evaluateWithCallerOwnedEvidence(request, run),
+  }),
+});
+```
+
 Model selection accepts caller-owned hard gates through `maxCostPerMillionTokens`, `maxLatencyMs`,
 `minQuality`, and the optional `minSelectionConfidence` rank-separation floor. The same gates are
 enforced by local health-aware ranking, contextual
@@ -1161,7 +1182,8 @@ Connector-bearing requests remain on the connector-aware `executeCycle()` or
 `executeAdaptiveCycle()` boundary, and launch-admitted variants reject semantic routing until its
 classifier call has its own admission. The methods return the route, selected kernel, evaluator
 projection, settlement metadata, and next action without retaining task text, prompts, provider
-responses, credentials, or evaluator evidence.
+responses, credentials, or evaluator evidence in the route/result metadata boundary; any nested
+execution values are caller-owned and transient, just like the lower-level cycle result.
 
 ```typescript
 const cycle = await brain.executeAutoCycle(

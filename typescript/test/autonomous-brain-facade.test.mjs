@@ -1580,6 +1580,91 @@ test("brain facade exposes automatic decision and replan kernels with route bind
   assert.equal(runtime.providerStatus("offline").attempts, runtime.providerStatus("offline").successes);
 });
 
+test("brain facade batches automatic evaluator cycles with bounded admission and deterministic accounting", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const inputs = AUTONOMOUS_DOMAIN_NAMES.map((domain) => ({ task: tasks[domain], domain }));
+
+  const automatic = await brain.executeAutoCycleBatch(inputs, {
+    maxParallelism: 3,
+    cycle: (_input, index) => ({ approveProviderCall: true, maxOutputTokens: 768 + index }),
+  });
+  assert.equal(automatic.schema, "bioprism-typescript-autonomous-brain-auto-cycle-batch/0.1");
+  assert.equal(automatic.status, "completed");
+  assert.equal(automatic.completed_count, inputs.length);
+  assert.equal(automatic.failed_count, 0);
+  assert.equal(automatic.omitted_count, 0);
+  assert.deepEqual(automatic.items.map((item) => item.index), [...Array(inputs.length).keys()]);
+  assert.ok(automatic.items.every((item, index) => item.status === "succeeded" && item.execution.route.primary_domain === inputs[index].domain));
+  assert.match(automatic.batch_digest, /^[0-9a-f]{64}$/);
+  assert.doesNotMatch(automatic.batch_digest, /debug and verify|offline:offline-model/);
+
+  const replans = await brain.executeAutoReplanCycleBatch(inputs, {
+    maxParallelism: 3,
+    replan: (input) => ({
+      approveProviderCall: true,
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: `batch-${input.domain}-reviewer`, evaluator_version: "1", reward: 0.86, passed: true, replan_requested: false }),
+    }),
+  });
+  assert.equal(replans.schema, "bioprism-typescript-autonomous-brain-auto-replan-batch/0.1");
+  assert.equal(replans.status, "completed");
+  assert.equal(replans.completed_count, inputs.length);
+  assert.deepEqual(replans.items.map((item) => item.index), [...Array(inputs.length).keys()]);
+  assert.ok(replans.items.every((item) => item.status === "succeeded" && item.execution.cycle.attempts.length === 1));
+  assert.match(replans.batch_digest, /^[0-9a-f]{64}$/);
+
+  const admission = await approvedLaunchAdmission(brain);
+  const admitted = await brain.executeAutoCycleBatchWithLaunchAdmission(inputs.slice(0, 3), admission, {
+    maxParallelism: 2,
+    cycle: { approveProviderCall: true },
+  });
+  assert.equal(admitted.status, "completed");
+  assert.equal(admitted.completed_count, 3);
+
+  const admittedReplans = await brain.executeAutoReplanCycleBatchWithLaunchAdmission(inputs.slice(0, 2), admission, {
+    maxParallelism: 2,
+    replan: {
+      approveProviderCall: true,
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: "admitted-batch-reviewer", evaluator_version: "1", reward: 0.9, passed: true, replan_requested: false }),
+    },
+  });
+  assert.equal(admittedReplans.status, "completed");
+  assert.equal(admittedReplans.completed_count, 2);
+
+  const held = brain.admitLaunchPreflight(await brain.launchPreflight(), { decision: "hold" });
+  const beforeHeld = runtime.providerStatus("offline").attempts;
+  await assert.rejects(
+    () => brain.executeAutoCycleBatchWithLaunchAdmission(inputs.slice(0, 2), held, { cycle: { approveProviderCall: true } }),
+    /not approved/,
+  );
+  assert.equal(runtime.providerStatus("offline").attempts, beforeHeld);
+
+  const stopped = await brain.executeAutoCycleBatch(inputs.slice(0, 3), {
+    maxParallelism: 1,
+    stopOnError: true,
+    cycle: { approveProviderCall: false },
+  });
+  assert.equal(stopped.status, "failed");
+  assert.equal(stopped.items[0].status, "refused");
+  assert.deepEqual(stopped.items.slice(1).map((item) => item.status), ["omitted", "omitted"]);
+
+  const conflict = await brain.executeAutoCycleBatch([inputs[0]], { cycle: { domain: "science" } });
+  assert.equal(conflict.status, "failed");
+  assert.equal(conflict.items[0].status, "refused");
+  await assert.rejects(
+    () => brain.executeAutoCycleBatchWithLaunchAdmission(
+      inputs.slice(0, 1),
+      admission,
+      { cycle: { semanticRouting: { enabled: true, approveProviderCall: true } } },
+    ),
+    /requires provider-free routing/,
+  );
+});
+
 test("brain facade keeps adaptive replanning bounded and routes cross-domain fan-out through the same boundary", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

@@ -22,7 +22,18 @@ planning, effect, or restart gates. Launch-admitted variants authorize the froze
 route before execution and refuse semantic classifier calls until separately admitted. The
 integration suite covers all built-in domains, cross-domain fan-out, bounded evaluator replanning,
 launch admission, route-override tampering, and semantic-routing refusal; connector-bearing input
-continues through the connector-aware facade boundary.
+continues through the connector-aware facade boundary. Batch digests contain only task/result
+digests and cycle status metadata; nested execution values remain explicitly caller-owned and
+transient rather than being treated as durable learning or audit state.
+
+The facade now also supports bounded automatic cycle and automatic replan batches. Per-item policy
+factories preserve request-owned route binding, evaluator identity, replan ceilings, learning
+settlement, and deterministic input ordering while `stopOnError` makes unstarted work explicit.
+Admission-aware batches union the complete provider-free route scope before dispatch and keep
+semantic classifier approval separate. All twelve built-in domains, per-item route conflicts,
+cross-domain selection, held admission, bounded omissions, and metadata-only batch digests are
+covered offline. Durable batch checkpoints and trace composition remain the next extension of
+this cycle-level boundary.
 
 The safe TypeScript `AutonomousBrainFacade` now owns the provider-free task-clarification loop
 already available on the lower-level agent. It can derive a bounded questionnaire for every

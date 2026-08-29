@@ -278,6 +278,8 @@ export const AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA = "bioprism-typescript-aut
 export const AUTONOMOUS_BRAIN_BATCH_CONTROLLER_SCHEMA = "bioprism-typescript-autonomous-brain-batch-controller/0.1" as const;
 export const AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-cycle-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-adaptive-batch/0.1" as const;
+export const AUTONOMOUS_BRAIN_AUTO_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-cycle-batch/0.1" as const;
+export const AUTONOMOUS_BRAIN_AUTO_REPLAN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-replan-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
 export const AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomous-brain-execution-policy/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-brain-auto-execution/0.1" as const;
@@ -945,6 +947,66 @@ export interface AutonomousBrainAdaptiveBatchResult {
   secret_material: "never_returned";
 }
 
+/** Bounded automatic evaluator-cycle controls with a shared or per-request policy factory. */
+export interface AutonomousBrainAutoCycleBatchOptions {
+  maxParallelism?: number;
+  stopOnError?: boolean;
+  cycle?: AutonomousBrainBatchOptionFactory<AutonomousBrainAutoCycleOptions>;
+}
+
+export interface AutonomousBrainAutoCycleBatchItem {
+  index: number;
+  status: "succeeded" | "refused" | "failed" | "omitted";
+  task_digest: string | null;
+  execution?: AutonomousBrainAutoCycleResult;
+  error_class?: string;
+  failure_code?: string;
+}
+
+export interface AutonomousBrainAutoCycleBatchResult {
+  schema: typeof AUTONOMOUS_BRAIN_AUTO_CYCLE_BATCH_SCHEMA;
+  status: "completed" | "partial" | "failed";
+  items: AutonomousBrainAutoCycleBatchItem[];
+  completed_count: number;
+  failed_count: number;
+  omitted_count: number;
+  max_parallelism: number;
+  stop_on_error: boolean;
+  batch_digest: string;
+  retention: "metadata_only_tasks_and_automatic_cycle_values_transient";
+  secret_material: "never_returned";
+}
+
+/** Bounded automatic evaluator/replan controls with a shared or per-request policy factory. */
+export interface AutonomousBrainAutoReplanBatchOptions {
+  maxParallelism?: number;
+  stopOnError?: boolean;
+  replan: AutonomousBrainBatchOptionFactory<AutonomousBrainAutoReplanCycleOptions>;
+}
+
+export interface AutonomousBrainAutoReplanBatchItem {
+  index: number;
+  status: "succeeded" | "refused" | "failed" | "omitted";
+  task_digest: string | null;
+  execution?: AutonomousBrainAutoReplanCycleResult;
+  error_class?: string;
+  failure_code?: string;
+}
+
+export interface AutonomousBrainAutoReplanBatchResult {
+  schema: typeof AUTONOMOUS_BRAIN_AUTO_REPLAN_BATCH_SCHEMA;
+  status: "completed" | "partial" | "failed";
+  items: AutonomousBrainAutoReplanBatchItem[];
+  completed_count: number;
+  failed_count: number;
+  omitted_count: number;
+  max_parallelism: number;
+  stop_on_error: boolean;
+  batch_digest: string;
+  retention: "metadata_only_tasks_and_automatic_replan_values_transient";
+  secret_material: "never_returned";
+}
+
 /** Options for the keyless readiness audit exposed at the application boundary. */
 export type AutonomousBrainReadinessOptions = Parameters<AutonomousAgent["readiness"]>[0];
 export type AutonomousBrainReadinessReport = Awaited<ReturnType<AutonomousAgent["readiness"]>>;
@@ -1326,7 +1388,9 @@ function domain(name: string, value: unknown): AutonomousDomainName {
 function bindAutomaticCycleOptions(request: AutonomousBrainRequest, options: unknown): Record<string, unknown> {
   if (!isObject(options) || Array.isArray(options)) throw new ArgumentError("autonomous brain automatic cycle options must be an object");
   const raw = options as Record<string, unknown>;
-  if (raw.routeOverride !== undefined) throw new ArgumentError("autonomous brain automatic cycle owns routeOverride; provide route fields on the request");
+  const routeBound = ["routeOverride", "domain", "capability", "context", "hints", "allowCrossDomain"] as const;
+  const supplied = routeBound.find((key) => raw[key] !== undefined);
+  if (supplied !== undefined) throw new ArgumentError(`autonomous brain automatic cycle owns ${supplied}; provide route fields on the request`);
   const {
     domain: _domain,
     routeOverride: _routeOverride,
@@ -1400,10 +1464,21 @@ function batchRefused(status: string): boolean {
 
 function automaticBatchRefused(status: string): boolean {
   return batchRefused(status)
+    || status === "provider_abstained"
     || status === "policy_review_required"
     || status === "policy_blocked"
     || status === "reconciliation_required"
-    || status === "response_review_required";
+    || status === "response_review_required"
+    || status === "children_partial"
+    || status === "child_failed";
+}
+
+function automaticCycleBatchSucceeded(status: string): boolean {
+  return status === "completed" || status === "children_completed";
+}
+
+function automaticReplanBatchSucceeded(status: string): boolean {
+  return status === "completed";
 }
 
 function batchStatus(completed: number, failed: number, omitted: number): "completed" | "partial" | "failed" {
@@ -1412,6 +1487,32 @@ function batchStatus(completed: number, failed: number, omitted: number): "compl
 
 function batchDigest(items: readonly { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } }[]): string {
   return digestJsonSync(items.map((item) => batchItemProjection(item)));
+}
+
+function automaticCycleBatchDigest(items: readonly {
+  index: number;
+  status: string;
+  task_digest: string | null;
+  error_class?: string;
+  failure_code?: string;
+  execution?: {
+    status: string;
+    mode: string | null;
+    route: { route_digest: string };
+    cycle: { schema: string; status: string } | null;
+  };
+}[]): string {
+  return digestJsonSync(items.map((item) => ({
+    index: item.index,
+    status: item.status,
+    task_digest: item.task_digest,
+    error_class: item.error_class ?? null,
+    failure_code: item.failure_code ?? null,
+    mode: item.execution?.mode ?? null,
+    route_digest: item.execution?.route.route_digest ?? null,
+    cycle_schema: item.execution?.cycle?.schema ?? null,
+    cycle_status: item.execution?.cycle?.status ?? null,
+  })));
 }
 
 function batchItemProjection(item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } }): Record<string, unknown> {
@@ -5208,6 +5309,155 @@ export class AutonomousBrainFacade {
     return this.executeBatchResumable(inputs, options);
   }
 
+  /** Execute automatic evaluator cycles with bounded concurrency and deterministic item order. */
+  async executeAutoCycleBatch(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoCycleBatchOptions = {},
+  ): Promise<AutonomousBrainAutoCycleBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic cycle batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const { maxParallelism, stopOnError } = boundedBatchControls(options);
+    const items: Array<AutonomousBrainAutoCycleBatchItem | undefined> = new Array(inputs.length);
+    let nextIndex = 0;
+    let halted = false;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= inputs.length) return;
+        if (halted) {
+          items[index] = { index, status: "omitted", task_digest: null };
+          continue;
+        }
+        try {
+          const policy = batchOption(options.cycle, inputs[index]!, index) ?? {};
+          const execution = await this.executeAutoCycle(inputs[index]!, policy);
+          const succeeded = automaticCycleBatchSucceeded(execution.status);
+          const refused = automaticBatchRefused(execution.status);
+          items[index] = {
+            index,
+            status: succeeded ? "succeeded" : refused ? "refused" : "failed",
+            task_digest: brainBatchTaskDigest(inputs[index]!),
+            execution,
+          };
+          if (stopOnError && !succeeded) halted = true;
+        } catch (error) {
+          const projection = errorProjection(error);
+          items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
+          if (stopOnError) halted = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(maxParallelism, inputs.length) }, () => worker()));
+    const normalized = items.map((item, index) => item ?? { index, status: "failed" as const, task_digest: null, error_class: "AutonomousBrainError", failure_code: "missing_batch_result" });
+    const completed = normalized.filter((item) => item.status === "succeeded").length;
+    const failed = normalized.filter((item) => item.status === "failed" || item.status === "refused").length;
+    const omitted = normalized.filter((item) => item.status === "omitted").length;
+    return {
+      schema: AUTONOMOUS_BRAIN_AUTO_CYCLE_BATCH_SCHEMA,
+      status: batchStatus(completed, failed, omitted),
+      items: normalized,
+      completed_count: completed,
+      failed_count: failed,
+      omitted_count: omitted,
+      max_parallelism: maxParallelism,
+      stop_on_error: stopOnError,
+      batch_digest: automaticCycleBatchDigest(normalized),
+      retention: "metadata_only_tasks_and_automatic_cycle_values_transient",
+      secret_material: "never_returned",
+    };
+  }
+
+  /** Execute automatic evaluator/replan batches with bounded concurrency and deterministic order. */
+  async executeAutoReplanCycleBatch(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoReplanBatchOptions,
+  ): Promise<AutonomousBrainAutoReplanBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic replan batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (!options || options.replan === undefined) throw new ArgumentError("autonomous brain automatic replan batch requires a replan policy");
+    const { maxParallelism, stopOnError } = boundedBatchControls(options);
+    const items: Array<AutonomousBrainAutoReplanBatchItem | undefined> = new Array(inputs.length);
+    let nextIndex = 0;
+    let halted = false;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        if (index >= inputs.length) return;
+        if (halted) {
+          items[index] = { index, status: "omitted", task_digest: null };
+          continue;
+        }
+        try {
+          const policy = batchOption(options.replan, inputs[index]!, index);
+          if (policy === undefined) throw new ArgumentError("automatic replan batch policy factory returned no policy");
+          const execution = await this.executeAutoReplanCycle(inputs[index]!, policy);
+          const succeeded = automaticReplanBatchSucceeded(execution.status);
+          const refused = automaticBatchRefused(execution.status);
+          items[index] = {
+            index,
+            status: succeeded ? "succeeded" : refused ? "refused" : "failed",
+            task_digest: brainBatchTaskDigest(inputs[index]!),
+            execution,
+          };
+          if (stopOnError && !succeeded) halted = true;
+        } catch (error) {
+          const projection = errorProjection(error);
+          items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
+          if (stopOnError) halted = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(maxParallelism, inputs.length) }, () => worker()));
+    const normalized = items.map((item, index) => item ?? { index, status: "failed" as const, task_digest: null, error_class: "AutonomousBrainError", failure_code: "missing_batch_result" });
+    const completed = normalized.filter((item) => item.status === "succeeded").length;
+    const failed = normalized.filter((item) => item.status === "failed" || item.status === "refused").length;
+    const omitted = normalized.filter((item) => item.status === "omitted").length;
+    return {
+      schema: AUTONOMOUS_BRAIN_AUTO_REPLAN_BATCH_SCHEMA,
+      status: batchStatus(completed, failed, omitted),
+      items: normalized,
+      completed_count: completed,
+      failed_count: failed,
+      omitted_count: omitted,
+      max_parallelism: maxParallelism,
+      stop_on_error: stopOnError,
+      batch_digest: automaticCycleBatchDigest(normalized),
+      retention: "metadata_only_tasks_and_automatic_replan_values_transient",
+      secret_material: "never_returned",
+    };
+  }
+
+  /** Execute an automatic cycle batch only after one provider-free admission covers every route. */
+  async executeAutoCycleBatchWithLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoCycleBatchOptions = {},
+  ): Promise<AutonomousBrainAutoCycleBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic cycle batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const policies = inputs.map((input, index) => batchOption(options.cycle, input, index) ?? {});
+    for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic cycle batch requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeAutomaticCycleBatchLaunchAdmission(inputs, policies, admission);
+    return this.executeAutoCycleBatch(inputs, { ...options, cycle: (_input, index) => policies[index]! });
+  }
+
+  /** Execute an automatic replan batch only after one provider-free admission covers every route. */
+  async executeAutoReplanCycleBatchWithLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoReplanBatchOptions,
+  ): Promise<AutonomousBrainAutoReplanBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic replan batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (!options || options.replan === undefined) throw new ArgumentError("autonomous brain automatic replan batch requires a replan policy");
+    const policies = inputs.map((input, index) => {
+      const policy = batchOption(options.replan, input, index);
+      if (policy === undefined) throw new ArgumentError("automatic replan batch policy factory returned no policy");
+      return policy;
+    });
+    for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic replan batch requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeAutomaticCycleBatchLaunchAdmission(inputs, policies, admission);
+    return this.executeAutoReplanCycleBatch(inputs, { ...options, replan: (_input, index) => policies[index]! });
+  }
+
   /** Execute ordinary closed-loop cycles with bounded concurrency and deterministic result order. */
   async executeCycleBatch(inputs: readonly AutonomousBrainRequest[], options: AutonomousBrainCycleBatchOptions = {}): Promise<AutonomousBrainCycleBatchResult> {
     if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain cycle batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
@@ -5461,6 +5711,37 @@ export class AutonomousBrainFacade {
       const policy = policies[index]!;
       const prepared = await this.prepare(validateRequest(input), undefined, policy, policy.approveProviderCall);
       for (const domainName of prepared.route.selected_domains) selected.add(domainName);
+    }
+    if (selected.size > 0) authorizeAutonomousLaunchDomains(admission, [...selected]);
+  }
+
+  private async authorizeAutomaticCycleBatchLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    policies: readonly Record<string, unknown>[],
+    admission: AutonomousLaunchAdmissionReport,
+  ): Promise<void> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain admitted automatic cycle batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (policies.length !== inputs.length) throw new ArgumentError("autonomous brain automatic cycle batch policies do not match the requests");
+    const selected = new Set<AutonomousDomainName>();
+    for (const [index, input] of inputs.entries()) {
+      const request = validateRequest(input);
+      const policy = policies[index]!;
+      const bound = bindAutomaticCycleOptions(request, policy) as {
+        minConfidence?: number;
+        minMargin?: number;
+        maxDomains?: number;
+        semanticRouting?: unknown;
+      };
+      this.rejectLaunchAdmittedSemanticRouting(bound.semanticRouting, "launch-admitted automatic cycle batch requires provider-free routing; admit semantic routing separately before enabling it");
+      const route = await this.agent.route(request.task, {
+        domain: request.domain,
+        hints: request.hints,
+        minConfidence: bound.minConfidence,
+        minMargin: bound.minMargin,
+        maxDomains: bound.maxDomains,
+        allowCrossDomain: request.allow_cross_domain,
+      });
+      if (!route.abstained) for (const domainName of route.selected_domains) selected.add(domainName);
     }
     if (selected.size > 0) authorizeAutonomousLaunchDomains(admission, [...selected]);
   }
