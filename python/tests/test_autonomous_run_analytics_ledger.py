@@ -345,3 +345,5 @@ def test_agent_coordinates_one_trace_snapshot_across_registry_and_analytics() ->
     assert failed.trace_registry is not None and failed.trace_registry.persisted is True
     assert failed.run_analytics is not None and failed.run_analytics.persisted is False
     assert any(error["scope"] == "analytics_persistence" for error in failed.errors)
+    with pytest.raises(ArgumentError, match="bounded identifier"):
+        partial.publish_and_analyze(source, "untrusted run id")

@@ -7659,6 +7659,7 @@ export class AutonomousBrainRunObservabilityController {
     this.requireRestored();
     this.requireIdle();
     if (!traceStore || typeof traceStore.snapshot !== "function") throw new ArgumentError("autonomous brain run observability publication requires a trace store");
+    if (typeof runId !== "string" || !/^[A-Za-z0-9_.:-]{1,256}$/.test(runId)) throw new ArgumentError("autonomous brain run observability run_id must be a bounded identifier");
     this.busy = true;
     const errors: AutonomousBrainRunObservabilityError[] = [];
     let sourceSnapshotDigest: string | null = null;

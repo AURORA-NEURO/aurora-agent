@@ -2984,4 +2984,8 @@ test("brain facade coordinates one trace snapshot across registry and analytics"
   assert.equal(partial.run_analytics?.persisted, false);
   assert.equal(partial.errors.some((error) => error.scope === "analytics_persistence"), true);
   assert.equal(partial.run_analytics?.ingest.status, "accepted");
+  await assert.rejects(
+    failingAnalytics.publishAndAnalyze(source, "untrusted run id"),
+    /bounded identifier/,
+  );
 });

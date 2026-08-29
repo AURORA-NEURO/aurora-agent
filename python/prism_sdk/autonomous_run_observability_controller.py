@@ -222,6 +222,8 @@ class AutonomousRunObservabilityController:
         with self._operation():
             if not callable(getattr(trace_store, "snapshot", None)):
                 raise ArgumentError("autonomous run observability publication requires a trace store")
+            if not isinstance(run_id, str) or not 1 <= len(run_id) <= 256 or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-" for character in run_id):
+                raise ArgumentError("autonomous run observability run_id must be a bounded identifier")
             errors: list[Mapping[str, str]] = []
             source_snapshot_digest: str | None = None
             trace_outcome: AutonomousBrainTraceRegistryPublicationRun | None = None
