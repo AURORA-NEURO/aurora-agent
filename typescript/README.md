@@ -2628,3 +2628,11 @@ revalidates the exact plan, registry, readiness report, and request digest. `awa
 is a valid conservative result when selected acquisition is accepted but other available
 requirements have not received evaluator decisions. Neither the facade nor the SDK stores keys,
 raw source values, prompts, claim text, or evaluator payloads in serialized projections.
+
+For the final reliance decision, the facade also exposes `projectOutcomeIntegrityRun()`,
+`bindOutcomeIntegrityClaims()`, and `assessOutcomeIntegrity()`. These bind caller claims to one
+exact direct or cross-domain output through digests, then return a conservative reliance status.
+Use `validateOutcomeIntegrity()` after rehydration. For fan-out responses, call
+`assessCrossDomainResponses()`, then persist and replay the returned alignment gate with
+`validateCrossDomainResponseAssessment()` and `replayCrossDomainResponseAssessment()` before
+synthesis. These methods retain metadata only and never infer truth from provider success.

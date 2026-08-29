@@ -2202,3 +2202,21 @@ If only the bridge-selected requirements are newly evaluated, the result can be
 `awaiting_evaluation` with zero missing coverage while the remaining caller-declared available
 requirements still lack accepted evaluator decisions. This explicit state prevents partial
 acquisition from being mistaken for a fully settled workflow.
+
+### Post-run reliance and cross-domain response gates
+
+The facade's final post-run boundary is `projectOutcomeIntegrityRun()` followed by
+`bindOutcomeIntegrityClaims()` and `assessOutcomeIntegrity()`. The projection and bindings use
+only canonical digests, exact domain/role identity, and bounded status metadata. They do not copy
+task text, output text, prompts, provider payloads, credentials, or evidence values. The assessment
+is a reliance decision for the exact run, not a truth certificate or an execution authorization.
+Use `validateOutcomeIntegrity()` or `validateOutcomeIntegritySnapshot()` after persistence to
+reject tampered metadata before it is used by a downstream report or workflow.
+
+For fan-out/fan-in work, `assessCrossDomainResponses()` validates transient specialist responses
+against their domain contracts and returns deterministic coverage, reward, alignment, contradiction,
+uncertainty, and next-action projections. `validateCrossDomainResponseAssessment()` verifies the
+sealed projection, while `replayCrossDomainResponseAssessment()` reruns the gate against the
+caller-owned response set and refuses digest drift. Complete response rows still require explicit
+alignment and synthesis policy when configured; transport success alone never authorizes
+synthesis or claim reliance.

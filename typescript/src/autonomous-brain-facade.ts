@@ -147,6 +147,25 @@ import {
   type AutonomousClaimIntegrityAssessment,
 } from "./autonomous-claim-integrity.js";
 import {
+  assessAutonomousOutcomeIntegrity,
+  bindAutonomousOutcomeIntegrityClaims,
+  projectAutonomousOutcomeIntegrityRun,
+  validateAutonomousOutcomeIntegrity,
+  validateAutonomousOutcomeIntegritySnapshot,
+  type AssessAutonomousOutcomeIntegrityOptions,
+  type AutonomousOutcomeIntegrityAssessment,
+  type AutonomousOutcomeIntegrityClaimBinding,
+  type AutonomousOutcomeIntegrityClaimBindingInput,
+  type AutonomousOutcomeIntegrityRun,
+} from "./autonomous-outcome-integrity.js";
+import {
+  replayAutonomousCrossDomainResponseAssessment,
+  validateAutonomousCrossDomainResponseAssessment,
+  type AutonomousCrossDomainResponseAlignmentInput,
+  type AutonomousCrossDomainResponseAssessment,
+  type AutonomousCrossDomainResponseEntry,
+} from "./autonomous-cross-domain-response.js";
+import {
   auditAutonomousDomainContracts,
   type AutonomousDomainAuditOptions,
   type AutonomousDomainAuditReport,
@@ -885,6 +904,18 @@ export type AutonomousBrainClaimIntegrityAcquisitionExecutionOptions = Parameter
 export type AutonomousBrainClaimIntegrityAcquisitionExecutionResult = Awaited<ReturnType<AutonomousAgent["executeClaimIntegrityAcquisition"]>>;
 export type AutonomousBrainClaimIntegrityAcquisitionResumableOptions = Parameters<AutonomousAgent["executeClaimIntegrityAcquisitionResumable"]>[3];
 export type AutonomousBrainClaimIntegrityAcquisitionResumableResult = Awaited<ReturnType<AutonomousAgent["executeClaimIntegrityAcquisitionResumable"]>>;
+/** Digest-only identity projected from a completed direct or cross-domain result. */
+export type AutonomousBrainOutcomeIntegrityRun = AutonomousOutcomeIntegrityRun;
+export type AutonomousBrainOutcomeIntegrityClaimBindingInput = AutonomousOutcomeIntegrityClaimBindingInput;
+export type AutonomousBrainOutcomeIntegrityClaimBinding = AutonomousOutcomeIntegrityClaimBinding;
+export type AutonomousBrainOutcomeIntegrityAssessmentOptions = Omit<AssessAutonomousOutcomeIntegrityOptions, "run">;
+export type AutonomousBrainOutcomeIntegrityAssessment = AutonomousOutcomeIntegrityAssessment;
+/** Cross-domain specialist/synthesis responses remain transient; only the alignment gate persists. */
+export type AutonomousBrainCrossDomainResponseEntry = AutonomousCrossDomainResponseEntry;
+export type AutonomousBrainCrossDomainResponseAlignmentInput = AutonomousCrossDomainResponseAlignmentInput;
+export type AutonomousBrainCrossDomainResponseAssessment = AutonomousCrossDomainResponseAssessment;
+export type AutonomousBrainCrossDomainResponseAssessmentOptions = Parameters<AutonomousAgent["assessCrossDomainResponses"]>[1];
+export type AutonomousBrainCrossDomainResponseReplayOptions = Parameters<typeof replayAutonomousCrossDomainResponseAssessment>[2];
 
 export interface AutonomousBrainBatchItem {
   index: number;
@@ -3766,6 +3797,65 @@ export class AutonomousBrainFacade {
   ): Promise<AutonomousBrainClaimIntegrityAcquisitionResumableResult> {
     authorizeAutonomousLaunchDomains(admission, claimIntegrityAcquisitionDomains(bridge));
     return this.executeClaimIntegrityAcquisitionResumable(bridge, registry, requests, options);
+  }
+
+  /** Project a completed direct or cross-domain result into a metadata-only reliance identity. */
+  projectOutcomeIntegrityRun(
+    result: AutonomousRunResult | AutonomousCrossDomainRunResult,
+  ): AutonomousBrainOutcomeIntegrityRun {
+    return projectAutonomousOutcomeIntegrityRun(result);
+  }
+
+  /** Bind caller claims to the exact output and response digests of one autonomous result. */
+  bindOutcomeIntegrityClaims(
+    result: AutonomousRunResult | AutonomousCrossDomainRunResult,
+    bindings: readonly (AutonomousBrainOutcomeIntegrityClaimBindingInput | Record<string, unknown>)[],
+  ): AutonomousBrainOutcomeIntegrityClaimBinding[] {
+    return bindAutonomousOutcomeIntegrityClaims(projectAutonomousOutcomeIntegrityRun(result), bindings);
+  }
+
+  /** Decide whether caller-supplied claims may rely on one exact autonomous outcome. */
+  assessOutcomeIntegrity(
+    result: AutonomousRunResult | AutonomousCrossDomainRunResult,
+    options: AutonomousBrainOutcomeIntegrityAssessmentOptions,
+  ): AutonomousBrainOutcomeIntegrityAssessment {
+    return assessAutonomousOutcomeIntegrity({
+      run: projectAutonomousOutcomeIntegrityRun(result),
+      ...options,
+    });
+  }
+
+  /** Validate an outcome assessment after caller-owned persistence or transport rehydration. */
+  validateOutcomeIntegrity(value: unknown): AutonomousBrainOutcomeIntegrityAssessment {
+    return validateAutonomousOutcomeIntegrity(value as AutonomousBrainOutcomeIntegrityAssessment);
+  }
+
+  /** Validate the same outcome projection through its public snapshot contract. */
+  validateOutcomeIntegritySnapshot(value: unknown): AutonomousBrainOutcomeIntegrityAssessment {
+    return validateAutonomousOutcomeIntegritySnapshot(value);
+  }
+
+  /** Gate specialist and synthesis responses before cross-domain reliance or synthesis. */
+  assessCrossDomainResponses(
+    responses: readonly AutonomousBrainCrossDomainResponseEntry[],
+    options: AutonomousBrainCrossDomainResponseAssessmentOptions = {},
+  ): AutonomousBrainCrossDomainResponseAssessment {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain cross-domain response options must be an object");
+    return this.agent.assessCrossDomainResponses(responses, options);
+  }
+
+  /** Validate a caller-rehydrated cross-domain response assessment before synthesis. */
+  validateCrossDomainResponseAssessment(value: unknown): AutonomousBrainCrossDomainResponseAssessment {
+    return validateAutonomousCrossDomainResponseAssessment(value);
+  }
+
+  /** Recompute the cross-domain response gate and refuse drift from the persisted assessment. */
+  replayCrossDomainResponseAssessment(
+    responses: readonly AutonomousBrainCrossDomainResponseEntry[],
+    expected: AutonomousBrainCrossDomainResponseAssessment,
+    options: AutonomousBrainCrossDomainResponseReplayOptions = {},
+  ): AutonomousBrainCrossDomainResponseAssessment {
+    return replayAutonomousCrossDomainResponseAssessment(responses, expected, options);
   }
 
   /** Project a portfolio-wide admission image before provider/tool/source dispatch. */

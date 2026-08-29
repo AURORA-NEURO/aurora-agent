@@ -3,14 +3,16 @@ import { test } from "node:test";
 import {
   AUTONOMOUS_DOMAIN_NAMES,
   AutonomousAgent,
+  AutonomousBrainFacade,
   AutonomousClaimIntegrityClaim,
   AutonomousClaimIntegrityEvidence,
   AutonomousClaimIntegrityPolicy,
   LLMRuntime,
   assessAutonomousOutcomeIntegrity,
   bindAutonomousOutcomeIntegrityClaims,
+  buildAutonomousDomainResponseContract,
+  builtinAutonomousDomainProfiles,
   digestJsonSync,
-  projectAutonomousOutcomeIntegrityRun,
   validateAutonomousOutcomeIntegrity,
   validateAutonomousOutcomeIntegritySnapshot,
 } from "../dist/index.js";
@@ -56,6 +58,32 @@ function binding(overrides = {}) {
     output_digest: digest("answer"),
     response_digest: digest("response"),
     ...overrides,
+  };
+}
+
+function responseFor(contract) {
+  return {
+    schema: "bioprism-typescript-autonomous-domain-response/0.1",
+    domain: contract.domain,
+    workflow_id: contract.workflow_id,
+    status: "complete",
+    answer: `Bounded answer for ${contract.domain}.`,
+    observations: ["bounded observation"],
+    inferences: ["bounded inference"],
+    uncertainty: ["bounded uncertainty"],
+    evidence_gaps: ["bounded evidence gap"],
+    next_actions: ["review the next action"],
+    stages: contract.stage_ids.map((stage_id) => ({
+      stage_id,
+      status: "complete",
+      evidence: [`evidence:${stage_id}`],
+      findings: [`finding:${stage_id}`],
+      uncertainty: [`uncertainty:${stage_id}`],
+      open_questions: [],
+    })),
+    domain_details: Object.fromEntries(contract.domain_fields.map((field) => [field, [`detail:${field}`]])),
+    retention: "transient_provider_response_only;validated_against_reviewed_domain_contract",
+    secret_material: "never_returned",
   };
 }
 
@@ -144,20 +172,53 @@ test("outcome integrity rejects output drift and tampered sealed metadata", () =
   assert.throws(() => validateAutonomousOutcomeIntegritySnapshot(tampered));
 });
 
-test("the autonomous facade projects a transient direct result without provider dispatch", () => {
+test("the autonomous brain facade projects and gates a transient direct result without provider dispatch", () => {
   const raw = {
     status: "completed",
     route: { task_digest: digest("facade-task"), route_digest: digest("facade-route") },
     blueprint: { domain_profile: { domain: "science" } },
     response: { text: "answer", structured: null },
   };
-  const projected = projectAutonomousOutcomeIntegrityRun(raw);
-  const result = new AutonomousAgent(new LLMRuntime()).assessOutcomeIntegrity(raw, {
+  const brain = new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime()) });
+  const projected = brain.projectOutcomeIntegrityRun(raw);
+  const claimBindings = brain.bindOutcomeIntegrityClaims(raw, [binding({ output_digest: projected.output_digest, response_digest: projected.response_digest })]);
+  const result = brain.assessOutcomeIntegrity(raw, {
     claims: [claim()],
     evidence: [evidence()],
-    claimBindings: [binding({ output_digest: projected.output_digest, response_digest: projected.response_digest })],
+    claimBindings,
     referenceTime: REFERENCE,
   });
   assert.equal(result.status, "ready");
   assert.equal(result.run.task_digest, digest("facade-task"));
+  assert.equal(brain.validateOutcomeIntegrity(result).assessment_digest, result.assessment_digest);
+  assert.equal(brain.validateOutcomeIntegritySnapshot(result).assessment_digest, result.assessment_digest);
+});
+
+test("the autonomous brain facade gates and replays cross-domain responses without retaining values", async () => {
+  const profiles = await builtinAutonomousDomainProfiles();
+  const selected = profiles.filter((profile) => profile.domain === "coding" || profile.domain === "science");
+  const contracts = new Map(await Promise.all(selected.map(async (profile) => [profile.domain, await buildAutonomousDomainResponseContract(profile)])));
+  const entries = selected.map((profile) => {
+    const contract = contracts.get(profile.domain);
+    return { domain: profile.domain, contract, response: responseFor(contract), role: "specialist" };
+  });
+  const brain = new AutonomousBrainFacade({ agent: new AutonomousAgent(new LLMRuntime()) });
+  const assessment = brain.assessCrossDomainResponses(entries, {
+    task: "private cross-domain response context must remain transient",
+    requestedDomains: ["coding", "science"],
+    requireCompleteAlignment: false,
+  });
+  assert.equal(assessment.status, "ready_to_synthesize");
+  assert.equal(assessment.ready_to_synthesize, true);
+  assert.equal(assessment.rows.length, 2);
+  assert.doesNotMatch(JSON.stringify(assessment), /private cross-domain response context/);
+  assert.equal(brain.validateCrossDomainResponseAssessment(assessment).assessment_digest, assessment.assessment_digest);
+  assert.equal(brain.replayCrossDomainResponseAssessment(entries, assessment, {
+    requestedDomains: ["coding", "science"],
+    requireCompleteAlignment: false,
+    contextDigest: assessment.context_digest,
+  }).assessment_digest, assessment.assessment_digest);
+  const tampered = structuredClone(assessment);
+  tampered.status = "completed";
+  assert.throws(() => brain.validateCrossDomainResponseAssessment(tampered), /digest/);
 });

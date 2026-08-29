@@ -13531,3 +13531,25 @@ method creates credentials, source truth, durable storage, evaluator authority, 
 effects. The integration matrix in
 `typescript/test/autonomous-brain-acquisition-facade.test.mjs` exercises all twelve built-in
 domains, launch refusal, metadata redaction, approval gating, and restart-safe replay.
+
+### Final outcome reliance and cross-domain alignment
+
+After a direct or cross-domain run, `projectOutcomeIntegrityRun()` reduces the transient result to
+a digest-bound identity containing task, route, mode, domain, output, response, and outcome
+digests. `bindOutcomeIntegrityClaims()` requires each claim to name its domain, reliance role,
+and exact output/response digests; output drift is rejected before a caller can assess reliance.
+`assessOutcomeIntegrity()` then combines that exact run identity with transient claims, evidence,
+and bindings. It returns `ready`, `review_required`, `blocked`, or `ineligible` metadata without
+promoting model output or evaluator values to external truth. `validateOutcomeIntegrity()` and
+`validateOutcomeIntegritySnapshot()` allow a restarted worker to verify the sealed projection
+without rehydrating task text, prompts, responses, credentials, or evidence values.
+
+`assessCrossDomainResponses()` is the corresponding synthesis gate for transient specialist and
+synthesis responses. It validates each response against its reviewed domain contract, records
+bounded reward/status/uncertainty projections, requires explicit pairwise alignment when policy
+demands it, and surfaces missing coverage, contradictions, unresolved alignments, and low
+confidence as next actions. `validateCrossDomainResponseAssessment()` checks a persisted gate, and
+`replayCrossDomainResponseAssessment()` recomputes it against caller-owned responses and refuses
+assessment drift. The facade therefore has an explicit final path from autonomous output to
+claim-bound reliance and cross-domain synthesis review, while provider invocation, evaluator
+authority, source truth, learning settlement, and external effects remain separate gates.

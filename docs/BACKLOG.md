@@ -10,6 +10,14 @@ has coverage but not accepted evaluator decisions. This is a high-level applicat
 increment; provider credentials, source truth, durable persistence, evaluator authority, and
 external-effect reconciliation remain deployment responsibilities.
 
+The TypeScript `AutonomousBrainFacade` now closes the post-run reliance seam as well. Applications
+can project direct or cross-domain outcomes, bind claims to exact output/response digests, assess
+reliance, validate persisted assessments, and gate/replay cross-domain specialist alignment. The
+all-domain lower-kernel contracts remain unchanged; this increment makes the final claim and
+synthesis gates available at the same application boundary as execution and acquisition. It
+continues to keep truth, evaluator authority, provider credentials, learning settlement, and
+external effects outside the facade's automatic authority.
+
 The provider runtime now enforces one terminal boundary across both SDKs. A stream that ends
 without a `done` event is rejected as an `invalid_response`, post-terminal events are refused,
 and provider finish frames plus `[DONE]` sentinels are normalized without duplicate completion.
