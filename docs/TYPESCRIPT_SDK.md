@@ -2170,3 +2170,35 @@ store to an application-owned `read()`/`write()` adapter. The adapter can use a 
 record, IndexedDB, or object store, but the SDK does not perform filesystem I/O or retain secrets.
 Restore preserves settled identities and rejects conflicting rows, so a restarted worker cannot
 silently replay or overwrite an already-settled evaluator episode.
+
+### Integrity-aware acquisition through `AutonomousBrainFacade`
+
+The application facade exposes the complete provider-free information-acquisition and
+claim-integrity handoff. `planInformationAcquisition()` and
+`replanInformationAcquisition()` are deterministic planning operations; they do not invoke an
+LLM, open a credential session, or call an evidence adapter. `validateInformationAcquisitionPlan()`
+checks a rehydrated plan's canonical digest. Replanning accepts only bounded observations such as
+status and value/evaluator digests, increments the generation, and preserves the prior-plan
+fence. These methods are usable by a UI or queue worker before any provider approval exists.
+
+The matching integrity methods are `assessClaimIntegrity()`, `reassessClaimIntegrity()`, and
+`validateClaimIntegrity()`. Callers supply claims and evidence transiently; serialized output is
+metadata-only and contains no task text, claim text, raw source values, credentials, or evaluator
+payloads. The assessment makes temporal, reliability, support, independence, conflict,
+reproducibility, and modality gaps explicit through bounded next actions. It does not certify
+external truth: accepted evidence is still caller-declared evidence and remains subject to the
+downstream workflow's evaluator and approval contracts.
+
+`planClaimIntegrityAcquisition()` turns those actions into a digest-bound bridge. Bind requests
+with `bindClaimIntegrityAcquisition()` and validate the returned binding before source dispatch.
+Binding requires one request for every selected candidate, exact source identity, and safe
+metadata; reserved integrity fields cannot be overridden. Use
+`executeClaimIntegrityAcquisition()` for a one-shot reviewed run or
+`executeClaimIntegrityAcquisitionResumable()` with a caller-owned checkpoint store for restart
+recovery. The launch-admitted variants perform the domain authorization immediately before the
+reviewed evidence controller, while the controller independently repeats readiness, plan,
+registry, and source-approval checks. A source completion is never treated as claim correctness.
+If only the bridge-selected requirements are newly evaluated, the result can be
+`awaiting_evaluation` with zero missing coverage while the remaining caller-declared available
+requirements still lack accepted evaluator decisions. This explicit state prevents partial
+acquisition from being mistaken for a fully settled workflow.

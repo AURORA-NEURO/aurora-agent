@@ -1,5 +1,15 @@
 # Remaining backlog
 
+The TypeScript `AutonomousBrainFacade` now closes its integrity-aware acquisition seam. It
+exposes provider-free information planning/replanning, transient claim-integrity assessment and
+reassessment, digest-validated bridge and request binding, reviewed source execution, launch
+admission, and restart-safe resumable execution across all twelve built-in domains. The new
+integration matrix verifies evaluator separation, metadata-only projections, approval gating,
+held-admission refusal, and the intentional `awaiting_evaluation` state when available evidence
+has coverage but not accepted evaluator decisions. This is a high-level application composition
+increment; provider credentials, source truth, durable persistence, evaluator authority, and
+external-effect reconciliation remain deployment responsibilities.
+
 The provider runtime now enforces one terminal boundary across both SDKs. A stream that ends
 without a `done` event is rejected as an `invalid_response`, post-terminal events are refused,
 and provider finish frames plus `[DONE]` sentinels are normalized without duplicate completion.

@@ -13493,3 +13493,41 @@ source credentials, projectors, evaluators, and journals transient. Evidence lau
 variants authorize the domains represented by the provider execution before any evidence adapter
 is called. A held or incomplete launch report therefore cannot be bypassed by submitting a
 portfolio evidence request directly to the high-level facade.
+
+### Facade-level information acquisition and claim integrity
+
+The TypeScript `AutonomousBrainFacade` now exposes the provider-free discovery and claim-integrity
+continuation surfaces that were previously available only on the lower-level agent. The facade
+methods `planInformationAcquisition()`, `replanInformationAcquisition()`, and
+`validateInformationAcquisitionPlan()` compile or verify bounded candidate selection without
+dispatching a provider or source. The returned plan binds task context only through a digest,
+retains selected domains, candidate digests, budget posture, dependency order, and observations,
+and accepts only caller-owned value-only observations when replanning. A replan is generation-
+and prior-digest fenced, so a stale candidate set cannot silently replace the reviewed plan.
+
+`assessClaimIntegrity()` and `reassessClaimIntegrity()` provide the corresponding transient
+claim/evidence gate. They evaluate temporal validity, reliability, support, independence,
+reproducibility, modality coverage, conflicts, and source identity, while the serialized
+assessment retains only claim/evidence digests, bounded rows, status, actions, and next-step
+metadata. `validateClaimIntegrity()` is intended for caller rehydration and refuses forged or
+drifted assessment identities. Claim text and raw evidence remain outside the control plane.
+
+When unresolved actions require new evidence, `planClaimIntegrityAcquisition()` produces a
+reviewed bridge into the existing information-acquisition planner. The bridge is domain- and
+candidate-bound; `bindClaimIntegrityAcquisition()` then requires exactly one source request per
+selected candidate, checks source identity, rejects reserved metadata overrides, and adds only
+digest metadata linking the request to the assessment and bridge. The validation method must be
+called again after persistence or transport rehydration.
+
+The execution methods `executeClaimIntegrityAcquisition()` and
+`executeClaimIntegrityAcquisitionResumable()` reuse the reviewed evidence adapter registry,
+readiness audit, explicit source-dispatch approval, evaluator, journal, and CAS-fenced checkpoint
+contracts. Their `...WithLaunchAdmission()` variants authorize every selected domain before
+source dispatch and reject held, blocked, stale, or mismatched admissions. A selected request can
+finish with an accepted evaluator assessment while the overall workflow remains
+`awaiting_evaluation` when caller-declared available evidence has coverage but no accepted
+assessment; this is deliberate conservative semantics, not a transport failure. No facade
+method creates credentials, source truth, durable storage, evaluator authority, or external
+effects. The integration matrix in
+`typescript/test/autonomous-brain-acquisition-facade.test.mjs` exercises all twelve built-in
+domains, launch refusal, metadata redaction, approval gating, and restart-safe replay.

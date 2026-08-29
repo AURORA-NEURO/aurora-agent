@@ -133,6 +133,20 @@ import type {
 } from "./autonomous-workflow-portfolio-evidence.js";
 import type { AutonomousWorkflowPortfolioEvidenceResumableExecutionOptions } from "./autonomous-workflow-portfolio-evidence-resumable.js";
 import {
+  replanAutonomousInformationAcquisition,
+  validateAutonomousInformationAcquisitionPlan,
+  type AutonomousInformationAcquisitionPlan,
+  type ReplanAutonomousInformationAcquisitionOptions,
+} from "./autonomous-information-acquisition.js";
+import {
+  validateAutonomousClaimIntegrity,
+  validateAutonomousClaimIntegrityAcquisitionBinding,
+  validateAutonomousClaimIntegrityAcquisitionBridge,
+  type AutonomousClaimIntegrityAcquisitionBinding,
+  type AutonomousClaimIntegrityAcquisitionBridge,
+  type AutonomousClaimIntegrityAssessment,
+} from "./autonomous-claim-integrity.js";
+import {
   auditAutonomousDomainContracts,
   type AutonomousDomainAuditOptions,
   type AutonomousDomainAuditReport,
@@ -856,6 +870,21 @@ export type AutonomousBrainWorkflowPortfolioAdmissionOptions = AutonomousWorkflo
 export type AutonomousBrainWorkflowPortfolioAdmission = AutonomousWorkflowPortfolioAdmission;
 export type AutonomousBrainActivationState = ReturnType<AutonomousAgent["activationState"]>;
 export type AutonomousBrainActivationSnapshotStore = AutonomousCapabilityActivationSnapshotStore;
+/** Provider-free information-acquisition controls bound to the facade's deterministic route. */
+export type AutonomousBrainInformationAcquisitionOptions = Parameters<AutonomousAgent["planInformationAcquisition"]>[1];
+export type AutonomousBrainInformationAcquisitionPlan = AutonomousInformationAcquisitionPlan;
+export type AutonomousBrainInformationAcquisitionReplanOptions = ReplanAutonomousInformationAcquisitionOptions;
+/** Claim-integrity assessment controls with task text kept transient to the caller. */
+export type AutonomousBrainClaimIntegrityAssessmentOptions = Parameters<AutonomousAgent["assessClaimIntegrity"]>[1];
+export type AutonomousBrainClaimIntegrityAssessment = AutonomousClaimIntegrityAssessment;
+export type AutonomousBrainClaimIntegrityReassessmentOptions = Parameters<AutonomousAgent["reassessClaimIntegrity"]>[1];
+export type AutonomousBrainClaimIntegrityAcquisitionPlanOptions = Parameters<AutonomousAgent["planClaimIntegrityAcquisition"]>[1];
+export type AutonomousBrainClaimIntegrityAcquisitionBridge = AutonomousClaimIntegrityAcquisitionBridge;
+export type AutonomousBrainClaimIntegrityAcquisitionBinding = AutonomousClaimIntegrityAcquisitionBinding;
+export type AutonomousBrainClaimIntegrityAcquisitionExecutionOptions = Parameters<AutonomousAgent["executeClaimIntegrityAcquisition"]>[3];
+export type AutonomousBrainClaimIntegrityAcquisitionExecutionResult = Awaited<ReturnType<AutonomousAgent["executeClaimIntegrityAcquisition"]>>;
+export type AutonomousBrainClaimIntegrityAcquisitionResumableOptions = Parameters<AutonomousAgent["executeClaimIntegrityAcquisitionResumable"]>[3];
+export type AutonomousBrainClaimIntegrityAcquisitionResumableResult = Awaited<ReturnType<AutonomousAgent["executeClaimIntegrityAcquisitionResumable"]>>;
 
 export interface AutonomousBrainBatchItem {
   index: number;
@@ -1296,6 +1325,12 @@ function workflowPortfolioExecutionDomains(execution: Pick<AutonomousWorkflowPor
   const domains = [...new Set(execution.items.map((item, index) => domain(`autonomous brain workflow portfolio execution item ${index} domain`, item.domain)))];
   if (domains.length < 1) throw new ArgumentError("autonomous brain workflow portfolio execution must declare at least one domain");
   return domains;
+}
+
+function claimIntegrityAcquisitionDomains(bridge: AutonomousClaimIntegrityAcquisitionBridge): AutonomousDomainName[] {
+  const verified = validateAutonomousClaimIntegrityAcquisitionBridge(bridge);
+  if (verified.acquisitionPlan === null || verified.acquisitionPlan.selectedDomains.length < 1) throw new ArgumentError("integrity acquisition bridge has no executable plan");
+  return [...verified.acquisitionPlan.selectedDomains];
 }
 
 function composeSelectionCallbacks(...callbacks: readonly (AutonomousModelSelectionTraceEventCallback | undefined)[]): AutonomousModelSelectionTraceEventCallback | undefined {
@@ -3601,6 +3636,136 @@ export class AutonomousBrainFacade {
   /** Bind an explicit caller decision to one exact preflight without granting execution authority. */
   admitLaunchPreflight(preflight: AutonomousLaunchPreflightReport, options: AutonomousLaunchAdmissionOptions): AutonomousLaunchAdmissionReport {
     return createAutonomousLaunchAdmission(preflight, options);
+  }
+
+  /**
+   * Compile the next bounded context/evidence acquisitions for the reviewed route.
+   *
+   * Routing and scoring are provider-free. The returned plan carries only candidate metadata,
+   * digests, budgets, dependency order, and explicit omissions; source dispatch, credentials,
+   * provider invocation, evaluation, and learning remain later caller-owned gates.
+   */
+  async planInformationAcquisition(
+    task: string,
+    options: AutonomousBrainInformationAcquisitionOptions,
+  ): Promise<AutonomousBrainInformationAcquisitionPlan> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain information acquisition options must be an object");
+    return this.agent.planInformationAcquisition(task, options);
+  }
+
+  /** Replan acquisition after caller-owned value-only observations, preserving the prior digest fence. */
+  replanInformationAcquisition(
+    options: AutonomousBrainInformationAcquisitionReplanOptions,
+  ): AutonomousBrainInformationAcquisitionPlan {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain information acquisition replan options must be an object");
+    return replanAutonomousInformationAcquisition(options);
+  }
+
+  /** Validate a caller-rehydrated acquisition plan before it is handed to a source worker. */
+  validateInformationAcquisitionPlan(
+    value: AutonomousBrainInformationAcquisitionPlan,
+  ): AutonomousBrainInformationAcquisitionPlan {
+    return validateAutonomousInformationAcquisitionPlan(value);
+  }
+
+  /** Assess caller-supplied evidence metadata before any downstream claim can rely on it. */
+  assessClaimIntegrity(
+    task: string,
+    options: AutonomousBrainClaimIntegrityAssessmentOptions,
+  ): AutonomousBrainClaimIntegrityAssessment {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain claim integrity options must be an object");
+    return this.agent.assessClaimIntegrity(task, options);
+  }
+
+  /** Continue claim assessment after transient evidence changes with an explicit generation fence. */
+  reassessClaimIntegrity(
+    previous: AutonomousBrainClaimIntegrityAssessment,
+    options: AutonomousBrainClaimIntegrityReassessmentOptions,
+  ): AutonomousBrainClaimIntegrityAssessment {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain claim integrity reassessment options must be an object");
+    return this.agent.reassessClaimIntegrity(previous, options);
+  }
+
+  /** Validate claim-integrity metadata before resuming a worker or creating an acquisition bridge. */
+  validateClaimIntegrity(
+    value: AutonomousBrainClaimIntegrityAssessment,
+  ): AutonomousBrainClaimIntegrityAssessment {
+    return validateAutonomousClaimIntegrity(value);
+  }
+
+  /** Translate unresolved claim actions into a reviewed, provider-free acquisition bridge. */
+  planClaimIntegrityAcquisition(
+    assessment: AutonomousBrainClaimIntegrityAssessment,
+    options: AutonomousBrainClaimIntegrityAcquisitionPlanOptions,
+  ): AutonomousBrainClaimIntegrityAcquisitionBridge {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain claim integrity acquisition options must be an object");
+    return this.agent.planClaimIntegrityAcquisition(assessment, options);
+  }
+
+  /** Validate an acquisition bridge before allowing its selected domains into a source boundary. */
+  validateClaimIntegrityAcquisitionBridge(
+    value: AutonomousBrainClaimIntegrityAcquisitionBridge,
+  ): AutonomousBrainClaimIntegrityAcquisitionBridge {
+    return validateAutonomousClaimIntegrityAcquisitionBridge(value);
+  }
+
+  /** Bind caller-owned source requests to the exact candidates selected by an integrity bridge. */
+  bindClaimIntegrityAcquisition(
+    bridge: AutonomousBrainClaimIntegrityAcquisitionBridge,
+    requests: Parameters<AutonomousAgent["bindClaimIntegrityAcquisition"]>[1],
+  ): AutonomousBrainClaimIntegrityAcquisitionBinding {
+    return this.agent.bindClaimIntegrityAcquisition(bridge, requests);
+  }
+
+  /** Validate a caller-rehydrated integrity binding before source dispatch. */
+  validateClaimIntegrityAcquisitionBinding(
+    value: AutonomousBrainClaimIntegrityAcquisitionBinding,
+  ): AutonomousBrainClaimIntegrityAcquisitionBinding {
+    return validateAutonomousClaimIntegrityAcquisitionBinding(value);
+  }
+
+  /** Execute only the integrity-selected evidence queue through the reviewed source boundary. */
+  async executeClaimIntegrityAcquisition(
+    bridge: AutonomousBrainClaimIntegrityAcquisitionBridge,
+    registry: Parameters<AutonomousAgent["executeClaimIntegrityAcquisition"]>[1],
+    requests: Parameters<AutonomousAgent["executeClaimIntegrityAcquisition"]>[2],
+    options: AutonomousBrainClaimIntegrityAcquisitionExecutionOptions = {},
+  ): Promise<AutonomousBrainClaimIntegrityAcquisitionExecutionResult> {
+    return this.agent.executeClaimIntegrityAcquisition(bridge, registry, requests, options);
+  }
+
+  /** Execute the integrity-selected queue only after every selected domain passes launch admission. */
+  async executeClaimIntegrityAcquisitionWithLaunchAdmission(
+    bridge: AutonomousBrainClaimIntegrityAcquisitionBridge,
+    registry: Parameters<AutonomousAgent["executeClaimIntegrityAcquisition"]>[1],
+    requests: Parameters<AutonomousAgent["executeClaimIntegrityAcquisition"]>[2],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainClaimIntegrityAcquisitionExecutionOptions = {},
+  ): Promise<AutonomousBrainClaimIntegrityAcquisitionExecutionResult> {
+    authorizeAutonomousLaunchDomains(admission, claimIntegrityAcquisitionDomains(bridge));
+    return this.executeClaimIntegrityAcquisition(bridge, registry, requests, options);
+  }
+
+  /** Resume the integrity-selected queue through its caller-owned, digest-fenced checkpoint. */
+  async executeClaimIntegrityAcquisitionResumable(
+    bridge: AutonomousBrainClaimIntegrityAcquisitionBridge,
+    registry: Parameters<AutonomousAgent["executeClaimIntegrityAcquisitionResumable"]>[1],
+    requests: Parameters<AutonomousAgent["executeClaimIntegrityAcquisitionResumable"]>[2],
+    options: AutonomousBrainClaimIntegrityAcquisitionResumableOptions,
+  ): Promise<AutonomousBrainClaimIntegrityAcquisitionResumableResult> {
+    return this.agent.executeClaimIntegrityAcquisitionResumable(bridge, registry, requests, options);
+  }
+
+  /** Resume integrity acquisition only after checkpointed domains pass launch admission. */
+  async executeClaimIntegrityAcquisitionResumableWithLaunchAdmission(
+    bridge: AutonomousBrainClaimIntegrityAcquisitionBridge,
+    registry: Parameters<AutonomousAgent["executeClaimIntegrityAcquisitionResumable"]>[1],
+    requests: Parameters<AutonomousAgent["executeClaimIntegrityAcquisitionResumable"]>[2],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainClaimIntegrityAcquisitionResumableOptions,
+  ): Promise<AutonomousBrainClaimIntegrityAcquisitionResumableResult> {
+    authorizeAutonomousLaunchDomains(admission, claimIntegrityAcquisitionDomains(bridge));
+    return this.executeClaimIntegrityAcquisitionResumable(bridge, registry, requests, options);
   }
 
   /** Project a portfolio-wide admission image before provider/tool/source dispatch. */

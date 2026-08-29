@@ -2593,3 +2593,38 @@ consumers receive ESM plus declarations in `dist/`.
 
 See [`docs/TYPESCRIPT_SDK.md`](../docs/TYPESCRIPT_SDK.md) for the complete route, error, safety,
 and browser/Node integration contract.
+
+## Integrity-aware acquisition facade
+
+`AutonomousBrainFacade` exposes provider-free information planning and claim-integrity review in
+addition to provider execution. Use `planInformationAcquisition()` and
+`replanInformationAcquisition()` to select bounded caller-declared candidates across the twelve
+built-in domains; use `assessClaimIntegrity()`/`reassessClaimIntegrity()` to identify temporal,
+support, independence, conflict, modality, and reproducibility gaps. Plans and assessments retain
+digests and bounded metadata only, while task, claim, evidence, and source values remain
+caller-transient.
+
+Unresolved integrity actions can be translated into a reviewed bridge, bound to exact source
+requests, and executed through the existing adapter/readiness/evaluator boundary:
+
+```typescript
+const assessment = brain.assessClaimIntegrity(task, { claims, evidence, referenceTime });
+const bridge = brain.planClaimIntegrityAcquisition(assessment, { candidates, policy });
+const binding = brain.bindClaimIntegrityAcquisition(bridge, requests);
+brain.validateClaimIntegrityAcquisitionBinding(binding);
+
+const result = await brain.executeClaimIntegrityAcquisitionWithLaunchAdmission(
+  bridge, registry, requests, approvedAdmission, {
+    prepare: { readinessPolicy, allowDegradedDispatch: true },
+    execute: { projector, evaluator, approveSourceDispatch: true },
+  },
+);
+```
+
+`...WithLaunchAdmission()` authorizes every selected domain before source dispatch. For process
+restarts, use `executeClaimIntegrityAcquisitionResumableWithLaunchAdmission()` with a
+caller-owned checkpoint store; the first call remains approval-gated and the resumed call
+revalidates the exact plan, registry, readiness report, and request digest. `awaiting_evaluation`
+is a valid conservative result when selected acquisition is accepted but other available
+requirements have not received evaluator decisions. Neither the facade nor the SDK stores keys,
+raw source values, prompts, claim text, or evaluator payloads in serialized projections.
