@@ -1,5 +1,11 @@
 # Remaining backlog
 
+The TypeScript `AutonomousBrainFacade` now exposes the protected BYOK model path: session-bound
+model discovery, candidate normalization, and digest-bound all-domain inventory reconciliation.
+This closes the user-facing bridge between credential collection and actual model selection
+readiness while preserving separate approval/evaluator gates. Raw keys, catalogues, and provider
+responses remain outside the facade's serialized projections.
+
 The TypeScript `AutonomousBrainFacade` now exposes the coordinated persistence lifecycle already
 implemented by `AutonomousAgent`: typed `restorePersistedState()` and `flushPersistedState()`
 forward caller-owned stores, deterministic dependency ordering, strict failure reports, and

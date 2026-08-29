@@ -12740,6 +12740,14 @@ startup or shutdown. The wrapper is intentionally transparent: it reuses the age
 coordinator, preserves deterministic ordering and redacted failure reports, and does not infer
 that an unconfigured store is durable merely because execution is otherwise ready.
 
+The TypeScript `AutonomousBrainFacade` also exposes the protected model-onboarding bridge:
+`discoverModels()`, `modelCandidates()`, and `refreshModelInventory()`. These methods bind the
+facade's exact agent to an active `CredentialSession`, so a user can move from protected key
+collection to live model discovery and all-domain inventory reconciliation without exposing a
+raw credential to the facade. The resulting inventory is a readiness/provenance projection,
+not an execution authorization; model selection, approval, evaluator evidence, and launch
+admission remain independent.
+
 ## Claim-integrity fusion and next-action planning
 
 Evidence acquisition and evidence truth are intentionally separate from the autonomous decision

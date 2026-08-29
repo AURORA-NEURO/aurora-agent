@@ -215,6 +215,78 @@ test("brain facade exposes protected provider onboarding without retaining user 
   assert.throws(() => setup.collectUserCredential(session, "groq", "another-fixture-secret"), /closed or expired/);
 });
 
+test("brain facade binds protected onboarding to model discovery and all-domain inventory", async () => {
+  let networkCalls = 0;
+  const runtime = new LLMRuntime({
+    fetch: async (url, init) => {
+      networkCalls += 1;
+      assert.equal(String(url), "https://groq.test/openai/v1/models");
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer facade-inventory-secret");
+      return new Response(JSON.stringify({
+        data: [{
+          id: "facade-discovered-model",
+          active: true,
+          context_window: 32_000,
+          max_output_tokens: 2_000,
+          capabilities: [
+            "reasoning", "structured_output", "code", "web", "data", "science",
+            "biomedical", "operations", "enterprise", "coordination", "multimodal",
+            "evaluation",
+          ],
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  const agent = new AutonomousAgent(runtime);
+  const brain = new AutonomousBrainFacade({ agent });
+  const setup = brain.providerSetup;
+  setup.registerProvider("groq", { baseUrl: "https://groq.test/openai/v1" });
+  const session = setup.startSession({ sessionId: "facade-inventory-session", ttlMs: 60_000, clock: () => 100 });
+  const secret = "facade-inventory-secret";
+  setup.collectUserCredential(session, "groq", secret, { ttlMs: 30_000 });
+
+  const discovery = await brain.discoverModels(session, "groq");
+  assert.equal(discovery.provider, "groq");
+  assert.equal(discovery.models.length, 1);
+  assert.equal(discovery.models[0].model, "facade-discovered-model");
+
+  const defaults = {
+    context_window_tokens: 32_000,
+    max_output_tokens: 2_000,
+    quality: 0.9,
+    latency_ms: 25,
+    cost_per_million_tokens: 0,
+    reliability: 0.95,
+  };
+  const candidates = brain.modelCandidates(discovery, defaults);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].provider, "groq");
+
+  const inventory = await brain.refreshModelInventory(
+    session,
+    [{ provider: "groq", defaults }],
+    { refreshId: "facade-inventory-refresh" },
+  );
+  assert.equal(inventory.status, "completed");
+  assert.equal(inventory.models.length, 1);
+  assert.equal(inventory.domains.length, AUTONOMOUS_DOMAIN_NAMES.length);
+  assert.equal(inventory.domains.every((row) => row.eligible_model_count === 1), true);
+  assert.equal(inventory.readiness, "ready");
+  assert.doesNotMatch(JSON.stringify({ discovery, candidates, inventory }), /facade-inventory-secret/);
+  assert.doesNotMatch(JSON.stringify({ discovery, candidates, inventory }), /api[_-]?key|credential[_-]?value/i);
+  assert.equal(networkCalls, 2);
+
+  session.close();
+  await assert.rejects(
+    () => brain.discoverModels(session, "groq"),
+    /closed or expired/,
+  );
+  await assert.rejects(
+    () => brain.refreshModelInventory(session, [{ provider: "groq", defaults }]),
+    /closed or expired/,
+  );
+});
+
 test("brain facade owns provisioned direct, cycle, and adaptive execution wrappers", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

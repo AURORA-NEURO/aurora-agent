@@ -2257,3 +2257,18 @@ report attached, and no report includes tasks, prompts, provider responses, cred
 arguments, evidence contents, or raw exception messages. The facade does not add cross-store
 atomicity: CAS, crash recovery between component writes, and coordination with deployment-owned
 identity or approval state remain explicit application responsibilities.
+
+### Protected model discovery and all-domain inventory
+
+After a caller opens a `ProviderSetup` session and collects a credential through the protected
+input boundary, `AutonomousBrainFacade.discoverModels()` exposes sanitized provider model
+metadata without accepting a raw key. `modelCandidates()` applies caller-owned quality,
+latency, cost, reliability, and capability defaults without dispatch. `refreshModelInventory()`
+then reconciles one or more provider catalogues through the agent's digest-bound inventory
+coordinator and produces readiness plus coverage for every built-in domain.
+
+The session is checked before each operation and should be closed by the caller after the
+request-scoped workflow. Inventory snapshots retain only model metadata, provider readiness,
+domain coverage, and digests; provider credentials, raw catalogues, prompts, and responses are
+never serialized. Inventory registration is not execution approval: selection, evaluator
+evidence, launch admission, and provider invocation remain separate gates.

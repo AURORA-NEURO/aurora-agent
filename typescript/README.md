@@ -2651,3 +2651,9 @@ caller-owned stores through deterministic restore/flush ordering and return a re
 component report; strict failures retain the typed lifecycle error and report. TypeScript
 consumers can import the lifecycle option/report aliases from the package barrel, so startup and
 shutdown code does not need to reach into internal agent types.
+
+For user-key onboarding, `discoverModels(session, provider)`, `modelCandidates(discovery,
+defaults)`, and `refreshModelInventory(session, specs)` keep the raw credential inside the
+protected session while producing sanitized discovery and all-domain inventory projections.
+Close the session after the request-scoped refresh; inventory registration does not authorize
+provider execution.

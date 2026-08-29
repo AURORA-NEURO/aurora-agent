@@ -1376,5 +1376,9 @@ export class ProviderSetup {
     if (!(session instanceof CredentialSession) || session.onboarding !== this.onboarding) {
       throw new CredentialError("credential session belongs to a different provider setup");
     }
+    if (!session.status().active) {
+      session.close();
+      throw new CredentialError("credential session is closed or expired");
+    }
   }
 }

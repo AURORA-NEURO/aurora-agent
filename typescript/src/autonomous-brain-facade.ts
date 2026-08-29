@@ -44,6 +44,7 @@ import {
   type AutonomousRunStreamHandle,
   type AutonomousModelSelectionPreview,
   type AutonomousModelSelectionPreviewOptions,
+  type AutonomousModelRefreshSpec,
   type AutonomousTaskBlueprint,
 } from "./autonomous.js";
 import {
@@ -101,7 +102,14 @@ import {
   type AutonomousRunTraceSummary,
 } from "./autonomous-run-trace.js";
 import { canonicalJson, digestJson, digestJsonSync } from "./tooling.js";
-import type { AutonomousModelSelectionTraceEventCallback, ProviderInvocationObserver } from "./llm.js";
+import type {
+  AutonomousModelCandidate,
+  AutonomousModelCandidateDefaults,
+  AutonomousModelSelectionTraceEventCallback,
+  ProviderInvocationObserver,
+  ProviderModelDiscovery,
+} from "./llm.js";
+import { CredentialSession } from "./llm.js";
 import { AutonomousCostBudget } from "./llm.js";
 import type { AgentMissionArgs, JsonObject, JsonValue } from "./types.js";
 import type { AutonomousMissionReplanResult } from "./mission-replan.js";
@@ -116,6 +124,10 @@ import type {
   AutonomousAgentPersistenceLifecycleOptions,
   AutonomousAgentPersistenceLifecycleReport,
 } from "./autonomous-agent-lifecycle.js";
+import type {
+  AutonomousModelInventoryRefreshOptions,
+  AutonomousModelInventorySnapshot,
+} from "./autonomous-model-inventory.js";
 import type {
   AutonomousWorkflowPortfolioAdmission,
   AutonomousWorkflowPortfolioAdmissionOptions,
@@ -944,6 +956,12 @@ export type AutonomousBrainPersistenceLifecycleOptions = AutonomousAgentPersiste
 export type AutonomousBrainPersistenceLifecycleRestoreOptions = Parameters<AutonomousAgent["restorePersistedState"]>[0];
 export type AutonomousBrainPersistenceLifecycleFlushOptions = Parameters<AutonomousAgent["flushPersistedState"]>[0];
 export type AutonomousBrainPersistenceLifecycleReport = AutonomousAgentPersistenceLifecycleReport;
+/** Protected discovery and inventory controls; credentials remain inside `CredentialSession`. */
+export type AutonomousBrainModelDiscovery = ProviderModelDiscovery;
+export type AutonomousBrainModelCandidateDefaults = AutonomousModelCandidateDefaults;
+export type AutonomousBrainModelCandidate = AutonomousModelCandidate;
+export type AutonomousBrainModelInventoryRefreshOptions = Omit<AutonomousModelInventoryRefreshOptions, "credentialFor" | "credentialSession">;
+export type AutonomousBrainModelInventorySnapshot = AutonomousModelInventorySnapshot;
 
 export interface AutonomousBrainBatchItem {
   index: number;
@@ -1974,6 +1992,44 @@ export class AutonomousBrainFacade {
   get providerSetup(): ProviderSetup {
     this.provider_setup ??= new ProviderSetup(this.agent.llm);
     return this.provider_setup;
+  }
+
+  /**
+   * Discover provider model metadata inside an already-open protected onboarding session.
+   *
+   * The session owns opaque credential handles and is checked by `ProviderSetup`; this facade
+   * never accepts a raw key or returns the provider response body. Discovery is observational and
+   * does not register a model or authorize execution.
+   */
+  async discoverModels(
+    session: CredentialSession,
+    provider: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<AutonomousBrainModelDiscovery> {
+    return this.providerSetup.discoverModels(session, provider, options);
+  }
+
+  /** Normalize one protected discovery result into explicit candidate priors without dispatch. */
+  modelCandidates(
+    discovery: AutonomousBrainModelDiscovery,
+    defaults: AutonomousBrainModelCandidateDefaults,
+  ): AutonomousBrainModelCandidate[] {
+    return this.providerSetup.modelCandidates(discovery, defaults);
+  }
+
+  /**
+   * Reconcile one or more discovered provider catalogues into the agent's all-domain inventory.
+   *
+   * The protected session is forwarded only to the agent's inventory coordinator. The returned
+   * snapshot contains model metadata, readiness, and twelve-domain coverage digests; provider
+   * keys, raw catalogues, prompts, and responses remain outside the snapshot.
+   */
+  async refreshModelInventory(
+    session: CredentialSession,
+    specs: readonly AutonomousModelRefreshSpec[],
+    options: AutonomousBrainModelInventoryRefreshOptions = {},
+  ): Promise<AutonomousBrainModelInventorySnapshot> {
+    return this.providerSetup.refreshModelInventory(this.agent, session, specs, options);
   }
 
   /**
