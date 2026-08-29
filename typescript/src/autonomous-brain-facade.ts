@@ -46,7 +46,13 @@ import {
   type AutonomousModelSelectionPreviewOptions,
   type AutonomousModelRefreshSpec,
   type AutonomousTaskBlueprint,
+  type AutonomousClarificationRecompileProjection,
+  type AutonomousClarificationRecompileResult,
 } from "./autonomous.js";
+import type {
+  AutonomousTaskClarificationPlan,
+  AutonomousTaskClarificationResolution,
+} from "./autonomous-task-clarification.js";
 import {
   semanticRouteAutonomousTask,
   type AutonomousSemanticRouteOptions,
@@ -283,6 +289,29 @@ export interface AutonomousBrainRequest {
   context?: readonly AutonomousPromptChunk[];
   /** Optional caller-owned evidence operation to run before provider invocation. */
   connector?: AutonomousConnectorOperationInput;
+}
+
+/** Provider-free clarification controls for one single-domain brain intake. */
+export interface AutonomousBrainClarificationOptions {
+  /** Optional explicit domain; when omitted, only an unambiguous deterministic route is accepted. */
+  domain?: AutonomousDomainName;
+  capability?: string;
+  riskClass?: string;
+  constraints?: readonly string[];
+  desiredOutputs?: readonly string[];
+  maxInputTokens?: number;
+  structuredDomainResponse?: boolean;
+  maxQuestions?: number;
+}
+
+/** Options applied while compiling a fresh blueprint after a resolved clarification receipt. */
+export interface AutonomousBrainClarificationRecompileOptions {
+  capability?: string;
+  riskClass?: string;
+  constraints?: readonly string[];
+  desiredOutputs?: readonly string[];
+  maxInputTokens?: number;
+  structuredDomainResponse?: boolean;
 }
 
 /**
@@ -1984,6 +2013,95 @@ export class AutonomousBrainFacade {
         operationFacade: options.connectorOperations,
         route: (task, routeOptions) => this.agent.route(task, routeOptions),
       });
+  }
+
+  /**
+   * Compile the same provider-free intake artifacts used by execution into a bounded
+   * clarification questionnaire. An explicit domain is preferred; without one, the facade
+   * accepts only a single deterministic route and refuses an abstained or cross-domain task so
+   * that a question set cannot accidentally be applied to the wrong workflow.
+   *
+   * The returned plan contains only reviewed metadata and digests. It does not call a provider,
+   * connector, source, tool, evaluator, or learner, and it cannot authorize any later action.
+   */
+  async clarificationPlan(
+    input: AutonomousBrainRequest,
+    options: AutonomousBrainClarificationOptions = {},
+  ): Promise<AutonomousTaskClarificationPlan> {
+    const request = validateRequest(input);
+    if (request.connector !== undefined) throw new ArgumentError("autonomous brain clarification does not execute connector inputs");
+    if (request.domain !== undefined && options.domain !== undefined && request.domain !== options.domain) throw new ArgumentError("autonomous brain clarification domain conflicts with the request");
+    let domain = options.domain ?? request.domain;
+    if (domain === undefined) {
+      const route = await this.agent.route(request.task, {
+        hints: request.hints,
+        allowCrossDomain: false,
+      });
+      if (route.abstained || route.cross_domain || route.primary_domain === null) throw new ArgumentError("autonomous brain clarification requires an explicit or unambiguous single-domain route");
+      domain = route.primary_domain;
+    }
+    return this.agent.clarificationPlan(request.task, {
+      domain,
+      capability: options.capability ?? request.capability,
+      riskClass: options.riskClass,
+      constraints: options.constraints,
+      desiredOutputs: options.desiredOutputs,
+      context: request.context,
+      maxInputTokens: options.maxInputTokens,
+      structuredDomainResponse: options.structuredDomainResponse,
+      maxQuestions: options.maxQuestions,
+    });
+  }
+
+  /** Resolve transient user answers into a plan-bound receipt containing answer digests only. */
+  async resolveClarification(
+    plan: AutonomousTaskClarificationPlan | unknown,
+    task: string,
+    answers: Readonly<Record<string, string>>,
+  ): Promise<AutonomousTaskClarificationResolution> {
+    return this.agent.resolveClarification(plan, task, answers);
+  }
+
+  /** Rehydrate and validate a clarification receipt against its exact questionnaire. */
+  async validateClarification(
+    plan: AutonomousTaskClarificationPlan | unknown,
+    receipt: AutonomousTaskClarificationResolution | unknown,
+  ): Promise<AutonomousTaskClarificationResolution> {
+    return this.agent.validateClarification(plan, receipt);
+  }
+
+  /**
+   * Recompile a clarified task only after its original task digest and resolved receipt verify.
+   * The fresh blueprint is transient; use the normal facade plan, launch, provider, tool, and
+   * effect gates before executing it.
+   */
+  async recompileClarification(
+    plan: AutonomousTaskClarificationPlan | unknown,
+    receipt: AutonomousTaskClarificationResolution | unknown,
+    input: AutonomousBrainRequest,
+    clarifiedTask: string,
+    options: AutonomousBrainClarificationRecompileOptions = {},
+  ): Promise<AutonomousClarificationRecompileResult> {
+    const request = validateRequest(input);
+    if (request.connector !== undefined) throw new ArgumentError("autonomous brain clarification recompile does not execute connector inputs");
+    return this.agent.recompileClarification(plan, receipt, request.task, clarifiedTask, {
+      capability: options.capability ?? request.capability,
+      riskClass: options.riskClass,
+      constraints: options.constraints,
+      desiredOutputs: options.desiredOutputs,
+      context: request.context,
+      maxInputTokens: options.maxInputTokens,
+      structuredDomainResponse: options.structuredDomainResponse,
+    });
+  }
+
+  /** Validate a serialized clarified blueprint without restoring task or answer values. */
+  async validateClarificationRecompile(
+    value: unknown,
+    plan?: AutonomousTaskClarificationPlan | unknown,
+    receipt?: AutonomousTaskClarificationResolution | unknown,
+  ): Promise<AutonomousClarificationRecompileProjection> {
+    return this.agent.validateClarificationRecompile(value, plan, receipt);
   }
 
   /**

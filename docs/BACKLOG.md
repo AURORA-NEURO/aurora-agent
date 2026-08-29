@@ -1,5 +1,15 @@
 # Remaining backlog
 
+The safe TypeScript `AutonomousBrainFacade` now owns the provider-free task-clarification loop
+already available on the lower-level agent. It can derive a bounded questionnaire for every
+single-domain profile (or accept only an unambiguous deterministic route when the domain is
+omitted), resolve answers into digest-only receipts, validate those receipts after restart, and
+recompile a clarified task into a fresh transient blueprint. Connector-bearing requests,
+cross-domain/abstained intake, stale task identities, and tampered receipts fail closed before any
+provider, source, tool, evaluator, learner, credential, or effect boundary. All twelve domains are
+covered by redaction, replay, auto-route, and tamper tests; this improves application usability
+without turning clarification or recompilation into execution authority.
+
 The TypeScript contextual-selector bridge now preserves the complete value-only selection contract
 across the remote boundary. Caller-supplied global observations reach the base selector as
 fallback history, contextual observations retain overlay precedence, and remote ranking rows are

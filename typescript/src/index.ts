@@ -2195,6 +2195,8 @@ export type {
   AutonomousActionHandoffExecutionOptions,
   AutonomousActionPlanExecution,
   AutonomousBrainRequest,
+  AutonomousBrainClarificationOptions,
+  AutonomousBrainClarificationRecompileOptions,
   AutonomousBrainWorkflowOptions,
   AutonomousBrainWorkflowResumeOptions,
   AutonomousBrainWorkflowResult,

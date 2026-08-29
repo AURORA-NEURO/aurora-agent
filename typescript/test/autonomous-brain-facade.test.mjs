@@ -215,6 +215,67 @@ test("brain facade exposes protected provider onboarding without retaining user 
   assert.throws(() => setup.collectUserCredential(session, "groq", "another-fixture-secret"), /closed or expired/);
 });
 
+test("brain facade exposes the provider-free clarification lifecycle across every domain", async () => {
+  const runtime = new LLMRuntime({ fetch: async () => { throw new Error("clarification must not contact a provider"); } });
+  const agent = new AutonomousAgent(runtime);
+  const brain = new AutonomousBrainFacade({ agent });
+  const privateContext = "clarification context must remain caller-owned";
+  let inferredDomainPlan;
+
+  for (const domain of AUTONOMOUS_DOMAIN_NAMES) {
+    const task = tasks[domain];
+    const plan = await brain.clarificationPlan({
+      task,
+      domain,
+      context: [{ id: `clarification-${domain}`, content: privateContext }],
+    });
+    assert.equal(plan.domain, domain);
+    assert.equal(plan.authorization, "interaction_guidance_only;does_not_authorize_provider_source_tool_or_effect_actions");
+    assert.equal(plan.secret_material, "never_returned");
+    assert.equal(JSON.stringify(plan).includes(privateContext), false);
+
+    const answers = Object.fromEntries(plan.questions.filter((question) => question.required).map((question) => [
+      question.question_id,
+      question.answer_kind === "choice" ? question.options[0] : "bounded caller clarification",
+    ]));
+    const receipt = await brain.resolveClarification(plan, task, answers);
+    assert.equal(receipt.status, "resolved", domain);
+    assert.equal(receipt.required_answer_count, plan.questions.filter((question) => question.required).length, domain);
+    assert.equal(JSON.stringify(receipt).includes("bounded caller clarification"), false);
+    const restored = await brain.validateClarification(plan, receipt);
+    assert.deepEqual(restored, receipt, domain);
+
+    const recompiled = await brain.recompileClarification(
+      plan,
+      receipt,
+      { task, domain, context: [{ id: `clarification-${domain}`, content: privateContext }] },
+      `${task}; clarified output and acceptance criteria are explicit`,
+    );
+    assert.equal(recompiled.domain, domain);
+    assert.equal(recompiled.status, "ready");
+    const projection = recompiled.toJSON();
+    assert.equal(projection.execution, "not_started; fresh_blueprint_requires_existing_gates");
+    assert.equal(projection.secret_material, "never_returned");
+    assert.equal(JSON.stringify(projection).includes("clarified output and acceptance criteria"), false);
+    const restoredProjection = await brain.validateClarificationRecompile(projection, plan, receipt);
+    assert.equal(restoredProjection.recompile_digest, projection.recompile_digest, domain);
+
+    if (domain === "coding") inferredDomainPlan = await brain.clarificationPlan({ task });
+  }
+
+  assert.equal(inferredDomainPlan?.domain, "coding");
+  const codingPlan = await brain.clarificationPlan({ task: tasks.coding, domain: "coding" });
+  const codingReceipt = await brain.resolveClarification(codingPlan, tasks.coding, Object.fromEntries(codingPlan.questions.map((question) => [question.question_id, question.answer_kind === "choice" ? question.options[0] : "complete"])));
+  await assert.rejects(
+    brain.validateClarification(codingPlan, { ...codingReceipt, resolution_digest: "0".repeat(64) }),
+    /digest/,
+  );
+  await assert.rejects(
+    brain.clarificationPlan({ task: tasks.coding, connector: { domain: "coding", operation: "unknown", request: {} } }),
+    /does not execute connector inputs|connector/i,
+  );
+});
+
 test("brain facade binds protected onboarding to model discovery and all-domain inventory", async () => {
   let networkCalls = 0;
   const runtime = new LLMRuntime({

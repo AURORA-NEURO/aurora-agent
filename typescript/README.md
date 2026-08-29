@@ -619,6 +619,18 @@ This keeps the control plane advisory: local capability, health, capacity, crede
 and exact-arm gates still decide whether a provider can run, and no prompt, response, credential,
 or API key is retained or sent through the learning bridge.
 
+The primary `AutonomousBrainFacade` also exposes the provider-free clarification lifecycle for
+ambiguous or review-heavy intake. `clarificationPlan({ task, domain })` derives bounded questions
+from the exact task lens, policy, intent, and decision that would shape execution; if `domain` is
+omitted, only an unambiguous deterministic single-domain route is accepted. Call
+`resolveClarification(plan, task, answers)` to produce an answer-digest-only receipt, validate it
+after restart with `validateClarification()`, and call `recompileClarification()` after the receipt
+is resolved to obtain a fresh transient blueprint. The facade refuses connector-bearing
+clarification requests, cross-domain/abstained routes, stale tasks, and tampered receipts before
+any provider, source, tool, evaluator, learner, credential, or effect boundary. Recompilation is
+still planning metadata: normal route, model, evidence, approval, provider, tool, evaluator, and
+effect gates must be passed before execution.
+
 For ambiguous or novel intake, `semanticRouteAutonomousTask()` adds an explicit provider-assisted
 classification pass. It sends the private task only through the caller's approved local provider,
 asks for structured domain scores against the reviewed twelve-domain catalogue, and maps the
