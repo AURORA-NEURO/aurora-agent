@@ -84,6 +84,16 @@ are never sent to it. A sink failure fails closed instead of turning a completed
 unobserved success. The adapter and sink contract are exercised across all twelve built-in domain
 profiles, including refusal, malformed-response, transport, schema, and no-discovery paths.
 
+For post-run operations, `AutonomousAgent.analyze_run_trace()` produces a digest-bound,
+metadata-only analytics report without invoking a provider. For longitudinal operator state,
+create an `AutonomousRunAnalyticsLedger` and bind it with
+`agent.create_run_analytics_controller(ledger, persistence)`. The controller requires
+`restore()` before reads, offers `analyze_and_ingest()` and `ingest()` with explicit
+accepted/duplicate/conflict results, persists through caller-owned JSON/CAS storage, and returns
+persistence failures separately from in-memory acceptance. Its summaries cover all twelve domains,
+observed providers, and provider/model pairs while retaining no task text, prompts, responses,
+evidence, tool payloads, credentials, or cost claims.
+
 For provider-backed evidence, `AutonomousConnectorRegistry` and `AutonomousConnectorRuntime`
 provide the corresponding caller-owned connector process. Register a typed
 `DomainEvidenceProviderConnectorManifest` and an executor that may close over a short-lived

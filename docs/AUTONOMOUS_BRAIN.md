@@ -10724,10 +10724,18 @@ if result.status == "accepted":
     snapshot = ledger.snapshot()  # caller-owned canonical JSON/CAS persistence
 ```
 
-The TypeScript facade provides the equivalent `createRunAnalyticsLedger()` factory. The ledger
-is an aggregation and restart boundary, not an evaluator, model-health oracle, billing ledger,
-alert delivery system, tenant authorization authority, or external-effect reconciler; those
-deployment responsibilities remain explicit.
+The TypeScript facade provides the equivalent `createRunAnalyticsLedger()` factory. Both
+application facades now also provide a controller around the ledger: TypeScript uses
+`brain.createRunAnalyticsController({ ledger, persistence })`, while Python uses
+`agent.create_run_analytics_controller(ledger, persistence)`. Each controller requires
+`restore()` before reads or ingestion, exposes `analyzeAndIngest()`/`analyze_and_ingest()` for a
+verified trace snapshot, returns explicit accepted/duplicate/conflict outcomes, and separates an
+in-memory accepted report from a failed persistence flush. `summary()`/`summary`, bounded
+`history()`, `snapshot()`, and `verifyIntegrity()`/`verify_integrity()` give operators a stable
+all-domain/provider/model projection and a restart integrity check. The controller is an
+aggregation and restart boundary, not an evaluator, model-health oracle, billing ledger, alert
+delivery system, tenant authorization authority, or external-effect reconciler; those deployment
+responsibilities remain explicit.
 
 Run-trace snapshots in both SDKs use a versioned lineage envelope. Current `0.2` snapshots carry
 an explicit generation and predecessor snapshot digest, are cached byte-for-byte when the event

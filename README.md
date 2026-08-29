@@ -96,7 +96,9 @@ facade methods. The report separates measured values from unmeasured domains, ag
 provider/model failure and latency observations, and emits conservative threshold alerts; it does
 not infer cost, task correctness, provider health, or domain truth. Longitudinal deployments can
 retain validated reports through the bounded `AutonomousRunAnalyticsLedger` with digest-checked
-restore and optional CAS persistence. See the [analytics section](docs/AUTONOMOUS_BRAIN.md#conservative-run-trace-analytics).
+restore and optional CAS persistence. TypeScript and Python application facades also provide
+restore-before-read analytics controllers that analyze verified traces, persist accepted reports,
+classify duplicates/conflicts, and expose safe all-domain rollups. See the [analytics section](docs/AUTONOMOUS_BRAIN.md#conservative-run-trace-analytics).
 
 ## Status
 

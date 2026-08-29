@@ -243,6 +243,7 @@ from .autonomous_run_analytics_ledger import (
     AutonomousRunAnalyticsLedger,
     AutonomousRunAnalyticsLedgerPolicy,
 )
+from .autonomous_run_analytics_controller import AutonomousRunAnalyticsController
 from .autonomous_decision_persistence import (
     AutonomousDecisionCycle,
     AutonomousDecisionCyclePersistenceCoordinator,
@@ -25868,6 +25869,20 @@ class AutonomousAgent:
             normalized_policy = AutonomousRunAnalyticsLedgerPolicy.from_dict(policy_mapping)
         return AutonomousRunAnalyticsLedger(normalized_policy) if clock is None else AutonomousRunAnalyticsLedger(normalized_policy, clock=clock)
 
+    def create_run_analytics_controller(
+        self,
+        ledger: AutonomousRunAnalyticsLedger,
+        persistence: Any,
+    ) -> AutonomousRunAnalyticsController:
+        """Bind a metadata-only analytics ledger to this agent's application lifecycle.
+
+        The controller is restore-before-read, re-entrancy fenced, and persistence-aware.  It
+        never gains provider authority and accepts only a caller-owned ledger and JSON/CAS
+        persistence adapter.
+        """
+
+        return AutonomousRunAnalyticsController(self, ledger, persistence)
+
     def run_cross_domain_with_trace(
         self,
         *,
@@ -29715,6 +29730,7 @@ __all__ = [
     "AutonomousBrainBatchJobController",
     "AutonomousLearningResult",
     "AutonomousAgent",
+    "AutonomousRunAnalyticsController",
     "AutonomousWorkflowCheckpoint",
     "AutonomousWorkflowExecutionReceipt",
     "AutonomousWorkflowEvaluator",

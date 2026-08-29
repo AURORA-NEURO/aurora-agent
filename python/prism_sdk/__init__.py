@@ -1983,6 +1983,15 @@ from .autonomous_run_analytics_ledger import (
     TransactionalJsonAutonomousRunAnalyticsLedgerPersistence,
     validate_autonomous_run_analytics_ledger_snapshot,
 )
+from .autonomous_run_analytics_controller import (
+    AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_SCHEMA,
+    AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_STATUSES,
+    AutonomousBrainRunAnalyticsAnalysisRun,
+    AutonomousBrainRunAnalyticsControllerProjection,
+    AutonomousBrainRunAnalyticsIngestRun,
+    AutonomousBrainRunAnalyticsIntegrity,
+    AutonomousRunAnalyticsController,
+)
 from .autonomous_decision_persistence import (
     AUTONOMOUS_DECISION_CYCLE_MODES,
     AUTONOMOUS_DECISION_CYCLE_PHASES,
@@ -8291,6 +8300,13 @@ __all__ = [
     "JsonAutonomousRunAnalyticsLedgerPersistence",
     "TransactionalJsonAutonomousRunAnalyticsLedgerPersistence",
     "validate_autonomous_run_analytics_ledger_snapshot",
+    "AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_SCHEMA",
+    "AUTONOMOUS_BRAIN_RUN_ANALYTICS_CONTROLLER_STATUSES",
+    "AutonomousBrainRunAnalyticsAnalysisRun",
+    "AutonomousBrainRunAnalyticsControllerProjection",
+    "AutonomousBrainRunAnalyticsIngestRun",
+    "AutonomousBrainRunAnalyticsIntegrity",
+    "AutonomousRunAnalyticsController",
     "AUTONOMOUS_DECISION_CYCLE_MODES",
     "AUTONOMOUS_DECISION_CYCLE_PHASES",
     "AUTONOMOUS_DECISION_CYCLE_SNAPSHOT_SCHEMA",

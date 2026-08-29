@@ -9,6 +9,7 @@ from prism_sdk import (
     AUTONOMOUS_DOMAIN_NAMES,
     AutonomousAgent,
     AutonomousRunAnalyticsLedger,
+    AutonomousRunAnalyticsController,
     AutonomousRunAnalyticsLedgerPersistenceCoordinator,
     AutonomousRunAnalyticsLedgerPolicy,
     InMemoryAutonomousRunTraceStore,
@@ -155,3 +156,84 @@ def test_ledger_json_persistence_uses_cas_and_agent_facade() -> None:
     assert plain.read() is not None
     agent = AutonomousAgent.__new__(AutonomousAgent)
     assert agent.create_run_analytics_ledger({"max_reports": 1}).policy.max_reports == 1
+
+
+def test_agent_analytics_controller_is_restart_safe_and_persistence_explicit() -> None:
+    source = InMemoryAutonomousRunTraceStore(clock=lambda: 5_000)
+    session = AutonomousRunTraceSession(
+        source,
+        run_id="facade-analytics-all-domains",
+        task_digest="d" * 64,
+        domains=tuple(AUTONOMOUS_DOMAIN_NAMES),
+    )
+    session.started()
+    session.record(
+        phase="provider_invocation_finished",
+        status="running",
+        provider="offline",
+        model="offline-model",
+        input_tokens=7,
+        output_tokens=5,
+        tool_count=3,
+    )
+    session.complete(status="completed")
+
+    agent = AutonomousAgent.__new__(AutonomousAgent)
+    store = _TransactionalTextStore()
+    controller = agent.create_run_analytics_controller(
+        AutonomousRunAnalyticsLedger(),
+        TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(store),
+    )
+    with pytest.raises(ArgumentError, match="must restore before use"):
+        controller.summary()
+    assert controller.restore().status == "empty"
+
+    analyzed = controller.analyze_and_ingest(source.snapshot(), ingested_at=7_000)
+    assert analyzed.ingest.status == "accepted"
+    assert analyzed.persisted is True
+    assert analyzed.controller.status == "ingested"
+    assert analyzed.report.run_count == 1
+    summary = controller.summary()
+    assert summary.report_count == 1
+    assert len(summary.domains) == len(AUTONOMOUS_DOMAIN_NAMES)
+    assert {row.identity for row in summary.domains if row.observed} == set(AUTONOMOUS_DOMAIN_NAMES)
+    assert next(row for row in summary.providers if row.identity == "offline").provider_invocations == 1
+    assert next(row for row in summary.models if row.identity == "offline/offline-model").provider_invocations == 1
+    assert controller.history(limit=1)[0].report.report_digest == analyzed.report.report_digest
+    assert controller.verify_integrity().verified is True
+    wire = controller.snapshot()
+    assert "facade-analytics-all-domains" not in str(wire)
+    assert "prompt" not in wire and "response" not in wire and "credentials" not in wire
+
+    duplicate = controller.ingest(analyzed.report, ingested_at=99_999)
+    assert duplicate.ingest.status == "duplicate"
+    assert duplicate.persisted is True
+
+    restored_controller = AutonomousRunAnalyticsController(
+        agent,
+        AutonomousRunAnalyticsLedger(),
+        TransactionalJsonAutonomousRunAnalyticsLedgerPersistence(store),
+    )
+    restored = restored_controller.restore()
+    assert restored.status == "restored"
+    assert restored.persisted is True
+    assert restored.summary.report_count == 1
+    assert restored_controller.verify_integrity().verified is True
+
+    class _FailingStore:
+        def read(self) -> None:
+            return None
+
+        def write(self, _value: str) -> None:
+            raise RuntimeError("analytics persistence unavailable")
+
+    failing = agent.create_run_analytics_controller(
+        AutonomousRunAnalyticsLedger(),
+        JsonAutonomousRunAnalyticsLedgerPersistence(_FailingStore()),
+    )
+    failing.restore()
+    failed = failing.ingest(analyzed.report)
+    assert failed.ingest.status == "accepted"
+    assert failed.persisted is False
+    assert failed.controller.status == "persistence_failed"
+    assert failing.summary().report_count == 1
