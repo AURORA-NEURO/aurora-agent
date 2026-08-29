@@ -91,6 +91,7 @@ pub mod error;
 pub mod fixtures;
 pub mod federated_ingestion;
 pub mod evidence_workbench;
+pub mod federated_continual_context_research_workbench;
 pub mod evaluation_assurance;
 pub mod knobs;
 pub mod query;
@@ -117,6 +118,16 @@ pub use evidence_workbench::{
     FEATURE_ID as EVIDENCE_WORKBENCH_FEATURE_ID,
     PRECLINICAL_BOUNDARY as EVIDENCE_WORKBENCH_PRECLINICAL_BOUNDARY,
     SCHEMA_VERSION as EVIDENCE_WORKBENCH_SCHEMA_VERSION,
+};
+pub use federated_continual_context_research_workbench::{
+    compile_federated_continual_context_workbench,
+    federated_continual_context_research_workbench_manifest,
+    FederatedContextWorkbenchError, FederatedContextWorkbenchPeer,
+    FederatedContextWorkbenchReceipt, FederatedContextWorkbenchRequest,
+    FederatedContextWorkbenchVerdict,
+    CONTENT_TYPE as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTENT_TYPE,
+    CONTRACT_VERSION as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
 };
 pub use evaluation_assurance::{
     assure_evaluation_observability, EvaluationAssuranceError, EvaluationAssuranceReceipt,

@@ -11,6 +11,12 @@ use crate::resource_discovery_contract::{
     compile_resource_discovery_contract_v2, ResourceDiscoveryContractRequest,
     ResourceDiscoveryContractResponse, FEATURE_ID as RESOURCE_DISCOVERY_CONTRACT_FEATURE_ID,
 };
+use bioprism_bioworlds::{
+    compile_federated_continual_context_workbench, FederatedContextWorkbenchError,
+    FederatedContextWorkbenchReceipt, FederatedContextWorkbenchRequest,
+    FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEDERATED_CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID,
+};
 use bioprism_adapter::{
     admit_bounded_evolution, BoundedEvolutionError, BoundedEvolutionReceipt,
     BoundedEvolutionRequest, BOUNDED_EVOLUTION_FEATURE_ID,
@@ -2341,6 +2347,26 @@ pub fn validate_dataops_provenance_signing_workflow_fabric_json(value: &Value) -
     output.validate().map_err(|error| error.to_string())?;
     if output.feature_id != DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID { return Err("dataops provenance workflow feature id mismatch".into()); }
     Ok(output)
+}
+
+pub const BIOWORLDS_FEDERATED_CONTEXT_RESEARCH_WORKBENCH_TOOL: &str = "bioworlds_federated_context_research_workbench";
+
+pub fn operate_bioworlds_federated_context_research_workbench_json(value: &Value) -> Result<Value, String> {
+    let request: FederatedContextWorkbenchRequest = serde_json::from_value(
+        value.get("request").cloned().ok_or("request is required")?,
+    ).map_err(|error| format!("invalid bioworlds federated context workbench request: {error}"))?;
+    let receipt = compile_federated_continual_context_workbench(&request).map_err(|error: FederatedContextWorkbenchError| error.to_string())?;
+    serde_json::to_value(receipt).map_err(|error| format!("cannot serialize bioworlds federated context workbench receipt: {error}"))
+}
+
+pub fn validate_bioworlds_federated_context_research_workbench_json(value: &Value) -> Result<FederatedContextWorkbenchReceipt, String> {
+    let receipt: FederatedContextWorkbenchReceipt = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid bioworlds federated context workbench receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != FEDERATED_CONTEXT_RESEARCH_WORKBENCH_FEATURE_ID || receipt.contract_version != FEDERATED_CONTEXT_RESEARCH_WORKBENCH_CONTRACT_VERSION {
+        return Err("bioworlds federated context workbench identity mismatch".into());
+    }
+    Ok(receipt)
 }
 
 pub fn run_atlashub_mechanism_exploration_assurance_json(value: &Value) -> Result<Value, String> {

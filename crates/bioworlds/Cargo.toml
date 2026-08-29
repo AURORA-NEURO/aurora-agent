@@ -5,6 +5,7 @@ edition = "2021"
 description = "Reference bioworlds and vertical slices: worlds built to make blocked platform claims exercisable"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
 bioprism-world = { workspace = true }
