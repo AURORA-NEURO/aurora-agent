@@ -253,6 +253,7 @@ from .autonomous_model_inventory import (
     AutonomousModelInventoryCoordinator,
     AutonomousModelInventoryError,
     AutonomousModelInventoryPersistenceCoordinator,
+    AutonomousModelInventoryReadiness,
     AutonomousModelInventorySnapshot,
     AutonomousModelInventoryStore,
 )
@@ -17595,6 +17596,40 @@ class AutonomousAgent:
             raise BrainRunError("model inventory restore failed") from error
         return None if snapshot is None else snapshot.to_dict()
 
+    def model_inventory_readiness(
+        self,
+        *,
+        domain_requirements: Mapping[str, Sequence[str]] | None = None,
+        estimated_input_tokens: int = 4_096,
+        requested_output_tokens: int = 1_024,
+    ) -> dict[str, Any]:
+        """Return a provider-free live eligibility projection for the model catalogue.
+
+        This complements ``refresh_model_inventory``: refresh performs authenticated discovery
+        and may mutate the caller-owned catalogue, while this method only joins the current
+        catalogue with the reviewed domain requirements and live runtime gates. It is safe to
+        call from a readiness screen before a user has supplied any credential.
+        """
+
+        if domain_requirements is None:
+            domain_requirements = {
+                domain: tuple(self.orchestrator.registry.resolve(domain).required_model_capabilities)
+                for domain in AUTONOMOUS_DOMAINS
+            }
+        try:
+            report = self.model_inventory.readiness(
+                domain_requirements=domain_requirements,
+                estimated_input_tokens=estimated_input_tokens,
+                requested_output_tokens=requested_output_tokens,
+            )
+        except Exception as error:
+            if isinstance(error, BrainRunError):
+                raise
+            raise BrainRunError("model inventory readiness projection failed") from error
+        if not isinstance(report, AutonomousModelInventoryReadiness):
+            raise BrainRunError("model inventory coordinator returned an invalid readiness report")
+        return report.to_dict()
+
     def flush_model_inventory(
         self,
         snapshot_store: AutonomousModelInventoryStore,
@@ -21631,6 +21666,7 @@ class AutonomousAgent:
                 "execution": "readiness_projection_only;no_learning_mutation",
                 "secret_material": "never_returned",
             }
+        model_inventory_readiness = self.model_inventory_readiness()
         learning["selection_promotion"] = {
             "configured": promotion_report is not None or promotion_state is not None,
             "required": require_promoted_selection,
@@ -21656,6 +21692,7 @@ class AutonomousAgent:
                 tuple(sorted(provider_names))
             ),
             "provider_health": health,
+            "model_inventory_readiness": model_inventory_readiness,
             "domains": domain_rows,
             "model_capability_coverage": self.model_capability_coverage(),
             "domain_learning_coverage": learning,

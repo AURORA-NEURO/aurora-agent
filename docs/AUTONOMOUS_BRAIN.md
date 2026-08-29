@@ -3381,6 +3381,27 @@ registered/replaced/removed model IDs, a catalogue digest, and static capability
 twelve domain packs. Coverage is evidence about declared capabilities only; credentials, health,
 circuit, economics, and semantic quality remain live selection gates.
 
+For a provider-free live gate view, call `agent.model_inventory_readiness()` after registering the
+catalogue (or after a successful inventory refresh):
+
+```python
+readiness = agent.model_inventory_readiness(
+    estimated_input_tokens=4_096,
+    requested_output_tokens=1_024,
+)
+```
+
+This separate digest-bound projection reports each domain's compatible and eligible
+`provider/model` arms. Compatibility requires an enabled candidate with every reviewed model
+capability and enough context/output capacity. Eligibility additionally requires a registered
+runtime provider, a ready caller-owned credential when needed, and a closed provider circuit.
+Ineligible arms remain visible as metadata so an operator can distinguish a capability gap from a
+missing credential, an unregistered transport, or a circuit hold. The projection performs no
+discovery, provider invocation, prompt assembly, tool execution, evaluator update, or learning
+mutation, and it never replaces evaluator evidence or launch approval. Python's legacy `0.1`
+discovery snapshot remains unchanged for persisted data; the readiness report is an additive
+`bioprism-python-autonomous-model-inventory-readiness/0.1` artifact.
+
 `AutonomousModelInventoryStore` uses an atomic, digest-checked JSON snapshot containing only
 bounded metadata. It rejects tampered snapshots and never stores prompts, response bodies,
 authorization headers, keys, or opaque credential handles.

@@ -609,6 +609,15 @@ answer = run.result                 # transient caller-owned provider result
 safe_event = run.to_dict()          # no result text, keys, or handles
 ```
 
+For a provider-free model gate view, `agent.model_inventory_readiness()` joins the current
+catalogue with every built-in domain's reviewed model capabilities, requested token capacity,
+provider registration, opaque-credential readiness, and live circuit state. It returns a
+digest-bound `ready`/`partial`/`missing` report with compatible and eligible `provider/model` arms
+for each domain. This is an operator projection only: it performs no discovery or invocation,
+keeps ineligible metadata visible for diagnosis, and does not replace evaluator evidence, launch
+admission, or effect approval. The existing `0.1` persisted discovery snapshot remains
+backward-compatible; the readiness projection is additive.
+
 For domain-aware structured answers, Python exposes the same twelve-domain response contract as
 the TypeScript SDK through `structured_domain_response=True` on `prepare()`, `run()`,
 `prepare_auto()`, `run_auto()`, and cross-domain execution. The selected workflow is bound into a
