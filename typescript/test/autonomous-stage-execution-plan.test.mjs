@@ -14,6 +14,7 @@ import {
   builtinAutonomousDomainProfiles,
   compileAutonomousWorkflowStageExecutionPlan,
   digestJson,
+  validateAutonomousWorkflowStageExecutionPlan,
 } from "../dist/index.js";
 
 test("stage execution packets compile for every built-in domain and remain payload-free", async () => {
@@ -38,11 +39,43 @@ test("stage execution packets compile for every built-in domain and remain paylo
       assert.deepEqual(plan.capability_contract_digests, plan.capability_contracts.map((contract) => contract.contract_digest));
       const { stage_plan_digest: digest, capability_contract_digests: _contractDigests, credential_posture: _credentials, authority_posture: _authority, ...descriptor } = plan;
       assert.equal(await digestJson(descriptor), digest, `${profile.domain}/${stage.id} digest`);
+      const restored = await validateAutonomousWorkflowStageExecutionPlan(structuredClone(plan), { blueprint, stage });
+      assert.deepEqual(restored, plan, `${profile.domain}/${stage.id} replay`);
       assert.equal(await autonomousWorkflowStageContractDigest(profile.workflow, stage.id), await autonomousWorkflowStageContractDigest(blueprint.workflow, stage.id));
       assert.doesNotMatch(JSON.stringify(plan), /Prepare a bounded/);
       assert.doesNotMatch(JSON.stringify(plan), /api[_-]?key|bearer|private[_-]?key|refresh[_-]?token/i);
     }
   }
+});
+
+test("stage execution packet replay fails closed on digest, marker, contract, and workflow drift", async () => {
+  const agent = new AutonomousAgent(new LLMRuntime({ credentials: new CredentialStore() }));
+  const blueprint = (await agent.blueprint("Inspect a bounded coding repository", { domain: "coding", tools: [] })).blueprint;
+  assert.ok(blueprint);
+  const stage = blueprint.workflow.stages.find((candidate) => candidate.id === "inspect");
+  assert.ok(stage);
+  const packet = blueprint.stage_execution_plans.find((candidate) => candidate.stage_id === stage.id);
+  assert.ok(packet);
+
+  await assert.rejects(
+    () => validateAutonomousWorkflowStageExecutionPlan({ ...structuredClone(packet), stage_plan_digest: "0".repeat(64) }, { blueprint, stage }),
+    /digest/,
+  );
+  await assert.rejects(
+    () => validateAutonomousWorkflowStageExecutionPlan({ ...structuredClone(packet), authority_posture: "caller_authorized" }, { blueprint, stage }),
+    /authority posture/,
+  );
+  const forgedContract = structuredClone(packet);
+  forgedContract.capability_contracts[0].capability = "forged_capability";
+  await assert.rejects(
+    () => validateAutonomousWorkflowStageExecutionPlan(forgedContract, { blueprint, stage }),
+    /digest/,
+  );
+  const forgedStage = { ...stage, objective: `${stage.objective} (drifted)` };
+  await assert.rejects(
+    () => validateAutonomousWorkflowStageExecutionPlan(packet, { blueprint, stage: forgedStage }),
+    /stage contract/,
+  );
 });
 
 test("stage dispatch rejects stale stage contracts and unselected tools before adapter execution", async () => {

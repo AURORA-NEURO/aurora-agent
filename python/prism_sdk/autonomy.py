@@ -7504,6 +7504,169 @@ def compile_autonomous_workflow_stage_execution_plan(
     )
 
 
+def validate_autonomous_workflow_stage_execution_plan(
+    value: Mapping[str, Any] | AutonomousWorkflowStageExecutionPlan,
+    *,
+    blueprint: AutonomousTaskBlueprint | None = None,
+    stage: AutonomousWorkflowStage | None = None,
+) -> AutonomousWorkflowStageExecutionPlan:
+    """Reconstruct and verify a persisted stage packet before workflow admission.
+
+    Stage packets are intentionally small metadata handoffs, but they still control which
+    capabilities and tools a later worker may present to a provider.  Treating a JSON packet as
+    trusted merely because it contains a 64-character digest would leave a restart boundary
+    vulnerable to changed fields, stale capability contracts, or an execution-posture downgrade.
+    This validator reconstructs the typed packet, checks every derived digest and safety marker,
+    and optionally binds it to the live reviewed blueprint and stage.  It never accepts task text,
+    provider values, credentials, arguments, or effect authority.
+    """
+
+    if isinstance(value, AutonomousWorkflowStageExecutionPlan):
+        raw: Mapping[str, Any] = value.to_dict()
+    elif isinstance(value, Mapping):
+        raw = value
+    else:
+        raise BrainRunError("workflow stage execution plan must be a mapping")
+    allowed = {
+        "schema",
+        "domain",
+        "workflow_id",
+        "workflow_digest",
+        "stage_id",
+        "stage_objective",
+        "required_capabilities",
+        "tool_capabilities",
+        "capability_contracts",
+        "required_model_capabilities",
+        "evidence_outputs",
+        "evaluator_signals",
+        "active_tool_names",
+        "selected_tool_names",
+        "withheld_tool_names",
+        "approval_required",
+        "read_only",
+        "execution_posture",
+        "source_plan_digest",
+        "stage_plan_digest",
+        "capability_contract_digests",
+        "credential_posture",
+        "authority_posture",
+    }
+    if set(raw) != allowed:
+        raise BrainRunError("workflow stage execution plan has unexpected or missing fields")
+    normalized = _safe_json(
+        "workflow stage execution plan",
+        raw,
+        maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES,
+    )
+    if not isinstance(normalized, Mapping):
+        raise BrainRunError("workflow stage execution plan must remain a mapping")
+    if normalized.get("schema") != AUTONOMOUS_WORKFLOW_STAGE_PLAN_SCHEMA:
+        raise BrainRunError("workflow stage execution plan schema is invalid")
+    if normalized.get("credential_posture") != "caller_supplied_opaque_handles; no_keys_or_handles":
+        raise BrainRunError("workflow stage execution plan credential posture is invalid")
+    if normalized.get("authority_posture") != "metadata_only; stage_plan_does_not_grant_authority":
+        raise BrainRunError("workflow stage execution plan authority posture is invalid")
+
+    packet = AutonomousWorkflowStageExecutionPlan(
+        domain=normalized.get("domain"),
+        workflow_id=normalized.get("workflow_id"),
+        workflow_digest=normalized.get("workflow_digest"),
+        stage_id=normalized.get("stage_id"),
+        stage_objective=normalized.get("stage_objective"),
+        required_capabilities=normalized.get("required_capabilities"),
+        tool_capabilities=normalized.get("tool_capabilities"),
+        capability_contracts=normalized.get("capability_contracts"),
+        required_model_capabilities=normalized.get("required_model_capabilities"),
+        evidence_outputs=normalized.get("evidence_outputs"),
+        evaluator_signals=normalized.get("evaluator_signals"),
+        active_tool_names=normalized.get("active_tool_names"),
+        selected_tool_names=normalized.get("selected_tool_names"),
+        withheld_tool_names=normalized.get("withheld_tool_names"),
+        approval_required=normalized.get("approval_required"),
+        read_only=normalized.get("read_only"),
+        execution_posture=normalized.get("execution_posture"),
+        source_plan_digest=normalized.get("source_plan_digest"),
+    )
+    supplied_digest = normalized.get("stage_plan_digest")
+    _workflow_digest(supplied_digest, "workflow stage execution plan stage_plan_digest")
+    if supplied_digest != packet.stage_plan_digest:
+        raise BrainRunError("workflow stage execution plan digest does not match its contents")
+    supplied_contract_digests = normalized.get("capability_contract_digests")
+    if not isinstance(supplied_contract_digests, Sequence) or isinstance(
+        supplied_contract_digests, (str, bytes)
+    ):
+        raise BrainRunError("workflow stage execution plan capability_contract_digests must be a sequence")
+    normalized_contract_digests = tuple(
+        _workflow_digest(item, "workflow stage execution plan capability_contract_digest")
+        for item in supplied_contract_digests
+    )
+    if normalized_contract_digests != packet.capability_contract_digests:
+        raise BrainRunError("workflow stage execution plan capability contract digests are inconsistent")
+    if set(packet.selected_tool_names).difference(packet.active_tool_names):
+        raise BrainRunError("workflow stage execution plan selected tools must be active")
+    if set(packet.active_tool_names).intersection(packet.withheld_tool_names):
+        raise BrainRunError("workflow stage execution plan active and withheld tools overlap")
+    expected_posture = (
+        "approval_gated"
+        if packet.approval_required
+        else "tool_backed"
+        if packet.selected_tool_names
+        else "provider_only_or_blocked"
+    )
+    if packet.execution_posture != expected_posture:
+        raise BrainRunError("workflow stage execution plan execution_posture is inconsistent")
+
+    for contract in packet.capability_contracts:
+        contract_digest = contract.get("contract_digest")
+        _workflow_digest(contract_digest, "workflow stage execution plan capability contract contract_digest")
+        descriptor = {
+            key: value
+            for key, value in contract.items()
+            if key not in {"contract_digest", "adapter_posture", "credential_posture", "authority_posture"}
+        }
+        if content_digest(descriptor) != contract_digest:
+            raise BrainRunError("workflow stage execution plan capability contract digest is invalid")
+        if contract.get("schema") != AUTONOMOUS_CAPABILITY_CONTRACT_SCHEMA:
+            raise BrainRunError("workflow stage execution plan capability contract schema is invalid")
+        if contract.get("adapter_posture") != "exact_capability_aliases_only":
+            raise BrainRunError("workflow stage execution plan capability contract adapter posture is invalid")
+        if contract.get("credential_posture") != "caller_supplied_opaque_handles":
+            raise BrainRunError("workflow stage execution plan capability contract credential posture is invalid")
+        if contract.get("authority_posture") != "metadata_only; no_provider_or_effect_authority":
+            raise BrainRunError("workflow stage execution plan capability contract authority posture is invalid")
+
+    if stage is not None:
+        if not isinstance(stage, AutonomousWorkflowStage):
+            raise BrainRunError("workflow stage execution plan stage binding is invalid")
+        if packet.stage_id != stage.id:
+            raise BrainRunError("workflow stage execution plan stage binding does not match")
+        if packet.stage_objective != stage.objective:
+            raise BrainRunError("workflow stage execution plan stage objective does not match")
+        if packet.required_capabilities != stage.required_capabilities:
+            raise BrainRunError("workflow stage execution plan stage capabilities do not match")
+        if packet.evidence_outputs != stage.evidence_outputs or packet.evaluator_signals != stage.evaluator_signals:
+            raise BrainRunError("workflow stage execution plan stage evidence contract does not match")
+        if packet.approval_required != stage.approval_required or packet.read_only != stage.read_only:
+            raise BrainRunError("workflow stage execution plan stage safety posture does not match")
+
+    if blueprint is not None:
+        if not isinstance(blueprint, AutonomousTaskBlueprint):
+            raise BrainRunError("workflow stage execution plan blueprint binding is invalid")
+        if packet.domain != blueprint.profile.domain:
+            raise BrainRunError("workflow stage execution plan blueprint domain does not match")
+        if packet.workflow_id != blueprint.workflow.workflow_id or packet.workflow_digest != blueprint.workflow.workflow_digest:
+            raise BrainRunError("workflow stage execution plan blueprint workflow does not match")
+        if packet.required_model_capabilities != blueprint.required_capabilities:
+            raise BrainRunError("workflow stage execution plan blueprint model capabilities do not match")
+        reviewed = next((item for item in blueprint.workflow.stages if item.id == packet.stage_id), None)
+        if reviewed is None:
+            raise BrainRunError("workflow stage execution plan stage is outside the blueprint workflow")
+        validate_autonomous_workflow_stage_execution_plan(packet, stage=reviewed)
+
+    return packet
+
+
 @dataclass(frozen=True, slots=True)
 class AutonomousWorkflowStageResult:
     """One executed stage plus its bounded model contract and caller-visible result."""
@@ -7520,6 +7683,7 @@ class AutonomousWorkflowStageResult:
     response_digest: str | None = None
     stage_execution_plan: Mapping[str, Any] | None = None
     response_evaluation: Mapping[str, Any] | None = None
+    stage_execution_metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.execution_status not in AUTONOMOUS_WORKFLOW_EXECUTION_STATUSES:
@@ -7544,10 +7708,21 @@ class AutonomousWorkflowStageResult:
             object.__setattr__(
                 self,
                 "stage_execution_plan",
-                _safe_json(
-                    "workflow stage execution plan",
+                validate_autonomous_workflow_stage_execution_plan(
                     self.stage_execution_plan,
-                    maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_PLAN_BYTES,
+                    stage=self.stage,
+                ).to_dict(),
+            )
+        if self.stage_execution_metadata is not None:
+            if not isinstance(self.stage_execution_metadata, Mapping):
+                raise BrainRunError("workflow stage execution metadata must be a mapping or None")
+            object.__setattr__(
+                self,
+                "stage_execution_metadata",
+                _safe_json(
+                    "workflow stage execution metadata",
+                    self.stage_execution_metadata,
+                    maximum=64_000,
                 ),
             )
         object.__setattr__(self, "evidence", _sequence("workflow stage evidence", self.evidence, maximum=MAX_AUTONOMOUS_WORKFLOW_STAGE_EVIDENCE))
@@ -7615,6 +7790,9 @@ class AutonomousWorkflowStageResult:
             "response_evaluation": None
             if self.response_evaluation is None
             else dict(self.response_evaluation),
+            "stage_execution_metadata": None
+            if self.stage_execution_metadata is None
+            else dict(self.stage_execution_metadata),
             "result": None if self.result is None else self.result.to_dict(),
             "retention": "provider_result_returned_to_caller; checkpoint_is_structured_only",
         }
@@ -29425,6 +29603,7 @@ __all__ = [
     "AutonomousCapabilityContract",
     "AutonomousWorkflowStageExecutionPlan",
     "compile_autonomous_workflow_stage_execution_plan",
+    "validate_autonomous_workflow_stage_execution_plan",
     "compile_autonomous_domain_execution_plan",
     "AutonomousRouteCandidate",
     "AutonomousRouteProposal",

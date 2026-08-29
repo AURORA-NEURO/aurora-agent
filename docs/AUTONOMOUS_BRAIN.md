@@ -13362,3 +13362,24 @@ can bind the policy to the resumed domain. Decision replay normalizes this polic
 approval requirements, so changing a token budget, evidence requirement, effect mode, or learning
 mode while preserving the old digest is rejected. High-level agents expose matching
 `validate_domain_policy(...)` / `validateDomainPolicy(...)` helpers for worker and UI restart paths.
+
+### Restart-safe workflow stage execution replay
+
+The stage packet is the final metadata handoff before a durable workflow can select its exact
+capabilities and provider-visible tools. Both SDKs now expose
+`validate_autonomous_workflow_stage_execution_plan(...)` /
+`validateAutonomousWorkflowStageExecutionPlan(...)`. It accepts only the canonical 23-field
+packet, enforces bounded identifiers and arrays, verifies the stage-plan digest, verifies every
+nested capability contract and its digest, checks the capability digest list, and preserves the
+exact no-credentials/no-authority markers. Selected tools must be active, active and withheld
+tools cannot overlap, and the execution posture must agree with the approval flag and selected
+tool set.
+
+The validator can additionally bind the packet to the current task blueprint and reviewed stage.
+That binding rejects workflow/domain/model-capability drift, packets from a different plan, stages
+outside the workflow, and changed stage objectives or evidence/evaluator contracts. The Python
+stage-result boundary invokes it before a rehydrated packet is checkpointed; the TypeScript stage
+compiler returns a validator-normalized packet. Rehydration therefore proves packet integrity
+without importing task text, arguments, provider values, credentials, or effect authority, and
+still leaves provider, tool, evidence, evaluator, learning, and effect approvals as independent
+gates.

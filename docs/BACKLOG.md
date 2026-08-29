@@ -2470,3 +2470,12 @@ marker/shape/tampering drift, and optionally bind the policy to the resumed doma
 normalizes this policy before recomputing approval posture, and high-level agents expose matching
 policy validation helpers. This prevents a stale or modified budget/effect/evidence policy from
 crossing a restart boundary under an otherwise valid digest.
+
+Workflow stage execution packets now have an independent restart validator in both SDKs. The
+validator reconstructs the allow-listed stage handoff, verifies the packet digest and every nested
+capability-contract digest, checks exact credential/authority markers, rejects selected/active/
+withheld tool inconsistencies, and optionally binds the packet to the live blueprint and reviewed
+stage. The compiler returns only validated packets, and Python stage-result construction validates
+caller-rehydrated packets before checkpointing. All twelve domains are covered by replay, tamper,
+marker, contract, workflow-drift, and stage-dispatch tests. The packet remains metadata-only: it
+contains no task text, provider output, credentials, arguments, or effect authority.

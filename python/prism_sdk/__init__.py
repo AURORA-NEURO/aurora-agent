@@ -736,6 +736,7 @@ from .autonomy import (
     AutonomousCapabilityContract,
     AutonomousWorkflowStageExecutionPlan,
     compile_autonomous_workflow_stage_execution_plan,
+    validate_autonomous_workflow_stage_execution_plan,
     compile_autonomous_domain_execution_plan,
     AutonomousRouteCandidate,
     AutonomousRouteProposal,

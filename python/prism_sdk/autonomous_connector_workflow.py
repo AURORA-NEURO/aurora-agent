@@ -463,23 +463,22 @@ class AutonomousConnectorWorkflowAdapter:
         receipt: Any | None,
         *,
         dispatch: str,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         compiled = compile_autonomous_workflow_stage_execution_plan(
             context.blueprint,
             context.stage,
             provider_tools=(),
         )
-        packet = compiled.to_dict()
-        packet.update(
-            {
-                "connector_selection_plan_digest": selection_plan.plan_digest,
-                "connector_dispatch": dispatch,
-                "connector_receipt": None if receipt is None else receipt.to_dict(),
-                "connector_value_retained": False,
-                "connector_execution": "caller_owned_executor;provider_invocation_not_implied",
-            }
-        )
-        return packet
+        return compiled.to_dict(), {
+            "schema": AUTONOMOUS_CONNECTOR_WORKFLOW_ADAPTER_SCHEMA,
+            "connector_selection_plan_digest": selection_plan.plan_digest,
+            "connector_dispatch": dispatch,
+            "connector_receipt": None if receipt is None else receipt.to_dict(),
+            "connector_value_retained": False,
+            "connector_execution": "caller_owned_executor;provider_invocation_not_implied",
+            "retention": "metadata_only;connector_value_transient",
+            "secret_material": "never_returned",
+        }
 
     @staticmethod
     def _structured(
@@ -527,7 +526,7 @@ class AutonomousConnectorWorkflowAdapter:
             raise ArgumentError("connector workflow execute_stage requires typed context")
         selection_plan, contract = self._select_plan(context)
         if context.stage.approval_required and not self.approved:
-            stage_plan = self._stage_plan(context, selection_plan, None, dispatch="approval_not_granted")
+            stage_plan, stage_metadata = self._stage_plan(context, selection_plan, None, dispatch="approval_not_granted")
             stage_result = AutonomousWorkflowStageResult(
                 stage=context.stage,
                 execution_status="approval_required",
@@ -537,6 +536,7 @@ class AutonomousConnectorWorkflowAdapter:
                 validation_errors=("connector_stage_approval_required",),
                 attempt=context.stage_attempt,
                 stage_execution_plan=stage_plan,
+                stage_execution_metadata=stage_metadata,
             )
             return AutonomousConnectorWorkflowStageExecution(stage_result, None, selection_plan)
         stable_attempt = 1 if self.evidence_runtime is not None else None
@@ -571,6 +571,12 @@ class AutonomousConnectorWorkflowAdapter:
         )
         payload, recovery_required = self._rehydrate(dispatch_result)
         if recovery_required:
+            stage_plan, stage_metadata = self._stage_plan(
+                context,
+                selection_plan,
+                dispatch_result.receipt,
+                dispatch="replayed_recovery_required",
+            )
             stage_result = AutonomousWorkflowStageResult(
                 stage=context.stage,
                 execution_status="paused",
@@ -579,12 +585,8 @@ class AutonomousConnectorWorkflowAdapter:
                 structured=None,
                 uncertainty=("connector_payload_rehydration_required",),
                 attempt=context.stage_attempt,
-                stage_execution_plan=self._stage_plan(
-                    context,
-                    selection_plan,
-                    dispatch_result.receipt,
-                    dispatch="replayed_recovery_required",
-                ),
+                stage_execution_plan=stage_plan,
+                stage_execution_metadata=stage_metadata,
             )
             return AutonomousConnectorWorkflowStageExecution(
                 stage_result,
@@ -620,7 +622,7 @@ class AutonomousConnectorWorkflowAdapter:
             execution_status = "completed"
         else:
             execution_status = "provider_failed"
-        stage_plan = self._stage_plan(context, selection_plan, receipt, dispatch="completed")
+        stage_plan, stage_metadata = self._stage_plan(context, selection_plan, receipt, dispatch="completed")
         response_digest = None
         if structured is not None:
             response_digest = content_digest(
@@ -643,6 +645,7 @@ class AutonomousConnectorWorkflowAdapter:
             attempt=context.stage_attempt,
             response_digest=response_digest,
             stage_execution_plan=stage_plan,
+            stage_execution_metadata=stage_metadata,
         )
         return AutonomousConnectorWorkflowStageExecution(stage_result, dispatch_result, selection_plan)
 

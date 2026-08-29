@@ -15,6 +15,7 @@ from prism_sdk import (
     BrainLearningLedger,
     BrainRunError,
     compile_autonomous_workflow_stage_execution_plan,
+    validate_autonomous_workflow_stage_execution_plan,
     DomainEvaluationEvidence,
     LLMRuntime,
     ModelCatalogue,
@@ -670,6 +671,12 @@ def test_stage_execution_plan_narrows_tools_and_binds_evidence_contracts():
     assert stage_plan.evaluator_signals == ("evidence_complete",)
     assert stage_plan.stage_plan_digest
     assert len(stage_plan.capability_contract_digests) == 2
+    restored = validate_autonomous_workflow_stage_execution_plan(
+        json.loads(json.dumps(stage_plan.to_dict())),
+        blueprint=blueprint,
+        stage=inspect,
+    )
+    assert restored.to_dict() == stage_plan.to_dict()
     public = json.dumps(stage_plan.to_dict())
     assert "inspect a bounded repository failure" not in public
     assert "api_key" not in public
@@ -713,6 +720,32 @@ def test_workflow_stage_plan_is_retained_in_checkpoint_and_learning_evidence():
     assert evidence["selected_tool_names"] == []
 
 
+def test_workflow_stage_plan_validator_rejects_digest_marker_and_contract_drift():
+    agent = AutonomousAgent(
+        _Workspace(),
+        LLMRuntime(),
+        model_catalogue=ModelCatalogue([_model()]),
+    )
+    blueprint = agent.prepare(task="prepare a bounded coding workflow", domain="coding")
+    stage = next(item for item in blueprint.workflow.stages if item.id == "inspect")
+    packet = compile_autonomous_workflow_stage_execution_plan(blueprint, stage)
+
+    tampered_digest = packet.to_dict()
+    tampered_digest["stage_plan_digest"] = "0" * 64
+    with pytest.raises(BrainRunError, match="digest"):
+        validate_autonomous_workflow_stage_execution_plan(tampered_digest, blueprint=blueprint, stage=stage)
+
+    tampered_marker = packet.to_dict()
+    tampered_marker["authority_posture"] = "caller_authorized"
+    with pytest.raises(BrainRunError, match="authority posture"):
+        validate_autonomous_workflow_stage_execution_plan(tampered_marker, blueprint=blueprint, stage=stage)
+
+    tampered_contract = packet.to_dict()
+    tampered_contract["capability_contracts"][0]["capability"] = "forged_capability"
+    with pytest.raises(BrainRunError, match="contract"):
+        validate_autonomous_workflow_stage_execution_plan(tampered_contract, blueprint=blueprint, stage=stage)
+
+
 def test_stage_execution_plan_compiles_every_stage_in_every_builtin_domain():
     agent = AutonomousAgent(
         _Workspace(),
@@ -739,6 +772,10 @@ def test_stage_execution_plan_compiles_every_stage_in_every_builtin_domain():
             assert stage_plan.evidence_outputs == stage.evidence_outputs
             assert stage_plan.evaluator_signals == stage.evaluator_signals
             assert stage_plan.stage_plan_digest
+            restored = validate_autonomous_workflow_stage_execution_plan(
+                stage_plan.to_dict(), blueprint=blueprint, stage=stage
+            )
+            assert restored.stage_plan_digest == stage_plan.stage_plan_digest
 
     assert len(compiled) == expected_count
     assert len(compiled) >= len(AUTONOMOUS_DOMAINS) * 4
