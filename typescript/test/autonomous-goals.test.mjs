@@ -45,6 +45,12 @@ import {
   validateAutonomousGoalSchedule,
   validateAutonomousGoalSnapshot,
   validateAutonomousGoalRecoveryReport,
+  InMemoryAutonomousGoalPreviewAdmissionLedger,
+  TransactionalJsonAutonomousGoalPreviewAdmissionSnapshotPersistence,
+  AutonomousGoalPreviewAdmissionPersistenceCoordinator,
+  createAutonomousGoalPreviewAdmissionRecord,
+  reviewAutonomousGoalPreviewAdmissionRecord,
+  verifyAutonomousGoalPreviewApproval,
 } from "../dist/index.js";
 
 test("goal scheduler prioritizes dependency-closed work across every domain", () => {
@@ -162,6 +168,74 @@ test("goal control loop requires an unchanged preview before dispatch", async ()
   });
   assert.equal(result.stop_reason, "run_budget_exhausted");
   assert.deepEqual(calls, { resolve: 1, execute: 1 });
+});
+
+test("goal preview admission is operator-reviewed, expiring, persisted, and all-domain bound", async () => {
+  const domains = [...AUTONOMOUS_DOMAIN_NAMES];
+  const ledger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 100 });
+  for (const domain of domains) ledger.create({ goal_id: `approval-${domain}`, task_digest: goalTaskDigest(`approval task ${domain}`), domain, now_ns: 0 });
+  const calls = { resolve: 0, execute: 0 };
+  const resolve = (goal) => { calls.resolve += 1; return { task: `approval task ${goal.domain}` }; };
+  const execute = () => { calls.execute += 1; return { status: "completed" }; };
+  const schedule_options = { now_ns: 100, max_selected: domains.length, max_concurrent: domains.length, required_domains: domains };
+  const loop = new AutonomousGoalControlLoop({ worker: new AutonomousGoalWorker({ ledger, resolver: resolve, executor: execute }) });
+  const preview = loop.preview({ schedule_options });
+  const admissions = new InMemoryAutonomousGoalPreviewAdmissionLedger({ max_records: 4 });
+  const submitted = admissions.submit(preview, {
+    admission_id: "all-domain-preview",
+    issued_at_ns: 100,
+    expires_at_ns: 100 + 1_000_000_000,
+    requested_by_digest: digestJsonSync("operator-requester"),
+    reason: "operator review of the exact all-domain admission",
+  });
+  const approved = admissions.review("all-domain-preview", {
+    approved: true,
+    reviewer_digest: digestJsonSync("operator-reviewer"),
+    reason: "approved after reviewing the bounded schedule",
+    expected_record_digest: submitted.record_digest,
+  });
+  assert.equal(verifyAutonomousGoalPreviewApproval(approved, { current_preview_digest: preview.preview_digest, now_ns: 100 }).status, "approved");
+  assert.throws(() => verifyAutonomousGoalPreviewApproval(approved, { current_preview_digest: preview.preview_digest, now_ns: approved.expires_at_ns }), /expired/);
+
+  const rejectedSubmitted = admissions.submit(preview, { admission_id: "rejected-preview", issued_at_ns: 100, expires_at_ns: 100 + 1_000_000_000 });
+  const rejected = admissions.review("rejected-preview", { approved: false, reviewer_digest: digestJsonSync("operator-reviewer"), expected_record_digest: rejectedSubmitted.record_digest });
+  assert.throws(() => verifyAutonomousGoalPreviewApproval(rejected, { current_preview_digest: preview.preview_digest, now_ns: 100 }), /not approved/);
+
+  const tampered = structuredClone(approved);
+  tampered.preview_digest = "0".repeat(64);
+  assert.throws(() => admissions.put(tampered), /digest/);
+
+  let encoded = null;
+  const persistence = new TransactionalJsonAutonomousGoalPreviewAdmissionSnapshotPersistence({
+    read: () => encoded,
+    write: (value) => { encoded = value; },
+    writeIfUnchanged: (expected, value) => {
+      const actual = encoded === null ? null : JSON.parse(encoded).snapshot_digest;
+      if (actual !== expected) return false;
+      encoded = value;
+      return true;
+    },
+  });
+  const coordinator = new AutonomousGoalPreviewAdmissionPersistenceCoordinator(admissions, persistence);
+  const firstSnapshot = await coordinator.flush();
+  const restored = new InMemoryAutonomousGoalPreviewAdmissionLedger({ max_records: 4 });
+  const restoredCoordinator = new AutonomousGoalPreviewAdmissionPersistenceCoordinator(restored, persistence);
+  assert.equal((await restoredCoordinator.restore()).snapshot_digest, firstSnapshot.snapshot_digest);
+  const staleCoordinator = new AutonomousGoalPreviewAdmissionPersistenceCoordinator(new InMemoryAutonomousGoalPreviewAdmissionLedger({ max_records: 4 }), persistence);
+  await staleCoordinator.restore();
+  admissions.submit(preview, { admission_id: "third-preview", issued_at_ns: 100, expires_at_ns: 100 + 1_000_000_000 });
+  await coordinator.flush();
+  await assert.rejects(() => staleCoordinator.flush(), /compare-and-swap/);
+
+  ledger.transition("approval-coding", "running", { expected_revision: 0, now_ns: 101 });
+  await assert.rejects(() => loop.run({ schedule_options, max_total_runs: domains.length, preview_approval: approved }), /expected_preview_digest|current preview/);
+  assert.deepEqual(calls, { resolve: 0, execute: 0 });
+
+  const freshLedger = new InMemoryAutonomousGoalLedger({ maxGoals: domains.length, clock: () => 100 });
+  for (const domain of domains) freshLedger.create({ goal_id: `approval-${domain}`, task_digest: goalTaskDigest(`approval task ${domain}`), domain, now_ns: 0 });
+  const result = await new AutonomousGoalControlLoop({ worker: new AutonomousGoalWorker({ ledger: freshLedger, resolver: resolve, executor: execute }) }).run({ schedule_options, max_total_runs: domains.length, preview_approval: approved });
+  assert.equal(result.stop_reason, "all_terminal");
+  assert.deepEqual(calls, { resolve: domains.length, execute: domains.length });
 });
 
 test("goal scheduler enforces cycles, budgets, retry policy, and stale claims", () => {

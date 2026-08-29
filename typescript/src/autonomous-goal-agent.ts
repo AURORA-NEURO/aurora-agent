@@ -31,6 +31,7 @@ import {
   type AutonomousGoalRecoveryReport,
 } from "./autonomous-goal-recovery.js";
 import type { AutonomousGoalControlLoopCheckpoint } from "./autonomous-goal-control-persistence.js";
+import type { AutonomousGoalPreviewAdmissionRecord } from "./autonomous-goal-preview.js";
 import {
   AutonomousGoalWorker,
   type AutonomousGoalExecutionRequest,
@@ -85,6 +86,7 @@ export interface AutonomousGoalAgentLoopRunOptions {
   resume_snapshot?: AutonomousGoalControlLoopCheckpoint | null;
   checkpoint?: (snapshot: AutonomousGoalControlLoopCheckpoint) => unknown | Promise<unknown>;
   expected_preview_digest?: string;
+  preview_approval?: AutonomousGoalPreviewAdmissionRecord;
 }
 
 export interface AutonomousGoalAgentTraceOptions extends Omit<AutonomousGoalAgentLoopRunOptions, "run_id"> {
@@ -401,7 +403,7 @@ export class AutonomousGoalAgentRuntime {
 
   run(options: AutonomousGoalAgentLoopRunOptions = {}): Promise<AutonomousGoalControlLoopResult> {
     if (this.recovery === undefined) return this.loop.run(options);
-    if (options.expected_preview_digest !== undefined) fail("expected_preview_digest cannot be combined with recovery-owned resume");
+    if (options.expected_preview_digest !== undefined || options.preview_approval !== undefined) fail("preview admission cannot be combined with recovery-owned resume");
     if (options.checkpoint !== undefined) fail("checkpoint is owned by the recovery coordinator");
     return this.recovery.resume(this.loop, {
       ...options,

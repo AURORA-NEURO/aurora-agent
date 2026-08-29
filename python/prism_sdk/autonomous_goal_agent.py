@@ -454,10 +454,11 @@ class AutonomousGoalAgentRuntime:
         resume_snapshot: Mapping[str, Any] | None = None,
         checkpoint: GoalLoopCheckpoint | None = None,
         expected_preview_digest: str | None = None,
+        preview_approval: Mapping[str, Any] | None = None,
     ) -> AutonomousGoalControlLoopResult:
         if self.recovery is not None:
-            if expected_preview_digest is not None:
-                _fail("expected_preview_digest cannot be combined with recovery-owned resume")
+            if expected_preview_digest is not None or preview_approval is not None:
+                _fail("preview admission cannot be combined with recovery-owned resume")
             if checkpoint is not None:
                 _fail("checkpoint is owned by the recovery coordinator")
             if resume_snapshot is not None:
@@ -472,6 +473,7 @@ class AutonomousGoalAgentRuntime:
                     "run_id": run_id,
                     "checkpoint": self.recovery.checkpoint,
                     "expected_preview_digest": expected_preview_digest,
+                    "preview_approval": preview_approval,
                 },
             )
         return self.loop.run(
@@ -483,6 +485,7 @@ class AutonomousGoalAgentRuntime:
             resume_snapshot=resume_snapshot,
             checkpoint=checkpoint,
             expected_preview_digest=expected_preview_digest,
+            preview_approval=preview_approval,
         )
 
     def preview(self, *, schedule_options: Mapping[str, Any] | None = None) -> AutonomousGoalControlLoopPreview:
@@ -503,6 +506,7 @@ class AutonomousGoalAgentRuntime:
         resume_snapshot: Mapping[str, Any] | None = None,
         checkpoint: GoalLoopCheckpoint | None = None,
         expected_preview_digest: str | None = None,
+        preview_approval: Mapping[str, Any] | None = None,
     ) -> AutonomousGoalAgentTracedRunResult:
         if not all(callable(getattr(trace_store, name, None)) for name in ("append", "events")):
             _fail("run_with_trace requires a trace store")
@@ -554,6 +558,7 @@ class AutonomousGoalAgentRuntime:
                 resume_snapshot=resume_snapshot,
                 checkpoint=checkpoint,
                 expected_preview_digest=expected_preview_digest,
+                preview_approval=preview_approval,
             )
             session.record(
                 phase="learning_prepared",

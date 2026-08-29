@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections.abc import Callable, Mapping, Sequence
 import math
+import time
 from typing import Any, Literal
 
 from .authoring import content_digest
@@ -22,6 +23,10 @@ from .autonomous_goal_control_persistence import (
     validate_autonomous_goal_control_loop_snapshot,
 )
 from .goals import AutonomousGoalError, AutonomousGoalLedger, AutonomousGoalRecord
+from .autonomous_goal_preview import (
+    validate_autonomous_goal_preview_admission_record,
+    verify_autonomous_goal_preview_approval,
+)
 
 
 GOAL_CONTROL_LOOP_SCHEMA = "bioprism-autonomous-goal-control-loop/0.1"
@@ -533,6 +538,7 @@ class AutonomousGoalControlLoop:
         resume_snapshot: Mapping[str, Any] | None = None,
         checkpoint: GoalLoopCheckpoint | None = None,
         expected_preview_digest: str | None = None,
+        preview_approval: Mapping[str, Any] | None = None,
     ) -> AutonomousGoalControlLoopResult:
         if schedule_options is not None and not isinstance(schedule_options, Mapping):
             _fail("schedule_options must be a mapping or None")
@@ -544,11 +550,20 @@ class AutonomousGoalControlLoop:
             _fail("resume_snapshot must be a mapping or None")
         if checkpoint is not None and not callable(checkpoint):
             _fail("checkpoint must be callable or None")
+        if preview_approval is not None and not isinstance(preview_approval, Mapping):
+            _fail("preview_approval must be a mapping or None")
         if expected_preview_digest is not None:
             _digest(expected_preview_digest, name="expected_preview_digest")
         max_cycles = _integer(max_cycles, name="max_cycles", minimum=1, maximum=MAX_GOAL_CONTROL_LOOP_CYCLES)
         max_total_runs = _integer(max_total_runs, name="max_total_runs", minimum=1, maximum=MAX_GOAL_CONTROL_LOOP_RUNS)
         base_options = {} if schedule_options is None else dict(schedule_options)
+        normalized_preview_approval: dict[str, Any] | None = None
+        if preview_approval is not None:
+            normalized_preview_approval = validate_autonomous_goal_preview_admission_record(preview_approval)
+            approval_digest = normalized_preview_approval["preview_digest"]
+            if expected_preview_digest is not None and expected_preview_digest != approval_digest:
+                _fail("expected_preview_digest does not match preview_approval")
+            expected_preview_digest = approval_digest
         if expected_preview_digest is not None:
             if options_factory is not None:
                 _fail("expected_preview_digest cannot be combined with options_factory")
@@ -563,6 +578,14 @@ class AutonomousGoalControlLoop:
             current_preview = self.preview(schedule_options=preview_options)
             if current_preview.preview_digest != expected_preview_digest:
                 _fail("expected_preview_digest does not match the current admission preview")
+            if normalized_preview_approval is not None:
+                raw_now = preview_options.get("now_ns")
+                approval_now = time.time_ns() if raw_now is None else _integer(raw_now, name="schedule_options.now_ns", minimum=0, maximum=2**63 - 1)
+                verify_autonomous_goal_preview_approval(
+                    normalized_preview_approval,
+                    current_preview_digest=current_preview.preview_digest,
+                    now_ns=approval_now,
+                )
         cycles: list[AutonomousGoalControlLoopCycle] = []
         history: list[dict[str, Any]] = []
         previous: dict[str, Any] | None = None

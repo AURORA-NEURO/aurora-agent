@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from prism_sdk.autonomy import AUTONOMOUS_DOMAINS, AutonomousAgent, AutonomousTaskOrchestrator
-from prism_sdk.authoring import canonical_json
+from prism_sdk.authoring import canonical_json, content_digest
 from prism_sdk.autonomous_action_admission_controller import AutonomousActionAdmissionController
 from prism_sdk.autonomous_action_admission_persistence import InMemoryAutonomousActionAdmissionLedger
 from prism_sdk.llm_runtime import LLMRuntime
@@ -34,6 +34,13 @@ from prism_sdk.autonomous_goal_control_persistence import (
     TransactionalJsonAutonomousGoalControlLoopSnapshotPersistence,
     seal_autonomous_goal_control_loop_snapshot,
     validate_autonomous_goal_control_loop_snapshot,
+)
+from prism_sdk.autonomous_goal_preview import (
+    InMemoryAutonomousGoalPreviewAdmissionLedger,
+    AutonomousGoalPreviewAdmissionPersistenceCoordinator,
+    TransactionalJsonAutonomousGoalPreviewAdmissionSnapshotPersistence,
+    create_autonomous_goal_preview_admission_record,
+    verify_autonomous_goal_preview_approval,
 )
 from prism_sdk.autonomous_goal_recovery import AutonomousGoalRecoveryCoordinator, validate_autonomous_goal_recovery_report
 from prism_sdk.autonomous_goal_agent import AutonomousGoalAgentRuntime
@@ -197,6 +204,104 @@ def test_goal_control_loop_requires_an_unchanged_preview_before_dispatch() -> No
     )
     assert result.stop_reason == "run_budget_exhausted"
     assert calls == {"resolve": 1, "execute": 1}
+
+
+def test_goal_preview_admission_is_operator_reviewed_expiring_persisted_and_all_domain_bound() -> None:
+    domains = tuple(AUTONOMOUS_DOMAINS)
+    ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=len(domains))
+    for domain in domains:
+        ledger.create(goal_id=f"approval-{domain}", task_digest=_digest(f"approval task {domain}"), domain=domain, now_ns=0)
+    calls = {"resolve": 0, "execute": 0}
+
+    def resolve(goal, _row):
+        calls["resolve"] += 1
+        return {"task": f"approval task {goal.domain}"}
+
+    def execute(_request):
+        calls["execute"] += 1
+        return {"status": "completed"}
+
+    options = {
+        "now_ns": 100,
+        "max_selected": len(domains),
+        "max_concurrent": len(domains),
+        "required_domains": list(domains),
+    }
+    loop = AutonomousGoalControlLoop(AutonomousGoalWorker(ledger, resolver=resolve, executor=execute))
+    preview = loop.preview(schedule_options=options)
+    admissions = InMemoryAutonomousGoalPreviewAdmissionLedger(max_records=4)
+    submitted = admissions.submit(
+        preview,
+        admission_id="all-domain-preview",
+        issued_at_ns=100,
+        expires_at_ns=100 + 1_000_000_000,
+        requested_by_digest=content_digest("operator-requester"),
+        reason="operator review of the exact all-domain admission",
+    )
+    approved = admissions.review(
+        "all-domain-preview",
+        approved=True,
+        reviewer_digest=content_digest("operator-reviewer"),
+        reason="approved after reviewing the bounded schedule",
+        expected_record_digest=submitted["record_digest"],
+    )
+    verified = verify_autonomous_goal_preview_approval(approved, current_preview_digest=preview.preview_digest, now_ns=100)
+    assert verified["status"] == "approved"
+    with pytest.raises(AutonomousGoalError, match="expired"):
+        verify_autonomous_goal_preview_approval(approved, current_preview_digest=preview.preview_digest, now_ns=approved["expires_at_ns"])
+
+    rejected = admissions.submit(preview, admission_id="rejected-preview", issued_at_ns=100, expires_at_ns=100 + 1_000_000_000)
+    rejected = admissions.review("rejected-preview", approved=False, reviewer_digest=content_digest("operator-reviewer"), expected_record_digest=rejected["record_digest"])
+    with pytest.raises(AutonomousGoalError, match="not approved"):
+        verify_autonomous_goal_preview_approval(rejected, current_preview_digest=preview.preview_digest, now_ns=100)
+
+    stale = dict(approved)
+    stale["preview_digest"] = "0" * 64
+    with pytest.raises(AutonomousGoalError, match="digest"):
+        admissions.put(stale)
+
+    class Store:
+        encoded: str | None = None
+
+        def read(self) -> str | None:
+            return self.encoded
+
+        def write(self, value: str) -> None:
+            self.encoded = value
+
+        def write_if_unchanged(self, expected_snapshot_digest: str | None, value: str) -> bool:
+            actual = None if self.encoded is None else json.loads(self.encoded)["snapshot_digest"]
+            if actual != expected_snapshot_digest:
+                return False
+            self.encoded = value
+            return True
+
+    store = Store()
+    persistence = TransactionalJsonAutonomousGoalPreviewAdmissionSnapshotPersistence(store)
+    coordinator = AutonomousGoalPreviewAdmissionPersistenceCoordinator(admissions, persistence)
+    first_snapshot = coordinator.flush()
+    restored = InMemoryAutonomousGoalPreviewAdmissionLedger(max_records=4)
+    restored_coordinator = AutonomousGoalPreviewAdmissionPersistenceCoordinator(restored, persistence)
+    assert restored_coordinator.restore()["snapshot_digest"] == first_snapshot["snapshot_digest"]
+    stale_coordinator = AutonomousGoalPreviewAdmissionPersistenceCoordinator(InMemoryAutonomousGoalPreviewAdmissionLedger(max_records=4), persistence)
+    stale_coordinator.restore()
+    admissions.submit(preview, admission_id="third-preview", issued_at_ns=100, expires_at_ns=100 + 1_000_000_000)
+    coordinator.flush()
+    with pytest.raises(AutonomousGoalError, match="compare-and-swap"):
+        stale_coordinator.flush()
+
+    ledger.transition("approval-coding", "running", expected_revision=0, now_ns=101)
+    with pytest.raises(AutonomousGoalError, match="expected_preview_digest|current preview"):
+        loop.run(schedule_options=options, max_total_runs=len(domains), preview_approval=approved)
+    assert calls == {"resolve": 0, "execute": 0}
+
+    fresh_ledger = AutonomousGoalLedger(clock=lambda: 100, max_goals=len(domains))
+    for domain in domains:
+        fresh_ledger.create(goal_id=f"approval-{domain}", task_digest=_digest(f"approval task {domain}"), domain=domain, now_ns=0)
+    fresh_loop = AutonomousGoalControlLoop(AutonomousGoalWorker(fresh_ledger, resolver=resolve, executor=execute))
+    result = fresh_loop.run(schedule_options=options, max_total_runs=len(domains), preview_approval=approved)
+    assert result.stop_reason == "all_terminal"
+    assert calls == {"resolve": len(domains), "execute": len(domains)}
 
 
 def test_goal_scheduler_enforces_budgets_cycles_retries_and_stale_claims(tmp_path: Path) -> None:

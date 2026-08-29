@@ -1,5 +1,6 @@
 import { ArgumentError, isObject } from "./errors.js";
 import { AutonomousGoalWorker, type AutonomousGoalWorkerBatch } from "./autonomous-goal-worker.js";
+import { validateAutonomousGoalPreviewAdmissionRecord, verifyAutonomousGoalPreviewApproval, type AutonomousGoalPreviewAdmissionRecord } from "./autonomous-goal-preview.js";
 import type { AutonomousGoalRecord, InMemoryAutonomousGoalLedger } from "./autonomous-goals.js";
 import type { AutonomousGoalSchedule, AutonomousGoalSchedulingSignal } from "./autonomous-goal-scheduler.js";
 import { digestJsonSync } from "./tooling.js";
@@ -508,6 +509,7 @@ export class AutonomousGoalControlLoop {
     resume_snapshot?: AutonomousGoalControlLoopCheckpoint | null;
     checkpoint?: (snapshot: AutonomousGoalControlLoopCheckpoint) => unknown | Promise<unknown>;
     expected_preview_digest?: string;
+    preview_approval?: AutonomousGoalPreviewAdmissionRecord | JsonObject;
   } = {}): Promise<AutonomousGoalControlLoopResult> {
     if (options.schedule_options !== undefined && !isObject(options.schedule_options)) fail("schedule_options must be an object");
     if (options.options_factory !== undefined && typeof options.options_factory !== "function") fail("options_factory must be callable or undefined");
@@ -518,7 +520,13 @@ export class AutonomousGoalControlLoop {
     const maxCycles = integer("max_cycles", options.max_cycles ?? AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES, 1, AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_CYCLES);
     const maxTotalRuns = integer("max_total_runs", options.max_total_runs ?? AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS, 1, AUTONOMOUS_GOAL_CONTROL_LOOP_MAX_RUNS);
     const baseOptions = options.schedule_options ? { ...options.schedule_options } : {};
-    if (options.expected_preview_digest !== undefined) {
+    let expectedPreviewDigest = options.expected_preview_digest;
+    const previewApproval = options.preview_approval === undefined ? null : validateAutonomousGoalPreviewAdmissionRecord(options.preview_approval);
+    if (previewApproval !== null) {
+      if (expectedPreviewDigest !== undefined && expectedPreviewDigest !== previewApproval.preview_digest) fail("expected_preview_digest does not match preview_approval");
+      expectedPreviewDigest = previewApproval.preview_digest;
+    }
+    if (expectedPreviewDigest !== undefined) {
       if (options.options_factory !== undefined) fail("expected_preview_digest cannot be combined with options_factory");
       if (options.resume_snapshot !== undefined && options.resume_snapshot !== null) fail("expected_preview_digest cannot be combined with resume_snapshot");
       const previewOptions = { ...baseOptions };
@@ -528,7 +536,12 @@ export class AutonomousGoalControlLoop {
       const requestedConcurrent = integer("schedule_options.max_concurrent", previewOptions.max_concurrent ?? effectiveSelected, 1, 128);
       previewOptions.max_concurrent = Math.min(requestedConcurrent, effectiveSelected);
       const currentPreview = this.preview({ schedule_options: previewOptions });
-      if (currentPreview.preview_digest !== options.expected_preview_digest) fail("expected_preview_digest does not match the current admission preview");
+      if (currentPreview.preview_digest !== expectedPreviewDigest) fail("expected_preview_digest does not match the current admission preview");
+      if (previewApproval !== null) {
+        const rawNow = previewOptions.now_ns;
+        const approvalNow = rawNow === undefined ? Date.now() * 1_000_000 : integer("schedule_options.now_ns", rawNow, 0, Number.MAX_SAFE_INTEGER);
+        verifyAutonomousGoalPreviewApproval(previewApproval, { current_preview_digest: currentPreview.preview_digest, now_ns: approvalNow });
+      }
     }
     const cycles: AutonomousGoalControlLoopCycle[] = [];
     const history: JsonObject[] = [];

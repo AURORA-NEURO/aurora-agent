@@ -94,6 +94,31 @@ preview task, prompt, response, or credential material. The provisioned facade v
 credential session, inject the opaque resolver only for the transient invocation, and revoke the
 session on success, refusal, stale-preview failure, or trace failure.
 
+### Durable operator approval for a goal preview
+
+The goal preview is now reviewable across a process boundary without turning preview metadata into
+an authorization bypass. `create_autonomous_goal_preview_admission_record()` in Python and
+`createAutonomousGoalPreviewAdmissionRecord()` in TypeScript seal the complete metadata-only
+preview projection, its digest, the requester identity digest, issue/expiry timestamps, and an
+optional bounded reason digest. `review_*()` records an independent reviewer identity digest and
+returns an immutable approved or rejected receipt. Identity digests document the review chain; the
+embedding service must still authenticate the caller and enforce its operator policy.
+
+The in-memory ledgers enforce monotonic revisions, predecessor continuity, bounded retention, and
+exact-record review. The JSON and transactional JSON adapters persist only canonical snapshots and
+use compare-and-swap revisions, so a stale writer cannot replace a newer review. Restore validates
+the schema, record count, every record digest, and the snapshot digest before any receipt is
+available to execution. `AutonomousGoalPreviewAdmissionPersistenceCoordinator` composes the
+caller-owned load/flush lifecycle without claiming distributed transactions.
+
+An approved receipt can be supplied as `preview_approval` / `previewApproval` to the goal control
+loop or high-level goal runtime. Execution recomputes the live provider-free preview, verifies the
+receipt is approved, unexpired, and bound to that exact digest, and only then reaches resolver,
+claim, evaluator, learner, provider, connector, tool, or effect boundaries. The receipt does not
+authorize credentials, providers, sources, connectors, tools, evaluators, learners, or effects;
+those gates remain independent. Recovery-owned resume is intentionally incompatible with a new
+preview approval, because restored execution must use its checkpoint's own admission identity.
+
 Persisted `AutonomousBrainPlan` values have an equivalent replay boundary. The
 `executePlanned*WithLaunchAdmission` methods canonicalize and revalidate the plan, recompute its
 provider-free route/blueprint identity against the current catalogue, and authorize the exact

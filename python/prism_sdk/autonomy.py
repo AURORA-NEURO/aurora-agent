@@ -17105,6 +17105,7 @@ class AutonomousAgent:
         max_cycles: int = 128,
         max_total_runs: int = 8_192,
         expected_preview_digest: str | None = None,
+        preview_approval: Mapping[str, Any] | None = None,
     ) -> Any:
         """Run bounded long-horizon goals through the facade-backed autonomous control loop."""
 
@@ -17124,6 +17125,7 @@ class AutonomousAgent:
             max_cycles=max_cycles,
             max_total_runs=max_total_runs,
             expected_preview_digest=expected_preview_digest,
+            preview_approval=preview_approval,
         )
 
     def preview_goal_control_loop(

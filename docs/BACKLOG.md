@@ -2366,3 +2366,12 @@ digest without mutating its generation. This gives operator and UI layers an exp
 pre-execution decision surface; it is not an authorization and `run()` still repeats revision
 and claim checks. The remaining deployment work is caller-owned preview storage/retention,
 operator identity, policy approval, and reconciliation of state changes between preview and run.
+
+The next control-plane increment closes the durable preview-decision seam. Python and TypeScript
+now expose bounded, metadata-only goal admission receipts with requester/reviewer identity
+digests, issue/expiry times, immutable preview digests, monotonic ledger revisions, predecessor
+fences, canonical JSON persistence, and transactional compare-and-swap restore/flush. An approved
+receipt is accepted only after live preview recomputation and expiry validation immediately before
+goal claim/resolution; it cannot authorize providers, credentials, connectors, tools, evaluators,
+learners, sources, or effects. The remaining deployment responsibilities are external operator
+authentication, encrypted/shared storage, distributed leases, and approval UX.
