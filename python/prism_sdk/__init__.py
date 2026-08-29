@@ -7583,6 +7583,18 @@ __all__ += [
     "bundleRetrievalAssuranceDigest",
 ]
 
+from .runtime_interpretation_assurance import (
+    InteractiveInterpretation7,
+    assure_interpretation,
+    interpretation_assurance_manifest,
+)
+
+__all__ += [
+    "InteractiveInterpretation7",
+    "assure_interpretation",
+    "interpretation_assurance_manifest",
+]
+
 from .mcp_multimodal_ingestion_assurance import (
     HarmonizedResearchObjectReceipt as McpMultimodalIngestionReceipt,
     assure_multimodal_ingestion,

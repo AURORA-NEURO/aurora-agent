@@ -4255,6 +4255,20 @@ export {
 export type { BundleEvidenceSynthesis } from "./research-contracts.js";
 
 export {
+  RUNTIME_INTERPRETATION_ASSURANCE_FEATURE_ID,
+  RUNTIME_INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+  RUNTIME_INTERPRETATION_ASSURANCE_INPUT_SCHEMA,
+  RUNTIME_INTERPRETATION_ASSURANCE_OUTPUT_SCHEMA,
+  runtimeInteractiveInterpretation7Digest,
+  validateRuntimeInteractiveInterpretation7,
+} from "./research-contracts.js";
+export type {
+  RuntimeInterpretationCandidate4,
+  RuntimeEvidenceBackedResult4,
+  RuntimeInteractiveInterpretation7,
+} from "./research-contracts.js";
+
+export {
   MCP_MULTIMODAL_INGESTION_ASSURANCE_FEATURE_ID,
   MCP_MULTIMODAL_INGESTION_ASSURANCE_CONTRACT_VERSION,
   MCP_MULTIMODAL_INGESTION_ASSURANCE_INPUT_SCHEMA,

@@ -546,9 +546,12 @@ use bioprism_routing::{
     FederatedMultimodalAssuranceRequest, FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID,
 };
 use bioprism_runtime::{
-    execute_workflow, execute_workflow_batch, WorkflowBatchReceipt, WorkflowBatchRequest,
-    WorkflowExecutionReceipt, WorkflowExecutionRequest, WORKFLOW_BATCH_FEATURE_ID,
-    WORKFLOW_EXECUTION_FEATURE_ID,
+    assure_interpretation as assure_runtime_interpretation, execute_workflow,
+    execute_workflow_batch, EvidenceBackedResult4, InteractiveInterpretation7,
+    WorkflowBatchReceipt, WorkflowBatchRequest, WorkflowExecutionReceipt,
+    WorkflowExecutionRequest,
+    INTERPRETATION_ASSURANCE_FEATURE_ID as RUNTIME_INTERPRETATION_ASSURANCE_FEATURE_ID,
+    WORKFLOW_BATCH_FEATURE_ID, WORKFLOW_EXECUTION_FEATURE_ID,
 };
 use bioprism_services::{
     infer_federated_publication_release, FederatedPublicationReleaseInferenceReceipt,
@@ -577,6 +580,7 @@ use serde_json::Value;
 /// Stable MCP tool name reserved for the evidence-to-typed-knowledge vertical.
 pub const RESEARCH_COMPILE_TOOL: &str = "aurora_research_compile_evidence";
 pub const WORKFLOW_EXECUTION_TOOL: &str = "runtime_workflow_execute";
+pub const RUNTIME_INTERPRETATION_ASSURANCE_TOOL: &str = "runtime_interpretation_assurance";
 pub const EVALUATION_OBSERVABILITY_TOOL: &str = "evaluation_observability_card";
 pub const FEDERATED_EVALUATION_TOOL: &str = "federated_evaluation_consensus";
 pub const RESEARCH_RELEASE_VALIDATE_TOOL: &str = "research_release_validate";
@@ -1104,6 +1108,26 @@ pub fn execute_workflow_batch_json(value: &Value) -> Result<Value, String> {
     let receipt = execute_workflow_batch(&request).map_err(|error| error.to_string())?;
     serde_json::to_value(receipt)
         .map_err(|error| format!("cannot serialize workflow batch receipt: {error}"))
+}
+
+pub fn runtime_interpretation_assurance_json(value: &Value) -> Result<Value, String> {
+    let request: EvidenceBackedResult4 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid runtime interpretation request: {error}"))?;
+    let receipt = assure_runtime_interpretation(&request).map_err(|error| error.to_string())?;
+    serde_json::to_value(receipt)
+        .map_err(|error| format!("cannot serialize runtime interpretation receipt: {error}"))
+}
+
+pub fn validate_runtime_interpretation_assurance_json(
+    value: &Value,
+) -> Result<InteractiveInterpretation7, String> {
+    let receipt: InteractiveInterpretation7 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid runtime interpretation receipt: {error}"))?;
+    receipt.validate().map_err(|error| error.to_string())?;
+    if receipt.feature_id != RUNTIME_INTERPRETATION_ASSURANCE_FEATURE_ID {
+        return Err("runtime interpretation feature id mismatch".into());
+    }
+    Ok(receipt)
 }
 
 pub fn validate_workflow_batch_receipt_json(value: &Value) -> Result<WorkflowBatchReceipt, String> {

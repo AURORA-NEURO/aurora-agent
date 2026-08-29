@@ -2122,6 +2122,7 @@ impl Server {
             "design_frontier_evaluate" => self.design_frontier_evaluate(&arguments),
             "autonomy_batch_admit" => self.autonomy_batch_admit(&arguments),
             "workflow_batch_execute" => self.workflow_batch_execute(&arguments),
+            "runtime_interpretation_assurance" => self.runtime_interpretation_assurance(&arguments),
             "bioeval_reference_audit" => self.bioeval_reference_audit(&arguments),
             "bioeval_acquisition_audit" => self.bioeval_acquisition_audit(&arguments),
             "bioeval_grounding_audit" => self.bioeval_grounding_audit(&arguments),
@@ -27811,6 +27812,28 @@ impl Server {
         }))
     }
 
+    fn runtime_interpretation_assurance(&self, arguments: &Value) -> Result<Value, String> {
+        let request = arguments
+            .get("request")
+            .ok_or("request is required and must be a serialized EvidenceBackedResult4")?;
+        let receipt = crate::research_contracts::runtime_interpretation_assurance_json(request)?;
+        Ok(json!({
+            "ok": true,
+            "schema": "aurora-research-contract/1.0",
+            "feature_id": bioprism_runtime::INTERPRETATION_ASSURANCE_FEATURE_ID,
+            "receipt": receipt,
+            "guarantees": [
+                "candidate order and outcome partitions are deterministic by score, study, modality, and id",
+                "comparability, replay identity, provenance, evidence state, omission, uncertainty, negative-result, policy, protected-closure, signed-approval, federation, locality, and adversarial gates remain explicit",
+                "the artifact is content-addressed and the release effect is always block:unsafe-release"
+            ],
+            "limitations": [
+                "the route evaluates typed declarations and does not render figures, read raw bytes, or infer biological truth",
+                "local aggregate output is not a clinical decision and requires independent scientific review"
+            ]
+        }))
+    }
+
     fn runtime_execution_simulate(&self, arguments: &Value) -> Result<Value, String> {
         let run = bioprism_ids::RunId::parse(
             arguments
@@ -42663,6 +42686,17 @@ pub fn tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "request": { "type": "object", "description": "Serialized bioprism-runtime WorkflowBatchRequest with typed workflow requests and an explicit dry_run or execute mode." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
+            "name": "runtime_interpretation_assurance",
+            "description": "Assure a federated continual interpretation surface from typed evidence-backed results. It deterministically partitions qualified, unresolved, blocked, and incomparable candidates; preserves omissions, uncertainty, negative results, replay and provenance identities; and always emits a block:unsafe-release effect without rendering, inferring, moving raw data, or making clinical decisions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized bioprism-runtime EvidenceBackedResult4 with semantic comparability, study/modality coverage, policy, protected-closure, signed-approval, federation, locality, and adversarial declarations." }
                 },
                 "required": ["request"]
             }

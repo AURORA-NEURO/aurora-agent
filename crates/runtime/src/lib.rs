@@ -63,6 +63,7 @@ pub mod effect;
 pub mod error;
 pub mod fork;
 pub mod host;
+pub mod interpretation_assurance;
 pub mod orchestrator;
 pub mod provider;
 pub mod research_run;
@@ -89,6 +90,13 @@ pub use fork::{
     OBSERVABLE_STATE_VERSION,
 };
 pub use host::{EffectSource, Host, RecordingHost, ReplayHost};
+pub use interpretation_assurance::{
+    assure_interpretation, interpretation_assurance_manifest, EvidenceBackedResult4,
+    InterpretationArtifact7, InterpretationAssuranceError, InterpretationCandidate4,
+    InterpretationEvidenceState, InteractiveInterpretation7,
+    CONTRACT_VERSION as INTERPRETATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_ASSURANCE_FEATURE_ID,
+};
 pub use orchestrator::{
     AggregationPolicy, AttemptId, AttemptRecord, LifecycleEvent, RetryClass, RunState,
     Termination, TerminationReason, Trial, TrialId,

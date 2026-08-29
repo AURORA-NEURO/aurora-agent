@@ -61,6 +61,7 @@ pub use research_contracts::{
     evaluate_federated_evaluation_json, evaluate_multimodal_replication_json,
     evaluate_quality_drift_json, evaluate_quality_envelope_json, evaluate_semantic_parity_json,
     execute_workflow_batch_json, execute_workflow_json, harmonize_multimodal_json,
+    runtime_interpretation_assurance_json, validate_runtime_interpretation_assurance_json,
     infer_adapter_dependency_composition_json, instrument_preflight_json,
     integrate_instrument_mesh_json, model_mcp_knowledge_representation_contract_json,
     negotiate_determinism_json, negotiate_interoperability_json,
@@ -248,7 +249,8 @@ pub use research_contracts::{
     RESEARCH_CONTRACT_SCHEMA_VERSION, RESEARCH_RELEASE_BATCH_VALIDATE_TOOL,
     RESEARCH_RELEASE_VALIDATE_TOOL, RESEARCH_WORKBENCH_TOOL, RESOURCE_CONTROL_PLANE_TOOL,
     RESOURCE_DISCOVERY_CONTRACT_TOOL, RESOURCE_WORKBENCH_TOOL, RETRIEVAL_SYNTHESIS_TOOL,
-    SEMANTIC_PARITY_TOOL, WEAVELANG_RELEASE_ASSURANCE_TOOL, WORKFLOW_BATCH_TOOL,
+    RUNTIME_INTERPRETATION_ASSURANCE_TOOL, SEMANTIC_PARITY_TOOL,
+    WEAVELANG_RELEASE_ASSURANCE_TOOL, WORKFLOW_BATCH_TOOL,
     WORKFLOW_EXECUTION_TOOL,
 };
 pub use research_contracts::{

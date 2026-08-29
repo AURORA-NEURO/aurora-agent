@@ -15,6 +15,8 @@ from typing import Any, Mapping, Sequence
 
 RESEARCH_CONTRACT_SCHEMA_VERSION = "aurora-research-contract/1.0"
 PRECLINICAL_BOUNDARY = "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"
+RUNTIME_INTERPRETATION_ASSURANCE_FEATURE_ID = "AFA-runtime-P14-F28"
+RUNTIME_INTERPRETATION_ASSURANCE_CONTRACT_VERSION = "runtime-federated-continual-interpretation-assurance/1.0"
 RESEARCH_FEATURE_ID = "AFA-bioir-P02-F01"
 RELEASE_REVIEW_FEATURE_ID = "AFA-evalengine-P13-F01"
 RESEARCH_INGESTION_FEATURE_ID = "AFA-adapter-P06-F01"
