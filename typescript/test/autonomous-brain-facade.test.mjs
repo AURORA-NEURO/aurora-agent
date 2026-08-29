@@ -1665,6 +1665,76 @@ test("brain facade batches automatic evaluator cycles with bounded admission and
   );
 });
 
+test("brain facade traces and resumes automatic evaluator batches without provider replay", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const inputs = [
+    { task: tasks.science, domain: "science" },
+    { task: tasks.biomedical, domain: "biomedical" },
+  ];
+  const cyclePolicy = {
+    approveProviderCall: true,
+    maxReplans: 0,
+    evaluate: () => ({ evaluator_id: "trace-resume-reviewer", evaluator_version: "1", reward: 0.9, passed: true, replan_requested: false }),
+  };
+  const traceStore = new InMemoryAutonomousRunTraceStore();
+  const traced = await brain.executeAutoCycleBatchWithTrace(inputs, {
+    maxParallelism: 1,
+    cycle: cyclePolicy,
+    traceStore,
+    runId: "automatic-cycle-trace",
+  });
+  assert.equal(traced.schema, "bioprism-typescript-autonomous-brain-traced-auto-cycle-batch/0.1");
+  assert.equal(traced.batch.status, "completed");
+  assert.equal(traced.trace.status, "completed");
+  assert.equal(traced.trace.provider_invocations, inputs.length);
+  assert.doesNotMatch(JSON.stringify(traced), /design a reproducible experiment|review biomedical evidence/);
+  assert.ok(traceStore.events({ run_id: "automatic-cycle-trace" }).some((event) => event.route_digest));
+
+  const checkpoints = [];
+  const first = await brain.executeAutoCycleBatchResumable(inputs, {
+    jobId: "automatic-cycle-resume",
+    maxParallelism: 1,
+    cycle: cyclePolicy,
+    checkpointSink: (checkpoint) => checkpoints.push(checkpoint),
+  });
+  assert.equal(first.status, "completed");
+  const beforeResume = runtime.providerStatus("offline").attempts;
+  const resumed = await brain.executeAutoCycleBatchResumable(inputs, {
+    jobId: "automatic-cycle-resume",
+    maxParallelism: 1,
+    cycle: cyclePolicy,
+    checkpoint: checkpoints.at(-1),
+    rehydrateCycle: (context) => first.items[context.index].execution,
+  });
+  assert.equal(resumed.status, "completed");
+  assert.equal(runtime.providerStatus("offline").attempts, beforeResume);
+  assert.deepEqual(resumed.items.map((item) => item.status), ["succeeded", "succeeded"]);
+
+  const replanPolicy = {
+    approveProviderCall: true,
+    maxReplans: 0,
+    evaluate: () => ({ evaluator_id: "trace-replan-reviewer", evaluator_version: "1", reward: 0.88, passed: true, replan_requested: false }),
+  };
+  const replans = await brain.executeAutoReplanCycleBatchResumable(inputs.slice(0, 1), {
+    jobId: "automatic-replan-resume",
+    maxParallelism: 1,
+    replan: replanPolicy,
+  });
+  assert.equal(replans.status, "completed");
+  const replannedTrace = await brain.executeAutoReplanCycleBatchWithTrace(inputs.slice(0, 1), {
+    maxParallelism: 1,
+    replan: replanPolicy,
+    traceStore: new InMemoryAutonomousRunTraceStore(),
+    runId: "automatic-replan-trace",
+  });
+  assert.equal(replannedTrace.schema, "bioprism-typescript-autonomous-brain-traced-auto-replan-batch/0.1");
+  assert.equal(replannedTrace.batch.status, "completed");
+  assert.equal(replannedTrace.trace.status, "completed");
+});
+
 test("brain facade keeps adaptive replanning bounded and routes cross-domain fan-out through the same boundary", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

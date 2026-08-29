@@ -280,6 +280,8 @@ export const AUTONOMOUS_BRAIN_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomo
 export const AUTONOMOUS_BRAIN_ADAPTIVE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-adaptive-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-cycle-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_REPLAN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-auto-replan-batch/0.1" as const;
+export const AUTONOMOUS_BRAIN_TRACED_AUTO_CYCLE_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-traced-auto-cycle-batch/0.1" as const;
+export const AUTONOMOUS_BRAIN_TRACED_AUTO_REPLAN_BATCH_SCHEMA = "bioprism-typescript-autonomous-brain-traced-auto-replan-batch/0.1" as const;
 export const AUTONOMOUS_BRAIN_SUMMARY_SCHEMA = "bioprism-typescript-autonomous-brain-plan-summary/0.1" as const;
 export const AUTONOMOUS_BRAIN_EXECUTION_POLICY_SCHEMA = "bioprism-typescript-autonomous-brain-execution-policy/0.1" as const;
 export const AUTONOMOUS_BRAIN_AUTO_EXECUTION_SCHEMA = "bioprism-typescript-autonomous-brain-auto-execution/0.1" as const;
@@ -977,6 +979,20 @@ export interface AutonomousBrainAutoCycleBatchResult {
   secret_material: "never_returned";
 }
 
+/** Automatic evaluator-cycle batch plus one caller-owned metadata-only lifecycle trace. */
+export interface AutonomousBrainAutoCycleBatchTraceOptions extends AutonomousBrainAutoCycleBatchOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+export interface AutonomousBrainTracedAutoCycleBatchResult {
+  schema: typeof AUTONOMOUS_BRAIN_TRACED_AUTO_CYCLE_BATCH_SCHEMA;
+  batch: AutonomousBrainAutoCycleBatchResult;
+  trace: AutonomousRunTraceSummary;
+  retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads";
+  secret_material: "never_returned";
+}
+
 /** Bounded automatic evaluator/replan controls with a shared or per-request policy factory. */
 export interface AutonomousBrainAutoReplanBatchOptions {
   maxParallelism?: number;
@@ -1005,6 +1021,50 @@ export interface AutonomousBrainAutoReplanBatchResult {
   batch_digest: string;
   retention: "metadata_only_tasks_and_automatic_replan_values_transient";
   secret_material: "never_returned";
+}
+
+/** Automatic evaluator/replan batch plus one caller-owned metadata-only lifecycle trace. */
+export interface AutonomousBrainAutoReplanBatchTraceOptions extends AutonomousBrainAutoReplanBatchOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+export interface AutonomousBrainTracedAutoReplanBatchResult {
+  schema: typeof AUTONOMOUS_BRAIN_TRACED_AUTO_REPLAN_BATCH_SCHEMA;
+  batch: AutonomousBrainAutoReplanBatchResult;
+  trace: AutonomousRunTraceSummary;
+  retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads";
+  secret_material: "never_returned";
+}
+
+/** Restart-safe automatic evaluator-cycle batch controls. */
+export interface AutonomousBrainAutoCycleBatchResumableOptions extends AutonomousBrainAutoCycleBatchOptions {
+  jobId: string;
+  /** Optional caller-owned identity for opaque evaluator/learning callback implementations. */
+  policyDigest?: string;
+  checkpoint?: AutonomousBrainBatchCheckpointJSON;
+  checkpointSink?: (checkpoint: AutonomousBrainBatchCheckpointJSON) => Promise<void> | void;
+  rehydrateCycle?: (context: AutonomousBrainBatchRehydrationContext) => Promise<AutonomousBrainAutoCycleResult> | AutonomousBrainAutoCycleResult;
+}
+
+/** Restart-safe automatic evaluator/replan batch controls. */
+export interface AutonomousBrainAutoReplanBatchResumableOptions extends AutonomousBrainAutoReplanBatchOptions {
+  jobId: string;
+  /** Optional caller-owned identity for opaque evaluator/learning callback implementations. */
+  policyDigest?: string;
+  checkpoint?: AutonomousBrainBatchCheckpointJSON;
+  checkpointSink?: (checkpoint: AutonomousBrainBatchCheckpointJSON) => Promise<void> | void;
+  rehydrateReplan?: (context: AutonomousBrainBatchRehydrationContext) => Promise<AutonomousBrainAutoReplanCycleResult> | AutonomousBrainAutoReplanCycleResult;
+}
+
+export interface AutonomousBrainAutoCycleBatchResumableTraceOptions extends AutonomousBrainAutoCycleBatchResumableOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
+}
+
+export interface AutonomousBrainAutoReplanBatchResumableTraceOptions extends AutonomousBrainAutoReplanBatchResumableOptions {
+  traceStore: AutonomousRunTraceStore;
+  runId: string;
 }
 
 /** Options for the keyless readiness audit exposed at the application boundary. */
@@ -1106,7 +1166,7 @@ export interface AutonomousBrainBatchResult {
   secret_material: "never_returned";
 }
 
-export type AutonomousBrainBatchMode = "brain" | "automatic";
+export type AutonomousBrainBatchMode = "brain" | "automatic" | "automatic_cycle" | "automatic_replan";
 
 export interface AutonomousBrainBatchRehydrationContext {
   job_id: string;
@@ -1523,6 +1583,33 @@ function batchItemDigest(item: { index: number; status: string; task_digest: str
   return digestJsonSync(batchItemProjection(item));
 }
 
+function automaticCycleBatchItemDigest(item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: unknown }): string {
+  const execution = isObject(item.execution) ? item.execution : null;
+  const route = execution !== null && isObject(execution.route) ? execution.route : null;
+  const cycle = execution !== null && isObject(execution.cycle) ? execution.cycle : null;
+  return digestJsonSync({
+    index: item.index,
+    status: item.status,
+    task_digest: item.task_digest,
+    error_class: item.error_class ?? null,
+    failure_code: item.failure_code ?? null,
+    execution_schema: execution?.schema ?? null,
+    execution_status: execution?.status ?? null,
+    execution_mode: execution?.mode ?? null,
+    route_digest: route?.route_digest ?? null,
+    cycle_schema: cycle?.schema ?? null,
+    cycle_status: cycle?.status ?? null,
+    next_action: execution?.next_action ?? null,
+  });
+}
+
+function checkpointBatchItemDigest(item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: unknown }): string {
+  const execution = isObject(item.execution) ? item.execution : null;
+  return execution !== null && isObject(execution.plan)
+    ? batchItemDigest(item as { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: { plan: { plan_digest: string }; status: string } })
+    : automaticCycleBatchItemDigest(item);
+}
+
 /**
  * Keep caller-owned automatic values usable for rehydration without making them part of the
  * serializable traced envelope.  A traced batch is routinely passed to logs, telemetry, and
@@ -1544,6 +1631,23 @@ function tracedAutoBatchResult(batch: AutonomousBrainAutoBatchResult): Autonomou
       return projection;
     }),
   };
+}
+
+function tracedAutomaticCycleBatchResult<T extends AutonomousBrainAutoCycleBatchResult | AutonomousBrainAutoReplanBatchResult>(batch: T): T {
+  return {
+    ...batch,
+    items: batch.items.map((item) => {
+      if (item.execution === undefined) return { ...item };
+      const projection = { ...item } as typeof item;
+      Object.defineProperty(projection, "execution", {
+        value: item.execution,
+        enumerable: false,
+        configurable: false,
+        writable: false,
+      });
+      return projection;
+    }),
+  } as T;
 }
 
 function validateMissionForBrain(mission: AgentMissionArgs): AgentMissionArgs {
@@ -1692,6 +1796,34 @@ function automaticBatchTraceTaskDigest(inputs: readonly AutonomousBrainRequest[]
     mode: "automatic",
     task_digests: inputs.map((input) => brainBatchTaskDigest(input)),
   });
+}
+
+function automaticCycleBatchTraceTaskDigest(inputs: readonly AutonomousBrainRequest[], mode: "automatic_cycle" | "automatic_replan"): string {
+  return digestJsonSync({
+    schema: mode === "automatic_cycle" ? AUTONOMOUS_BRAIN_TRACED_AUTO_CYCLE_BATCH_SCHEMA : AUTONOMOUS_BRAIN_TRACED_AUTO_REPLAN_BATCH_SCHEMA,
+    mode,
+    task_digests: inputs.map((input) => brainBatchTaskDigest(input)),
+  });
+}
+
+async function recordAutomaticCycleBatchTrace(
+  trace: AutonomousRunTraceSession,
+  batch: AutonomousBrainAutoCycleBatchResult | AutonomousBrainAutoReplanBatchResult,
+): Promise<void> {
+  for (const item of batch.items) {
+    const execution = item.execution;
+    const rawStatus = execution === undefined
+      ? item.status === "omitted" ? "paused" : item.status === "refused" ? "refused" : "failed"
+      : autonomousRunTraceStatus(execution.status);
+    const status = rawStatus === "running" || rawStatus === "unknown" ? "paused" : rawStatus;
+    await trace.record({
+      phase: status === "completed" || status === "partial" ? "completed" : status,
+      status,
+      domains: execution?.route.selected_domains,
+      route_digest: execution?.route.route_digest,
+      detail_digest: digestJsonSync({ index: item.index, item_status: item.status, execution_status: execution?.status ?? null }),
+    });
+  }
 }
 
 function brainBatchTaskDigest(input: AutonomousBrainRequest): string {
@@ -1844,12 +1976,40 @@ function brainAutomaticExecutionPolicyDigest(options: AutonomousBrainAutoExecute
   });
 }
 
+function policyDigestProjection(value: unknown, depth = 0): unknown {
+  if (depth > 5) return "[depth_bound]";
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  if (typeof value === "function") return "[callback]";
+  if (Array.isArray(value)) return value.slice(0, 128).map((entry) => policyDigestProjection(entry, depth + 1));
+  if (!isObject(value)) return `[${typeof value}]`;
+  const output: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    if (key === "observer" || key === "selectionEventCallback") continue;
+    output[key] = policyDigestProjection(value[key], depth + 1);
+  }
+  return output;
+}
+
+function automaticCyclePolicyDigest(
+  policy: AutonomousBrainAutoCycleOptions | AutonomousBrainAutoReplanCycleOptions,
+  mode: "automatic_cycle" | "automatic_replan",
+  explicitPolicyDigest?: string,
+): string {
+  if (explicitPolicyDigest !== undefined) digest("autonomous brain automatic cycle policyDigest", explicitPolicyDigest);
+  return digestJsonSync({
+    schema: "bioprism-typescript-autonomous-brain-automatic-cycle-batch-policy/0.1",
+    mode,
+    explicit_policy_digest: explicitPolicyDigest ?? null,
+    policy: policyDigestProjection(policy),
+  });
+}
+
 function checkpointText(name: string, value: unknown): string {
   return boundedIdentifier(name, value);
 }
 
 function validateBrainBatchCheckpoint(value: unknown): AutonomousBrainBatchCheckpointJSON {
-  if (!isObject(value) || value.schema !== AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA || !["brain", "automatic"].includes(value.mode as string)) throw new ArgumentError("autonomous brain batch checkpoint schema is invalid");
+  if (!isObject(value) || value.schema !== AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA || !["brain", "automatic", "automatic_cycle", "automatic_replan"].includes(value.mode as string)) throw new ArgumentError("autonomous brain batch checkpoint schema is invalid");
   const allowedKeys = new Set(["schema", "job_id", "mode", "batch_input_digest", "semantic_routing_policy_digest", "automatic_execution_policy_digest", "request_digests", "completed_indices", "completed_result_digests", "max_parallelism", "stop_on_error", "status", "checkpoint_digest", "retention", "secret_material"]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) throw new ArgumentError("autonomous brain batch checkpoint contains unsupported metadata");
   const jobId = checkpointText("autonomous brain batch checkpoint job_id", value.job_id);
@@ -1865,7 +2025,7 @@ function validateBrainBatchCheckpoint(value: unknown): AutonomousBrainBatchCheck
   if (!Number.isSafeInteger(value.max_parallelism) || (value.max_parallelism as number) < 1 || (value.max_parallelism as number) > MAX_AUTONOMOUS_BRAIN_PARALLELISM) throw new ArgumentError("autonomous brain batch checkpoint maxParallelism is invalid");
   if (typeof value.stop_on_error !== "boolean" || !["running", "partial", "completed"].includes(value.status as string)) throw new ArgumentError("autonomous brain batch checkpoint controls are invalid");
   if (value.status === "completed" && completedIndices.length !== requestDigests.length) throw new ArgumentError("completed autonomous brain batch checkpoint is incomplete");
-  if (value.mode === "automatic" && automaticExecutionPolicyDigest === undefined) throw new ArgumentError("automatic brain batch checkpoint requires an automatic execution policy digest");
+  if (value.mode !== "brain" && automaticExecutionPolicyDigest === undefined) throw new ArgumentError("automatic brain batch checkpoint requires an automatic execution policy digest");
   if (value.mode === "brain" && automaticExecutionPolicyDigest !== undefined) throw new ArgumentError("direct brain batch checkpoint cannot contain an automatic execution policy digest");
   const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: jobId, mode: value.mode as AutonomousBrainBatchMode, batch_input_digest: batchInputDigest, ...(semanticRoutingPolicyDigest === undefined ? {} : { semantic_routing_policy_digest: semanticRoutingPolicyDigest }), ...(automaticExecutionPolicyDigest === undefined ? {} : { automatic_execution_policy_digest: automaticExecutionPolicyDigest }), request_digests: [...requestDigests as string[]], completed_indices: completedIndices, completed_result_digests: [...(value.completed_result_digests as string[])], max_parallelism: value.max_parallelism as number, stop_on_error: value.stop_on_error as boolean, status: value.status as "running" | "partial" | "completed" };
   if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES) throw new ArgumentError("autonomous brain batch checkpoint exceeds its bounded size");
@@ -1874,10 +2034,10 @@ function validateBrainBatchCheckpoint(value: unknown): AutonomousBrainBatchCheck
   return { ...payload, checkpoint_digest: value.checkpoint_digest as string, retention: value.retention, secret_material: value.secret_material };
 }
 
-function makeBrainBatchCheckpoint(input: { jobId: string; mode?: AutonomousBrainBatchMode; requestDigests: readonly string[]; batchInputDigest: string; semanticRoutingPolicyDigest: string | null; automaticExecutionPolicyDigest?: string | null; completed: readonly { index: number; item: AutonomousBrainBatchItem | AutonomousBrainAutoBatchItem }[]; maxParallelism: number; stopOnError: boolean; status: "running" | "partial" | "completed" }): AutonomousBrainBatchCheckpointJSON {
+function makeBrainBatchCheckpoint(input: { jobId: string; mode?: AutonomousBrainBatchMode; requestDigests: readonly string[]; batchInputDigest: string; semanticRoutingPolicyDigest: string | null; automaticExecutionPolicyDigest?: string | null; completed: readonly { index: number; item: { index: number; status: string; task_digest: string | null; error_class?: string; failure_code?: string; execution?: unknown } }[]; maxParallelism: number; stopOnError: boolean; status: "running" | "partial" | "completed" }): AutonomousBrainBatchCheckpointJSON {
   const mode = input.mode ?? "brain";
   if (mode === "automatic" && input.automaticExecutionPolicyDigest === undefined) throw new ArgumentError("automatic brain batch checkpoint requires an automatic execution policy digest");
-  const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: input.jobId, mode, batch_input_digest: input.batchInputDigest, ...(input.semanticRoutingPolicyDigest === null ? {} : { semantic_routing_policy_digest: input.semanticRoutingPolicyDigest }), ...(input.automaticExecutionPolicyDigest === undefined || input.automaticExecutionPolicyDigest === null ? {} : { automatic_execution_policy_digest: input.automaticExecutionPolicyDigest }), request_digests: [...input.requestDigests], completed_indices: input.completed.map((entry) => entry.index), completed_result_digests: input.completed.map((entry) => batchItemDigest(entry.item)), max_parallelism: input.maxParallelism, stop_on_error: input.stopOnError, status: input.status };
+  const payload = { schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, job_id: input.jobId, mode, batch_input_digest: input.batchInputDigest, ...(input.semanticRoutingPolicyDigest === null ? {} : { semantic_routing_policy_digest: input.semanticRoutingPolicyDigest }), ...(input.automaticExecutionPolicyDigest === undefined || input.automaticExecutionPolicyDigest === null ? {} : { automatic_execution_policy_digest: input.automaticExecutionPolicyDigest }), request_digests: [...input.requestDigests], completed_indices: input.completed.map((entry) => entry.index), completed_result_digests: input.completed.map((entry) => checkpointBatchItemDigest(entry.item)), max_parallelism: input.maxParallelism, stop_on_error: input.stopOnError, status: input.status };
   if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_BYTES) throw new ArgumentError("autonomous brain batch checkpoint exceeds its bounded size");
   return { ...payload, checkpoint_digest: digestJsonSync(payload), retention: "request_and_result_digests_only;tasks_prompts_credentials_and_payloads_never_persisted", secret_material: "never_returned" };
 }
@@ -5456,6 +5616,470 @@ export class AutonomousBrainFacade {
     for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic replan batch requires provider-free routing; admit semantic routing separately before enabling it");
     await this.authorizeAutomaticCycleBatchLaunchAdmission(inputs, policies, admission);
     return this.executeAutoReplanCycleBatch(inputs, { ...options, replan: (_input, index) => policies[index]! });
+  }
+
+  /** Execute automatic evaluator cycles while recording one redacted batch lifecycle trace. */
+  async executeAutoCycleBatchWithTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoCycleBatchTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoCycleBatchResult> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain automatic cycle trace options must be an object");
+    const normalizedInputs = inputs.map((input) => validateRequest(input));
+    const trace = new AutonomousRunTraceSession(options.traceStore, {
+      run_id: options.runId,
+      task_digest: automaticCycleBatchTraceTaskDigest(normalizedInputs, "automatic_cycle"),
+      domains: [...AUTONOMOUS_DOMAIN_NAMES],
+    });
+    await trace.started();
+    try {
+      const { traceStore: _traceStore, runId: _runId, ...batchOptions } = options;
+      const cycle = (input: AutonomousBrainRequest, index: number): AutonomousBrainAutoCycleOptions => {
+        const policy = (batchOption(batchOptions.cycle, input, index) ?? {}) as AutonomousBrainAutoCycleOptions & { observer?: ProviderInvocationObserver; selectionEventCallback?: AutonomousModelSelectionTraceEventCallback };
+        return {
+          ...policy,
+          observer: composeBrainObservers(policy.observer, trace.providerObserver()),
+          selectionEventCallback: trace.selectionEventCallback(policy.selectionEventCallback),
+        };
+      };
+      const batch = await this.executeAutoCycleBatch(normalizedInputs, { ...batchOptions, cycle });
+      for (const item of batch.items) {
+        const execution = item.execution;
+        const rawStatus = execution === undefined
+          ? item.status === "omitted" ? "paused" : item.status === "refused" ? "refused" : "failed"
+          : autonomousRunTraceStatus(execution.status);
+        const status = rawStatus === "running" || rawStatus === "unknown" ? "paused" : rawStatus;
+        await trace.record({
+          phase: status === "completed" || status === "partial" ? "completed" : status,
+          status,
+          domains: execution?.route.selected_domains,
+          route_digest: execution?.route.route_digest,
+          detail_digest: digestJsonSync({ index: item.index, item_status: item.status, execution_status: execution?.status ?? null }),
+        });
+      }
+      await trace.complete({
+        status: autonomousRunTraceStatus(batch.status),
+        domains: [...AUTONOMOUS_DOMAIN_NAMES],
+        detail_digest: digestJsonSync({ batch_digest: batch.batch_digest, completed_count: batch.completed_count, failed_count: batch.failed_count, omitted_count: batch.omitted_count }),
+      });
+      return {
+        schema: AUTONOMOUS_BRAIN_TRACED_AUTO_CYCLE_BATCH_SCHEMA,
+        batch: tracedAutomaticCycleBatchResult(batch),
+        trace: await trace.summary(),
+        retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads",
+        secret_material: "never_returned",
+      };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Execute automatic evaluator/replan cycles while recording one redacted batch trace. */
+  async executeAutoReplanCycleBatchWithTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoReplanBatchTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoReplanBatchResult> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain automatic replan trace options must be an object");
+    const normalizedInputs = inputs.map((input) => validateRequest(input));
+    const trace = new AutonomousRunTraceSession(options.traceStore, {
+      run_id: options.runId,
+      task_digest: automaticCycleBatchTraceTaskDigest(normalizedInputs, "automatic_replan"),
+      domains: [...AUTONOMOUS_DOMAIN_NAMES],
+    });
+    await trace.started();
+    try {
+      const { traceStore: _traceStore, runId: _runId, ...batchOptions } = options;
+      const replan = (input: AutonomousBrainRequest, index: number): AutonomousBrainAutoReplanCycleOptions => {
+        const policy = batchOption(batchOptions.replan, input, index) as (AutonomousBrainAutoReplanCycleOptions & { observer?: ProviderInvocationObserver; selectionEventCallback?: AutonomousModelSelectionTraceEventCallback }) | undefined;
+        if (policy === undefined) throw new ArgumentError("automatic replan batch policy factory returned no policy");
+        return {
+          ...policy,
+          observer: composeBrainObservers(policy.observer, trace.providerObserver()),
+          selectionEventCallback: trace.selectionEventCallback(policy.selectionEventCallback),
+        };
+      };
+      const batch = await this.executeAutoReplanCycleBatch(normalizedInputs, { ...batchOptions, replan });
+      for (const item of batch.items) {
+        const execution = item.execution;
+        const rawStatus = execution === undefined
+          ? item.status === "omitted" ? "paused" : item.status === "refused" ? "refused" : "failed"
+          : autonomousRunTraceStatus(execution.status);
+        const status = rawStatus === "running" || rawStatus === "unknown" ? "paused" : rawStatus;
+        await trace.record({
+          phase: status === "completed" || status === "partial" ? "completed" : status,
+          status,
+          domains: execution?.route.selected_domains,
+          route_digest: execution?.route.route_digest,
+          detail_digest: digestJsonSync({ index: item.index, item_status: item.status, execution_status: execution?.status ?? null }),
+        });
+      }
+      await trace.complete({
+        status: autonomousRunTraceStatus(batch.status),
+        domains: [...AUTONOMOUS_DOMAIN_NAMES],
+        detail_digest: digestJsonSync({ batch_digest: batch.batch_digest, completed_count: batch.completed_count, failed_count: batch.failed_count, omitted_count: batch.omitted_count }),
+      });
+      return {
+        schema: AUTONOMOUS_BRAIN_TRACED_AUTO_REPLAN_BATCH_SCHEMA,
+        batch: tracedAutomaticCycleBatchResult(batch),
+        trace: await trace.summary(),
+        retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads",
+        secret_material: "never_returned",
+      };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Traced automatic evaluator cycles after one provider-free admission covers all routes. */
+  async executeAutoCycleBatchWithLaunchAdmissionAndTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoCycleBatchTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoCycleBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic cycle trace batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const policies = inputs.map((input, index) => batchOption(options.cycle, input, index) ?? {});
+    for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic cycle trace batch requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeAutomaticCycleBatchLaunchAdmission(inputs, policies, admission);
+    return this.executeAutoCycleBatchWithTrace(inputs, { ...options, cycle: (_input, index) => policies[index]! });
+  }
+
+  /** Traced automatic evaluator/replan cycles after one provider-free admission covers all routes. */
+  async executeAutoReplanCycleBatchWithLaunchAdmissionAndTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoReplanBatchTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoReplanBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic replan trace batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (!options || options.replan === undefined) throw new ArgumentError("autonomous brain automatic replan trace batch requires a replan policy");
+    const policies = inputs.map((input, index) => {
+      const policy = batchOption(options.replan, input, index);
+      if (policy === undefined) throw new ArgumentError("automatic replan batch policy factory returned no policy");
+      return policy;
+    });
+    for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic replan trace batch requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeAutomaticCycleBatchLaunchAdmission(inputs, policies, admission);
+    return this.executeAutoReplanCycleBatchWithTrace(inputs, { ...options, replan: (_input, index) => policies[index]! });
+  }
+
+  /** Run automatic evaluator cycles with digest-bound, metadata-only restart checkpoints. */
+  async executeAutoCycleBatchResumable(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoCycleBatchResumableOptions,
+  ): Promise<AutonomousBrainAutoCycleBatchResult> {
+    return this.executeAutoCycleBatchResumableCore(inputs, options);
+  }
+
+  /** Resume automatic evaluator cycles while composing the same redacted lifecycle trace. */
+  async executeAutoCycleBatchResumableWithTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoCycleBatchResumableTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoCycleBatchResult> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain automatic cycle resumable trace options must be an object");
+    const normalizedInputs = inputs.map((input) => validateRequest(input));
+    const trace = new AutonomousRunTraceSession(options.traceStore, {
+      run_id: options.runId,
+      task_digest: automaticCycleBatchTraceTaskDigest(normalizedInputs, "automatic_cycle"),
+      domains: [...AUTONOMOUS_DOMAIN_NAMES],
+    });
+    await trace.started();
+    try {
+      const { traceStore: _traceStore, runId: _runId, ...batchOptions } = options;
+      const cycle = (input: AutonomousBrainRequest, index: number): AutonomousBrainAutoCycleOptions => {
+        const policy = (batchOption(batchOptions.cycle, input, index) ?? {}) as AutonomousBrainAutoCycleOptions & { observer?: ProviderInvocationObserver; selectionEventCallback?: AutonomousModelSelectionTraceEventCallback };
+        return { ...policy, observer: composeBrainObservers(policy.observer, trace.providerObserver()), selectionEventCallback: trace.selectionEventCallback(policy.selectionEventCallback) };
+      };
+      const batch = await this.executeAutoCycleBatchResumable(normalizedInputs, { ...batchOptions, cycle });
+      await recordAutomaticCycleBatchTrace(trace, batch);
+      await trace.complete({
+        status: autonomousRunTraceStatus(batch.status),
+        domains: [...AUTONOMOUS_DOMAIN_NAMES],
+        detail_digest: digestJsonSync({ batch_digest: batch.batch_digest, completed_count: batch.completed_count, failed_count: batch.failed_count, omitted_count: batch.omitted_count }),
+      });
+      return {
+        schema: AUTONOMOUS_BRAIN_TRACED_AUTO_CYCLE_BATCH_SCHEMA,
+        batch: tracedAutomaticCycleBatchResult(batch),
+        trace: await trace.summary(),
+        retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads",
+        secret_material: "never_returned",
+      };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Run automatic evaluator/replan cycles with digest-bound, metadata-only restart checkpoints. */
+  async executeAutoReplanCycleBatchResumable(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoReplanBatchResumableOptions,
+  ): Promise<AutonomousBrainAutoReplanBatchResult> {
+    return this.executeAutoReplanCycleBatchResumableCore(inputs, options);
+  }
+
+  /** Resume automatic evaluator/replan cycles while composing the same redacted lifecycle trace. */
+  async executeAutoReplanCycleBatchResumableWithTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoReplanBatchResumableTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoReplanBatchResult> {
+    if (!options || typeof options !== "object") throw new ArgumentError("autonomous brain automatic replan resumable trace options must be an object");
+    const normalizedInputs = inputs.map((input) => validateRequest(input));
+    const trace = new AutonomousRunTraceSession(options.traceStore, {
+      run_id: options.runId,
+      task_digest: automaticCycleBatchTraceTaskDigest(normalizedInputs, "automatic_replan"),
+      domains: [...AUTONOMOUS_DOMAIN_NAMES],
+    });
+    await trace.started();
+    try {
+      const { traceStore: _traceStore, runId: _runId, ...batchOptions } = options;
+      const replan = (input: AutonomousBrainRequest, index: number): AutonomousBrainAutoReplanCycleOptions => {
+        const policy = batchOption(batchOptions.replan, input, index) as (AutonomousBrainAutoReplanCycleOptions & { observer?: ProviderInvocationObserver; selectionEventCallback?: AutonomousModelSelectionTraceEventCallback }) | undefined;
+        if (policy === undefined) throw new ArgumentError("automatic replan batch policy factory returned no policy");
+        return { ...policy, observer: composeBrainObservers(policy.observer, trace.providerObserver()), selectionEventCallback: trace.selectionEventCallback(policy.selectionEventCallback) };
+      };
+      const batch = await this.executeAutoReplanCycleBatchResumable(normalizedInputs, { ...batchOptions, replan });
+      await recordAutomaticCycleBatchTrace(trace, batch);
+      await trace.complete({
+        status: autonomousRunTraceStatus(batch.status),
+        domains: [...AUTONOMOUS_DOMAIN_NAMES],
+        detail_digest: digestJsonSync({ batch_digest: batch.batch_digest, completed_count: batch.completed_count, failed_count: batch.failed_count, omitted_count: batch.omitted_count }),
+      });
+      return {
+        schema: AUTONOMOUS_BRAIN_TRACED_AUTO_REPLAN_BATCH_SCHEMA,
+        batch: tracedAutomaticCycleBatchResult(batch),
+        trace: await trace.summary(),
+        retention: "batch_values_caller_owned;trace_metadata_only_no_prompts_responses_or_tool_payloads",
+        secret_material: "never_returned",
+      };
+    } catch (error) {
+      const projection = errorProjection(error);
+      await trace.fail({ failure_class: projection.error_class, failure_code: projection.failure_code, detail_digest: digestJsonSync(projection) }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /** Resume automatic evaluator cycles only after one provider-free admission covers all routes. */
+  async executeAutoCycleBatchResumableWithLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoCycleBatchResumableOptions,
+  ): Promise<AutonomousBrainAutoCycleBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic cycle resumable batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const policies = inputs.map((input, index) => batchOption(options.cycle, input, index) ?? {});
+    for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic cycle resumable batch requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeAutomaticCycleBatchLaunchAdmission(inputs, policies, admission);
+    return this.executeAutoCycleBatchResumable(inputs, { ...options, cycle: (_input, index) => policies[index]! });
+  }
+
+  /** Resume traced automatic evaluator cycles only after one provider-free admission covers all routes. */
+  async executeAutoCycleBatchResumableWithLaunchAdmissionAndTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoCycleBatchResumableTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoCycleBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic cycle resumable trace batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    const policies = inputs.map((input, index) => batchOption(options.cycle, input, index) ?? {});
+    for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic cycle resumable trace batch requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeAutomaticCycleBatchLaunchAdmission(inputs, policies, admission);
+    return this.executeAutoCycleBatchResumableWithTrace(inputs, { ...options, cycle: (_input, index) => policies[index]! });
+  }
+
+  /** Resume automatic evaluator/replan cycles only after one provider-free admission covers all routes. */
+  async executeAutoReplanCycleBatchResumableWithLaunchAdmission(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoReplanBatchResumableOptions,
+  ): Promise<AutonomousBrainAutoReplanBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic replan resumable batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (!options || options.replan === undefined) throw new ArgumentError("autonomous brain automatic replan resumable batch requires a replan policy");
+    const policies = inputs.map((input, index) => {
+      const policy = batchOption(options.replan, input, index);
+      if (policy === undefined) throw new ArgumentError("automatic replan batch policy factory returned no policy");
+      return policy;
+    });
+    for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic replan resumable batch requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeAutomaticCycleBatchLaunchAdmission(inputs, policies, admission);
+    return this.executeAutoReplanCycleBatchResumable(inputs, { ...options, replan: (_input, index) => policies[index]! });
+  }
+
+  /** Resume traced automatic evaluator/replan cycles only after one provider-free admission covers all routes. */
+  async executeAutoReplanCycleBatchResumableWithLaunchAdmissionAndTrace(
+    inputs: readonly AutonomousBrainRequest[],
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainAutoReplanBatchResumableTraceOptions,
+  ): Promise<AutonomousBrainTracedAutoReplanBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic replan resumable trace batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (!options || options.replan === undefined) throw new ArgumentError("autonomous brain automatic replan resumable trace batch requires a replan policy");
+    const policies = inputs.map((input, index) => {
+      const policy = batchOption(options.replan, input, index);
+      if (policy === undefined) throw new ArgumentError("automatic replan batch policy factory returned no policy");
+      return policy;
+    });
+    for (const policy of policies) this.rejectLaunchAdmittedSemanticRouting(policy.semanticRouting, "launch-admitted automatic replan resumable trace batch requires provider-free routing; admit semantic routing separately before enabling it");
+    await this.authorizeAutomaticCycleBatchLaunchAdmission(inputs, policies, admission);
+    return this.executeAutoReplanCycleBatchResumableWithTrace(inputs, { ...options, replan: (_input, index) => policies[index]! });
+  }
+
+  private async executeAutoCycleBatchResumableCore(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoCycleBatchResumableOptions,
+  ): Promise<AutonomousBrainAutoCycleBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic cycle resumable batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (!options || options.jobId === undefined) throw new ArgumentError("autonomous brain automatic cycle resumable batch requires jobId");
+    if (options.checkpointSink !== undefined && typeof options.checkpointSink !== "function") throw new ArgumentError("autonomous brain automatic cycle checkpointSink must be callable");
+    if (options.rehydrateCycle !== undefined && typeof options.rehydrateCycle !== "function") throw new ArgumentError("autonomous brain automatic cycle rehydrateCycle must be callable");
+    const normalizedInputs = inputs.map((input) => validateRequest(input));
+    const { maxParallelism, stopOnError } = boundedBatchControls(options);
+    const jobId = checkpointText("autonomous brain automatic cycle jobId", options.jobId);
+    const policies = normalizedInputs.map((input, index) => batchOption(options.cycle, input, index) ?? {});
+    const taskDigests = normalizedInputs.map((input) => brainBatchTaskDigest(input));
+    const requestDigests = normalizedInputs.map((input, index) => brainBatchRequestDigest(input, index, "automatic_cycle"));
+    const automaticExecutionPolicyDigest = digestJsonSync({ schema: "bioprism-typescript-autonomous-brain-automatic-cycle-policy-set/0.1", mode: "automatic_cycle", policies: policies.map((policy) => automaticCyclePolicyDigest(policy, "automatic_cycle", options.policyDigest)) });
+    const batchInputDigest = digestJsonSync({ schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, mode: "automatic_cycle", request_digests: requestDigests, automatic_execution_policy_digest: automaticExecutionPolicyDigest });
+    const restored = options.checkpoint === undefined ? null : validateBrainBatchCheckpoint(options.checkpoint);
+    if (restored !== null) {
+      if (restored.mode !== "automatic_cycle" || restored.job_id !== jobId || JSON.stringify(restored.request_digests) !== JSON.stringify(requestDigests)) throw new ArgumentError("autonomous brain automatic cycle checkpoint does not match the current requests or mode");
+      if (restored.automatic_execution_policy_digest !== automaticExecutionPolicyDigest || restored.batch_input_digest !== batchInputDigest) throw new ArgumentError("autonomous brain automatic cycle checkpoint policy does not match");
+      if (restored.max_parallelism !== maxParallelism || restored.stop_on_error !== stopOnError) throw new ArgumentError("autonomous brain automatic cycle checkpoint controls do not match");
+      if (restored.completed_indices.length > 0 && options.rehydrateCycle === undefined) throw new ArgumentError("resuming an autonomous brain automatic cycle batch requires rehydrateCycle");
+    }
+    const items: Array<AutonomousBrainAutoCycleBatchItem | undefined> = new Array(normalizedInputs.length);
+    if (restored !== null) {
+      for (let position = 0; position < restored.completed_indices.length; position += 1) {
+        const index = restored.completed_indices[position]!;
+        const context: AutonomousBrainBatchRehydrationContext = { job_id: jobId, index, mode: "automatic_cycle", request_digest: requestDigests[index]!, task_digest: taskDigests[index]!, expected_result_digest: restored.completed_result_digests[position]! };
+        let execution: AutonomousBrainAutoCycleResult;
+        try { execution = await options.rehydrateCycle!(context); } catch { throw new ArgumentError(`rehydrated autonomous brain automatic cycle item ${index} failed`); }
+        if (!execution || !execution.route || execution.route.task_digest !== taskDigests[index] || !automaticCycleBatchSucceeded(execution.status)) throw new ArgumentError(`rehydrated autonomous brain automatic cycle item ${index} is not a matching successful execution`);
+        const item: AutonomousBrainAutoCycleBatchItem = { index, status: "succeeded", task_digest: taskDigests[index]!, execution };
+        if (automaticCycleBatchItemDigest(item) !== restored.completed_result_digests[position]) throw new ArgumentError(`rehydrated autonomous brain automatic cycle item ${index} does not match its checkpoint digest`);
+        items[index] = item;
+      }
+    }
+    let persistChain: Promise<void> = Promise.resolve();
+    const queueCheckpoint = (snapshot: readonly (AutonomousBrainAutoCycleBatchItem | undefined)[], status: "running" | "partial" | "completed"): void => {
+      if (options.checkpointSink === undefined) return;
+      const completed = snapshot.flatMap((item, index) => item?.status === "succeeded" ? [{ index, item }] : []);
+      const checkpoint = makeBrainBatchCheckpoint({ mode: "automatic_cycle", jobId, requestDigests, batchInputDigest, semanticRoutingPolicyDigest: null, automaticExecutionPolicyDigest, completed, maxParallelism, stopOnError, status });
+      persistChain = persistChain.then(() => options.checkpointSink!(checkpoint));
+    };
+    queueCheckpoint(items, "running");
+    let nextIndex = 0;
+    let halted = false;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex++;
+        if (index >= normalizedInputs.length) return;
+        if (items[index] !== undefined) continue;
+        if (halted) { items[index] = { index, status: "omitted", task_digest: null }; continue; }
+        try {
+          const execution = await this.executeAutoCycle(normalizedInputs[index]!, policies[index]!);
+          const succeeded = automaticCycleBatchSucceeded(execution.status);
+          const refused = automaticBatchRefused(execution.status);
+          items[index] = { index, status: succeeded ? "succeeded" : refused ? "refused" : "failed", task_digest: taskDigests[index]!, execution };
+          if (succeeded) queueCheckpoint([...items], "running");
+          if (stopOnError && !succeeded) halted = true;
+        } catch (error) {
+          const projection = errorProjection(error);
+          items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
+          if (stopOnError) halted = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(maxParallelism, normalizedInputs.length) }, () => worker()));
+    const normalized = items.map((item, index) => item ?? { index, status: "failed" as const, task_digest: null, error_class: "AutonomousBrainError", failure_code: "missing_batch_result" });
+    const completed = normalized.filter((item) => item.status === "succeeded").length;
+    const failed = normalized.filter((item) => item.status === "failed" || item.status === "refused").length;
+    const omitted = normalized.filter((item) => item.status === "omitted").length;
+    const result: AutonomousBrainAutoCycleBatchResult = { schema: AUTONOMOUS_BRAIN_AUTO_CYCLE_BATCH_SCHEMA, status: batchStatus(completed, failed, omitted), items: normalized, completed_count: completed, failed_count: failed, omitted_count: omitted, max_parallelism: maxParallelism, stop_on_error: stopOnError, batch_digest: automaticCycleBatchDigest(normalized), retention: "metadata_only_tasks_and_automatic_cycle_values_transient", secret_material: "never_returned" };
+    queueCheckpoint(normalized, result.status === "completed" ? "completed" : "partial");
+    await persistChain;
+    return result;
+  }
+
+  private async executeAutoReplanCycleBatchResumableCore(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoReplanBatchResumableOptions,
+  ): Promise<AutonomousBrainAutoReplanBatchResult> {
+    if (!Array.isArray(inputs) || inputs.length < 1 || inputs.length > MAX_AUTONOMOUS_BRAIN_BATCH) throw new ArgumentError(`autonomous brain automatic replan resumable batch must contain 1..=${MAX_AUTONOMOUS_BRAIN_BATCH} entries`);
+    if (!options || options.jobId === undefined) throw new ArgumentError("autonomous brain automatic replan resumable batch requires jobId");
+    if (!options || options.replan === undefined) throw new ArgumentError("autonomous brain automatic replan resumable batch requires a replan policy");
+    if (options.checkpointSink !== undefined && typeof options.checkpointSink !== "function") throw new ArgumentError("autonomous brain automatic replan checkpointSink must be callable");
+    if (options.rehydrateReplan !== undefined && typeof options.rehydrateReplan !== "function") throw new ArgumentError("autonomous brain automatic replan rehydrateReplan must be callable");
+    const normalizedInputs = inputs.map((input) => validateRequest(input));
+    const { maxParallelism, stopOnError } = boundedBatchControls(options);
+    const jobId = checkpointText("autonomous brain automatic replan jobId", options.jobId);
+    const policies = normalizedInputs.map((input, index) => {
+      const policy = batchOption(options.replan, input, index);
+      if (policy === undefined) throw new ArgumentError("automatic replan batch policy factory returned no policy");
+      return policy;
+    });
+    const taskDigests = normalizedInputs.map((input) => brainBatchTaskDigest(input));
+    const requestDigests = normalizedInputs.map((input, index) => brainBatchRequestDigest(input, index, "automatic_replan"));
+    const automaticExecutionPolicyDigest = digestJsonSync({ schema: "bioprism-typescript-autonomous-brain-automatic-cycle-policy-set/0.1", mode: "automatic_replan", policies: policies.map((policy) => automaticCyclePolicyDigest(policy, "automatic_replan", options.policyDigest)) });
+    const batchInputDigest = digestJsonSync({ schema: AUTONOMOUS_BRAIN_BATCH_CHECKPOINT_SCHEMA, mode: "automatic_replan", request_digests: requestDigests, automatic_execution_policy_digest: automaticExecutionPolicyDigest });
+    const restored = options.checkpoint === undefined ? null : validateBrainBatchCheckpoint(options.checkpoint);
+    if (restored !== null) {
+      if (restored.mode !== "automatic_replan" || restored.job_id !== jobId || JSON.stringify(restored.request_digests) !== JSON.stringify(requestDigests)) throw new ArgumentError("autonomous brain automatic replan checkpoint does not match the current requests or mode");
+      if (restored.automatic_execution_policy_digest !== automaticExecutionPolicyDigest || restored.batch_input_digest !== batchInputDigest) throw new ArgumentError("autonomous brain automatic replan checkpoint policy does not match");
+      if (restored.max_parallelism !== maxParallelism || restored.stop_on_error !== stopOnError) throw new ArgumentError("autonomous brain automatic replan checkpoint controls do not match");
+      if (restored.completed_indices.length > 0 && options.rehydrateReplan === undefined) throw new ArgumentError("resuming an autonomous brain automatic replan batch requires rehydrateReplan");
+    }
+    const items: Array<AutonomousBrainAutoReplanBatchItem | undefined> = new Array(normalizedInputs.length);
+    if (restored !== null) {
+      for (let position = 0; position < restored.completed_indices.length; position += 1) {
+        const index = restored.completed_indices[position]!;
+        const context: AutonomousBrainBatchRehydrationContext = { job_id: jobId, index, mode: "automatic_replan", request_digest: requestDigests[index]!, task_digest: taskDigests[index]!, expected_result_digest: restored.completed_result_digests[position]! };
+        let execution: AutonomousBrainAutoReplanCycleResult;
+        try { execution = await options.rehydrateReplan!(context); } catch { throw new ArgumentError(`rehydrated autonomous brain automatic replan item ${index} failed`); }
+        if (!execution || !execution.route || execution.route.task_digest !== taskDigests[index] || !automaticReplanBatchSucceeded(execution.status)) throw new ArgumentError(`rehydrated autonomous brain automatic replan item ${index} is not a matching successful execution`);
+        const item: AutonomousBrainAutoReplanBatchItem = { index, status: "succeeded", task_digest: taskDigests[index]!, execution };
+        if (automaticCycleBatchItemDigest(item) !== restored.completed_result_digests[position]) throw new ArgumentError(`rehydrated autonomous brain automatic replan item ${index} does not match its checkpoint digest`);
+        items[index] = item;
+      }
+    }
+    let persistChain: Promise<void> = Promise.resolve();
+    const queueCheckpoint = (snapshot: readonly (AutonomousBrainAutoReplanBatchItem | undefined)[], status: "running" | "partial" | "completed"): void => {
+      if (options.checkpointSink === undefined) return;
+      const completed = snapshot.flatMap((item, index) => item?.status === "succeeded" ? [{ index, item }] : []);
+      const checkpoint = makeBrainBatchCheckpoint({ mode: "automatic_replan", jobId, requestDigests, batchInputDigest, semanticRoutingPolicyDigest: null, automaticExecutionPolicyDigest, completed, maxParallelism, stopOnError, status });
+      persistChain = persistChain.then(() => options.checkpointSink!(checkpoint));
+    };
+    queueCheckpoint(items, "running");
+    let nextIndex = 0;
+    let halted = false;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex++;
+        if (index >= normalizedInputs.length) return;
+        if (items[index] !== undefined) continue;
+        if (halted) { items[index] = { index, status: "omitted", task_digest: null }; continue; }
+        try {
+          const execution = await this.executeAutoReplanCycle(normalizedInputs[index]!, policies[index]!);
+          const succeeded = automaticReplanBatchSucceeded(execution.status);
+          const refused = automaticBatchRefused(execution.status);
+          items[index] = { index, status: succeeded ? "succeeded" : refused ? "refused" : "failed", task_digest: taskDigests[index]!, execution };
+          if (succeeded) queueCheckpoint([...items], "running");
+          if (stopOnError && !succeeded) halted = true;
+        } catch (error) {
+          const projection = errorProjection(error);
+          items[index] = { index, status: stopOnError ? "failed" : "refused", task_digest: null, ...projection };
+          if (stopOnError) halted = true;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(maxParallelism, normalizedInputs.length) }, () => worker()));
+    const normalized = items.map((item, index) => item ?? { index, status: "failed" as const, task_digest: null, error_class: "AutonomousBrainError", failure_code: "missing_batch_result" });
+    const completed = normalized.filter((item) => item.status === "succeeded").length;
+    const failed = normalized.filter((item) => item.status === "failed" || item.status === "refused").length;
+    const omitted = normalized.filter((item) => item.status === "omitted").length;
+    const result: AutonomousBrainAutoReplanBatchResult = { schema: AUTONOMOUS_BRAIN_AUTO_REPLAN_BATCH_SCHEMA, status: batchStatus(completed, failed, omitted), items: normalized, completed_count: completed, failed_count: failed, omitted_count: omitted, max_parallelism: maxParallelism, stop_on_error: stopOnError, batch_digest: automaticCycleBatchDigest(normalized), retention: "metadata_only_tasks_and_automatic_replan_values_transient", secret_material: "never_returned" };
+    queueCheckpoint(normalized, result.status === "completed" ? "completed" : "partial");
+    await persistChain;
+    return result;
   }
 
   /** Execute ordinary closed-loop cycles with bounded concurrency and deterministic result order. */

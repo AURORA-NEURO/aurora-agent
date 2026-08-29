@@ -796,6 +796,18 @@ the first execution and reject semantic routing until its classifier call is sep
 Batch digests cover only item status, task/result digests, route identity, mode, and cycle status;
 nested cycle execution values remain caller-owned and transient.
 
+The cycle boundary also has `WithTrace()` and `Resumable()` variants. Traced cycle/replan batches
+compose provider and model-selection lifecycle events into one hash-chained, metadata-only trace;
+the returned cycle values are non-enumerable caller-owned properties so logging the envelope cannot
+accidentally persist responses, prompts, evaluator evidence, or tool payloads. Resumable variants
+persist only request/result digests, bounded controls, the explicit automatic-cycle mode, and a
+policy-set digest. Restart callers must rehydrate each settled cycle through `rehydrateCycle()` or
+`rehydrateReplan()`; the facade verifies the route task identity and cycle result digest before
+skipping that item, and a checkpoint from direct or ordinary automatic execution cannot cross the
+cycle/replan mode boundary. `policyDigest` is available for deployments that need an additional
+caller-owned identity for opaque evaluator or learning callback implementations. Launch-admitted
+trace/resume variants re-check the full provider-free route union before rehydration or dispatch.
+
 ```typescript
 const batch = await brain.executeAutoReplanCycleBatch(requests, {
   maxParallelism: 4,

@@ -32,8 +32,15 @@ settlement, and deterministic input ordering while `stopOnError` makes unstarted
 Admission-aware batches union the complete provider-free route scope before dispatch and keep
 semantic classifier approval separate. All twelve built-in domains, per-item route conflicts,
 cross-domain selection, held admission, bounded omissions, and metadata-only batch digests are
-covered offline. Durable batch checkpoints and trace composition remain the next extension of
-this cycle-level boundary.
+covered offline. The cycle boundary now also has metadata-only trace and restart-safe checkpoint
+variants. Trace events compose provider/model-selection lifecycle metadata for the whole batch while
+cycle values remain non-enumerable caller-owned properties. Checkpoints bind the explicit
+automatic-cycle or automatic-replan mode, every request/result digest, bounded controls, and a
+policy-set digest; restart callers must rehydrate settled cycle results and the facade verifies
+route task identity and result digests before skipping provider work. Launch-admitted trace/resume
+variants union and re-review the full provider-free route scope before rehydration or dispatch.
+Durable checkpoint stores, trace composition, and protected receipt adapters remain separate
+application integration work rather than implicit SDK persistence.
 
 The safe TypeScript `AutonomousBrainFacade` now owns the provider-free task-clarification loop
 already available on the lower-level agent. It can derive a bounded questionnaire for every
