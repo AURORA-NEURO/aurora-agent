@@ -505,6 +505,13 @@ use bioprism_ids::{
     simulate_protocol_workbench, ProtocolWorkbenchReport9, ProtocolWorkbenchRequest5,
     IDS_PROTOCOL_SIMULATION_FEATURE_ID,
 };
+use bioprism_dataops::{
+    assure_prospective_provenance as assure_dataops_provenance,
+    ArtifactAndDerivationRequest3 as DataopsArtifactAndDerivationRequest3,
+    ProspectiveProvenanceError as DataopsProspectiveProvenanceError,
+    SignedProvenanceEnvelope7 as DataopsSignedProvenanceEnvelope7,
+    PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID as DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID,
+};
 use bioprism_influence::{
     run_federated_continual_interpretation, EvidenceBackedResult4, FederatedInterpretationError,
     InteractiveInterpretation, FEDERATED_CONTINUAL_INTERPRETATION_FEATURE_ID,
@@ -707,6 +714,8 @@ pub const ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLAN
     "adapter_federated_continual_retrieval_synthesis_federated_control_plane";
 pub const FOUNDATION_MECHANISM_EXPLORATION_ASSURANCE_TOOL: &str =
     "foundation_mechanism_exploration_assurance";
+pub const DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_TOOL: &str =
+    "dataops_provenance_signing_workflow_fabric";
 pub const ATLASHUB_MECHANISM_EXPLORATION_ASSURANCE_TOOL: &str =
     "atlashub_mechanism_exploration_assurance";
 pub const ORACLEX_PUBLICATION_RELEASE_TOOL: &str = "oraclex_publication_release";
@@ -2316,6 +2325,22 @@ pub fn validate_foundation_mechanism_exploration_assurance_json(
         return Err("foundation mechanism assurance feature id mismatch".into());
     }
     Ok(receipt)
+}
+
+pub fn run_dataops_provenance_signing_workflow_fabric_json(value: &Value) -> Result<Value, String> {
+    let request: DataopsArtifactAndDerivationRequest3 = serde_json::from_value(
+        value.get("request").cloned().ok_or("request is required")?,
+    ).map_err(|error| format!("invalid dataops provenance workflow request: {error}"))?;
+    let output = assure_dataops_provenance(&request).map_err(|error: DataopsProspectiveProvenanceError| format!("dataops provenance workflow failed: {error}"))?;
+    serde_json::to_value(output).map_err(|error| format!("cannot serialize dataops provenance workflow output: {error}"))
+}
+
+pub fn validate_dataops_provenance_signing_workflow_fabric_json(value: &Value) -> Result<DataopsSignedProvenanceEnvelope7, String> {
+    let output: DataopsSignedProvenanceEnvelope7 = serde_json::from_value(value.clone())
+        .map_err(|error| format!("invalid dataops provenance workflow output: {error}"))?;
+    output.validate().map_err(|error| error.to_string())?;
+    if output.feature_id != DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID { return Err("dataops provenance workflow feature id mismatch".into()); }
+    Ok(output)
 }
 
 pub fn run_atlashub_mechanism_exploration_assurance_json(value: &Value) -> Result<Value, String> {

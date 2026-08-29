@@ -4480,3 +4480,5 @@ export {
   validateConformanceCertifiedDecisionSection7,
 } from "./research-contracts.js";
 export type { ConformanceCertifiedDecisionSection7 } from "./research-contracts.js";
+export { DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID, DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_CONTRACT_VERSION, DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_INPUT_SCHEMA, DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_OUTPUT_SCHEMA, DATAOPS_PROVENANCE_SIGNING_WORKFLOW_FABRIC_CONTENT_TYPE, dataopsProvenanceSigningWorkflowReceiptDigest, validateDataopsProvenanceSigningWorkflowReceipt } from "./research-contracts.js";
+export type { DataopsProvenanceSigningWorkflowReceipt } from "./research-contracts.js";

@@ -268,6 +268,7 @@ pub mod placement;
 pub mod provider;
 pub mod slo;
 pub mod topology;
+pub mod provenance_signing_workflow_fabric;
 
 pub use basis::{Attested, Basis, Coverage, PartyId};
 pub use catalog::{
@@ -306,6 +307,13 @@ pub use slo::{
 pub use topology::{
     parity, reference_local, reference_team, DataClass, Deployment, Mutability, ParityReport,
     PromiseDifference, Promises, StorageTopology, StoreProfile, TopologyDraft,
+};
+pub use provenance_signing_workflow_fabric::{
+    assure_prospective_provenance, prospective_provenance_assurance_manifest,
+    ArtifactAndDerivation3, ArtifactAndDerivationRequest3, DerivationEvidenceState,
+    ProspectiveProvenanceError, SignedProvenanceEnvelope7,
+    FEATURE_ID as PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID,
+    CONTRACT_VERSION as PROVENANCE_SIGNING_WORKFLOW_FABRIC_CONTRACT_VERSION,
 };
 
 /// The caller-supplied logical clock every lifecycle decision in this crate advances on.

@@ -7848,6 +7848,20 @@ __all__ += [
     "conformance_context_compilation_assurance_manifest",
 ]
 
+from .dataops_provenance_signing_workflow_fabric import (
+    SignedProvenanceEnvelope7 as DataopsSignedProvenanceEnvelope7,
+    assure_prospective_provenance as assure_dataops_provenance,
+    dataops_provenance_signing_workflow_fabric_manifest,
+    idsProspectiveProvenanceDigest as dataopsProvenanceSigningWorkflowDigest,
+)
+
+__all__ += [
+    "DataopsSignedProvenanceEnvelope7",
+    "assure_dataops_provenance",
+    "dataops_provenance_signing_workflow_fabric_manifest",
+    "dataopsProvenanceSigningWorkflowDigest",
+]
+
 from .atlashub_mechanism_exploration_assurance import (
     MechanismExplorationAssuranceReceipt as AtlashubMechanismExplorationAssuranceReceipt,
     assure_mechanism_exploration as assure_atlashub_mechanism_exploration,

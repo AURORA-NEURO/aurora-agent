@@ -2033,6 +2033,9 @@ impl Server {
             "foundation_mechanism_exploration_assurance" => {
                 self.foundation_mechanism_exploration_assurance(&arguments)
             }
+            "dataops_provenance_signing_workflow_fabric" => {
+                self.dataops_provenance_signing_workflow_fabric(&arguments)
+            }
             "atlashub_mechanism_exploration_assurance" => {
                 self.atlashub_mechanism_exploration_assurance(&arguments)
             }
@@ -26249,6 +26252,14 @@ impl Server {
         }))
     }
 
+    fn dataops_provenance_signing_workflow_fabric(
+        &self,
+        arguments: &Value,
+    ) -> Result<Value, String> {
+        let receipt = crate::research_contracts::run_dataops_provenance_signing_workflow_fabric_json(arguments)?;
+        Ok(json!({"ok":true,"schema":"aurora-research-contract/1.0","feature_id":bioprism_dataops::PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID,"receipt":receipt,"guarantees":["A1 workflow fabric verifies high-throughput artifact derivation lineage, detached signature attestations, root and replay identity, capacity, policy, protected closure, approval, aggregate-only locality, and adversarial gates","missing parents, cycles, invalid signatures, root drift, unknown or negative evidence, omissions, and unresolved closure remain explicit","non-qualified workflows fail closed with block:unsafe-release; raw preclinical data never leaves its institution"],"limitations":["the fabric validates caller-supplied attestations and does not sign, upload, execute, or move artifacts","the capability is not a clinical decision system"]}))
+    }
+
     fn oraclex_publication_release(&self, arguments: &Value) -> Result<Value, String> {
         let request = arguments
             .get("request")
@@ -42092,6 +42103,11 @@ pub fn tool_definitions() -> Vec<Value> {
             "name": "foundation_mechanism_exploration_assurance",
             "description": "Assure a prospective high-throughput mechanism-exploration candidate batch with typed evidence/provenance/comparability, baseline, replay, capacity, policy, approval, protected-closure, negative-result, and fail-closed release gates.",
             "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized MechanismExplorationAssuranceRequest with candidate evidence digests, baseline/algorithm identity, support threshold, bounded capacity, required mechanisms, policy/approval/closure/locality controls, replay identity, and preclinical boundary."}},"required":["request"]}
+        }),
+        json!({
+            "name": "dataops_provenance_signing_workflow_fabric",
+            "description": "Verify a prospective high-throughput provenance-and-signing workflow fabric with lineage, detached-attestation, root/replay, capacity, policy, protected-closure, aggregate-only locality, and fail-closed release gates.",
+            "inputSchema": {"type":"object","properties":{"request":{"type":"object","description":"Serialized ArtifactAndDerivationRequest3 with workflow/batch identity, artifact parent graph, content/provenance/replay digests, signature and evidence states, capacity, governance controls, and preclinical boundary."}},"required":["request"]}
         }),
         json!({
             "name": "atlashub_mechanism_exploration_assurance",
