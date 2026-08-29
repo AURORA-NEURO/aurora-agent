@@ -2213,6 +2213,65 @@ test("automatic cycle protected rehydrators keep cycle and replan receipts mode-
   await assert.rejects(cycleRehydrator.resolve(contexts[0]), /request_digest/);
 });
 
+test("brain batch controller restores automatic cycle and replan checkpoints as distinct jobs", async () => {
+  const runtime = localRuntime();
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+  const inputs = [
+    { task: tasks.science, domain: "science" },
+    { task: tasks.operations, domain: "operations" },
+  ];
+  const cycle = {
+    approveProviderCall: true,
+    maxReplans: 0,
+    evaluate: () => ({ evaluator_id: "controller-cycle-reviewer", evaluator_version: "1", reward: 0.9, passed: true, replan_requested: false }),
+  };
+  const store = new InMemoryAutonomousBrainBatchCheckpointStore();
+  const controller = new AutonomousBrainBatchJobController(brain, store);
+  assert.equal((await controller.restore()).status, "empty");
+  const first = await controller.runAutomaticCycle(inputs, { jobId: "controller-cycle", maxParallelism: 1, cycle });
+  assert.equal(first.batch.status, "completed");
+  assert.equal(store.read().mode, "automatic_cycle");
+  const beforeResume = runtime.providerStatus("offline").attempts;
+
+  const resumedController = new AutonomousBrainBatchJobController(brain, store);
+  assert.equal((await resumedController.restore()).status, "restored");
+  const resumed = await resumedController.runAutomaticCycle(inputs, {
+    jobId: "controller-cycle",
+    maxParallelism: 1,
+    cycle,
+    rehydrateCycle: (context) => first.batch.items[context.index].execution,
+  });
+  assert.equal(resumed.batch.status, "completed");
+  assert.equal(runtime.providerStatus("offline").attempts, beforeResume);
+
+  await assert.rejects(
+    () => resumedController.runAutomatic(inputs, {
+      jobId: "controller-cycle",
+      maxParallelism: 1,
+      execution: { approveProviderCall: true },
+      rehydrateExecution: () => first.batch.items[0].execution,
+    }),
+    /mode/,
+  );
+
+  const replanStore = new InMemoryAutonomousBrainBatchCheckpointStore();
+  const replanController = new AutonomousBrainBatchJobController(brain, replanStore);
+  await replanController.restore();
+  const replanned = await replanController.runAutomaticReplan(inputs.slice(0, 1), {
+    jobId: "controller-replan",
+    maxParallelism: 1,
+    replan: {
+      approveProviderCall: true,
+      maxReplans: 0,
+      evaluate: () => ({ evaluator_id: "controller-replan-reviewer", evaluator_version: "1", reward: 0.87, passed: true, replan_requested: false }),
+    },
+  });
+  assert.equal(replanned.batch.status, "completed");
+  assert.equal(replanStore.read().mode, "automatic_replan");
+});
+
 test("brain facade exposes a keyless readiness and activation lifecycle for onboarding", async () => {
   const runtime = localRuntime();
   const agent = new AutonomousAgent(runtime);

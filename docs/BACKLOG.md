@@ -43,7 +43,9 @@ Typed protected receipt adapters now cover both cycle checkpoint modes as well: 
 the exact `automatic_cycle` or `automatic_replan` identity before releasing a transient result, and
 cannot be substituted for direct or ordinary automatic batch rehydration. Durable checkpoint
 stores and application-specific receipt issuance remain caller-owned rather than implicit SDK
-persistence.
+persistence. The batch job controller now exposes these modes directly, preserving one active run,
+restore-before-execution, callback-over-protected-receipt precedence, and CAS-fenced checkpoint
+writes for worker processes.
 
 The safe TypeScript `AutonomousBrainFacade` now owns the provider-free task-clarification loop
 already available on the lower-level agent. It can derive a bounded questionnaire for every

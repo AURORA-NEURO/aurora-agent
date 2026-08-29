@@ -811,7 +811,10 @@ Protected stores can use `AutonomousBrainAutoCycleBatchProtectedRehydrator` or
 `AutonomousBrainAutoReplanBatchProtectedRehydrator`; each requires the matching checkpoint mode
 and verifies the complete job/index/request/task/result identity before asking the caller-owned
 protected boundary to release a transient value. The adapters are deliberately not interchangeable
-with direct or ordinary automatic batch rehydrators.
+with direct or ordinary automatic batch rehydrators. `AutonomousBrainBatchJobController` exposes
+the same lifecycle as `runAutomaticCycle()` and `runAutomaticReplan()`, so a worker can restore
+once, serialize one active run, persist every checkpoint through its own store, and select either
+the explicit callback or the matching protected rehydrator for settled items.
 
 ```typescript
 const batch = await brain.executeAutoReplanCycleBatch(requests, {

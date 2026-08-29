@@ -1067,6 +1067,19 @@ export interface AutonomousBrainAutoReplanBatchResumableTraceOptions extends Aut
   runId: string;
 }
 
+export interface AutonomousBrainAutoCycleBatchControllerRun {
+  controller: AutonomousBrainBatchControllerProjection;
+  batch: AutonomousBrainAutoCycleBatchResult;
+}
+
+export interface AutonomousBrainAutoReplanBatchControllerRun {
+  controller: AutonomousBrainBatchControllerProjection;
+  batch: AutonomousBrainAutoReplanBatchResult;
+}
+
+export type AutonomousBrainAutoCycleBatchControllerRunOptions = Omit<AutonomousBrainAutoCycleBatchResumableOptions, "checkpoint" | "checkpointSink">;
+export type AutonomousBrainAutoReplanBatchControllerRunOptions = Omit<AutonomousBrainAutoReplanBatchResumableOptions, "checkpoint" | "checkpointSink">;
+
 /** Options for the keyless readiness audit exposed at the application boundary. */
 export type AutonomousBrainReadinessOptions = Parameters<AutonomousAgent["readiness"]>[0];
 export type AutonomousBrainReadinessReport = Awaited<ReturnType<AutonomousAgent["readiness"]>>;
@@ -6907,6 +6920,13 @@ export class AutonomousBrainFacade {
   }
 }
 
+export interface AutonomousBrainBatchJobControllerOptions {
+  protectedRehydration?: AutonomousBrainBatchProtectedRehydrator;
+  automaticProtectedRehydration?: AutonomousBrainAutoBatchProtectedRehydrator;
+  automaticCycleProtectedRehydration?: AutonomousBrainAutoCycleBatchProtectedRehydrator;
+  automaticReplanProtectedRehydration?: AutonomousBrainAutoReplanBatchProtectedRehydrator;
+}
+
 /**
  * Own the process lifecycle around the verified resumable brain batch engine.
  *
@@ -6924,12 +6944,14 @@ export class AutonomousBrainBatchJobController {
   constructor(
     readonly brain: AutonomousBrainFacade,
     readonly persistence: AutonomousBrainBatchCheckpointStore,
-    readonly options: { protectedRehydration?: AutonomousBrainBatchProtectedRehydrator; automaticProtectedRehydration?: AutonomousBrainAutoBatchProtectedRehydrator } = {},
+    readonly options: AutonomousBrainBatchJobControllerOptions = {},
   ) {
     if (!(brain instanceof AutonomousBrainFacade)) throw new ArgumentError("autonomous brain batch controller requires an AutonomousBrainFacade");
     if (!persistence || typeof persistence.read !== "function" || typeof persistence.write !== "function") throw new ArgumentError("autonomous brain batch checkpoint store is malformed");
     if (options.protectedRehydration !== undefined && !(options.protectedRehydration instanceof AutonomousBrainBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller protectedRehydration is malformed");
     if (options.automaticProtectedRehydration !== undefined && !(options.automaticProtectedRehydration instanceof AutonomousBrainAutoBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller automaticProtectedRehydration is malformed");
+    if (options.automaticCycleProtectedRehydration !== undefined && !(options.automaticCycleProtectedRehydration instanceof AutonomousBrainAutoCycleBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller automaticCycleProtectedRehydration is malformed");
+    if (options.automaticReplanProtectedRehydration !== undefined && !(options.automaticReplanProtectedRehydration instanceof AutonomousBrainAutoReplanBatchProtectedRehydrator)) throw new ArgumentError("autonomous brain batch controller automaticReplanProtectedRehydration is malformed");
   }
 
   private requireRestored(): void {
@@ -7013,6 +7035,64 @@ export class AutonomousBrainBatchJobController {
       const batch = await this.brain.executeAutoBatchResumable(inputs, {
         ...options,
         ...(rehydrateExecution === undefined ? {} : { rehydrateExecution }),
+        checkpoint: this.checkpoint ?? undefined,
+        checkpointSink: async (checkpoint) => {
+          const verified = validateBrainBatchCheckpoint(checkpoint);
+          await this.persistence.write(verified);
+          this.checkpoint = verified;
+        },
+      });
+      return { controller: this.projection(batch.status, inputs.length, options.jobId), batch };
+    } finally {
+      this.running = false;
+    }
+  }
+
+  /** Run restart-safe automatic evaluator cycles with controller-owned checkpoint persistence. */
+  async runAutomaticCycle(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoCycleBatchControllerRunOptions,
+  ): Promise<AutonomousBrainAutoCycleBatchControllerRun> {
+    this.requireRestored();
+    this.requireIdle();
+    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain automatic cycle controller run requires jobId");
+    const runtimeOptions = options as AutonomousBrainAutoCycleBatchResumableOptions & Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain automatic cycle controller owns checkpoint and checkpointSink");
+    const rehydrateCycle = options.rehydrateCycle ?? (this.options.automaticCycleProtectedRehydration === undefined ? undefined : this.options.automaticCycleProtectedRehydration.resolve.bind(this.options.automaticCycleProtectedRehydration));
+    this.running = true;
+    try {
+      const batch = await this.brain.executeAutoCycleBatchResumable(inputs, {
+        ...options,
+        ...(rehydrateCycle === undefined ? {} : { rehydrateCycle }),
+        checkpoint: this.checkpoint ?? undefined,
+        checkpointSink: async (checkpoint) => {
+          const verified = validateBrainBatchCheckpoint(checkpoint);
+          await this.persistence.write(verified);
+          this.checkpoint = verified;
+        },
+      });
+      return { controller: this.projection(batch.status, inputs.length, options.jobId), batch };
+    } finally {
+      this.running = false;
+    }
+  }
+
+  /** Run restart-safe automatic evaluator/replan cycles with controller-owned persistence. */
+  async runAutomaticReplan(
+    inputs: readonly AutonomousBrainRequest[],
+    options: AutonomousBrainAutoReplanBatchControllerRunOptions,
+  ): Promise<AutonomousBrainAutoReplanBatchControllerRun> {
+    this.requireRestored();
+    this.requireIdle();
+    if (!options || typeof options !== "object" || typeof options.jobId !== "string") throw new ArgumentError("autonomous brain automatic replan controller run requires jobId");
+    const runtimeOptions = options as AutonomousBrainAutoReplanBatchResumableOptions & Record<string, unknown>;
+    if (Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpoint") || Object.prototype.hasOwnProperty.call(runtimeOptions, "checkpointSink")) throw new ArgumentError("autonomous brain automatic replan controller owns checkpoint and checkpointSink");
+    const rehydrateReplan = options.rehydrateReplan ?? (this.options.automaticReplanProtectedRehydration === undefined ? undefined : this.options.automaticReplanProtectedRehydration.resolve.bind(this.options.automaticReplanProtectedRehydration));
+    this.running = true;
+    try {
+      const batch = await this.brain.executeAutoReplanCycleBatchResumable(inputs, {
+        ...options,
+        ...(rehydrateReplan === undefined ? {} : { rehydrateReplan }),
         checkpoint: this.checkpoint ?? undefined,
         checkpointSink: async (checkpoint) => {
           const verified = validateBrainBatchCheckpoint(checkpoint);
