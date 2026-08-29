@@ -2191,6 +2191,8 @@ export type {
   AutonomousBrainWorkflowOptions,
   AutonomousBrainWorkflowResumeOptions,
   AutonomousBrainWorkflowResult,
+  AutonomousBrainWorkflowCycleOptions,
+  AutonomousBrainWorkflowCycleResult,
   AutonomousBrainExecutionPolicyOptions,
   AutonomousBrainExecutionPolicyPlan,
   AutonomousBrainDomainPlanSummary,

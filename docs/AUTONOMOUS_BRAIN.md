@@ -13427,3 +13427,20 @@ neuroscience, operations, enterprise, multi-agent, multimodal, cross-domain, and
 profiles while preserving the current single-domain workflow limitation. Distributed checkpoint
 storage, task/credential rehydration, evaluator settlement, operator identity, and durable
 workflow traces remain deployment-owned follow-up surfaces.
+
+The facade also exposes `runWorkflowCycle()` and
+`runWorkflowCycleWithLaunchAdmission()` for the closed-loop workflow path. These methods compose
+the existing bounded executor with explicit stage evidence, evaluator scoring, optional delayed
+credit, and digest-bound retry state. The cycle does not infer quality from a successful provider
+transport: the caller's evaluator must declare the signal evidence, and only that evaluator can
+request a bounded replan. `maxReplans`, accepted provider-plan ordering, stage contracts, tool
+selection, provider approval, and effect approval remain independent gates. When learning is
+enabled, task-quality and structured-response signals remain separate episodes and settlements.
+
+The cycle's `checkpointStore` and optional `stateStore` are intentionally distinct. The first
+holds stage progress; the second holds evaluator/settlement/replan handoff metadata. Neither
+stores task text, prompts, credentials, provider responses, evaluator values, or retry
+instructions. After restart, caller-owned rehydration callbacks must return the exact private
+execution/evidence/plan values whose digests are already recorded. This gives high-level
+applications a complete workflow/evaluator/learning composition boundary while retaining the
+same explicit recovery responsibilities as the lower-level kernels.

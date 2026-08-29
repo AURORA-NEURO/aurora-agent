@@ -89,6 +89,15 @@ function workflowRuntime(onRequest = () => {}) {
   return runtime;
 }
 
+function perfectWorkflowEvidence(execution) {
+  return {
+    stages: execution.blueprint.workflow.stages.map((stage) => ({
+      stage_id: stage.id,
+      signals: Object.fromEntries(stage.evaluator_signals.map((signal) => [signal, 1])),
+    })),
+  };
+}
+
 async function approvedLaunchAdmission(brain) {
   const profiles = await builtinAutonomousDomainProfiles();
   const ready = { configured: true, operational: true, restart_safe: true, integrity_fenced: true, caller_owned: true };
@@ -394,6 +403,45 @@ test("brain facade durable workflow launch admission gates dispatch and resume",
     /provider-free routing/,
   );
   assert.equal(requests.length, first.total_stage_count);
+});
+
+test("brain facade exposes evaluator-guided workflow cycles across every built-in domain", async () => {
+  const requests = [];
+  const runtime = workflowRuntime((request) => requests.push(request));
+  const agent = new AutonomousAgent(runtime);
+  agent.registerModel(model);
+  const brain = new AutonomousBrainFacade({ agent });
+
+  for (const [index, domain] of AUTONOMOUS_DOMAIN_NAMES.entries()) {
+    const cycle = await brain.runWorkflowCycle(`Evaluate a bounded ${domain} workflow`, {
+      checkpointStore: new InMemoryAutonomousWorkflowCheckpointStore(),
+      domain,
+      candidates: [model],
+      approveProviderCall: true,
+      maxReplans: 0,
+      cycleId: `facade-cycle-${domain}-${index}`,
+      evaluate: async (execution) => ({ evidence: perfectWorkflowEvidence(execution) }),
+    });
+    assert.equal(cycle.status, "completed", domain);
+    assert.equal(cycle.attempts.length, 1, domain);
+    assert.equal(cycle.evaluations[0].status, "passed", domain);
+    assert.equal(cycle.evaluations[0].reward, 1, domain);
+    assert.equal(cycle.final?.blueprint?.domain_profile.domain, domain, domain);
+  }
+
+  const held = brain.admitLaunchPreflight(await brain.launchPreflight(), { decision: "hold" });
+  const attempts = requests.length;
+  await assert.rejects(
+    () => brain.runWorkflowCycleWithLaunchAdmission("held evaluator cycle", held, {
+      checkpointStore: new InMemoryAutonomousWorkflowCheckpointStore(),
+      domain: "evaluation",
+      candidates: [model],
+      approveProviderCall: true,
+      evaluate: async (execution) => ({ evidence: perfectWorkflowEvidence(execution) }),
+    }),
+    /not approved/,
+  );
+  assert.equal(requests.length, attempts);
 });
 
 test("brain facade automatic execution preserves the separate provider-planning acceptance gate", async () => {

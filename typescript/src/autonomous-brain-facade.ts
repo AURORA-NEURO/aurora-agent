@@ -168,6 +168,11 @@ import {
   type AutonomousWorkflowExecutorOptions,
   type AutonomousWorkflowExecutionResult,
 } from "./workflow-execution.js";
+import {
+  runAutonomousWorkflowCycle,
+  type AutonomousWorkflowCycleOptions,
+  type AutonomousWorkflowCycleResult as AutonomousWorkflowCycleRunResult,
+} from "./autonomous-workflow-cycle.js";
 
 /**
  * The application-facing composition boundary for the autonomous brain.
@@ -233,6 +238,20 @@ export interface AutonomousBrainWorkflowResumeOptions extends Omit<AutonomousWor
 
 /** Result of one bounded workflow start or resume operation. */
 export type AutonomousBrainWorkflowResult = AutonomousWorkflowExecutionResult;
+
+/**
+ * Evaluator-guided workflow cycle controls exposed by the high-level facade.
+ *
+ * The workflow checkpoint store and optional cycle state store remain caller-owned; the facade
+ * only binds both durable kernels to its exact agent and keeps provider/effect authority explicit.
+ */
+export interface AutonomousBrainWorkflowCycleOptions extends AutonomousWorkflowCycleOptions {
+  checkpointStore: AutonomousWorkflowCheckpointStore;
+  executorOptions?: AutonomousWorkflowExecutorOptions;
+}
+
+/** Result of one bounded workflow execution/evaluation/replan cycle. */
+export type AutonomousBrainWorkflowCycleResult = AutonomousWorkflowCycleRunResult;
 
 export interface AutonomousBrainExecutionPolicyOptions {
   candidates: readonly AutonomousExecutionPolicyCandidateInput[];
@@ -2166,6 +2185,33 @@ export class AutonomousBrainFacade {
     const domains = await this.workflowLaunchDomains(task, options);
     if (domains.length > 0) authorizeAutonomousLaunchDomains(admission, domains);
     return this.resumeWorkflow(jobId, task, options);
+  }
+
+  /**
+   * Run a bounded workflow execution/evaluation cycle through the high-level facade.
+   *
+   * The evaluator owns task-quality evidence and any replan request; an optional learning
+   * controller owns delayed credit. Every retry remains a new digest-bound workflow attempt.
+   */
+  async runWorkflowCycle(
+    task: string,
+    options: AutonomousBrainWorkflowCycleOptions,
+  ): Promise<AutonomousBrainWorkflowCycleResult> {
+    if (!isObject(options)) throw new ArgumentError("autonomous brain workflow cycle options must be an object");
+    const { checkpointStore, executorOptions, ...cycleOptions } = options;
+    const executor = new AutonomousWorkflowExecutor(this.agent, checkpointStore, executorOptions);
+    return runAutonomousWorkflowCycle(task, executor, cycleOptions);
+  }
+
+  /** Run an evaluator-guided workflow cycle only after provider-free launch admission. */
+  async runWorkflowCycleWithLaunchAdmission(
+    task: string,
+    admission: AutonomousLaunchAdmissionReport,
+    options: AutonomousBrainWorkflowCycleOptions,
+  ): Promise<AutonomousBrainWorkflowCycleResult> {
+    const domains = await this.workflowLaunchDomains(task, options);
+    if (domains.length > 0) authorizeAutonomousLaunchDomains(admission, domains);
+    return this.runWorkflowCycle(task, options);
   }
 
   /**
@@ -4193,7 +4239,7 @@ export class AutonomousBrainFacade {
 
   private async workflowLaunchDomains(
     task: string,
-    options: Pick<AutonomousBrainWorkflowOptions, "domain" | "hints" | "routeOverride" | "semanticRouting">,
+    options: Pick<AutonomousWorkflowExecuteOptions, "domain" | "hints" | "routeOverride" | "semanticRouting">,
   ): Promise<AutonomousDomainName[]> {
     this.rejectLaunchAdmittedSemanticRouting(options.semanticRouting, "launch-admitted workflow execution requires provider-free routing; admit semantic routing separately before enabling it");
     const route = options.routeOverride

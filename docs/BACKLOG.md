@@ -2499,3 +2499,14 @@ coverage runs real structured provider fixtures across all twelve built-in domai
 restart completion and checkpoint redaction, and proves held admission prevents dispatch. Future
 deployment work remains persistence adapters, operator-facing recovery UX, and a caller-owned
 workflow trace/settlement surface for long-running workers.
+
+The TypeScript high-level facade now also exposes evaluator-guided workflow cycles through
+`runWorkflowCycle()` and `runWorkflowCycleWithLaunchAdmission()`. The cycle binds a fresh durable
+workflow executor to the facade's exact agent, requires caller-declared stage evidence, bounds
+evaluator-guided retries, and forwards optional learning/trajectory state through the existing
+value-only controller. Its workflow checkpoint store and evaluator/settlement state store remain
+separate caller-owned persistence surfaces, so a restart can rehydrate private task/provider
+outcomes only through explicit callbacks. All twelve domains run through the same facade cycle
+contract; provider completion is never treated as task reward, and launch admission still gates
+the first provider or planner boundary. Future work remains deployment-owned trace export,
+operator identity, and production persistence adapters.

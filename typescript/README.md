@@ -1829,6 +1829,35 @@ admit that classifier as a separate provider boundary first, then pass its revie
 `routeOverride` to the workflow. All four methods preserve the executor's metadata-only
 checkpoint contract and are covered across every built-in domain.
 
+For closed-loop quality and online adaptation, `runWorkflowCycle()` adds the durable workflow
+executor to the evaluator/replan kernel while preserving the same caller-owned checkpoint store.
+The required `evaluate` callback supplies stage-level evidence; `maxReplans` bounds retries;
+`learning.controller` or `executorOptions.learning` can prepare and settle value-only bandit
+episodes; and `stateStore` makes evaluator/settlement/replan handoffs restart-safe. The facade
+also exposes `runWorkflowCycleWithLaunchAdmission()`, which performs the provider-free domain
+admission before the first stage or planner call. The evaluator decides task quality and retry
+guidance; provider completion alone never becomes reward, and retries cannot add stages, tools,
+permissions, or effects.
+
+```typescript
+const cycle = await brain.runWorkflowCycle(task, {
+  checkpointStore,
+  domain: "neuroscience",
+  candidates: agent.models(),
+  approveProviderCall: true,
+  maxReplans: 1,
+  learning: { controller: learning, trajectoryIdPrefix: "signal-review" },
+  evaluate: (execution) => ({
+    evidence: {
+      stages: execution.blueprint.workflow.stages.map((stage) => ({
+        stage_id: stage.id,
+        signals: Object.fromEntries(stage.evaluator_signals.map((signal) => [signal, 1])),
+      })),
+    },
+  }),
+});
+```
+
 ```typescript
 const first = await executor.start(task, {
   candidates: agent.models(),
