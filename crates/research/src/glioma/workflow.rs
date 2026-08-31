@@ -17,6 +17,7 @@ use super::experiment::{ExperimentDesign, ExperimentDisposition};
 use super::mechanism::{MechanismDisposition, MechanismPortfolio};
 use super::multimodal::{MultimodalDisposition, MultimodalQcReport};
 use super::programs::p07_protocol_simulation::{ProtocolDisposition, ProtocolSimulation};
+use super::programs::p09_reproducible_computation::{RobustnessDisposition, RobustnessSuite};
 use bioprism_foundation::{AutonomyTier, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -66,6 +67,11 @@ pub struct GliomaWorkflowRequest {
     pub mechanism_portfolio: Option<MechanismPortfolio>,
     pub experiment_design: Option<ExperimentDesign>,
     pub protocol_simulation: Option<ProtocolSimulation>,
+    /// A completed omission-stress analysis can close the replication gate, but fragile or
+    /// unresolved robustness must hold release and federation rather than being presented as
+    /// confirmed evidence.
+    #[serde(default)]
+    pub robustness_suite: Option<RobustnessSuite>,
     pub max_parallelism: u16,
 }
 
@@ -447,6 +453,17 @@ fn feedback_decision(
         {
             Some((WorkflowNodeDecision::Hold, "protocol-feasibility-required".into(), "repair capacity, horizon, risk, or approval constraints before dispatching work".into()))
         }
+        GliomaStageKind::ResearchObjectRelease | GliomaStageKind::FederationBenchmarking
+            if request.robustness_suite.as_ref().is_some_and(|suite| {
+                matches!(
+                    suite.disposition,
+                    RobustnessDisposition::Fragile | RobustnessDisposition::Unresolved
+                )
+            }) => Some((
+            WorkflowNodeDecision::Hold,
+            "robustness-remediation-required".into(),
+            "do not release or federate a result that changes direction, crosses its threshold, or has unresolved omission cases".into(),
+        )),
         _ => None,
     }
 }
@@ -458,6 +475,17 @@ fn context_completed(kind: GliomaStageKind, request: &GliomaWorkflowRequest) -> 
         GliomaStageKind::MechanismExploration => request.mechanism_portfolio.is_some(),
         GliomaStageKind::ExperimentDesign => request.experiment_design.is_some(),
         GliomaStageKind::ProtocolSimulation => request.protocol_simulation.is_some(),
+        GliomaStageKind::ReplicationRobustness => {
+            request.robustness_suite.as_ref().is_some_and(|suite| {
+                matches!(
+                    suite.disposition,
+                    RobustnessDisposition::Stable
+                        | RobustnessDisposition::Null
+                        | RobustnessDisposition::Fragile
+                        | RobustnessDisposition::Unresolved
+                )
+            })
+        }
         _ => false,
     }
 }
@@ -490,6 +518,13 @@ fn checkpoint_digest_order(request: &GliomaWorkflowRequest) -> Vec<ContentHash> 
             GliomaStageKind::ProtocolSimulation.stage_id(),
             request
                 .protocol_simulation
+                .as_ref()
+                .map(|value| value.digest.clone()),
+        ),
+        (
+            GliomaStageKind::ReplicationRobustness.stage_id(),
+            request
+                .robustness_suite
                 .as_ref()
                 .map(|value| value.digest.clone()),
         ),
@@ -542,6 +577,10 @@ pub fn plan_glioma_workflow(
             .protocol_simulation
             .as_ref()
             .is_some_and(|simulation| simulation.validate().is_err())
+        || request
+            .robustness_suite
+            .as_ref()
+            .is_some_and(|suite| suite.validate().is_err())
     {
         return Err(GliomaWorkflowError::InvalidRequest(
             "supplied checkpoint output failed its contract validation".into(),
@@ -567,6 +606,10 @@ pub fn plan_glioma_workflow(
         (
             GliomaStageKind::ProtocolSimulation,
             request.protocol_simulation.is_some(),
+        ),
+        (
+            GliomaStageKind::ReplicationRobustness,
+            request.robustness_suite.is_some(),
         ),
     ] {
         if request.completed_stages.contains(&kind) && !supplied {
@@ -912,6 +955,7 @@ mod tests {
             mechanism_portfolio: None,
             experiment_design: None,
             protocol_simulation: None,
+            robustness_suite: None,
             max_parallelism: 3,
         };
         let first = plan_glioma_workflow(&request).unwrap();
@@ -948,6 +992,7 @@ mod tests {
             mechanism_portfolio: None,
             experiment_design: None,
             protocol_simulation: None,
+            robustness_suite: None,
             max_parallelism: 2,
         };
         let plan = plan_glioma_workflow(&request).unwrap();
@@ -973,6 +1018,7 @@ mod tests {
             mechanism_portfolio: None,
             experiment_design: None,
             protocol_simulation: None,
+            robustness_suite: None,
             max_parallelism: 2,
         };
         let mut executor = DryRunGliomaExecutor;
@@ -1000,6 +1046,7 @@ mod tests {
             mechanism_portfolio: None,
             experiment_design: None,
             protocol_simulation: None,
+            robustness_suite: None,
             max_parallelism: 2,
         };
         let plan = plan_glioma_workflow(&request).unwrap();
@@ -1022,6 +1069,7 @@ mod tests {
             mechanism_portfolio: None,
             experiment_design: None,
             protocol_simulation: None,
+            robustness_suite: None,
             max_parallelism: 1,
         };
         assert!(matches!(
