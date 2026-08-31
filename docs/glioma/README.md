@@ -148,8 +148,9 @@ P10 now includes an exact bounded causal contrast (`analyze_glioma_causal_contra
 pre/post unit changes, treatment-label permutations, and leave-one-unit bounds; null, non-significant,
 or underpowered effects remain explicit rather than being promoted into mechanism claims.
 P10 also includes fixed-point replication meta-analysis (`analyze_replication_meta_analysis`) with
-inverse-uncertainty pooling, Cochran/I² heterogeneity, leave-one-study-out influence, and explicit
-negative or unresolved outcomes for contradiction, underpowered sites, weak signal, and unstable pools.
+fixed and random-effects inverse-uncertainty pooling, estimated between-study variance,
+Cochran/I² heterogeneity, leave-one-study-out influence, and explicit negative or unresolved
+outcomes for contradiction, underpowered sites, weak signal, and unstable pools.
 P06 now includes combination-response analysis (`analyze_glioma_combination_synergy`) with
 vehicle/single-agent control requirements, integer Bliss expectations, residual noise, synergy,
 antagonism, and explicit unresolved cells for missing controls or replicates.

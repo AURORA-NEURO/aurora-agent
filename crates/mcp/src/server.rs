@@ -3651,7 +3651,8 @@ impl Server {
             .map_err(|error| format!("cannot encode glioma replication assessment: {error}"))
     }
 
-    /// Pool independent preclinical glioma studies with fixed-point inverse-uncertainty weights.
+    /// Pool independent preclinical glioma studies with fixed-point inverse-uncertainty and
+    /// random-effects weights.
     /// Heterogeneity, contradictory directions, and influential sites remain visible and never
     /// become a clinical or treatment recommendation.
     fn glioma_replication_meta_analyze(&self, arguments: &Value) -> Result<Value, String> {
@@ -3675,8 +3676,8 @@ impl Server {
             "analysis": output,
             "dispatch": "not_started",
             "guarantees": [
-                "pooled effects use deterministic inverse-uncertainty fixed-point weights",
-                "Cochran heterogeneity, I2, and leave-one-study-out influence are reported",
+                "fixed-effect and deterministic random-effects inverse-uncertainty pools are reported",
+                "between-study variance, Cochran heterogeneity, I2, and leave-one-study-out influence are reported",
                 "underpowered, contradictory, heterogeneous, and signal-poor results remain explicit",
                 "the output is preclinical replication evidence, not a clinical recommendation"
             ]
@@ -50894,7 +50895,7 @@ pub fn tool_definitions() -> Vec<Value> {
     }));
     definitions.push(json!({
         "name": "glioma_replication_meta_analyze",
-        "description": "Pool independent local preclinical glioma replication studies with deterministic inverse-uncertainty fixed-point weights. Reports pooled effect and uncertainty, Cochran heterogeneity, I2, leave-one-study-out influence, replicate-floor exclusions, and explicit qualified, heterogeneous, negative, or unresolved outcomes; it never makes a clinical recommendation.",
+        "description": "Pool independent local preclinical glioma replication studies with deterministic fixed-effect and random-effects inverse-uncertainty weights. Reports both pooled effects and uncertainty, estimated between-study variance, Cochran heterogeneity, I2, leave-one-study-out influence, replicate-floor exclusions, and explicit qualified, heterogeneous, negative, or unresolved outcomes; it never makes a clinical recommendation.",
         "inputSchema": {
             "type": "object",
             "properties": {
