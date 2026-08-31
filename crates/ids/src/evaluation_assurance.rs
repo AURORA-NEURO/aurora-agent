@@ -387,8 +387,8 @@ pub fn assure_evaluation(
     payload["artifact"] = json!({"artifact_id":format!("evaluation-card-9:{}",request.study_id),"content_type":CONTENT_TYPE,"content_hash":digest,"semantic_loss":loss.iter().cloned().collect::<Vec<_>>(),"provenance_digests":prov.into_iter().collect::<Vec<_>>(),"boundary":PRECLINICAL_BOUNDARY});
     payload["effect_receipts"] = json!(if disposition == "qualified" {
         vec![
-            format!("measure:evaluation-card:{}", request.request_id),
             format!("manage:local-capability:{}", request.request_id),
+            format!("measure:evaluation-card:{}", request.request_id),
         ]
     } else {
         vec!["block:unsafe-release".to_string()]

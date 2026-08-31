@@ -385,8 +385,8 @@ pub fn preflight_reliability(
     });
     payload["effect_receipts"] = json!(if disposition == "qualified" {
         vec![
-            format!("observe:reliability-plan:{}", request.request_id),
             format!("manage:local-capability:{}", request.request_id),
+            format!("observe:reliability-plan:{}", request.request_id),
         ]
     } else {
         vec!["block:unsafe-release".to_string()]
