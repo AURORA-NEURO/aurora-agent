@@ -1601,7 +1601,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             "adaptive glioma scheduler".into(),
         ]
         .into(),
-        behavior: "compile an adaptive, checkpoint-oriented glioma campaign, choose the next dependency-safe batch, execute an admitted full preclinical program through caller-owned local stage executors, and stress-test declared effects under deterministic omission batteries; every unresolved, contradictory, underpowered, budget, locality, and approval state routes to an explicit hold or abstain branch".into(),
+        behavior: "compile an adaptive, checkpoint-oriented glioma campaign, choose the next dependency-safe batch, execute an admitted full preclinical program through caller-owned local stage executors, fit declared longitudinal and dose-response effects, and stress-test endpoint effects under deterministic omission batteries; every unresolved, contradictory, underpowered, budget, locality, and approval state routes to an explicit hold or abstain branch".into(),
         value: "turns a glioma research objective into a usable end-to-end evidence, multimodal, mechanism, experiment, computation, replication, and release workflow while keeping autonomous progress auditable and outside clinical decision support".into(),
         inputs: vec![TypedPort {
             name: "glioma_research_intent".into(),
@@ -1637,6 +1637,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_trajectory_analysis".into(),
                 schema: "GliomaTrajectoryAnalysis1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_dose_response_analysis".into(),
+                schema: "GliomaDoseResponseAnalysis1@1".into(),
                 required: false,
             },
         ],
