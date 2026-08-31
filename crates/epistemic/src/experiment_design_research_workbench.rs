@@ -142,7 +142,6 @@ impl ExecutableExperimentDesign5 {
             || self.semantic_profile.trim().is_empty()
             || self.candidate_order.is_empty()
             || self.ranked_order.len() != self.candidate_order.len()
-            || self.plan_order.is_empty()
             || self.evidence_order.is_empty()
             || self.effect_receipts.is_empty()
             || self.budget_units == 0
@@ -202,10 +201,14 @@ impl ExecutableExperimentDesign5 {
             .validate_metadata()
             .map_err(|error| ExperimentDesignWorkbenchError::Artifact(error.to_string()))?;
         if self.disposition == "qualified" {
-            if self.effect_receipts.len() != 1
+            if self.plan_order.is_empty()
+                || self.executable_order.is_empty()
+                || self.effect_receipts.len() != 1
                 || !self.effect_receipts[0].starts_with("view:design-plan:")
             {
-                return Err(invalid("qualified workbench effect is invalid"));
+                return Err(invalid(
+                    "qualified workbench requires an executable plan and valid effect",
+                ));
             }
         } else if self.effect_receipts != ["block:unsafe-release"] {
             return Err(invalid("non-qualified workbench must block release"));
