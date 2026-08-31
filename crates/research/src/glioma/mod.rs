@@ -64,6 +64,10 @@ pub use programs::p07_protocol_simulation::{
     ProtocolResource, ProtocolResourceKind, ProtocolSimulation, ProtocolSimulationError,
     ProtocolSimulationRequest, ProtocolTask, ResourceUtilization, ScheduleEntry,
 };
+pub use programs::p08_instrument_robotics::{
+    analyze_instrument_calibration, CalibrationDisposition, CalibrationError, CalibrationPoint,
+    CalibrationRequest, CalibrationRun, InstrumentCalibration,
+};
 pub use programs::p09_reproducible_computation::{
     assess_glioma_robustness, RobustnessCase, RobustnessCaseKind, RobustnessDisposition,
     RobustnessError, RobustnessRequest, RobustnessSuite,

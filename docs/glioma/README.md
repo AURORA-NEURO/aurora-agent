@@ -24,6 +24,8 @@ crates/research/src/glioma/
                                              P04 evidence-gap to typed next-action compilation
   programs/p05_mechanism_exploration/discrimination.rs
                                              P05 residual-likelihood mechanism discrimination and next-assay information gain
+  programs/p08_instrument_robotics/calibration.rs
+                                             P08 robust control calibration and Theil-Sen instrument drift detection
   multimodal.rs                            P03 harmonization and QC
   mechanism.rs                             P05 competing mechanism portfolio
   experiment.rs                             P06 fixed-point power and allocation design
@@ -79,7 +81,7 @@ crates/research/src/glioma/
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response and combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, utilization, deterministic next batches, and repair/abstain routing before physical effects |
-| P08 Instrument and robotics preflight | instrument operator | instrument preflight | signed, interlocked, human-authorized action plan |
+| P08 Instrument and robotics preflight | instrument operator | instrument preflight | robust control calibration, drift detection, and signed interlocked action planning |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, causal-contrast, meta-analytic, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |

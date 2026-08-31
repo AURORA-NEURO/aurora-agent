@@ -469,23 +469,23 @@ use bioprism_repair::{
 use bioprism_research::{
     analyze_federated_benchmark, analyze_glioma_causal_contrast,
     analyze_glioma_combination_synergy, analyze_glioma_dose_response, analyze_glioma_trajectories,
-    analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
-    analyze_replication_meta_analysis, assess_glioma_robustness, assess_replication,
-    build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
-    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    analyze_instrument_calibration, analyze_multimodal_concordance, analyze_multimodal_consensus,
+    analyze_preclinical_outcomes, analyze_replication_meta_analysis, assess_glioma_robustness,
+    assess_replication, build_research_object_manifest, compile_decision_context,
+    compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
+    dry_run_glioma_research, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
     simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
-    CausalContrastRequest, CombinationObservation, CombinationSynergyRequest, ConcordanceRequest,
-    ConsensusRequest, DecisionContextRequest, DoseResponseObservation, DoseResponseRequest,
-    EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
-    FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
-    KnowledgeRequest, MechanismCandidate, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
-    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
-    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustnessRequest, TrajectoryObservation, TrajectoryRequest,
-    TypedKnowledge,
+    CalibrationRequest, CalibrationRun, CausalContrastRequest, CombinationObservation,
+    CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest, DecisionContextRequest,
+    DoseResponseObservation, DoseResponseRequest, EvidenceRecord, EvidenceRequest, ExperimentArm,
+    ExperimentRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite, GliomaActionCandidate,
+    GliomaResearchIntent, GliomaWorkflowRequest, KnowledgeRequest, MechanismCandidate,
+    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
+    MechanismHypothesis, MechanismRequest, MetaAnalysisRequest, ModalityVector,
+    MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
+    TrajectoryRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1937,6 +1937,7 @@ impl Server {
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
+            "glioma_instrument_calibration" => self.glioma_instrument_calibration(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
             "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
@@ -3553,6 +3554,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma mechanism discrimination: {error}"))
+    }
+
+    /// Detect instrument-control drift before a preclinical run is admitted. The calibration
+    /// computation is local and deterministic; this endpoint never touches hardware.
+    fn glioma_instrument_calibration(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CalibrationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_calibration requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma instrument calibration request: {error}"))?;
+        let runs: Vec<CalibrationRun> = serde_json::from_value(
+            arguments
+                .get("runs")
+                .cloned()
+                .ok_or_else(|| "glioma_instrument_calibration requires runs".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma calibration runs: {error}"))?;
+        let output = analyze_instrument_calibration(&request, &runs)
+            .map_err(|error| format!("glioma instrument calibration refused: {error}"))?;
+        serde_json::to_value(json!({
+            "calibration": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "reference controls use a robust median/MAD rather than a single run",
+                "drift uses a deterministic Theil-Sen slope and explicit final/max deviations",
+                "noisy, drifting, or insufficient calibration history blocks admission explicitly",
+                "the route only plans a preclinical instrument gate and never executes hardware"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma instrument calibration: {error}"))
     }
 
     fn glioma_experiment_design(&self, arguments: &Value) -> Result<Value, String> {
@@ -43748,6 +43781,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
                 "glioma_mechanism_discriminate",
+                "glioma_instrument_calibration",
                 "glioma_experiment_design",
                 "glioma_analysis_run",
                 "glioma_replication_assess",
@@ -50808,6 +50842,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "actions": {"type": "array", "items": {"type": "object"}, "description": "MechanismDiscriminatorAction1@1 candidate assays with per-mechanism predictions, cost, feasibility, and uncertainty."}
             },
             "required": ["request", "hypotheses", "observations", "actions"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_instrument_calibration",
+        "description": "Detect preclinical instrument-control drift before admitting a glioma assay. Uses a robust reference median/MAD and deterministic Theil-Sen slope over local control runs, reports final/max drift and explicit qualified, drifting, negative, or unresolved states, and never executes hardware.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CalibrationRequest1@1 with instrument/metric/model binding, run/reference floors, control MAD, drift, and slope tolerances."},
+                "runs": {"type": "array", "items": {"type": "object"}, "description": "CalibrationRun1@1 local de-identified control measurements with sequence indices and artifact references."}
+            },
+            "required": ["request", "runs"]
         }
     }));
     definitions.push(json!({

@@ -1601,7 +1601,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             "adaptive glioma scheduler".into(),
         ]
         .into(),
-        behavior: "compile an adaptive, checkpoint-oriented glioma campaign, compile typed claims and evidence-gap actions, choose the next dependency-safe batch, execute an admitted full preclinical program through caller-owned local stage executors, compare and cluster declared multimodal vectors, discriminate competing mechanisms against local features and rank information-gain assays, fit longitudinal, causal-contrast, dose-response, combination-synergy, and replication-meta-analysis effects, compare aggregate federated benchmark outcomes with robust site consensus, and stress-test endpoint effects under deterministic omission batteries; every unresolved, contradictory, underpowered, heterogeneous, budget, locality, and approval state routes to an explicit hold or abstain branch".into(),
+        behavior: "compile an adaptive, checkpoint-oriented glioma campaign, compile typed claims and evidence-gap actions, choose the next dependency-safe batch, execute an admitted full preclinical program through caller-owned local stage executors, detect instrument-control drift before assay admission, compare and cluster declared multimodal vectors, discriminate competing mechanisms against local features and rank information-gain assays, fit longitudinal, causal-contrast, dose-response, combination-synergy, and replication-meta-analysis effects, compare aggregate federated benchmark outcomes with robust site consensus, and stress-test endpoint effects under deterministic omission batteries; every unresolved, contradictory, underpowered, heterogeneous, budget, locality, and approval state routes to an explicit hold or abstain branch".into(),
         value: "turns a glioma research objective into a usable end-to-end evidence, multimodal, mechanism, experiment, computation, replication, and release workflow while keeping autonomous progress auditable and outside clinical decision support".into(),
         inputs: vec![TypedPort {
             name: "glioma_research_intent".into(),
@@ -1677,6 +1677,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_mechanism_discrimination".into(),
                 schema: "GliomaMechanismDiscrimination1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_instrument_calibration".into(),
+                schema: "GliomaInstrumentCalibration1@1".into(),
                 required: false,
             },
             TypedPort {

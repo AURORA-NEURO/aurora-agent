@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 544;
+const TOOL_DEFINITION_COUNT: usize = 545;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -860,6 +860,41 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         mechanism_discrimination["discrimination"]["selected_action_order"][0],
         json!("perturb-f1")
+    );
+
+    let instrument_calibration = call(
+        &mut server,
+        "glioma_instrument_calibration",
+        json!({
+            "request": {
+                "objective": "qualify imaging control before invasion assay",
+                "instrument_id": "imager-1",
+                "model_system": "organoid",
+                "metric_name": "control_intensity",
+                "minimum_runs": 3,
+                "reference_run_count": 2,
+                "max_reference_mad_milli": 5,
+                "max_drift_milli": 20,
+                "max_slope_milli_per_tick": 10
+            },
+            "runs": [
+                {"run_id":"cal-r1","sequence_index":1,"batch_id":"cal-b1","instrument_id":"imager-1","metric_name":"control_intensity","model_system":"organoid","observed_milli":500,"expected_milli":500,"artifact":{"artifact_id":"cal-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-control+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"run_id":"cal-r2","sequence_index":2,"batch_id":"cal-b2","instrument_id":"imager-1","metric_name":"control_intensity","model_system":"organoid","observed_milli":502,"expected_milli":500,"artifact":{"artifact_id":"cal-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-control+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"run_id":"cal-r3","sequence_index":3,"batch_id":"cal-b3","instrument_id":"imager-1","metric_name":"control_intensity","model_system":"organoid","observed_milli":504,"expected_milli":500,"artifact":{"artifact_id":"cal-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-control+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(instrument_calibration["dispatch"], json!("not_started"));
+    assert_eq!(
+        instrument_calibration["calibration"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        instrument_calibration["calibration"]["reference_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
     );
 
     let knowledge = call(

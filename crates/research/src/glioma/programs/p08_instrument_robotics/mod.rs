@@ -2,6 +2,13 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod calibration;
+
+pub use calibration::{
+    analyze_instrument_calibration, CalibrationDisposition, CalibrationError, CalibrationPoint,
+    CalibrationRequest, CalibrationRun, InstrumentCalibration,
+};
+
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::InstrumentRobotics;
 
 pub fn descriptor() -> GliomaProgramDescriptor {
