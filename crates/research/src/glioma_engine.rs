@@ -1640,6 +1640,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
                 required: false,
             },
             TypedPort {
+                name: "glioma_causal_contrast".into(),
+                schema: "GliomaCausalContrast1@1".into(),
+                required: false,
+            },
+            TypedPort {
                 name: "glioma_dose_response_analysis".into(),
                 schema: "GliomaDoseResponseAnalysis1@1".into(),
                 required: false,

@@ -59,9 +59,10 @@ pub use programs::p09_reproducible_computation::{
     RobustnessError, RobustnessRequest, RobustnessSuite,
 };
 pub use programs::p10_interpretation_replication::{
-    analyze_glioma_trajectories, TrajectoryAnalysis, TrajectoryArmSummary, TrajectoryDisposition,
-    TrajectoryError, TrajectoryObservation, TrajectoryRequest, UnitTrajectory,
-    UnitTrajectoryDisposition,
+    analyze_glioma_causal_contrast, analyze_glioma_trajectories, CausalContrastAnalysis,
+    CausalContrastDisposition, CausalContrastError, CausalContrastRequest, TrajectoryAnalysis,
+    TrajectoryArmSummary, TrajectoryDisposition, TrajectoryError, TrajectoryObservation,
+    TrajectoryRequest, UnitContrast, UnitTrajectory, UnitTrajectoryDisposition,
 };
 pub use release::{build_research_object_manifest, ResearchObjectManifest, ResearchObjectRequest};
 pub use replication::{

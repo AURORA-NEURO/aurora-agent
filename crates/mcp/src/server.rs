@@ -467,7 +467,8 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_multimodal_concordance,
+    analyze_glioma_causal_contrast, analyze_glioma_dose_response,
+    analyze_glioma_trajectories, analyze_multimodal_concordance,
     analyze_preclinical_outcomes, assess_glioma_robustness, assess_replication,
     build_research_object_manifest, design_preclinical_experiment, dry_run_glioma_research,
     compile_decision_context, compile_typed_knowledge, explore_mechanisms, generate_feature_catalog,
@@ -477,7 +478,8 @@ use bioprism_research::{
     ConcordanceRequest, DoseResponseObservation, DoseResponseRequest, EvidenceRecord,
     EvidenceRequest, ExperimentArm, ExperimentRequest, GliomaActionCandidate, GliomaResearchIntent,
     GliomaWorkflowRequest, MechanismCandidate, MechanismRequest, ModalityVector,
-    DecisionContextRequest, KnowledgeRequest, MultimodalObservation, MultimodalRequest,
+    CausalContrastRequest, DecisionContextRequest, KnowledgeRequest, MultimodalObservation,
+    MultimodalRequest,
     ProtocolSimulationRequest, ReplicationRequest, TypedKnowledge,
     ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
     TrajectoryRequest,
@@ -1919,6 +1921,7 @@ impl Server {
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
+            "glioma_causal_contrast" => self.glioma_causal_contrast(&arguments),
             "glioma_dose_response" => self.glioma_dose_response(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
@@ -3159,6 +3162,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma trajectory analysis: {error}"))
+    }
+
+    /// Estimate a pre/post treatment contrast for a preclinical glioma study. This is analysis
+    /// only: it does not select a clinical dose, dispatch an assay, or move raw observations.
+    fn glioma_causal_contrast(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CausalContrastRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_contrast requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal-contrast request: {error}"))?;
+        let observations: Vec<TrajectoryObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_causal_contrast requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma causal-contrast observations: {error}"))?;
+        let output = analyze_glioma_causal_contrast(&request, &observations)
+            .map_err(|error| format!("glioma causal contrast refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "pre and post windows are declared and computed per tracked unit",
+                "the effect is a treatment-minus-control difference in differences",
+                "exact label permutations and leave-one-unit bounds remain deterministic",
+                "underpowered, capped, null, or non-significant results remain explicit"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma causal contrast: {error}"))
     }
 
     /// Fit a bounded monotone preclinical glioma dose-response curve. This is analysis only: it
@@ -43518,6 +43553,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_protocol_simulate",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
+                "glioma_causal_contrast",
                 "glioma_dose_response",
                 "glioma_multimodal_concordance",
                 "glioma_research_select_actions",
@@ -50398,6 +50434,18 @@ pub fn tool_definitions() -> Vec<Value> {
                     "items": {"type": "object"},
                     "description": "Local TrajectoryObservation1@1 values from de-identified preclinical units."
                 }
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_causal_contrast",
+        "description": "Estimate a pre/post treatment-minus-control difference-in-differences for local preclinical glioma observations. Uses per-unit windows, exact label permutations under a bounded unit count, and leave-one-unit effect bounds; underpowered, capped, null, or non-significant results remain explicit and no clinical decision is made.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CausalContrastRequest1@1 with intervention boundary, arm/model bindings, unit floor, effect threshold, and alpha."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local TrajectoryObservation1@1 values with pre and post timepoints."}
             },
             "required": ["request", "observations"]
         }

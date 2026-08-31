@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 538;
+const TOOL_DEFINITION_COUNT: usize = 539;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -583,6 +583,39 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         trajectory["analysis"]["slope_effect_milli_per_tick"],
         json!(9)
+    );
+
+    let causal = call(
+        &mut server,
+        "glioma_causal_contrast",
+        json!({
+            "request": {
+                "objective": "estimate treatment-associated invasion change",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "intervention_timepoint": 1,
+                "min_units_per_arm": 2,
+                "effect_threshold_milli": 5,
+                "alpha_milli": 500
+            },
+            "observations": [
+                {"observation_id":"cc0-pre","unit_id":"cc0","arm_id":"control","model_system":"organoid","batch_id":"b0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"cc0-post","unit_id":"cc0","arm_id":"control","model_system":"organoid","batch_id":"b1","timepoint":1,"outcome_milli":101},
+                {"observation_id":"cc1-pre","unit_id":"cc1","arm_id":"control","model_system":"organoid","batch_id":"b0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"cc1-post","unit_id":"cc1","arm_id":"control","model_system":"organoid","batch_id":"b1","timepoint":1,"outcome_milli":101},
+                {"observation_id":"ct0-pre","unit_id":"ct0","arm_id":"treated","model_system":"organoid","batch_id":"b0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"ct0-post","unit_id":"ct0","arm_id":"treated","model_system":"organoid","batch_id":"b1","timepoint":1,"outcome_milli":120},
+                {"observation_id":"ct1-pre","unit_id":"ct1","arm_id":"treated","model_system":"organoid","batch_id":"b0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"ct1-post","unit_id":"ct1","arm_id":"treated","model_system":"organoid","batch_id":"b1","timepoint":1,"outcome_milli":120}
+            ]
+        }),
+    );
+    assert_eq!(causal["dispatch"], json!("not_started"));
+    assert_eq!(causal["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        causal["analysis"]["difference_in_differences_milli"],
+        json!(19)
     );
 
     let dose_response = call(

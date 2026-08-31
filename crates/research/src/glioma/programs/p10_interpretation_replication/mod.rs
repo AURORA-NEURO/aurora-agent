@@ -2,7 +2,13 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod causal_contrast;
 pub mod trajectory;
+
+pub use causal_contrast::{
+    analyze_glioma_causal_contrast, CausalContrastAnalysis, CausalContrastDisposition,
+    CausalContrastError, CausalContrastRequest, UnitContrast,
+};
 
 pub use trajectory::{
     analyze_glioma_trajectories, TrajectoryAnalysis, TrajectoryArmSummary, TrajectoryDisposition,
