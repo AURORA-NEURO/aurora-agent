@@ -584,6 +584,20 @@ pub fn default_panel() -> Vec<Box<dyn ContextStrategy>> {
         Box::new(crate::incidence::QueryGraph),
         Box::new(crate::lexical::LexicalTopK { k: 11 }),
         Box::new(crate::lexical::LexicalTopK { k: 50 }),
+        Box::new(crate::embedding::EmbeddingTopK { k: 11 }),
+        Box::new(crate::embedding::EmbeddingTopK { k: 50 }),
+        Box::new(crate::directed::DirectedDependencyWalk::unbounded()),
         Box::new(crate::strategy::FiberCompiled),
     ]
+}
+
+/// [`default_panel`] plus counter-baselines carrying FIBER's subtractive passes.
+pub fn extended_panel() -> Vec<Box<dyn ContextStrategy>> {
+    let mut panel = default_panel();
+    let fiber = panel.pop().expect("the default panel ends with fiber");
+    panel.push(Box::new(crate::directed::ScreenedDependencyWalk::cut()));
+    panel.push(Box::new(crate::directed::ScreenedDependencyWalk::screened()));
+    panel.push(Box::new(crate::directed::ScreenedDependencyWalk::compiled()));
+    panel.push(fiber);
+    panel
 }
