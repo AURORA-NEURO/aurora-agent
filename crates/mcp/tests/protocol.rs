@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 548;
+const TOOL_DEFINITION_COUNT: usize = 549;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -788,6 +788,38 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         concordance["concordance"]["disposition"],
         json!("qualified")
+    );
+
+    let harmonization = call(
+        &mut server,
+        "glioma_multimodal_harmonize",
+        json!({
+            "request": {
+                "study_id": "mcp-harmonization-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics"],
+                "reference_batch": "batch-1",
+                "min_vectors_per_batch": 2,
+                "min_shared_features": 2,
+                "max_correction_milli": 100,
+                "max_post_harmonization_spread_milli": 20
+            },
+            "vectors": [
+                {"observation_id":"mh-v1","study_id":"mcp-harmonization-study","sample_lineage":"mh-s1","modality":"genomics","model_system":"organoid","batch_id":"batch-1","artifact":{"artifact_id":"mh-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"f1","value_milli":100},{"feature_id":"f2","value_milli":200}]},
+                {"observation_id":"mh-v2","study_id":"mcp-harmonization-study","sample_lineage":"mh-s2","modality":"genomics","model_system":"organoid","batch_id":"batch-1","artifact":{"artifact_id":"mh-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"f1","value_milli":110},{"feature_id":"f2","value_milli":210}]},
+                {"observation_id":"mh-v3","study_id":"mcp-harmonization-study","sample_lineage":"mh-s3","modality":"genomics","model_system":"organoid","batch_id":"batch-2","artifact":{"artifact_id":"mh-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"f1","value_milli":150},{"feature_id":"f2","value_milli":250}]},
+                {"observation_id":"mh-v4","study_id":"mcp-harmonization-study","sample_lineage":"mh-s4","modality":"genomics","model_system":"organoid","batch_id":"batch-2","artifact":{"artifact_id":"mh-artifact-4","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"f1","value_milli":160},{"feature_id":"f2","value_milli":260}]}
+            ]
+        }),
+    );
+    assert_eq!(harmonization["dispatch"], json!("not_started"));
+    assert_eq!(
+        harmonization["harmonization"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        harmonization["harmonization"]["max_correction_milli"],
+        json!(50)
     );
 
     let consensus = call(

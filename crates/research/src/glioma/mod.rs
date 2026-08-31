@@ -42,10 +42,13 @@ pub use programs::p02_evidence_knowledge::{
     KnowledgeError, KnowledgeRequest, TypedKnowledge,
 };
 pub use programs::p03_multimodal_ingestion_qc::{
-    analyze_multimodal_concordance, analyze_multimodal_consensus, ConcordanceDisposition,
+    analyze_multimodal_concordance, analyze_multimodal_consensus,
+    harmonize_glioma_multimodal_batches, BatchHarmonizationDiagnostic, ConcordanceDisposition,
     ConcordanceError, ConcordanceRequest, ConsensusAssignment, ConsensusCluster,
-    ConsensusDisposition, ConsensusError, ConsensusRequest, FeatureValue, ModalityConcordance,
-    ModalityVector, MultimodalConcordance, MultimodalConsensus, PairConcordanceDisposition,
+    ConsensusDisposition, ConsensusError, ConsensusRequest, FeatureValue, HarmonizationDisposition,
+    HarmonizationError, HarmonizationRequest, HarmonizationVector, HarmonizedFeature,
+    HarmonizedVector, ModalityConcordance, ModalityVector, MultimodalConcordance,
+    MultimodalConsensus, MultimodalHarmonization, PairConcordanceDisposition,
 };
 pub use programs::p04_decision_context::{
     compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,

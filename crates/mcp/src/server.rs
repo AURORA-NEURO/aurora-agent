@@ -475,20 +475,21 @@ use bioprism_research::{
     build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
     design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
     explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
-    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
-    AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
-    CalibrationRequest, CalibrationRun, CausalContrastRequest, CombinationObservation,
-    CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest, DecisionContextRequest,
-    DoseResponseObservation, DoseResponseRequest, EvidenceRecord, EvidenceRequest,
-    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
-    FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
-    KnowledgeRequest, MechanismCandidate, MechanismDiscriminationRequest,
-    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
-    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
-    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustnessRequest, StratifiedCausalRequest, StratifiedObservation,
-    TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
+    harmonize_glioma_multimodal_batches, harmonize_multimodal_inputs, plan_glioma_workflow,
+    qualify_evidence, select_glioma_actions, simulate_glioma_protocol, surveil_glioma_evidence,
+    validate_feature_catalog, AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset,
+    AnalysisRequest, CalibrationRequest, CalibrationRun, CausalContrastRequest,
+    CombinationObservation, CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest,
+    DecisionContextRequest, DoseResponseObservation, DoseResponseRequest, EvidenceRecord,
+    EvidenceRequest, EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest,
+    FederatedBenchmarkRequest, FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent,
+    GliomaWorkflowRequest, HarmonizationRequest, HarmonizationVector, KnowledgeRequest,
+    MechanismCandidate, MechanismDiscriminationRequest, MechanismDiscriminatorAction,
+    MechanismFeatureObservation, MechanismHypothesis, MechanismRequest, MetaAnalysisRequest,
+    ModalityVector, MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest, RobustnessRequest,
+    StratifiedCausalRequest, StratifiedObservation, TrajectoryObservation, TrajectoryRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1936,6 +1937,7 @@ impl Server {
             "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
+            "glioma_multimodal_harmonize" => self.glioma_multimodal_harmonize(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
@@ -3403,6 +3405,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal consensus: {error}"))
+    }
+
+    /// Harmonize local preclinical glioma modality vectors with deterministic robust
+    /// median-centering. Missing features remain missing and no raw artifact leaves the caller.
+    fn glioma_multimodal_harmonize(&self, arguments: &Value) -> Result<Value, String> {
+        let request: HarmonizationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_harmonize requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma harmonization request: {error}"))?;
+        let vectors: Vec<HarmonizationVector> = serde_json::from_value(
+            arguments
+                .get("vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_harmonize requires vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma harmonization vectors: {error}"))?;
+        let output = harmonize_glioma_multimodal_batches(&request, &vectors)
+            .map_err(|error| format!("glioma multimodal harmonization refused: {error}"))?;
+        serde_json::to_value(json!({
+            "harmonization": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "batch corrections use robust per-modality medians with deterministic integer arithmetic",
+                "reference batches, correction magnitudes, residual spread, and excluded batches remain visible",
+                "missing features and modality overlap are never imputed or silently treated as comparable",
+                "the route produces local preclinical vectors only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal harmonization: {error}"))
     }
 
     /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
@@ -43884,6 +43918,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_combination_synergy",
                 "glioma_multimodal_concordance",
                 "glioma_multimodal_consensus",
+                "glioma_multimodal_harmonize",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
@@ -50872,6 +50907,18 @@ pub fn tool_definitions() -> Vec<Value> {
                     "items": {"type": "object"},
                     "description": "Local ModalityVector1@1 values with sorted FeatureValue1@1 entries, grouped by de-identified sample lineage."
                 }
+            },
+            "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_harmonize",
+        "description": "Robustly median-center local preclinical glioma modality vectors within batches, using a declared reference batch when available. Emits corrected vectors, per-batch correction and residual-spread diagnostics, missing modality/feature coverage, and explicit partial or unresolved gates; it never imputes missing features, moves raw data, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "HarmonizationRequest1@1 with modality/model coverage, reference batch, vector/feature floors, and correction bounds."},
+                "vectors": {"type": "array", "items": {"type": "object"}, "description": "Local HarmonizationVector1@1 values with de-identified sample lineages, batches, feature values, and artifact references."}
             },
             "required": ["request", "vectors"]
         }

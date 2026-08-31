@@ -68,8 +68,10 @@ crates/research/src/glioma/
     p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
     p03_multimodal_ingestion_qc/concordance.rs
                                              P03 feature-level modality concordance analysis
-    p03_multimodal_ingestion_qc/consensus.rs
+  p03_multimodal_ingestion_qc/consensus.rs
                                              P03 deterministic multimodal sample consensus clustering
+  p03_multimodal_ingestion_qc/harmonization.rs
+                                             P03 robust per-modality batch harmonization with explicit correction gates
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -82,7 +84,7 @@ crates/research/src/glioma/
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, prioritized review/revalidation actions, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims and competing explanations bound to source artifacts |
-| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, feature-level concordance, consensus clusters, and explicit defects |
+| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, robust batch harmonization, feature-level concordance, consensus clusters, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response, adaptive replicate allocation, combination-synergy fitting, and null-result plan |
@@ -143,6 +145,9 @@ shared-feature alignment, fixed-point correlation, and explicit contradictory or
 It also includes deterministic multimodal consensus clustering (`analyze_multimodal_consensus`),
 which forms per-lineage median profiles and bounded k-medoids clusters while preserving missing
 modalities, disconnected sample pairs, distance failures, and unresolved samples.
+P03 also includes robust batch harmonization (`harmonize_glioma_multimodal_batches`) that
+median-centers each modality against a declared reference batch, emits corrected vectors and
+residual-spread diagnostics, and refuses to impute missing features or hide oversized corrections.
 P02 now includes typed-knowledge compilation (`compile_typed_knowledge`) that coalesces scoped
 claims, ranks support against contradiction, preserves negative/unknown evidence, and exposes
 missing modality/model coverage for the next workflow action.
@@ -160,3 +165,9 @@ outcomes for contradiction, underpowered sites, weak signal, and unstable pools.
 P06 now includes combination-response analysis (`analyze_glioma_combination_synergy`) with
 vehicle/single-agent control requirements, integer Bliss expectations, residual noise, synergy,
 antagonism, and explicit unresolved cells for missing controls or replicates.
+P06 also includes sequential assay allocation (`allocate_glioma_assays`) using Beta posteriors,
+conservative Cantelli target-effect bounds, uncertainty exploration, replicate floors, risk
+ceilings, and a hard next-batch budget.
+P10 also includes stratified causal adjustment (`analyze_stratified_causal_adjustment`) that
+collapses repeated measurements to units, requires positivity within confounder strata, computes
+pooled weighted contrasts, and exposes leave-one-stratum influence and missing coverage.

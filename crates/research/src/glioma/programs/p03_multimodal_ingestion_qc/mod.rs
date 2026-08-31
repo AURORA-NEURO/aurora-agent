@@ -4,6 +4,7 @@ use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, Gl
 
 pub mod concordance;
 pub mod consensus;
+pub mod harmonization;
 
 pub use concordance::{
     analyze_multimodal_concordance, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
@@ -13,6 +14,11 @@ pub use concordance::{
 pub use consensus::{
     analyze_multimodal_consensus, ConsensusAssignment, ConsensusCluster, ConsensusDisposition,
     ConsensusError, ConsensusRequest, MultimodalConsensus,
+};
+pub use harmonization::{
+    harmonize_glioma_multimodal_batches, BatchHarmonizationDiagnostic, HarmonizationDisposition,
+    HarmonizationError, HarmonizationRequest, HarmonizationVector, HarmonizedFeature,
+    HarmonizedVector, MultimodalHarmonization,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MultimodalIngestionQc;
