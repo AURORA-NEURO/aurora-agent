@@ -37,9 +37,10 @@ pub use programs::p02_evidence_knowledge::{
     KnowledgeError, KnowledgeRequest, TypedKnowledge,
 };
 pub use programs::p03_multimodal_ingestion_qc::{
-    analyze_multimodal_concordance, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
-    FeatureValue, ModalityConcordance, ModalityVector, MultimodalConcordance,
-    PairConcordanceDisposition,
+    analyze_multimodal_concordance, analyze_multimodal_consensus, ConcordanceDisposition,
+    ConcordanceError, ConcordanceRequest, ConsensusAssignment, ConsensusCluster,
+    ConsensusDisposition, ConsensusError, ConsensusRequest, FeatureValue, ModalityConcordance,
+    ModalityVector, MultimodalConcordance, MultimodalConsensus, PairConcordanceDisposition,
 };
 pub use programs::p04_decision_context::{
     compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,

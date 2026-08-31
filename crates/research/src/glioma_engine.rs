@@ -1660,6 +1660,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
                 required: false,
             },
             TypedPort {
+                name: "glioma_multimodal_consensus".into(),
+                schema: "GliomaMultimodalConsensus1@1".into(),
+                required: false,
+            },
+            TypedPort {
                 name: "glioma_typed_knowledge".into(),
                 schema: "GliomaTypedKnowledge1@1".into(),
                 required: false,

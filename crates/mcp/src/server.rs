@@ -469,19 +469,19 @@ use bioprism_repair::{
 use bioprism_research::{
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_multimodal_concordance,
-    analyze_preclinical_outcomes, assess_glioma_robustness, assess_replication,
-    build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
-    design_preclinical_experiment, dry_run_glioma_research, explore_mechanisms,
-    generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
-    plan_glioma_workflow, qualify_evidence, select_glioma_actions, simulate_glioma_protocol,
-    validate_feature_catalog, AnalysisDataset, AnalysisRequest, CausalContrastRequest,
-    CombinationObservation, CombinationSynergyRequest, ConcordanceRequest, DecisionContextRequest,
-    DoseResponseObservation, DoseResponseRequest, EvidenceRecord, EvidenceRequest, ExperimentArm,
-    ExperimentRequest, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
-    KnowledgeRequest, MechanismCandidate, MechanismRequest, ModalityVector, MultimodalObservation,
-    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustnessRequest, TrajectoryObservation, TrajectoryRequest,
-    TypedKnowledge,
+    analyze_multimodal_consensus, analyze_preclinical_outcomes, assess_glioma_robustness,
+    assess_replication, build_research_object_manifest, compile_decision_context,
+    compile_typed_knowledge, design_preclinical_experiment, dry_run_glioma_research,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
+    simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
+    CausalContrastRequest, CombinationObservation, CombinationSynergyRequest, ConcordanceRequest,
+    ConsensusRequest, DecisionContextRequest, DoseResponseObservation, DoseResponseRequest,
+    EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest, GliomaActionCandidate,
+    GliomaResearchIntent, GliomaWorkflowRequest, KnowledgeRequest, MechanismCandidate,
+    MechanismRequest, ModalityVector, MultimodalObservation, MultimodalRequest,
+    ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
+    RobustnessRequest, TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1924,6 +1924,7 @@ impl Server {
             "glioma_dose_response" => self.glioma_dose_response(&arguments),
             "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
+            "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
@@ -3290,6 +3291,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma multimodal concordance: {error}"))
+    }
+
+    /// Cluster de-identified preclinical glioma sample lineages from multiple modality vectors.
+    /// This is a deterministic consensus computation only: it never imputes missing assays,
+    /// moves raw data, dispatches an instrument, or makes a clinical decision.
+    fn glioma_multimodal_consensus(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ConsensusRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_consensus requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma consensus request: {error}"))?;
+        let vectors: Vec<ModalityVector> = serde_json::from_value(
+            arguments
+                .get("vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_consensus requires vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma consensus vectors: {error}"))?;
+        let output = analyze_multimodal_consensus(&request, &vectors)
+            .map_err(|error| format!("glioma multimodal consensus refused: {error}"))?;
+        serde_json::to_value(json!({
+            "consensus": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "per-sample feature values use deterministic modality medians without imputation",
+                "sample assignments use bounded deterministic k-medoids with stable tie-breaking",
+                "missing modality coverage, disconnected pairs, and distance-bound failures remain explicit",
+                "the output is local preclinical evidence, not a causal or clinical conclusion"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal consensus: {error}"))
     }
 
     /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
@@ -43589,6 +43623,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_dose_response",
                 "glioma_combination_synergy",
                 "glioma_multimodal_concordance",
+                "glioma_multimodal_consensus",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
@@ -50528,6 +50563,25 @@ pub fn tool_definitions() -> Vec<Value> {
                     "type": "array",
                     "items": {"type": "object"},
                     "description": "Local ModalityVector1@1 values with sorted FeatureValue1@1 entries."
+                }
+            },
+            "required": ["request", "vectors"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_consensus",
+        "description": "Cluster de-identified local preclinical glioma sample lineages across modality vectors using deterministic per-feature medians and bounded k-medoids. Reports stable cluster medoids, distances, modality/feature coverage, incomparable pairs, missing samples, and partial or unresolved dispositions; it never imputes assays, moves raw data, dispatches an instrument, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized ConsensusRequest1@1 with study/model bindings, cluster and modality/feature floors, iteration bound, and distance threshold."
+                },
+                "vectors": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Local ModalityVector1@1 values with sorted FeatureValue1@1 entries, grouped by de-identified sample lineage."
                 }
             },
             "required": ["request", "vectors"]

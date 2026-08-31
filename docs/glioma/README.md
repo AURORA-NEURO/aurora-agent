@@ -54,6 +54,8 @@ crates/research/src/glioma/
     p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
     p03_multimodal_ingestion_qc/concordance.rs
                                              P03 feature-level modality concordance analysis
+    p03_multimodal_ingestion_qc/consensus.rs
+                                             P03 deterministic multimodal sample consensus clustering
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -66,7 +68,7 @@ crates/research/src/glioma/
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | qualified source candidates with stale, unknown, contradictory, and negative states |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims and competing explanations bound to source artifacts |
-| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, feature-level concordance, and explicit defects |
+| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, feature-level concordance, consensus clusters, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | ranked competing mechanisms and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response and combination-synergy fitting, and null-result plan |
@@ -122,6 +124,9 @@ with transparent raw/fitted means, residual noise, monotonicity violations, and 
 interpolation only on the declared preclinical grid.
 P03 now includes feature-level multimodal concordance (`analyze_multimodal_concordance`) with
 shared-feature alignment, fixed-point correlation, and explicit contradictory or unresolved pairs.
+It also includes deterministic multimodal consensus clustering (`analyze_multimodal_consensus`),
+which forms per-lineage median profiles and bounded k-medoids clusters while preserving missing
+modalities, disconnected sample pairs, distance failures, and unresolved samples.
 P02 now includes typed-knowledge compilation (`compile_typed_knowledge`) that coalesces scoped
 claims, ranks support against contradiction, preserves negative/unknown evidence, and exposes
 missing modality/model coverage for the next workflow action.

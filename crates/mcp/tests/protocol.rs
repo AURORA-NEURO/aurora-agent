@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 540;
+const TOOL_DEFINITION_COUNT: usize = 541;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -716,6 +716,42 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         concordance["concordance"]["disposition"],
         json!("qualified")
+    );
+
+    let consensus = call(
+        &mut server,
+        "glioma_multimodal_consensus",
+        json!({
+            "request": {
+                "study_id": "mcp-consensus-study",
+                "model_system": "organoid",
+                "cluster_count": 2,
+                "min_modalities_per_sample": 2,
+                "min_modalities_per_feature": 1,
+                "min_shared_features": 3,
+                "max_iterations": 8,
+                "max_distance_milli": 100
+            },
+            "vectors": [
+                {"observation_id":"cs1-g","study_id":"mcp-consensus-study","sample_lineage":"cs1","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"cs1-g-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":1},{"feature_id":"feature-002","value_milli":2},{"feature_id":"feature-003","value_milli":3}]},
+                {"observation_id":"cs1-t","study_id":"mcp-consensus-study","sample_lineage":"cs1","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"cs1-t-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":1},{"feature_id":"feature-002","value_milli":2},{"feature_id":"feature-003","value_milli":3}]},
+                {"observation_id":"cs2-g","study_id":"mcp-consensus-study","sample_lineage":"cs2","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"cs2-g-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":2},{"feature_id":"feature-002","value_milli":3},{"feature_id":"feature-003","value_milli":4}]},
+                {"observation_id":"cs2-t","study_id":"mcp-consensus-study","sample_lineage":"cs2","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"cs2-t-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":2},{"feature_id":"feature-002","value_milli":3},{"feature_id":"feature-003","value_milli":4}]},
+                {"observation_id":"cs3-g","study_id":"mcp-consensus-study","sample_lineage":"cs3","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"cs3-g-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":900},{"feature_id":"feature-002","value_milli":901},{"feature_id":"feature-003","value_milli":902}]},
+                {"observation_id":"cs3-t","study_id":"mcp-consensus-study","sample_lineage":"cs3","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"cs3-t-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":900},{"feature_id":"feature-002","value_milli":901},{"feature_id":"feature-003","value_milli":902}]},
+                {"observation_id":"cs4-g","study_id":"mcp-consensus-study","sample_lineage":"cs4","modality":"genomics","model_system":"organoid","artifact":{"artifact_id":"cs4-g-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":901},{"feature_id":"feature-002","value_milli":902},{"feature_id":"feature-003","value_milli":903}]},
+                {"observation_id":"cs4-t","study_id":"mcp-consensus-study","sample_lineage":"cs4","modality":"transcriptomics","model_system":"organoid","artifact":{"artifact_id":"cs4-t-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"features":[{"feature_id":"feature-001","value_milli":901},{"feature_id":"feature-002","value_milli":902},{"feature_id":"feature-003","value_milli":903}]}
+            ]
+        }),
+    );
+    assert_eq!(consensus["dispatch"], json!("not_started"));
+    assert_eq!(consensus["consensus"]["disposition"], json!("qualified"));
+    assert_eq!(
+        consensus["consensus"]["assignments"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
     );
 
     let knowledge = call(
