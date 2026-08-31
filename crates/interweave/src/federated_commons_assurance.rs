@@ -195,9 +195,8 @@ impl InterweaveFederationEnvelope7 {
             .cloned()
             .collect::<BTreeSet<_>>();
         if missing_providers.len() != self.missing_provider_order.len()
-            || !missing_providers.is_disjoint(
-                &self.provider_order.iter().cloned().collect::<BTreeSet<_>>(),
-            )
+            || !missing_providers
+                .is_disjoint(&self.provider_order.iter().cloned().collect::<BTreeSet<_>>())
         {
             return Err(invalid(
                 "missing federation providers overlap observed providers",
