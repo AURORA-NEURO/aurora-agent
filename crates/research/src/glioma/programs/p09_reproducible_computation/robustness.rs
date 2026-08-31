@@ -147,6 +147,14 @@ impl RobustnessCase {
                 .any(|pair| pair[0] >= pair[1])
             || self.uncertainty.windows(2).any(|pair| pair[0] >= pair[1])
             || self.analysis_digest.as_str().len() != 64
+            || match self.kind {
+                RobustnessCaseKind::LeaveOneBatchOut => {
+                    !self.omitted_rows.is_empty() || self.omitted_batches.len() != 1
+                }
+                RobustnessCaseKind::LeaveOneRowOut => {
+                    self.omitted_rows.len() != 1 || !self.omitted_batches.is_empty()
+                }
+            }
         {
             return Err(RobustnessError::InvalidCase(
                 "identity, omission, ordering, or digest shape is invalid".into(),
