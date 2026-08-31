@@ -91,14 +91,17 @@ pub use findings::{
 };
 pub use glioma::{
     analyze_preclinical_outcomes, assess_replication, build_research_object_manifest,
-    design_preclinical_experiment, explore_mechanisms, generate_feature_catalog,
-    glioma_program_catalog, harmonize_multimodal_inputs, qualify_evidence,
-    validate_feature_catalog, AnalysisDataset, AnalysisRequest, AnalysisResult, CatalogError,
-    EvidenceQualification, EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentDesign,
-    ExperimentRequest, GliomaFeatureSpec, GliomaOperatingScale, GliomaProgramDescriptor,
-    GliomaProgramId, MechanismCandidate, MechanismPortfolio, MechanismRequest,
-    MultimodalObservation, MultimodalQcReport, MultimodalRequest, ReplicationAssessment,
-    ReplicationRequest, ReplicationStudy, ResearchObjectManifest, ResearchObjectRequest,
+    design_preclinical_experiment, execute_glioma_workflow, explore_mechanisms,
+    generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
+    plan_glioma_workflow, qualify_evidence, validate_feature_catalog, AnalysisDataset,
+    AnalysisRequest, AnalysisResult, CatalogError, EvidenceQualification, EvidenceRecord,
+    EvidenceRequest, ExperimentArm, ExperimentDesign, ExperimentRequest, GliomaFeatureSpec,
+    GliomaOperatingScale, GliomaProgramDescriptor, GliomaProgramId, GliomaWorkflowBranch,
+    GliomaWorkflowError, GliomaWorkflowExecution, GliomaWorkflowMode, GliomaWorkflowNode,
+    GliomaWorkflowPlan, GliomaWorkflowRequest, MechanismCandidate, MechanismPortfolio,
+    MechanismRequest, MultimodalObservation, MultimodalQcReport, MultimodalRequest,
+    ReplicationAssessment, ReplicationRequest, ReplicationStudy, ResearchObjectManifest,
+    ResearchObjectRequest, WorkflowNodeDecision,
 };
 pub use glioma_engine::{
     compile_glioma_research, dry_run_glioma_research, execute_glioma_research,

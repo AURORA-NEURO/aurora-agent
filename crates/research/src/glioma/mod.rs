@@ -15,6 +15,7 @@ pub mod multimodal;
 pub mod programs;
 pub mod release;
 pub mod replication;
+pub mod workflow;
 
 pub use analysis::{
     analyze_preclinical_outcomes, AnalysisDataset, AnalysisRequest, AnalysisResult,
@@ -34,4 +35,9 @@ pub use multimodal::{
 pub use release::{build_research_object_manifest, ResearchObjectManifest, ResearchObjectRequest};
 pub use replication::{
     assess_replication, ReplicationAssessment, ReplicationRequest, ReplicationStudy,
+};
+pub use workflow::{
+    execute_glioma_workflow, plan_glioma_workflow, GliomaWorkflowBranch, GliomaWorkflowError,
+    GliomaWorkflowExecution, GliomaWorkflowMode, GliomaWorkflowNode, GliomaWorkflowPlan,
+    GliomaWorkflowRequest, WorkflowNodeDecision,
 };

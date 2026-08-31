@@ -470,11 +470,11 @@ use bioprism_research::{
     analyze_preclinical_outcomes, assess_replication, build_research_object_manifest,
     design_preclinical_experiment, dry_run_glioma_research, explore_mechanisms,
     generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
-    qualify_evidence, select_glioma_actions, validate_feature_catalog, AnalysisDataset,
-    AnalysisRequest, EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest,
-    GliomaActionCandidate, GliomaResearchIntent, MechanismCandidate, MechanismRequest,
-    MultimodalObservation, MultimodalRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest,
+    plan_glioma_workflow, qualify_evidence, select_glioma_actions, validate_feature_catalog,
+    AnalysisDataset, AnalysisRequest, EvidenceRecord, EvidenceRequest, ExperimentArm,
+    ExperimentRequest, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
+    MechanismCandidate, MechanismRequest, MultimodalObservation, MultimodalRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1909,6 +1909,7 @@ impl Server {
             "brain_model_health" => self.brain_model_health(&arguments),
             "brain_replay_evaluate" => self.brain_replay_evaluate(&arguments),
             "glioma_research_dry_run" => self.glioma_research_dry_run(&arguments),
+            "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
@@ -3023,6 +3024,35 @@ impl Server {
             .map_err(|error| format!("glioma dry-run refused: {error}"))?;
         serde_json::to_value(receipt)
             .map_err(|error| format!("cannot encode glioma execution receipt: {error}"))
+    }
+
+    /// Plan the next adaptive, checkpoint-aware glioma workflow batch. This is a pure planning
+    /// surface: it never dispatches a provider, moves raw data, calls an instrument, or asserts a
+    /// biological result. A local host can submit the returned `next_ready_batch` to its own
+    /// caller-owned executor after applying its institution's approvals.
+    fn glioma_workflow_plan(&self, arguments: &Value) -> Result<Value, String> {
+        let request: GliomaWorkflowRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_workflow_plan requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma workflow request: {error}"))?;
+        let plan = plan_glioma_workflow(&request)
+            .map_err(|error| format!("glioma workflow planning refused: {error}"))?;
+        let next_ready_batch = plan.next_ready_batch();
+        serde_json::to_value(json!({
+            "plan": plan,
+            "next_ready_batch": next_ready_batch,
+            "dispatch": "not_started",
+            "guarantees": [
+                "mode scope closes over upstream evidence, QC, and policy dependencies",
+                "unknown, contradictory, underpowered, and non-local inputs hold or abstain",
+                "the returned plan is deterministic and digest-bound",
+                "physical execution remains behind a caller-owned local executor and approval gate"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma workflow plan: {error}"))
     }
 
     /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
@@ -43249,6 +43279,7 @@ pub fn workspace_capabilities() -> Value {
             "crates": ["bioprism-research", "bioprism-onco", "bioprism-foundation", "bioprism-mcp"],
             "mcp_tools": [
                 "glioma_research_dry_run",
+                "glioma_workflow_plan",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
@@ -50062,6 +50093,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             },
             "required": ["intent"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_workflow_plan",
+        "description": "Compile a deterministic adaptive preclinical glioma campaign plan and return its next runnable batch. The planner closes over evidence, multimodal QC, mechanism, experiment-power, locality, budget, and approval gates; it routes unknown, contradictory, underpowered, or unsafe states into explicit hold/abstain branches. It never dispatches a provider, instrument, network call, federation export, or clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized GliomaWorkflowRequest1@1 containing a GliomaResearchIntent, mode, optional validated checkpoint outputs, completed stage ids, and max_parallelism."
+                }
+            },
+            "required": ["request"]
         }
     }));
     definitions.push(json!({

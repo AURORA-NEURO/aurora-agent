@@ -24,6 +24,7 @@
     "engine": "crates/research/src/glioma_engine.rs",
     "programs": "crates/research/src/glioma/programs",
     "contracts": "crates/research/src/glioma",
+    "adaptive_workflow": "crates/research/src/glioma/workflow.rs",
     "documentation": "docs/glioma",
     "mcp": "crates/mcp/src/server.rs"
   },
@@ -34,7 +35,7 @@
     {"id": "P04", "slug": "decision-context", "folder": "p04_decision_context", "stage_kinds": ["intent_normalization", "evidence_compilation"]},
     {"id": "P05", "slug": "mechanism-exploration", "folder": "p05_mechanism_exploration", "stage_kinds": ["molecular_landscape", "mechanism_exploration"]},
     {"id": "P06", "slug": "experiment-design", "folder": "p06_experiment_design", "stage_kinds": ["experiment_design"]},
-    {"id": "P07", "slug": "protocol-simulation", "folder": "p07_protocol_simulation", "stage_kinds": ["protocol_simulation"]},
+    {"id": "P07", "slug": "protocol-simulation", "folder": "p07_protocol_simulation", "stage_kinds": ["protocol_simulation"], "surfaces": ["plan_glioma_workflow", "execute_glioma_workflow"]},
     {"id": "P08", "slug": "instrument-robotics", "folder": "p08_instrument_robotics", "stage_kinds": ["instrument_preflight"]},
     {"id": "P09", "slug": "reproducible-computation", "folder": "p09_reproducible_computation", "stage_kinds": ["computational_execution"]},
     {"id": "P10", "slug": "interpretation-replication", "folder": "p10_interpretation_replication", "stage_kinds": ["statistical_interpretation", "replication_robustness"]},

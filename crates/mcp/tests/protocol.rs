@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 530;
+const TOOL_DEFINITION_COUNT: usize = 531;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -414,7 +414,7 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     let dry_run = call(
         &mut server,
         "glioma_research_dry_run",
-        json!({"intent": intent}),
+        json!({"intent": intent.clone()}),
     );
     assert_eq!(dry_run["disposition"], json!("succeeded"));
     assert_eq!(dry_run["completed_order"].as_array().unwrap().len(), 12);
@@ -423,6 +423,32 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         .unwrap()
         .iter()
         .any(|item| item.as_str().unwrap().contains("simulation")));
+
+    let workflow = call(
+        &mut server,
+        "glioma_workflow_plan",
+        json!({
+            "request": {
+                "intent": intent,
+                "mode": "full_program",
+                "completed_stages": [],
+                "evidence": null,
+                "qc_report": null,
+                "mechanism_portfolio": null,
+                "experiment_design": null,
+                "max_parallelism": 2
+            }
+        }),
+    );
+    assert_eq!(workflow["dispatch"], json!("not_started"));
+    assert_eq!(
+        workflow["plan"]["output_schema"],
+        json!("GliomaAdaptiveWorkflow1@1")
+    );
+    assert_eq!(
+        workflow["next_ready_batch"],
+        json!(["intent-normalization"])
+    );
 }
 
 #[test]
