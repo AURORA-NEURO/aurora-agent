@@ -470,14 +470,15 @@ use bioprism_research::{
     analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_multimodal_concordance,
     analyze_preclinical_outcomes, assess_glioma_robustness, assess_replication,
     build_research_object_manifest, design_preclinical_experiment, dry_run_glioma_research,
-    compile_typed_knowledge, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    compile_decision_context, compile_typed_knowledge, explore_mechanisms, generate_feature_catalog,
+    glioma_program_catalog,
     harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
     simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
     ConcordanceRequest, DoseResponseObservation, DoseResponseRequest, EvidenceRecord,
     EvidenceRequest, ExperimentArm, ExperimentRequest, GliomaActionCandidate, GliomaResearchIntent,
     GliomaWorkflowRequest, MechanismCandidate, MechanismRequest, ModalityVector,
-    KnowledgeRequest, MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest,
-    ReplicationRequest,
+    DecisionContextRequest, KnowledgeRequest, MultimodalObservation, MultimodalRequest,
+    ProtocolSimulationRequest, ReplicationRequest, TypedKnowledge,
     ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
     TrajectoryRequest,
 };
@@ -1924,6 +1925,7 @@ impl Server {
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
+            "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
@@ -3321,6 +3323,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma typed knowledge: {error}"))
+    }
+
+    /// Turn typed glioma knowledge gaps into executable candidates for the bounded action
+    /// selector. The returned candidates are still caller-dispatched and cannot touch instruments
+    /// or export data without the selector's explicit policy gates.
+    fn glioma_decision_context(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DecisionContextRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_context requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma decision-context request: {error}"))?;
+        let knowledge: TypedKnowledge = serde_json::from_value(
+            arguments
+                .get("knowledge")
+                .cloned()
+                .ok_or_else(|| "glioma_decision_context requires knowledge".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma typed knowledge: {error}"))?;
+        let output = compile_decision_context(&request, &knowledge)
+            .map_err(|error| format!("glioma decision-context compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "context": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "each action is a typed candidate consumable by glioma_research_select_actions",
+                "missing coverage, contradictions, negative results, and unknown evidence receive distinct actions",
+                "all candidates are local A1 computation and remain subject to downstream budget and policy gates",
+                "no action is executed and no clinical decision is produced"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma decision context: {error}"))
     }
 
     fn glioma_multimodal_qc(&self, arguments: &Value) -> Result<Value, String> {
@@ -43489,6 +43524,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
                 "glioma_knowledge_compile",
+                "glioma_decision_context",
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
                 "glioma_experiment_design",
@@ -50456,6 +50492,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values."}
             },
             "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_decision_context",
+        "description": "Compile an actionable preclinical glioma decision context from typed knowledge. Generates bounded A1 candidates for coverage closure, contradiction replication, negative-result falsification, evidence resolution, or mechanism validation; candidates feed the action selector and no action is dispatched here.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "DecisionContextRequest1@1 with matching objective, action bound, and cost."},
+                "knowledge": {"type": "object", "description": "TypedKnowledge1@1 from glioma_knowledge_compile."}
+            },
+            "required": ["request", "knowledge"]
         }
     }));
     definitions.push(json!({

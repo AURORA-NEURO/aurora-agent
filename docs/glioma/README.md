@@ -20,6 +20,8 @@ crates/research/src/glioma/
   evidence.rs                              P01 evidence qualification
   programs/p02_evidence_knowledge/knowledge_graph.rs
                                              P02 scoped claim graph and support/contradiction synthesis
+  programs/p04_decision_context/context_compiler.rs
+                                             P04 evidence-gap to typed next-action compilation
   multimodal.rs                            P03 harmonization and QC
   mechanism.rs                             P05 competing mechanism portfolio
   experiment.rs                             P06 fixed-point power and allocation design
@@ -119,3 +121,7 @@ shared-feature alignment, fixed-point correlation, and explicit contradictory or
 P02 now includes typed-knowledge compilation (`compile_typed_knowledge`) that coalesces scoped
 claims, ranks support against contradiction, preserves negative/unknown evidence, and exposes
 missing modality/model coverage for the next workflow action.
+P04 now includes decision-context compilation (`compile_decision_context`) that converts those
+gaps into typed A1 candidates for coverage closure, contradiction replication, negative-result
+falsification, evidence resolution, or mechanism validation; the existing action selector then
+applies budget and policy gates before any provider dispatch.

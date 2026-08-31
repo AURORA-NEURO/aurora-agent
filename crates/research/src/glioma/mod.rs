@@ -41,6 +41,10 @@ pub use programs::p03_multimodal_ingestion_qc::{
     FeatureValue, ModalityConcordance, ModalityVector, MultimodalConcordance,
     PairConcordanceDisposition,
 };
+pub use programs::p04_decision_context::{
+    compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,
+    DecisionContextDisposition, DecisionContextError, DecisionContextRequest,
+};
 pub use programs::p06_experiment_design::{
     analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,
     DoseResponseError, DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,

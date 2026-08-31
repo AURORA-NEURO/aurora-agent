@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 537;
+const TOOL_DEFINITION_COUNT: usize = 538;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -691,6 +691,24 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     );
     assert_eq!(knowledge["dispatch"], json!("not_started"));
     assert_eq!(knowledge["knowledge"]["disposition"], json!("qualified"));
+
+    let decision_context = call(
+        &mut server,
+        "glioma_decision_context",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "max_actions": 8,
+                "default_cost_units": 5
+            },
+            "knowledge": knowledge["knowledge"].clone()
+        }),
+    );
+    assert_eq!(decision_context["dispatch"], json!("not_started"));
+    assert_eq!(
+        decision_context["context"]["actions"][0]["candidate"]["stage_kind"],
+        json!("mechanism_exploration")
+    );
 }
 
 #[test]

@@ -1,5 +1,12 @@
 //! Question-to-decision context program ownership.
 
+pub mod context_compiler;
+
+pub use context_compiler::{
+    compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,
+    DecisionContextDisposition, DecisionContextError, DecisionContextRequest,
+};
+
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::DecisionContext;
