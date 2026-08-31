@@ -419,6 +419,18 @@ mod tests {
             GliomaStageKind::MechanismExploration
         );
         assert_eq!(output.disposition, DecisionContextDisposition::Qualified);
+        let candidates = output
+            .actions
+            .iter()
+            .map(|action| action.candidate.clone())
+            .collect::<Vec<_>>();
+        let selection = crate::glioma_engine::select_glioma_actions(
+            &candidates,
+            &BTreeSet::new(),
+            &Default::default(),
+        )
+        .unwrap();
+        assert_eq!(selection.selected_order, output.action_order);
         output.validate().unwrap();
     }
 
