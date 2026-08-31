@@ -39,6 +39,8 @@ crates/research/src/glioma/
     p12_federated_benchmarking/
   workflow.rs                               P07 adaptive campaign planner and guarded execution
     p07_protocol_simulation/simulator.rs    P07 deterministic resource-constrained scheduling
+    p09_reproducible_computation/robustness.rs
+                                             P09 leave-one-batch/row-out robustness battery
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -57,7 +59,7 @@ crates/research/src/glioma/
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | signed, interlocked, human-authorized action plan |
-| P09 Reproducible computation | computational scientist | computational execution | checkpointed and replayable analysis run |
+| P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware effect and cross-site verdict |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark and governance decision |
@@ -98,5 +100,7 @@ chooses deterministic next batches, closes over dependencies, and routes unresol
 QC defects, contradictory mechanisms, underpowered designs, budget exhaustion, and approval gaps
 into explicit hold/abstain branches. Checkpoint output digests are bound into the workflow plan so
 a resumed campaign cannot silently swap a local evidence, QC, mechanism, or design object. P02, P04, P08, P09, and P12 retain explicit ownership folders
-and catalog routes; their provider-specific implementations remain subsequent build work rather
-than being implied as complete.
+and catalog routes. P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
+recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
+unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution
+for the remaining programs remains subsequent build work rather than being implied as complete.

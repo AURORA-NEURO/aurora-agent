@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 532;
+const TOOL_DEFINITION_COUNT: usize = 533;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -498,6 +498,53 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         protocol["simulation"]["schedule"].as_array().unwrap().len(),
         2
     );
+
+    let robustness = call(
+        &mut server,
+        "glioma_robustness_suite",
+        json!({
+            "request": {
+                "objective": "stress-test a preclinical glioma invasion effect",
+                "analysis": {
+                    "objective": "estimate invasion effect",
+                    "control_arm": "control",
+                    "treatment_arm": "treated",
+                    "model_system": "organoid",
+                    "min_replicates_per_arm": 3,
+                    "effect_threshold_milli": 100,
+                    "alpha_milli": 50
+                },
+                "max_cases": 8,
+                "include_row_jackknife": false,
+                "min_eligible_cases": 2,
+                "min_stability_milli": 900
+            },
+            "dataset": {
+                "dataset_id": "mcp-robustness",
+                "artifact": {
+                    "artifact_id": "mcp-robustness-artifact",
+                    "content_hash": artifact_hash,
+                    "content_type": "application/vnd.aurora.glioma-analysis+json",
+                    "local_only": true,
+                    "contains_human_data": false,
+                    "contains_direct_identifiers": false
+                },
+                "rows": [
+                    {"row_id":"r1","arm_id":"control","model_system":"organoid","batch_id":"b1","outcome_milli":100},
+                    {"row_id":"r2","arm_id":"control","model_system":"organoid","batch_id":"b2","outcome_milli":105},
+                    {"row_id":"r3","arm_id":"control","model_system":"organoid","batch_id":"b3","outcome_milli":95},
+                    {"row_id":"r4","arm_id":"control","model_system":"organoid","batch_id":"b4","outcome_milli":102},
+                    {"row_id":"r5","arm_id":"treated","model_system":"organoid","batch_id":"b5","outcome_milli":300},
+                    {"row_id":"r6","arm_id":"treated","model_system":"organoid","batch_id":"b6","outcome_milli":305},
+                    {"row_id":"r7","arm_id":"treated","model_system":"organoid","batch_id":"b7","outcome_milli":295},
+                    {"row_id":"r8","arm_id":"treated","model_system":"organoid","batch_id":"b8","outcome_milli":301}
+                ]
+            }
+        }),
+    );
+    assert_eq!(robustness["dispatch"], json!("not_started"));
+    assert_eq!(robustness["suite"]["disposition"], json!("stable"));
+    assert_eq!(robustness["suite"]["cases"].as_array().unwrap().len(), 8);
 }
 
 #[test]

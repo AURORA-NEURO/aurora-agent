@@ -467,15 +467,15 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    analyze_preclinical_outcomes, assess_replication, build_research_object_manifest,
-    design_preclinical_experiment, dry_run_glioma_research, explore_mechanisms,
-    generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
-    plan_glioma_workflow, qualify_evidence, select_glioma_actions, simulate_glioma_protocol,
-    validate_feature_catalog, AnalysisDataset, AnalysisRequest, EvidenceRecord, EvidenceRequest,
-    ExperimentArm, ExperimentRequest, GliomaActionCandidate, GliomaResearchIntent,
-    GliomaWorkflowRequest, MechanismCandidate, MechanismRequest, MultimodalObservation,
-    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest,
+    analyze_preclinical_outcomes, assess_glioma_robustness, assess_replication,
+    build_research_object_manifest, design_preclinical_experiment, dry_run_glioma_research,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
+    simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
+    EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest, GliomaActionCandidate,
+    GliomaResearchIntent, GliomaWorkflowRequest, MechanismCandidate, MechanismRequest,
+    MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustnessRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1912,6 +1912,7 @@ impl Server {
             "glioma_research_dry_run" => self.glioma_research_dry_run(&arguments),
             "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
+            "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
@@ -3081,6 +3082,40 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma protocol simulation: {error}"))
+    }
+
+    /// Stress-test a local two-arm glioma analysis under deterministic batch and row omissions.
+    /// The suite never promotes an unresolved omission to support and never treats a null result
+    /// as a failed computation; it is a bounded scientific robustness report, not execution.
+    fn glioma_robustness_suite(&self, arguments: &Value) -> Result<Value, String> {
+        let request: RobustnessRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_robustness_suite requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma robustness request: {error}"))?;
+        let dataset: AnalysisDataset = serde_json::from_value(
+            arguments
+                .get("dataset")
+                .cloned()
+                .ok_or_else(|| "glioma_robustness_suite requires dataset".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma robustness dataset: {error}"))?;
+        let output = assess_glioma_robustness(&request, &dataset)
+            .map_err(|error| format!("glioma robustness assessment refused: {error}"))?;
+        serde_json::to_value(json!({
+            "suite": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "leave-one-batch and optional leave-one-row analyses use the declared estimand",
+                "unresolved omissions never count as supporting evidence",
+                "null and negative outcomes remain first-class scientific results",
+                "the bounded battery is deterministic and digest-bound",
+                "raw data remains local and no clinical decision is produced"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma robustness suite: {error}"))
     }
 
     /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
@@ -43309,6 +43344,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_dry_run",
                 "glioma_workflow_plan",
                 "glioma_protocol_simulate",
+                "glioma_robustness_suite",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
@@ -50150,6 +50186,24 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             },
             "required": ["request"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_robustness_suite",
+        "description": "Run a deterministic robustness battery for a local preclinical glioma analysis. Recomputes the declared estimand under leave-one-batch-out and optional leave-one-row-out omissions, reports effect ranges, direction/stability fractions, and explicit stable, fragile, null, or unresolved outcomes. It never counts an unresolved omission as support, never hides negative results, and never executes an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized RobustnessRequest1@1 with an AnalysisRequest, bounded case budget, eligibility floor, and stability threshold."
+                },
+                "dataset": {
+                    "type": "object",
+                    "description": "Local AnalysisDataset1@1 containing de-identified preclinical two-arm rows."
+                }
+            },
+            "required": ["request", "dataset"]
         }
     }));
     definitions.push(json!({
