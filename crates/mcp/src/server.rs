@@ -467,16 +467,17 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    analyze_glioma_trajectories, analyze_preclinical_outcomes, assess_glioma_robustness,
-    assess_replication, build_research_object_manifest, design_preclinical_experiment,
-    dry_run_glioma_research, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
-    simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
-    EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest, GliomaActionCandidate,
-    GliomaResearchIntent, GliomaWorkflowRequest, MechanismCandidate, MechanismRequest,
-    MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
-    TrajectoryRequest,
+    analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_preclinical_outcomes,
+    assess_glioma_robustness, assess_replication, build_research_object_manifest,
+    design_preclinical_experiment, dry_run_glioma_research, explore_mechanisms,
+    generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
+    plan_glioma_workflow, qualify_evidence, select_glioma_actions, simulate_glioma_protocol,
+    validate_feature_catalog, AnalysisDataset, AnalysisRequest, DoseResponseObservation,
+    DoseResponseRequest, EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest,
+    GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest, MechanismCandidate,
+    MechanismRequest, MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest,
+    ReplicationRequest, ReplicationStudy, ResearchObjectRequest, RobustnessRequest,
+    TrajectoryObservation, TrajectoryRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1915,6 +1916,7 @@ impl Server {
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
+            "glioma_dose_response" => self.glioma_dose_response(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
@@ -3151,6 +3153,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma trajectory analysis: {error}"))
+    }
+
+    /// Fit a bounded monotone preclinical glioma dose-response curve. This is analysis only: it
+    /// does not choose a clinical dose, dispatch an assay, or move raw observations.
+    fn glioma_dose_response(&self, arguments: &Value) -> Result<Value, String> {
+        let request: DoseResponseRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_dose_response requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma dose-response request: {error}"))?;
+        let observations: Vec<DoseResponseObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_dose_response requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma dose-response observations: {error}"))?;
+        let output = analyze_glioma_dose_response(&request, &observations)
+            .map_err(|error| format!("glioma dose-response analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "the monotone fit uses weighted pool-adjacent-violators arithmetic",
+                "raw means, fitted means, residuals, and monotonicity violations remain visible",
+                "missing dose levels and replicate floors remain unresolved",
+                "half-maximal dose is interpolated only on the declared preclinical grid"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma dose-response analysis: {error}"))
     }
 
     /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
@@ -43381,6 +43415,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_protocol_simulate",
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
+                "glioma_dose_response",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
@@ -50256,6 +50291,25 @@ pub fn tool_definitions() -> Vec<Value> {
                     "type": "array",
                     "items": {"type": "object"},
                     "description": "Local TrajectoryObservation1@1 values from de-identified preclinical units."
+                }
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_dose_response",
+        "description": "Fit a bounded monotone dose-response curve for local preclinical glioma observations using weighted pool-adjacent-violators arithmetic. Returns raw and fitted means, residual uncertainty, monotonicity violations, an interpolated half-maximal dose when identifiable on the declared grid, and qualified, negative, or unresolved outcomes. It never selects a clinical dose or executes an assay.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized DoseResponseRequest1@1 with model binding, monotonic direction, dose/replicate floors, effect threshold, and noise tolerance."
+                },
+                "observations": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Local DoseResponseObservation1@1 values from de-identified preclinical units."
                 }
             },
             "required": ["request", "observations"]

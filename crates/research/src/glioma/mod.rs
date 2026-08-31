@@ -32,6 +32,10 @@ pub use mechanism::{explore_mechanisms, MechanismCandidate, MechanismPortfolio, 
 pub use multimodal::{
     harmonize_multimodal_inputs, MultimodalObservation, MultimodalQcReport, MultimodalRequest,
 };
+pub use programs::p06_experiment_design::{
+    analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,
+    DoseResponseError, DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,
+};
 pub use programs::p07_protocol_simulation::{
     protocol_request_from_experiment_design, simulate_glioma_protocol, ProtocolDisposition,
     ProtocolResource, ProtocolResourceKind, ProtocolSimulation, ProtocolSimulationError,

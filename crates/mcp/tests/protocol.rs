@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 534;
+const TOOL_DEFINITION_COUNT: usize = 535;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -583,6 +583,35 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         trajectory["analysis"]["slope_effect_milli_per_tick"],
         json!(9)
+    );
+
+    let dose_response = call(
+        &mut server,
+        "glioma_dose_response",
+        json!({
+            "request": {
+                "objective": "map a preclinical glioma invasion dose response",
+                "model_system": "organoid",
+                "control_dose_milli": 0,
+                "direction": "increasing",
+                "min_observations_per_dose": 1,
+                "min_dose_levels": 3,
+                "effect_threshold_milli": 100,
+                "max_residual_milli": 0,
+                "max_monotonicity_violations": 0
+            },
+            "observations": [
+                {"observation_id":"d0","unit_id":"u0","model_system":"organoid","batch_id":"b0","dose_milli":0,"outcome_milli":100},
+                {"observation_id":"d1","unit_id":"u1","model_system":"organoid","batch_id":"b1","dose_milli":10,"outcome_milli":200},
+                {"observation_id":"d2","unit_id":"u2","model_system":"organoid","batch_id":"b2","dose_milli":20,"outcome_milli":300}
+            ]
+        }),
+    );
+    assert_eq!(dose_response["dispatch"], json!("not_started"));
+    assert_eq!(dose_response["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        dose_response["analysis"]["half_maximal_dose_milli"],
+        json!(10)
     );
 }
 

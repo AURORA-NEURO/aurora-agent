@@ -2,6 +2,13 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod dose_response;
+
+pub use dose_response::{
+    analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,
+    DoseResponseError, DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,
+};
+
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ExperimentDesign;
 
 pub fn descriptor() -> GliomaProgramDescriptor {

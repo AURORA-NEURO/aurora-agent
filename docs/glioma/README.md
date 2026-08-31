@@ -43,6 +43,7 @@ crates/research/src/glioma/
                                              P09 leave-one-batch/row-out robustness battery
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
+    p06_experiment_design/dose_response.rs   P06 monotone dose-response curve analysis
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -58,7 +59,7 @@ crates/research/src/glioma/
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable study-by-modality cells and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | ranked competing mechanisms and discriminating actions |
-| P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, and null-result plan |
+| P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | signed, interlocked, human-authorized action plan |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
@@ -106,3 +107,6 @@ and catalog routes. P09 now includes a bounded robustness suite (`assess_glioma_
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution
 for the remaining programs remains subsequent build work rather than being implied as complete.
+P06 now also includes a weighted monotone dose-response analyzer (`analyze_glioma_dose_response`)
+with transparent raw/fitted means, residual noise, monotonicity violations, and half-maximal-dose
+interpolation only on the declared preclinical grid.
