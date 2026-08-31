@@ -117,13 +117,15 @@ It is a product capability route, not a hypothesis or a to-do item. Stable ids u
 6. Promote a program only when its independent baseline, reproducibility, and preclinical safety
    gates are measured.
 
-The first tranche is implemented in P01, P02, P03, P05, P06, P10, and P11. P07 now also has an
+The first tranche is implemented in P01, P02, P03, P05, P06, P08, P10, P11, and P12. P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,
 QC defects, contradictory mechanisms, underpowered designs, budget exhaustion, and approval gaps
 into explicit hold/abstain branches. Checkpoint output digests are bound into the workflow plan so
-a resumed campaign cannot silently swap a local evidence, QC, mechanism, or design object. P04, P08, and P12 retain explicit ownership folders
-and catalog routes. P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
+a resumed campaign cannot silently swap a local evidence, QC, mechanism, or design object. P04
+retains an explicit ownership folder and catalog route. P08 now includes robust instrument-control
+calibration and Theil–Sen drift detection, while P12 includes aggregate-only federated benchmark
+consensus with heterogeneity and leave-site-out influence bounds. P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution
 for the remaining programs remains subsequent build work rather than being implied as complete.
