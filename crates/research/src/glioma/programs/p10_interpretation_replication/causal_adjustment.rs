@@ -117,7 +117,8 @@ fn ordered_unique(values: &[String]) -> bool {
 }
 
 fn mean(values: &[i64]) -> i64 {
-    (values.iter().map(|value| i128::from(*value)).sum::<i128>() / values.len() as i128) as i64
+    let mean = values.iter().map(|value| i128::from(*value)).sum::<i128>() / values.len() as i128;
+    mean.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
 }
 
 fn imbalance(control_count: usize, treatment_count: usize) -> u16 {
@@ -253,6 +254,7 @@ pub fn analyze_stratified_causal_adjustment(
     }
     let mut observation_ids = BTreeSet::new();
     let mut unit_strata = BTreeMap::<String, String>::new();
+    let mut unit_arms = BTreeMap::<String, String>::new();
     let mut grouped = BTreeMap::<String, BTreeMap<String, BTreeMap<String, Vec<i64>>>>::new();
     for observation in observations {
         if observation.observation_id.trim().is_empty()
@@ -280,6 +282,15 @@ pub fn analyze_stratified_causal_adjustment(
             }
         } else {
             unit_strata.insert(observation.unit_id.clone(), observation.stratum_id.clone());
+        }
+        if let Some(previous_arm) = unit_arms.get(&observation.unit_id) {
+            if previous_arm != &observation.arm_id {
+                return Err(StratifiedCausalError::InvalidObservation(
+                    "a unit cannot contribute observations to both causal arms".into(),
+                ));
+            }
+        } else {
+            unit_arms.insert(observation.unit_id.clone(), observation.arm_id.clone());
         }
         grouped
             .entry(observation.stratum_id.clone())
@@ -603,5 +614,15 @@ mod tests {
             .unwrap();
         assert_eq!(low.control_unit_order.len(), 2);
         assert_eq!(low.control_mean_milli, Some(110));
+    }
+
+    #[test]
+    fn unit_cannot_cross_causal_arms() {
+        let observations = vec![
+            observation("a-c1", "shared", "low", "control", 100),
+            observation("a-t1", "shared", "low", "treated", 260),
+        ];
+        let error = analyze_stratified_causal_adjustment(&request(), &observations).unwrap_err();
+        assert!(error.to_string().contains("both causal arms"));
     }
 }
