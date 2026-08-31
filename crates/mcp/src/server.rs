@@ -467,19 +467,21 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    analyze_glioma_causal_contrast, analyze_glioma_dose_response, analyze_glioma_trajectories,
-    analyze_multimodal_concordance, analyze_preclinical_outcomes, assess_glioma_robustness,
-    assess_replication, build_research_object_manifest, compile_decision_context,
-    compile_typed_knowledge, design_preclinical_experiment, dry_run_glioma_research,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
-    simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
-    CausalContrastRequest, ConcordanceRequest, DecisionContextRequest, DoseResponseObservation,
-    DoseResponseRequest, EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest,
-    GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest, KnowledgeRequest,
-    MechanismCandidate, MechanismRequest, ModalityVector, MultimodalObservation, MultimodalRequest,
-    ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustnessRequest, TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
+    analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
+    analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_multimodal_concordance,
+    analyze_preclinical_outcomes, assess_glioma_robustness, assess_replication,
+    build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
+    design_preclinical_experiment, dry_run_glioma_research, explore_mechanisms,
+    generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
+    plan_glioma_workflow, qualify_evidence, select_glioma_actions, simulate_glioma_protocol,
+    validate_feature_catalog, AnalysisDataset, AnalysisRequest, CausalContrastRequest,
+    CombinationObservation, CombinationSynergyRequest, ConcordanceRequest, DecisionContextRequest,
+    DoseResponseObservation, DoseResponseRequest, EvidenceRecord, EvidenceRequest, ExperimentArm,
+    ExperimentRequest, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
+    KnowledgeRequest, MechanismCandidate, MechanismRequest, ModalityVector, MultimodalObservation,
+    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest, RobustnessRequest, TrajectoryObservation, TrajectoryRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1920,6 +1922,7 @@ impl Server {
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_causal_contrast" => self.glioma_causal_contrast(&arguments),
             "glioma_dose_response" => self.glioma_dose_response(&arguments),
+            "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
@@ -3223,6 +3226,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma dose-response analysis: {error}"))
+    }
+
+    /// Analyze a two-agent preclinical glioma response surface with fixed-point Bliss synergy.
+    /// This is analysis only: it does not choose a clinical dose or dispatch an assay.
+    fn glioma_combination_synergy(&self, arguments: &Value) -> Result<Value, String> {
+        let request: CombinationSynergyRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_combination_synergy requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma combination-synergy request: {error}"))?;
+        let observations: Vec<CombinationObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_combination_synergy requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma combination-synergy observations: {error}"))?;
+        let output = analyze_glioma_combination_synergy(&request, &observations)
+            .map_err(|error| format!("glioma combination synergy refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "single-agent controls are required for every combination cell",
+                "Bliss expected response and synergy use bounded integer arithmetic",
+                "under-replicated and noisy cells remain unresolved",
+                "antagonistic and null responses remain negative evidence"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma combination synergy: {error}"))
     }
 
     /// Compare typed local glioma modality vectors for one sample lineage. This is a scientific
@@ -43552,6 +43587,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_trajectory_analyze",
                 "glioma_causal_contrast",
                 "glioma_dose_response",
+                "glioma_combination_synergy",
                 "glioma_multimodal_concordance",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
@@ -50462,6 +50498,18 @@ pub fn tool_definitions() -> Vec<Value> {
                     "items": {"type": "object"},
                     "description": "Local DoseResponseObservation1@1 values from de-identified preclinical units."
                 }
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_combination_synergy",
+        "description": "Analyze a local preclinical glioma two-agent response surface with fixed-point Bliss independence. Requires vehicle and single-agent controls for every combination cell, reports observed/expected responses, synergy, residual noise, antagonism, and unresolved control or replicate gaps; it never selects a clinical dose or dispatches an assay.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "CombinationSynergyRequest1@1 with model binding, replicate/cell floors, synergy threshold, and residual tolerance."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local CombinationObservation1@1 values with bounded inhibition responses."}
             },
             "required": ["request", "observations"]
         }

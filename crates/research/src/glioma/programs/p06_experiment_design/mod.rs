@@ -3,10 +3,16 @@
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub mod dose_response;
+pub mod synergy;
 
 pub use dose_response::{
     analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,
     DoseResponseError, DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,
+};
+pub use synergy::{
+    analyze_glioma_combination_synergy, CombinationCell, CombinationCellDisposition,
+    CombinationObservation, CombinationSynergyAnalysis, CombinationSynergyDisposition,
+    CombinationSynergyError, CombinationSynergyRequest, DosePair,
 };
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::ExperimentDesign;

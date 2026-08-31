@@ -51,6 +51,7 @@ crates/research/src/glioma/
     p10_interpretation_replication/causal_contrast.rs
                                              P10 exact pre/post difference-in-differences analysis
     p06_experiment_design/dose_response.rs   P06 monotone dose-response curve analysis
+    p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
     p03_multimodal_ingestion_qc/concordance.rs
                                              P03 feature-level modality concordance analysis
 ```
@@ -68,7 +69,7 @@ crates/research/src/glioma/
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, feature-level concordance, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | ranked competing mechanisms and discriminating actions |
-| P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response fitting, and null-result plan |
+| P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response and combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | signed, interlocked, human-authorized action plan |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
@@ -131,3 +132,6 @@ applies budget and policy gates before any provider dispatch.
 P10 now includes an exact bounded causal contrast (`analyze_glioma_causal_contrast`) using
 pre/post unit changes, treatment-label permutations, and leave-one-unit bounds; null, non-significant,
 or underpowered effects remain explicit rather than being promoted into mechanism claims.
+P06 now includes combination-response analysis (`analyze_glioma_combination_synergy`) with
+vehicle/single-agent control requirements, integer Bliss expectations, residual noise, synergy,
+antagonism, and explicit unresolved cells for missing controls or replicates.

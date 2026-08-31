@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 539;
+const TOOL_DEFINITION_COUNT: usize = 540;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -646,6 +646,30 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         dose_response["analysis"]["half_maximal_dose_milli"],
         json!(10)
     );
+
+    let synergy = call(
+        &mut server,
+        "glioma_combination_synergy",
+        json!({
+            "request": {
+                "objective": "map glioma combination suppression",
+                "model_system": "organoid",
+                "min_replicates_per_cell": 1,
+                "min_combination_cells": 1,
+                "synergy_threshold_milli": 50,
+                "max_residual_milli": 0
+            },
+            "observations": [
+                {"observation_id":"v","unit_id":"v","model_system":"organoid","batch_id":"b0","dose_a_milli":0,"dose_b_milli":0,"response_milli":0},
+                {"observation_id":"a","unit_id":"a","model_system":"organoid","batch_id":"b1","dose_a_milli":10,"dose_b_milli":0,"response_milli":400},
+                {"observation_id":"b","unit_id":"b","model_system":"organoid","batch_id":"b2","dose_a_milli":0,"dose_b_milli":10,"response_milli":400},
+                {"observation_id":"ab","unit_id":"ab","model_system":"organoid","batch_id":"b3","dose_a_milli":10,"dose_b_milli":10,"response_milli":900}
+            ]
+        }),
+    );
+    assert_eq!(synergy["dispatch"], json!("not_started"));
+    assert_eq!(synergy["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(synergy["analysis"]["cells"][0]["synergy_milli"], json!(260));
 
     let concordance = call(
         &mut server,
