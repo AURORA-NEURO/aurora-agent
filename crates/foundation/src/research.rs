@@ -1023,6 +1023,29 @@ impl EvidenceReceipt {
         }
         Ok(())
     }
+
+    /// Returns the canonical JSON bytes used for receipt replay and federation joins.
+    ///
+    /// Evidence receipts are intentionally content-addressed separately from any protected
+    /// source payload.  A caller can therefore persist or exchange this digest while keeping
+    /// institution-local bytes behind the evidence boundary.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ResearchContractError> {
+        self.validate()?;
+        let value =
+            serde_json::to_value(self).map_err(|error| ResearchContractError::Serialization {
+                item: self.receipt_id.clone(),
+                message: error.to_string(),
+            })?;
+        to_canonical_bytes(&value).map_err(|error| ResearchContractError::Serialization {
+            item: self.receipt_id.clone(),
+            message: error.to_string(),
+        })
+    }
+
+    /// Computes the stable SHA-256 identity of this validated receipt.
+    pub fn digest(&self) -> Result<ContentHash, ResearchContractError> {
+        Ok(ContentHash::of_bytes(&self.canonical_bytes()?))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1533,5 +1556,65 @@ mod tests {
             receipt.validate(),
             Err(ResearchContractError::ProtectedOmissionBlocksConclusion { .. })
         ));
+    }
+
+    #[test]
+    fn evidence_receipt_digest_is_stable_across_json_round_trip() {
+        let receipt = EvidenceReceipt {
+            schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+            receipt_id: "evidence:digest-1".into(),
+            intent: "compare preclinical mechanisms".into(),
+            sources: vec![EvidenceSource {
+                source_id: "paper-1".into(),
+                source_type: "paper".into(),
+                locator: "doi:1".into(),
+                digest: Some(ContentHash::of_bytes(b"paper-1")),
+                availability: EvidenceAvailability::Available,
+            }],
+            derivation: vec!["extract:claim-1".into()],
+            uncertainty: vec![UncertaintyStatement {
+                kind: "epistemic".into(),
+                statement: "single study".into(),
+            }],
+            omissions: Vec::new(),
+            competing_explanations: Vec::new(),
+            negative_evidence: Vec::new(),
+            conclusion_state: EvidenceState::Supported,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        let digest = receipt.digest().unwrap();
+        let round_trip: EvidenceReceipt =
+            serde_json::from_slice(&receipt.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(digest, round_trip.digest().unwrap());
+    }
+
+    #[test]
+    fn evidence_receipt_digest_preserves_fail_closed_validation() {
+        let mut receipt = EvidenceReceipt {
+            schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+            receipt_id: "evidence:invalid".into(),
+            intent: "audit".into(),
+            sources: Vec::new(),
+            derivation: Vec::new(),
+            uncertainty: vec![UncertaintyStatement {
+                kind: "epistemic".into(),
+                statement: "unknown".into(),
+            }],
+            omissions: vec![Omission {
+                item: "query".into(),
+                reason: "empty".into(),
+                could_change_decision: DecisionImpact::Unknown,
+            }],
+            competing_explanations: Vec::new(),
+            negative_evidence: Vec::new(),
+            conclusion_state: EvidenceState::Unknown,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        assert!(matches!(
+            receipt.digest(),
+            Err(ResearchContractError::MissingDerivation { .. })
+        ));
+        receipt.derivation.push("observe:none".into());
+        assert!(receipt.digest().is_ok());
     }
 }
