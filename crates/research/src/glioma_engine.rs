@@ -1634,6 +1634,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
                 schema: "GliomaRobustnessSuite1@1".into(),
                 required: false,
             },
+            TypedPort {
+                name: "glioma_trajectory_analysis".into(),
+                schema: "GliomaTrajectoryAnalysis1@1".into(),
+                required: false,
+            },
         ],
         effects: BTreeSet::from([
             Effect::ReadLocalData,
