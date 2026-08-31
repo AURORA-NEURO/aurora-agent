@@ -50,8 +50,10 @@ crates/research/src/glioma/
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/causal_contrast.rs
                                              P10 exact pre/post difference-in-differences analysis
-    p10_interpretation_replication/meta_analysis.rs
+  p10_interpretation_replication/meta_analysis.rs
                                              P10 inverse-uncertainty replication meta-analysis and influence bounds
+    p12_federated_benchmarking/consensus.rs
+                                             P12 aggregate-only multi-site benchmark consensus with robust pooling and influence bounds
     p06_experiment_design/dose_response.rs   P06 monotone dose-response curve analysis
     p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
     p03_multimodal_ingestion_qc/concordance.rs
@@ -79,7 +81,7 @@ crates/research/src/glioma/
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
 | P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, causal-contrast, meta-analytic, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |
-| P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark and governance decision |
+| P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark consensus with robust pooling, heterogeneity, and site-influence analysis |
 
 ## Feature expansion
 

@@ -467,22 +467,23 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
-    analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_multimodal_concordance,
-    analyze_multimodal_consensus, analyze_preclinical_outcomes, analyze_replication_meta_analysis,
-    assess_glioma_robustness, assess_replication, build_research_object_manifest,
-    compile_decision_context, compile_typed_knowledge, design_preclinical_experiment,
-    dry_run_glioma_research, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
-    harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
-    simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
-    CausalContrastRequest, CombinationObservation, CombinationSynergyRequest, ConcordanceRequest,
-    ConsensusRequest, DecisionContextRequest, DoseResponseObservation, DoseResponseRequest,
-    EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest, GliomaActionCandidate,
-    GliomaResearchIntent, GliomaWorkflowRequest, KnowledgeRequest, MechanismCandidate,
-    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
-    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustnessRequest, TrajectoryObservation, TrajectoryRequest,
-    TypedKnowledge,
+    analyze_federated_benchmark, analyze_glioma_causal_contrast,
+    analyze_glioma_combination_synergy, analyze_glioma_dose_response, analyze_glioma_trajectories,
+    analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
+    analyze_replication_meta_analysis, assess_glioma_robustness, assess_replication,
+    build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
+    design_preclinical_experiment, dry_run_glioma_research, explore_mechanisms,
+    generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
+    plan_glioma_workflow, qualify_evidence, select_glioma_actions, simulate_glioma_protocol,
+    validate_feature_catalog, AnalysisDataset, AnalysisRequest, CausalContrastRequest,
+    CombinationObservation, CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest,
+    DecisionContextRequest, DoseResponseObservation, DoseResponseRequest, EvidenceRecord,
+    EvidenceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
+    FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
+    KnowledgeRequest, MechanismCandidate, MechanismRequest, MetaAnalysisRequest, ModalityVector,
+    MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
+    TrajectoryRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1937,6 +1938,9 @@ impl Server {
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
             "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
             "glioma_replication_meta_analyze" => self.glioma_replication_meta_analyze(&arguments),
+            "glioma_federated_benchmark_consensus" => {
+                self.glioma_federated_benchmark_consensus(&arguments)
+            }
             "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
@@ -3597,6 +3601,35 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma replication meta-analysis: {error}"))
+    }
+
+    /// Compare aggregate benchmark outcomes from independent preclinical sites. Raw traces stay
+    /// at the institutions; this route computes robust pooled effects and blocks unstable
+    /// federation conclusions.
+    fn glioma_federated_benchmark_consensus(&self, arguments: &Value) -> Result<Value, String> {
+        let request: FederatedBenchmarkRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_consensus requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma federated benchmark request: {error}"))?;
+        let sites: Vec<FederatedBenchmarkSite> =
+            serde_json::from_value(arguments.get("sites").cloned().ok_or_else(|| {
+                "glioma_federated_benchmark_consensus requires sites".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma federated benchmark sites: {error}"))?;
+        let output = analyze_federated_benchmark(&request, &sites)
+            .map_err(|error| format!("glioma federated benchmark consensus refused: {error}"))?;
+        serde_json::to_value(json!({
+            "consensus": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "only aggregate site scores, baselines, uncertainty, and replicate counts cross the federation boundary",
+                "fixed-point inverse-uncertainty pooling, weighted median, heterogeneity, and leave-one-site-out influence are deterministic",
+                "underpowered, contradictory, heterogeneous, negative, and site-sensitive outcomes remain explicit",
+                "the output is a preclinical benchmark comparison, not a clinical recommendation or instrument command"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma federated benchmark consensus: {error}"))
     }
 
     fn glioma_research_object_prepare(&self, arguments: &Value) -> Result<Value, String> {
@@ -43670,6 +43703,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_analysis_run",
                 "glioma_replication_assess",
                 "glioma_replication_meta_analyze",
+                "glioma_federated_benchmark_consensus",
                 "glioma_research_object_prepare"
             ],
             "cli_entrypoints": [],
@@ -50759,6 +50793,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 "studies": {"type": "array", "items": {"type": "object"}, "description": "Local ReplicationStudy1@1 values with declared effect and uncertainty."}
             },
             "required": ["request", "studies"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_federated_benchmark_consensus",
+        "description": "Compare aggregate preclinical glioma benchmark outcomes from independent institutions without moving raw traces. Computes deterministic inverse-uncertainty pooled and weighted-median effects, heterogeneity, site spread, leave-one-site-out influence, and explicit qualified, heterogeneous, negative, or unresolved outcomes; underpowered or contradictory sites are never hidden and no clinical recommendation or instrument command is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "FederatedBenchmarkRequest1@1 with capability/world/metric binding, model and site/replicate floors, effect/signal thresholds, heterogeneity, spread, and influence bounds."},
+                "sites": {"type": "array", "items": {"type": "object"}, "description": "FederatedBenchmarkSite1@1 aggregate-only site scores with local artifact references; raw observations remain local."}
+            },
+            "required": ["request", "sites"]
         }
     }));
     definitions.push(json!({

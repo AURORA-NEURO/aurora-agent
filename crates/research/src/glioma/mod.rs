@@ -70,6 +70,11 @@ pub use programs::p10_interpretation_replication::{
     TrajectoryError, TrajectoryObservation, TrajectoryRequest, UnitContrast, UnitTrajectory,
     UnitTrajectoryDisposition,
 };
+pub use programs::p12_federated_benchmarking::{
+    analyze_federated_benchmark, FederatedBenchmarkConsensus, FederatedBenchmarkContribution,
+    FederatedBenchmarkDisposition, FederatedBenchmarkError, FederatedBenchmarkRequest,
+    FederatedBenchmarkSite, FederatedBenchmarkSiteDisposition,
+};
 pub use release::{build_research_object_manifest, ResearchObjectManifest, ResearchObjectRequest};
 pub use replication::{
     assess_replication, ReplicationAssessment, ReplicationRequest, ReplicationStudy,
