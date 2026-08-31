@@ -470,10 +470,11 @@ use bioprism_research::{
     allocate_glioma_assays, analyze_federated_benchmark, analyze_glioma_causal_contrast,
     analyze_glioma_combination_synergy, analyze_glioma_dose_response, analyze_glioma_trajectories,
     analyze_instrument_calibration, analyze_multimodal_concordance, analyze_multimodal_consensus,
-    analyze_preclinical_outcomes, analyze_replication_meta_analysis, assess_glioma_robustness,
-    assess_replication, build_research_object_manifest, compile_decision_context,
-    compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
-    dry_run_glioma_research, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    analyze_preclinical_outcomes, analyze_replication_meta_analysis,
+    analyze_stratified_causal_adjustment, assess_glioma_robustness, assess_replication,
+    build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
+    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
     simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
     AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
@@ -486,8 +487,8 @@ use bioprism_research::{
     MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
     MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
     MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
-    ResearchObjectRequest, RobustnessRequest, TrajectoryObservation, TrajectoryRequest,
-    TypedKnowledge,
+    ResearchObjectRequest, RobustnessRequest, StratifiedCausalRequest, StratifiedObservation,
+    TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1927,6 +1928,9 @@ impl Server {
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_causal_contrast" => self.glioma_causal_contrast(&arguments),
+            "glioma_stratified_causal_adjustment" => {
+                self.glioma_stratified_causal_adjustment(&arguments)
+            }
             "glioma_dose_response" => self.glioma_dose_response(&arguments),
             "glioma_adaptive_allocation" => self.glioma_adaptive_allocation(&arguments),
             "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
@@ -3209,6 +3213,34 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma causal contrast: {error}"))
+    }
+
+    /// Estimate a stratified, overlap-checked preclinical glioma contrast. This is interpretation
+    /// only: it does not infer patient benefit, select a dose, or dispatch an assay.
+    fn glioma_stratified_causal_adjustment(&self, arguments: &Value) -> Result<Value, String> {
+        let request: StratifiedCausalRequest =
+            serde_json::from_value(arguments.get("request").cloned().ok_or_else(|| {
+                "glioma_stratified_causal_adjustment requires request".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma stratified-causal request: {error}"))?;
+        let observations: Vec<StratifiedObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_stratified_causal_adjustment requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma stratified-causal observations: {error}"))?;
+        let output = analyze_stratified_causal_adjustment(&request, &observations)
+            .map_err(|error| format!("glioma stratified causal adjustment refused: {error}"))?;
+        serde_json::to_value(json!({
+            "adjustment": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "repeated observations collapse to de-identified unit means before adjustment",
+                "only strata with declared arm overlap and unit floors enter the weighted contrast",
+                "leave-one-stratum influence, overlap imbalance, excluded strata, and missing coverage remain explicit",
+                "the route produces a preclinical estimand only and never makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma stratified causal adjustment: {error}"))
     }
 
     /// Fit a bounded monotone preclinical glioma dose-response curve. This is analysis only: it
@@ -43846,6 +43878,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_causal_contrast",
+                "glioma_stratified_causal_adjustment",
                 "glioma_dose_response",
                 "glioma_adaptive_allocation",
                 "glioma_combination_synergy",
@@ -50746,6 +50779,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "properties": {
                 "request": {"type": "object", "description": "CausalContrastRequest1@1 with intervention boundary, arm/model bindings, unit floor, effect threshold, and alpha."},
                 "observations": {"type": "array", "items": {"type": "object"}, "description": "Local TrajectoryObservation1@1 values with pre and post timepoints."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_stratified_causal_adjustment",
+        "description": "Estimate a preclinical glioma treatment contrast after stratifying by a caller-declared confounder such as molecular subtype, batch, or organoid class. Collapses repeated observations to unit means, requires overlap and replicate floors, weights eligible strata by pooled units, and reports leave-one-stratum influence, imbalance, excluded coverage, and an explicit next action; it never infers patient benefit, selects a dose, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "StratifiedCausalRequest1@1 with arm/model bindings, overlap floors, effect threshold, and influence bounds."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local StratifiedObservation1@1 values with de-identified units, confounder strata, outcomes, and artifact references."}
             },
             "required": ["request", "observations"]
         }

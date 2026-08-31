@@ -2,10 +2,16 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod causal_adjustment;
 pub mod causal_contrast;
 pub mod meta_analysis;
 pub mod trajectory;
 
+pub use causal_adjustment::{
+    analyze_stratified_causal_adjustment, CausalStratumSummary, StratifiedCausalActionKind,
+    StratifiedCausalAdjustment, StratifiedCausalDisposition, StratifiedCausalError,
+    StratifiedCausalRequest, StratifiedObservation,
+};
 pub use causal_contrast::{
     analyze_glioma_causal_contrast, CausalContrastAnalysis, CausalContrastDisposition,
     CausalContrastError, CausalContrastRequest, UnitContrast,

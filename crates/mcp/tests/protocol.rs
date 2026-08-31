@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 547;
+const TOOL_DEFINITION_COUNT: usize = 548;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -616,6 +616,43 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         causal["analysis"]["difference_in_differences_milli"],
         json!(19)
+    );
+
+    let stratified_causal = call(
+        &mut server,
+        "glioma_stratified_causal_adjustment",
+        json!({
+            "request": {
+                "objective": "adjust invasion effect by molecular stratum",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "min_units_per_arm_per_stratum": 2,
+                "min_eligible_strata": 2,
+                "effect_threshold_milli": 100,
+                "max_stratum_imbalance_milli": 400,
+                "max_leave_one_stratum_shift_milli": 80
+            },
+            "observations": [
+                {"observation_id":"sc-a-c1","unit_id":"sc-c1","stratum_id":"low","arm_id":"control","model_system":"organoid","batch_id":"sc-b1","outcome_milli":100,"artifact":{"artifact_id":"sc-artifact-a-c1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-a-c2","unit_id":"sc-c2","stratum_id":"low","arm_id":"control","model_system":"organoid","batch_id":"sc-b2","outcome_milli":110,"artifact":{"artifact_id":"sc-artifact-a-c2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-a-t1","unit_id":"sc-t1","stratum_id":"low","arm_id":"treated","model_system":"organoid","batch_id":"sc-b3","outcome_milli":260,"artifact":{"artifact_id":"sc-artifact-a-t1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-a-t2","unit_id":"sc-t2","stratum_id":"low","arm_id":"treated","model_system":"organoid","batch_id":"sc-b4","outcome_milli":270,"artifact":{"artifact_id":"sc-artifact-a-t2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-b-c1","unit_id":"sc-c3","stratum_id":"high","arm_id":"control","model_system":"organoid","batch_id":"sc-b5","outcome_milli":200,"artifact":{"artifact_id":"sc-artifact-b-c1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-b-c2","unit_id":"sc-c4","stratum_id":"high","arm_id":"control","model_system":"organoid","batch_id":"sc-b6","outcome_milli":210,"artifact":{"artifact_id":"sc-artifact-b-c2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-b-t1","unit_id":"sc-t3","stratum_id":"high","arm_id":"treated","model_system":"organoid","batch_id":"sc-b7","outcome_milli":340,"artifact":{"artifact_id":"sc-artifact-b-t1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"observation_id":"sc-b-t2","unit_id":"sc-t4","stratum_id":"high","arm_id":"treated","model_system":"organoid","batch_id":"sc-b8","outcome_milli":350,"artifact":{"artifact_id":"sc-artifact-b-t2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-stratified-observation+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ]
+        }),
+    );
+    assert_eq!(stratified_causal["dispatch"], json!("not_started"));
+    assert_eq!(
+        stratified_causal["adjustment"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        stratified_causal["adjustment"]["adjusted_effect_milli"],
+        json!(150)
     );
 
     let dose_response = call(

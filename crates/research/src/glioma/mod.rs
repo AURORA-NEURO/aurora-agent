@@ -82,11 +82,13 @@ pub use programs::p09_reproducible_computation::{
 };
 pub use programs::p10_interpretation_replication::{
     analyze_glioma_causal_contrast, analyze_glioma_trajectories, analyze_replication_meta_analysis,
-    CausalContrastAnalysis, CausalContrastDisposition, CausalContrastError, CausalContrastRequest,
-    MetaAnalysisDisposition, MetaAnalysisError, MetaAnalysisRequest, MetaStudyContribution,
-    ReplicationMetaAnalysis, TrajectoryAnalysis, TrajectoryArmSummary, TrajectoryDisposition,
-    TrajectoryError, TrajectoryObservation, TrajectoryRequest, UnitContrast, UnitTrajectory,
-    UnitTrajectoryDisposition,
+    analyze_stratified_causal_adjustment, CausalContrastAnalysis, CausalContrastDisposition,
+    CausalContrastError, CausalContrastRequest, CausalStratumSummary, MetaAnalysisDisposition,
+    MetaAnalysisError, MetaAnalysisRequest, MetaStudyContribution, ReplicationMetaAnalysis,
+    StratifiedCausalActionKind, StratifiedCausalAdjustment, StratifiedCausalDisposition,
+    StratifiedCausalError, StratifiedCausalRequest, StratifiedObservation, TrajectoryAnalysis,
+    TrajectoryArmSummary, TrajectoryDisposition, TrajectoryError, TrajectoryObservation,
+    TrajectoryRequest, UnitContrast, UnitTrajectory, UnitTrajectoryDisposition,
 };
 pub use programs::p12_federated_benchmarking::{
     analyze_federated_benchmark, FederatedBenchmarkConsensus, FederatedBenchmarkContribution,
