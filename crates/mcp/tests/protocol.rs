@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 546;
+const TOOL_DEFINITION_COUNT: usize = 547;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -645,6 +645,41 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         dose_response["analysis"]["half_maximal_dose_milli"],
         json!(10)
+    );
+
+    let adaptive_allocation = call(
+        &mut server,
+        "glioma_adaptive_allocation",
+        json!({
+            "request": {
+                "objective": "allocate organoid invasion replicates",
+                "model_system": "organoid",
+                "control_arm_id": "control",
+                "target_effect_milli": 100,
+                "min_replicates_per_arm": 30,
+                "min_probability_milli": 700,
+                "max_posterior_uncertainty_milli": 60,
+                "exploration_weight_milli": 300,
+                "max_selected_arms": 1,
+                "max_new_replicates": 20,
+                "budget_units": 80,
+                "risk_ceiling_milli": 700
+            },
+            "arms": [
+                {"arm_id":"control","label":"vehicle control","artifact":{"artifact_id":"adaptive-control-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-adaptive-arm+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":50,"failures":50,"prior_alpha":1,"prior_beta":1,"risk_milli":100,"cost_units":2},
+                {"arm_id":"egfr","label":"EGFR perturbation","artifact":{"artifact_id":"adaptive-egfr-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-adaptive-arm+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":28,"failures":2,"prior_alpha":1,"prior_beta":1,"risk_milli":100,"cost_units":2},
+                {"arm_id":"matrix","label":"matrix perturbation","artifact":{"artifact_id":"adaptive-matrix-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-adaptive-arm+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"model_system":"organoid","successes":12,"failures":18,"prior_alpha":1,"prior_beta":1,"risk_milli":100,"cost_units":2}
+            ]
+        }),
+    );
+    assert_eq!(adaptive_allocation["dispatch"], json!("not_started"));
+    assert_eq!(
+        adaptive_allocation["allocation"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        adaptive_allocation["allocation"]["selected_order"],
+        json!(["egfr"])
     );
 
     let synergy = call(

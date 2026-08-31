@@ -2,9 +2,15 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod adaptive_allocation;
 pub mod dose_response;
 pub mod synergy;
 
+pub use adaptive_allocation::{
+    allocate_glioma_assays, AdaptiveAllocation, AdaptiveAllocationActionKind,
+    AdaptiveAllocationDisposition, AdaptiveAllocationError, AdaptiveAllocationRequest,
+    AdaptiveArmObservation, AdaptiveArmPosterior,
+};
 pub use dose_response::{
     analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,
     DoseResponseError, DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,

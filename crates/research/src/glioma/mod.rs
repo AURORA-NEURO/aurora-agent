@@ -25,17 +25,17 @@ pub use catalog::{
     GliomaFeatureSpec, GliomaOperatingScale, GliomaProgramDescriptor, GliomaProgramId,
 };
 pub use evidence::{qualify_evidence, EvidenceQualification, EvidenceRecord, EvidenceRequest};
-pub use programs::p01_evidence_surveillance::{
-    surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind, EvidenceSurveillance,
-    EvidenceSurveillanceAction, EvidenceSurveillanceActionKind, EvidenceSurveillanceDisposition,
-    EvidenceSurveillanceError, EvidenceSurveillanceRequest,
-};
 pub use experiment::{
     design_preclinical_experiment, ExperimentArm, ExperimentDesign, ExperimentRequest,
 };
 pub use mechanism::{explore_mechanisms, MechanismCandidate, MechanismPortfolio, MechanismRequest};
 pub use multimodal::{
     harmonize_multimodal_inputs, MultimodalObservation, MultimodalQcReport, MultimodalRequest,
+};
+pub use programs::p01_evidence_surveillance::{
+    surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind, EvidenceSurveillance,
+    EvidenceSurveillanceAction, EvidenceSurveillanceActionKind, EvidenceSurveillanceDisposition,
+    EvidenceSurveillanceError, EvidenceSurveillanceRequest,
 };
 pub use programs::p02_evidence_knowledge::{
     compile_typed_knowledge, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,
@@ -58,11 +58,14 @@ pub use programs::p05_mechanism_exploration::{
     MechanismInformationGain, MechanismPrediction,
 };
 pub use programs::p06_experiment_design::{
-    analyze_glioma_combination_synergy, analyze_glioma_dose_response, CombinationCell,
-    CombinationCellDisposition, CombinationObservation, CombinationSynergyAnalysis,
-    CombinationSynergyDisposition, CombinationSynergyError, CombinationSynergyRequest,
-    DoseDirection, DosePair, DoseResponseAnalysis, DoseResponseDisposition, DoseResponseError,
-    DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,
+    allocate_glioma_assays, analyze_glioma_combination_synergy, analyze_glioma_dose_response,
+    AdaptiveAllocation, AdaptiveAllocationActionKind, AdaptiveAllocationDisposition,
+    AdaptiveAllocationError, AdaptiveAllocationRequest, AdaptiveArmObservation,
+    AdaptiveArmPosterior, CombinationCell, CombinationCellDisposition, CombinationObservation,
+    CombinationSynergyAnalysis, CombinationSynergyDisposition, CombinationSynergyError,
+    CombinationSynergyRequest, DoseDirection, DosePair, DoseResponseAnalysis,
+    DoseResponseDisposition, DoseResponseError, DoseResponseObservation, DoseResponsePoint,
+    DoseResponseRequest,
 };
 pub use programs::p07_protocol_simulation::{
     protocol_request_from_experiment_design, simulate_glioma_protocol, ProtocolDisposition,

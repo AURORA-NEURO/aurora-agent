@@ -467,7 +467,7 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    analyze_federated_benchmark, analyze_glioma_causal_contrast,
+    allocate_glioma_assays, analyze_federated_benchmark, analyze_glioma_causal_contrast,
     analyze_glioma_combination_synergy, analyze_glioma_dose_response, analyze_glioma_trajectories,
     analyze_instrument_calibration, analyze_multimodal_concordance, analyze_multimodal_consensus,
     analyze_preclinical_outcomes, analyze_replication_meta_analysis, assess_glioma_robustness,
@@ -475,17 +475,19 @@ use bioprism_research::{
     compile_typed_knowledge, design_preclinical_experiment, discriminate_mechanisms,
     dry_run_glioma_research, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
-    simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
+    simulate_glioma_protocol, surveil_glioma_evidence, validate_feature_catalog,
+    AdaptiveAllocationRequest, AdaptiveArmObservation, AnalysisDataset, AnalysisRequest,
     CalibrationRequest, CalibrationRun, CausalContrastRequest, CombinationObservation,
     CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest, DecisionContextRequest,
-    DoseResponseObservation, DoseResponseRequest, EvidenceRecord, EvidenceRequest, ExperimentArm,
-    ExperimentRequest, FederatedBenchmarkRequest, FederatedBenchmarkSite, GliomaActionCandidate,
-    GliomaResearchIntent, GliomaWorkflowRequest, KnowledgeRequest, MechanismCandidate,
-    MechanismDiscriminationRequest, MechanismDiscriminatorAction, MechanismFeatureObservation,
-    MechanismHypothesis, MechanismRequest, MetaAnalysisRequest, ModalityVector,
-    MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
-    TrajectoryRequest, TypedKnowledge, surveil_glioma_evidence, EvidenceSurveillanceRequest,
+    DoseResponseObservation, DoseResponseRequest, EvidenceRecord, EvidenceRequest,
+    EvidenceSurveillanceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
+    FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
+    KnowledgeRequest, MechanismCandidate, MechanismDiscriminationRequest,
+    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
+    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
+    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest, RobustnessRequest, TrajectoryObservation, TrajectoryRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1926,6 +1928,7 @@ impl Server {
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_causal_contrast" => self.glioma_causal_contrast(&arguments),
             "glioma_dose_response" => self.glioma_dose_response(&arguments),
+            "glioma_adaptive_allocation" => self.glioma_adaptive_allocation(&arguments),
             "glioma_combination_synergy" => self.glioma_combination_synergy(&arguments),
             "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_multimodal_consensus" => self.glioma_multimodal_consensus(&arguments),
@@ -3238,6 +3241,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma dose-response analysis: {error}"))
+    }
+
+    /// Select a bounded next replicate batch for a preclinical glioma campaign. This is a
+    /// conservative statistical allocation only: it never chooses a clinical dose or dispatches
+    /// an instrument/protocol.
+    fn glioma_adaptive_allocation(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AdaptiveAllocationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_allocation requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive-allocation request: {error}"))?;
+        let arms: Vec<AdaptiveArmObservation> = serde_json::from_value(
+            arguments
+                .get("arms")
+                .cloned()
+                .ok_or_else(|| "glioma_adaptive_allocation requires arms".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma adaptive-allocation arms: {error}"))?;
+        let output = allocate_glioma_assays(&request, &arms)
+            .map_err(|error| format!("glioma adaptive allocation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "allocation": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "Beta posteriors and Cantelli lower bounds are computed with deterministic integer arithmetic",
+                "control contrasts, exploration, replicate floors, risk ceilings, and budget limits remain explicit",
+                "underpowered, negative, risk-blocked, and budget-capped arms are never silently promoted",
+                "the route proposes a next batch only and never executes an assay or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma adaptive allocation: {error}"))
     }
 
     /// Analyze a two-agent preclinical glioma response surface with fixed-point Bliss synergy.
@@ -43811,6 +43847,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_trajectory_analyze",
                 "glioma_causal_contrast",
                 "glioma_dose_response",
+                "glioma_adaptive_allocation",
                 "glioma_combination_synergy",
                 "glioma_multimodal_concordance",
                 "glioma_multimodal_consensus",
@@ -50730,6 +50767,18 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             },
             "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_adaptive_allocation",
+        "description": "Allocate a bounded next replicate batch for a local preclinical glioma campaign using Beta posteriors, a conservative Cantelli probability bound for exceeding the declared effect, uncertainty-driven exploration, replicate floors, risk ceilings, and a hard budget. Returns posterior diagnostics, selected arms, negative/underpowered/risk-blocked states, and replay-bound output; it never executes an assay, chooses a clinical dose, or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AdaptiveAllocationRequest1@1 with control contrast, posterior thresholds, exploration weight, risk ceiling, and batch budget."},
+                "arms": {"type": "array", "items": {"type": "object"}, "description": "Local AdaptiveArmObservation1@1 values containing de-identified binary assay counts and artifact references."}
+            },
+            "required": ["request", "arms"]
         }
     }));
     definitions.push(json!({

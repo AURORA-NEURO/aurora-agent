@@ -68,6 +68,7 @@ fn main() {
                      workspace_capabilities, brain_model_select, brain_model_select_contextual, brain_prompt_assemble, brain_plan, brain_bandit_select, brain_bandit_update, brain_outcome_record, brain_job_submit, brain_job_status, brain_job_events, brain_job_approval, brain_job_claim, brain_job_claim_next, brain_job_renew, brain_job_checkpoint, brain_job_complete, brain_job_fail, brain_job_reconcile, brain_job_cancel, brain_model_health, brain_replay_evaluate, glioma_research_dry_run, glioma_workflow_plan, glioma_protocol_simulate, glioma_robustness_suite, glioma_trajectory_analyze, glioma_causal_contrast, glioma_dose_response, glioma_combination_synergy, glioma_multimodal_concordance, glioma_research_select_actions, glioma_program_catalog, glioma_evidence_qualify, glioma_knowledge_compile, glioma_decision_context, glioma_multimodal_qc, glioma_mechanism_explore, glioma_experiment_design, glioma_analysis_run, glioma_replication_assess, glioma_research_object_prepare, repository_catalog, repository_bundle, repository_impact\n\
                      glioma_multimodal_consensus, glioma_replication_meta_analyze,\n\
                      glioma_mechanism_discriminate,\n\
+                     glioma_adaptive_allocation,\n\
                      glioma_evidence_surveillance,\n\
                      glioma_instrument_calibration,\n\
                      glioma_federated_benchmark_consensus,\n\
