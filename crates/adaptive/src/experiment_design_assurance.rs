@@ -543,8 +543,8 @@ pub fn assure_experiment_design(
     };
     let effects = if disposition == "qualified" {
         vec![
-            format!("retain:experiment-design-assurance:{}", request.request_id),
             format!("exchange:aggregate-design-summary:{}", request.request_id),
+            format!("retain:experiment-design-assurance:{}", request.request_id),
         ]
     } else {
         vec!["block:unsafe-release".into()]

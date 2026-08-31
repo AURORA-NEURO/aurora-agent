@@ -373,8 +373,8 @@ pub fn assure_mechanisms(
     };
     let effects = if disposition == "qualified" {
         vec![
-            format!("retain:mechanism-assurance:{}", q.request_id),
             format!("exchange:aggregate-mechanism-summary:{}", q.request_id),
+            format!("retain:mechanism-assurance:{}", q.request_id),
         ]
     } else {
         vec!["block:unsafe-release".into()]
