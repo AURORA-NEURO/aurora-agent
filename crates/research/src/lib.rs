@@ -1,11 +1,14 @@
-//! Autonomous research protocol runner: a validated request in, a digested dossier and a
-//! rendered report out — with every finding derived by a fixed rule from a cited measurement.
+//! Autonomous research protocol runners: a validated request in, a digested dossier or a
+//! domain-specific execution plan out — with every finding derived by a fixed rule from a cited
+//! measurement.
 //!
-//! This is autonomous **measurement science over synthetic decision worlds** — committed fixtures
-//! and seeded generators — and nothing else. The blueprint does not specify a research protocol
-//! runner; the request document, protocol shape, dossier schema, finding rules, and report layout
-//! here are this crate's design, stated as such. What the steps *measure* is specified, and each
-//! step calls the crate that owns it: 43.26 context certificates via `bioprism-fiber`, the 43.38
+//! The original runner remains autonomous **measurement science over synthetic decision worlds** —
+//! committed fixtures and seeded generators. [`glioma_engine`] adds a second production surface:
+//! a preclinical glioma program planner and execution loop that delegates real work to
+//! caller-owned local providers. The blueprint does not specify either runner; their request,
+//! workflow, artifact and report schemas are this crate's design, stated as such. What the
+//! synthetic steps *measure* is specified, and each step calls the crate that owns it: 43.26
+//! context certificates via `bioprism-fiber`, the 43.38
 //! equal-engineering comparison and the 43.39 structural families and sweep via
 //! `bioprism-baseline`/`bioprism-worldgen`, the 03.08/32 metamorphic suite via
 //! `bioprism-mutation`, and the 1-minimal reduction (in 43.40/43.41's refusal vocabulary) via
@@ -48,9 +51,12 @@
 //!
 //! - **No question understanding.** The question is recorded and rendered verbatim, digested,
 //!   and never parsed, matched, or routed on. There is no NLP anywhere in this crate.
-//! - **No literature.** Nothing searches, cites, or claims coverage of prior work; the report's
-//!   citations are content digests of this run's own artifacts.
-//! - **No scheduling or recurrence.** One request runs one protocol to one dossier in one call.
+//! - **No literature fetching in the synthetic runner.** Nothing in that runner searches, cites,
+//!   or claims coverage of prior work. The glioma engine accepts literature and other evidence as
+//!   caller-supplied local artifact references and delegates retrieval to a provider.
+//! - **No recurrence in the synthetic runner.** One request runs one protocol to one dossier in
+//!   one call. The glioma engine provides bounded stage retries and checkpoints, but recurrence
+//!   scheduling is still owned by the host.
 //! - **No wall-clock.** No timestamps, durations, or dates appear in any artifact; determinism
 //!   is byte-for-byte and the only order is protocol order.
 //! - **No oracle acceptance.** The runner emits observations for human review and accepts,
@@ -67,6 +73,7 @@
 pub mod dossier;
 pub mod error;
 pub mod findings;
+pub mod glioma_engine;
 pub mod protocol;
 pub mod report;
 pub mod request;
@@ -80,6 +87,17 @@ pub use error::ResearchError;
 pub use findings::{
     comparison_findings, minimization_findings, mutation_findings, reference_anchor_finding,
     sweep_findings, Finding, ObservationLevel,
+};
+pub use glioma_engine::{
+    compile_glioma_research, dry_run_glioma_research, execute_glioma_research,
+    glioma_research_engine_manifest, select_glioma_actions, DryRunGliomaExecutor,
+    GliomaActionCandidate, GliomaActionDecision, GliomaActionSelection, GliomaEngineError,
+    GliomaExecutionReceipt, GliomaModality, GliomaModelSystem, GliomaPlanDisposition,
+    GliomaResearchIntent, GliomaResearchPlan, GliomaSelectionConfig, GliomaSelectionWeights,
+    GliomaStage, GliomaStageDisposition, GliomaStageExecution, GliomaStageExecutor,
+    GliomaStageFailure, GliomaStageInput, GliomaStageKind, LocalArtifactRef, StageReadiness,
+    ACTION_SELECTION_OUTPUT_SCHEMA as GLIOMA_ACTION_SELECTION_OUTPUT_SCHEMA,
+    CONTRACT_VERSION as GLIOMA_ENGINE_CONTRACT_VERSION, FEATURE_ID as GLIOMA_ENGINE_FEATURE_ID,
 };
 pub use protocol::{plan_protocol, ProtocolStep, ResearchProtocol};
 pub use report::{render_report, RenderedReport};

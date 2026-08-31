@@ -312,8 +312,8 @@ fn hub_review_fixture(id: &str, artifact: &[u8]) -> Value {
 const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
-const CAPABILITY_GROUP_COUNT: usize = 35;
-const TOOL_DEFINITION_COUNT: usize = 332;
+const CAPABILITY_GROUP_COUNT: usize = 57;
+const TOOL_DEFINITION_COUNT: usize = 522;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -10738,8 +10738,7 @@ fn repair_verify_reports_staleness_against_a_different_world_without_evaluating_
         "the report must name the world the plan was planned from"
     );
     assert_ne!(
-        payload["report"]["found_world_id"],
-        payload["report"]["expected_world_id"],
+        payload["report"]["found_world_id"], payload["report"]["expected_world_id"],
         "if the two worlds were the same this test would prove nothing"
     );
     assert_eq!(

@@ -466,6 +466,9 @@ use bioprism_repair::{
     plan_for_issue, predicate_from_json, verify as verify_repair, AcceptanceReport,
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
+use bioprism_research::{
+    dry_run_glioma_research, select_glioma_actions, GliomaActionCandidate, GliomaResearchIntent,
+};
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
     EvidenceLedger, Fingerprint, RoutingPolicy, FEDERATED_EXECUTION_COPILOT_CONTRACT_VERSION,
@@ -1839,6 +1842,14 @@ impl Server {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
+        if !arguments.is_object() {
+            return Response::error(
+                id,
+                code::INVALID_PARAMS,
+                "tools/call arguments must be an object".into(),
+                None,
+            );
+        }
 
         audit(name, &arguments);
 
@@ -1890,6 +1901,8 @@ impl Server {
             "brain_job_cancel" => self.brain_job_cancel(&arguments),
             "brain_model_health" => self.brain_model_health(&arguments),
             "brain_replay_evaluate" => self.brain_replay_evaluate(&arguments),
+            "glioma_research_dry_run" => self.glioma_research_dry_run(&arguments),
+            "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
             }
@@ -2979,6 +2992,52 @@ impl Server {
             .lock()
             .map_err(|_| "brain control-plane state is unavailable".to_string())?
             .replay_evaluate(arguments)
+    }
+
+    /// Rehearse a complete glioma research program locally. The dry-run intentionally executes
+    /// no provider, instrument, network, or federation effect; it is a bounded way to inspect the
+    /// compiled stage graph and replay/checkpoint behavior before wiring real local executors.
+    fn glioma_research_dry_run(&self, arguments: &Value) -> Result<Value, String> {
+        let intent_value = arguments
+            .get("intent")
+            .cloned()
+            .ok_or_else(|| "glioma_research_dry_run requires intent".to_string())?;
+        let intent: GliomaResearchIntent = serde_json::from_value(intent_value)
+            .map_err(|error| format!("invalid glioma research intent: {error}"))?;
+        let receipt = dry_run_glioma_research(&intent)
+            .map_err(|error| format!("glioma dry-run refused: {error}"))?;
+        serde_json::to_value(receipt)
+            .map_err(|error| format!("cannot encode glioma execution receipt: {error}"))
+    }
+
+    /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
+    /// does not execute assays, contact instruments, move data, or claim scientific results.
+    fn glioma_research_select_actions(&self, arguments: &Value) -> Result<Value, String> {
+        let candidates_value = arguments
+            .get("candidates")
+            .cloned()
+            .ok_or_else(|| "glioma_research_select_actions requires candidates".to_string())?;
+        let candidates: Vec<GliomaActionCandidate> = serde_json::from_value(candidates_value)
+            .map_err(|error| format!("invalid glioma action candidates: {error}"))?;
+        let completed = arguments
+            .get("completed_actions")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let completed: BTreeSet<String> = serde_json::from_value(completed)
+            .map_err(|error| format!("invalid completed_actions: {error}"))?;
+        let config = arguments
+            .get("config")
+            .cloned()
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|error| format!("invalid glioma selection config: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let selection = select_glioma_actions(&candidates, &completed, &config)
+            .map_err(|error| format!("glioma action selection refused: {error}"))?;
+        serde_json::to_value(selection)
+            .map_err(|error| format!("cannot encode glioma action selection: {error}"))
     }
 
     fn compiled(
@@ -43013,6 +43072,160 @@ pub fn workspace_capabilities() -> Value {
             "status": "available"
         },
         {
+            "id": "glioma_autonomous_research_engine",
+            "domains": ["preclinical glioma research", "evidence surveillance", "multimodal QC", "molecular mechanism exploration", "experiment design", "protocol simulation", "instrument preflight", "reproducible computation", "replication and negative results", "adaptive next-action selection"],
+            "crates": ["bioprism-research", "bioprism-onco", "bioprism-foundation", "bioprism-mcp"],
+            "mcp_tools": ["glioma_research_dry_run", "glioma_research_select_actions"],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
+            "id": "frontier_capability_extensions",
+            "domains": ["crate-specific frontier capabilities", "cross-domain research workflows", "production capability extensions", "MCP transport parity"],
+            "crates": ["workspace frontier crates", "bioprism-mcp"],
+            "mcp_tools": [
+                "adapter_federated_context_copilot",
+                "adapter_federated_continual_evidence_surveillance_research_workbench",
+                "adapter_local_evidence_surveillance_research_workbench",
+                "adapter_multimodal_evidence_surveillance_research_workbench",
+                "adapter_throughput_evidence_surveillance_research_workbench",
+                "atlashub_mechanism_exploration_assurance",
+                "atlashub_provenance_signing_inference_engine",
+                "atlashub_quality_control_contract_model",
+                "atlashub_quality_control_research_copilot",
+                "atlashub_replication_negative_results_federated_control_plane",
+                "atlasx_computational_execution_assurance",
+                "atlasx_context_compilation_assurance",
+                "atlasx_federated_execution_control_plane",
+                "atlasx_mechanism_contract",
+                "backends_federated_retrieval_synthesis_workflow",
+                "bioethics_evidence_surveillance",
+                "bioethics_experiment_design_workflow_fabric",
+                "bioethics_multimodal_bounded_evolution_assurance",
+                "bioethics_multimodal_context_compilation_assurance",
+                "bioethics_prospective_computational_execution_assurance",
+                "bioethics_statistical_analysis_assurance",
+                "bioworlds_federated_context_research_workbench",
+                "bioworlds_knowledge_workflow_fabric",
+                "bioworlds_resource_discovery_copilot",
+                "conformance_context_compilation_assurance",
+                "conformance_retrieval_synthesis_contract_model",
+                "dataops_provenance_signing_workflow_fabric",
+                "devplat_multimodal_limitation_closure_assurance",
+                "devx_context_compilation_contract",
+                "devx_evidence_surveillance_control",
+                "docgraph_instrument_action_contract",
+                "epistemic_experiment_design_research_workbench",
+                "epistemic_retrieval_synthesis_federated_control_plane",
+                "evalengine_federated_protocol_simulation_copilot",
+                "evalengine_local_mechanism_exploration_assurance",
+                "fabric_experiment_design_contract_model",
+                "fabric_experiment_design_interoperability_gateway",
+                "factory_federated_quality_workbench",
+                "factory_prospective_evidence_surveillance",
+                "fiber_federated_analysis_control_plane",
+                "fiber_federated_resource_workbench",
+                "governance_experiment_design_assurance",
+                "hub_policy_autonomy_inference_engine",
+                "hubapi_federated_experiment_design_assurance",
+                "ids_adversarial_recovery",
+                "ids_bounded_evolution",
+                "ids_computational_execution_workbench",
+                "ids_context_compilation_federated_control_plane",
+                "ids_contract_frontier",
+                "ids_dependency_composition",
+                "ids_evaluation_assurance",
+                "ids_experiment_design_workbench",
+                "ids_federated_commons",
+                "ids_federated_interpretation_visualization_assurance",
+                "ids_federated_resource_discovery_interoperability",
+                "ids_federated_workflow_fabric",
+                "ids_federation_security_contract",
+                "ids_interoperability_extensibility_copilot",
+                "ids_interoperability_gateway",
+                "ids_knowledge_representation_federated_control_plane",
+                "ids_laboratory_integration_workflow_fabric",
+                "ids_limitation_closure",
+                "ids_local_evidence_surveillance_inference",
+                "ids_mechanism_exploration_assurance",
+                "ids_multimodal_ingestion_research_copilot",
+                "ids_performance_reliability_gateway",
+                "ids_policy_autonomy_interoperability_gateway",
+                "ids_policy_autonomy_workbench",
+                "ids_prospective_provenance_assurance",
+                "ids_protocol_simulation_workbench",
+                "ids_provenance_signing_assurance",
+                "ids_publication_research_object_release_control_plane",
+                "ids_quality_control_assurance",
+                "ids_reliability_copilot",
+                "ids_replication_negative_results_interoperability_gateway",
+                "ids_research_workbench",
+                "ids_retrieval_synthesis_assurance_harness",
+                "ids_scale_frontier",
+                "ids_semantic_parity",
+                "ids_statistical_causal_ml_research_copilot",
+                "ids_typed_determinism_assurance",
+                "ids_typed_determinism_interoperability_gateway",
+                "influence_local_evidence_surveillance_assurance",
+                "interweave_federated_commons_assurance",
+                "interweave_federated_interpretation_engine",
+                "lab_federated_experiment_design_interoperability_gateway",
+                "lab_instrument_interoperability_gateway",
+                "lens_provenance_signing_copilot",
+                "mcp_federated_quality_control",
+                "mcp_replication_negative_results_assurance",
+                "mutation_federated_continual_bounded_evolution_assurance",
+                "mutation_federated_publication_release",
+                "mutation_federated_resource_discovery_control_plane",
+                "obligation_knowledge_representation_assurance",
+                "obligation_prospective_release_assurance",
+                "obligation_security_federation_interoperability_gateway",
+                "onco_computational_execution_contract_model",
+                "onco_federated_provenance_signing",
+                "onco_instrument_research_workbench",
+                "oncoworlds_federated_resource_discovery_assurance",
+                "oncoworlds_federated_statistical_analysis_workbench",
+                "oncoworlds_prospective_evidence_surveillance_copilot",
+                "oncoworlds_prospective_replication_negative_results_assurance",
+                "oracle_evidence_surveillance_workflow_fabric",
+                "oracle_interoperability_research_workbench",
+                "oraclex_interpretation_inference",
+                "oraclex_performance_reliability_interoperability_gateway",
+                "oraclex_statistical_analysis_research_workbench",
+                "packs_local_quality_control_assurance",
+                "packs_protocol_simulation_workbench",
+                "policy_federated_analysis_copilot",
+                "prism_analysis_workbench",
+                "prism_laboratory_integration_copilot",
+                "prism_protocol_simulation_assurance",
+                "registry_replication_workbench",
+                "retrieval_synthesis_operations",
+                "routing_execution_copilot",
+                "routing_laboratory_inference_engine",
+                "routing_limitation_closure_workflow",
+                "runtime_interpretation_assurance",
+                "runtime_knowledge_representation_assurance",
+                "safety_prospective_laboratory_integration_assurance",
+                "scale_federation_trust_control_plane",
+                "scale_interpretation_interoperability_gateway",
+                "scale_interpretation_visualization_assurance",
+                "scale_quality_control_contract_model",
+                "scope_federated_commons_interoperability_gateway",
+                "scope_federated_evidence_control",
+                "services_context_compilation_research_copilot",
+                "services_multimodal_interpretation",
+                "stress_federated_multimodal_ingestion_contract_model",
+                "stress_publication_research_object_workbench",
+                "weavelang_federated_commons_assurance",
+                "worldfactory_computational_execution_federated_control_plane",
+                "worldfactory_protocol_simulation_federated_control_plane",
+                "worldgen_multimodal_execution",
+                "worldgen_multimodal_ingestion"
+            ],
+            "cli_entrypoints": [],
+            "status": "available"
+        },
+        {
             "id": "registry_operations_and_infrastructure",
             "domains": ["registry", "deployment", "storage", "cache", "leases", "observability"],
             "crates": ["bioprism-registry", "bioprism-hubapi", "bioprism-infra", "bioprism-ledger", "bioprism-factory", "bioprism-ops", "bioprism-services"],
@@ -43189,7 +43402,7 @@ pub fn tool_definitions() -> Vec<Value> {
         "required": ["world", "query"]
     });
 
-    let definitions = vec![
+    let mut definitions = vec![
         json!({
             "name": "brain_model_select",
             "description": "Select an available provider/model from explicit capability, context-window, quality, latency, cost, reliability, and caller-owned online-learning observations. An optional min_selection_confidence floor abstains on near-tied eligible ranks. Every rejected candidate remains visible, along with normalized rank-separation confidence. This tool accepts no API key, opens no network connection, and does not claim that a future model response will be correct.",
@@ -49654,6 +49867,45 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
     ];
     let mut control = crate::brain_control::tool_definitions();
+    definitions.push(json!({
+        "name": "glioma_research_dry_run",
+        "description": "Rehearse a complete preclinical glioma research program locally. Compiles a closed 14-stage evidence, multimodal, molecular, mechanism, experiment, computation, replication, and release pipeline, then runs deterministic simulated stage executors. No network, instrument, federation, clinical decision, or biological observation is performed; real providers plug into the research crate's caller-owned executor seam.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "intent": {
+                    "type": "object",
+                    "description": "Serialized bioprism-research GliomaResearchIntent1@1. Use only local, de-identified, aggregate preclinical inputs and research output uses."
+                }
+            },
+            "required": ["intent"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_select_actions",
+        "description": "Select the next bounded batch of typed preclinical glioma assays, analyses, simulations, or instrument actions. Uses deterministic information-gain, novelty, workflow-unlock, reproducibility/safety, federation-value, feasibility, cost, dependency, and modality/model-diversity scoring. Returns selected, deferred, and blocked actions with reasons; performs no execution or data movement.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "description": "Typed GliomaActionCandidate1@1 records.",
+                    "items": {"type": "object"}
+                },
+                "completed_actions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "default": []
+                },
+                "config": {
+                    "type": "object",
+                    "description": "Optional GliomaSelectionConfig1@1; defaults to a 100-unit local, approval-gated budget.",
+                    "default": {}
+                }
+            },
+            "required": ["candidates"]
+        }
+    }));
     control.extend(definitions);
     control
 }
