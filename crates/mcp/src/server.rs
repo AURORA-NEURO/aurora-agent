@@ -467,17 +467,18 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_preclinical_outcomes,
-    assess_glioma_robustness, assess_replication, build_research_object_manifest,
-    design_preclinical_experiment, dry_run_glioma_research, explore_mechanisms,
-    generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
-    plan_glioma_workflow, qualify_evidence, select_glioma_actions, simulate_glioma_protocol,
-    validate_feature_catalog, AnalysisDataset, AnalysisRequest, DoseResponseObservation,
-    DoseResponseRequest, EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest,
-    GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest, MechanismCandidate,
-    MechanismRequest, MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest,
-    ReplicationRequest, ReplicationStudy, ResearchObjectRequest, RobustnessRequest,
-    TrajectoryObservation, TrajectoryRequest,
+    analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_multimodal_concordance,
+    analyze_preclinical_outcomes, assess_glioma_robustness, assess_replication,
+    build_research_object_manifest, design_preclinical_experiment, dry_run_glioma_research,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
+    simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
+    ConcordanceRequest, DoseResponseObservation, DoseResponseRequest, EvidenceRecord,
+    EvidenceRequest, ExperimentArm, ExperimentRequest, GliomaActionCandidate, GliomaResearchIntent,
+    GliomaWorkflowRequest, MechanismCandidate, MechanismRequest, ModalityVector,
+    MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
+    TrajectoryRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1917,6 +1918,7 @@ impl Server {
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
             "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_dose_response" => self.glioma_dose_response(&arguments),
+            "glioma_multimodal_concordance" => self.glioma_multimodal_concordance(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
@@ -3185,6 +3187,38 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma dose-response analysis: {error}"))
+    }
+
+    /// Compare typed local glioma modality vectors for one sample lineage. This is a scientific
+    /// concordance computation only; it never moves raw data or treats correlation as causation.
+    fn glioma_multimodal_concordance(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ConcordanceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_concordance requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma concordance request: {error}"))?;
+        let vectors: Vec<ModalityVector> = serde_json::from_value(
+            arguments
+                .get("vectors")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_concordance requires vectors".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma concordance vectors: {error}"))?;
+        let output = analyze_multimodal_concordance(&request, &vectors)
+            .map_err(|error| format!("glioma multimodal concordance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "concordance": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "feature identifiers are aligned before correlation",
+                "missing overlap and zero-variance pairs remain unresolved",
+                "negative or contradictory modality pairs remain visible",
+                "the output is local preclinical evidence, not a causal or clinical conclusion"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma multimodal concordance: {error}"))
     }
 
     /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
@@ -43416,6 +43450,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_robustness_suite",
                 "glioma_trajectory_analyze",
                 "glioma_dose_response",
+                "glioma_multimodal_concordance",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
@@ -50313,6 +50348,25 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             },
             "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_concordance",
+        "description": "Compare typed local glioma modality vectors for one preclinical sample lineage. Aligns shared feature identifiers and computes bounded fixed-point Pearson-style concordance, retaining contradictory, missing-overlap, and zero-variance pairs as explicit negative or unresolved evidence. It never imputes features, moves raw data, or treats correlation as causation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized ConcordanceRequest1@1 with study/model bindings, required modalities, shared-feature floor, and minimum correlation."
+                },
+                "vectors": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Local ModalityVector1@1 values with sorted FeatureValue1@1 entries."
+                }
+            },
+            "required": ["request", "vectors"]
         }
     }));
     definitions.push(json!({

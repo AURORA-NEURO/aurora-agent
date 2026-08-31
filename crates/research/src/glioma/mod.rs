@@ -32,6 +32,11 @@ pub use mechanism::{explore_mechanisms, MechanismCandidate, MechanismPortfolio, 
 pub use multimodal::{
     harmonize_multimodal_inputs, MultimodalObservation, MultimodalQcReport, MultimodalRequest,
 };
+pub use programs::p03_multimodal_ingestion_qc::{
+    analyze_multimodal_concordance, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
+    FeatureValue, ModalityConcordance, ModalityVector, MultimodalConcordance,
+    PairConcordanceDisposition,
+};
 pub use programs::p06_experiment_design::{
     analyze_glioma_dose_response, DoseDirection, DoseResponseAnalysis, DoseResponseDisposition,
     DoseResponseError, DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,

@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 535;
+const TOOL_DEFINITION_COUNT: usize = 536;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -612,6 +612,53 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(
         dose_response["analysis"]["half_maximal_dose_milli"],
         json!(10)
+    );
+
+    let concordance = call(
+        &mut server,
+        "glioma_multimodal_concordance",
+        json!({
+            "request": {
+                "study_id": "mcp-study",
+                "model_system": "organoid",
+                "required_modalities": ["genomics", "transcriptomics"],
+                "min_shared_features": 3,
+                "min_correlation_milli": 900
+            },
+            "vectors": [
+                {
+                    "observation_id": "genomics-vector",
+                    "study_id": "mcp-study",
+                    "sample_lineage": "mcp-sample",
+                    "modality": "genomics",
+                    "model_system": "organoid",
+                    "artifact": {"artifact_id":"mcp-genomics-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "features": [
+                        {"feature_id":"feature-001","value_milli":1},
+                        {"feature_id":"feature-002","value_milli":2},
+                        {"feature_id":"feature-003","value_milli":3}
+                    ]
+                },
+                {
+                    "observation_id": "transcriptomics-vector",
+                    "study_id": "mcp-study",
+                    "sample_lineage": "mcp-sample",
+                    "modality": "transcriptomics",
+                    "model_system": "organoid",
+                    "artifact": {"artifact_id":"mcp-transcriptomics-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-vector+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                    "features": [
+                        {"feature_id":"feature-001","value_milli":10},
+                        {"feature_id":"feature-002","value_milli":20},
+                        {"feature_id":"feature-003","value_milli":30}
+                    ]
+                }
+            ]
+        }),
+    );
+    assert_eq!(concordance["dispatch"], json!("not_started"));
+    assert_eq!(
+        concordance["concordance"]["disposition"],
+        json!("qualified")
     );
 }
 

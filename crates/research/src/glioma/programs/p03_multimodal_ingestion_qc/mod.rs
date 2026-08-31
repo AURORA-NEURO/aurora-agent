@@ -2,6 +2,14 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod concordance;
+
+pub use concordance::{
+    analyze_multimodal_concordance, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
+    FeatureValue, ModalityConcordance, ModalityVector, MultimodalConcordance,
+    PairConcordanceDisposition,
+};
+
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::MultimodalIngestionQc;
 
 pub fn descriptor() -> GliomaProgramDescriptor {

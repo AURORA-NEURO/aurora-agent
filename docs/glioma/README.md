@@ -44,6 +44,8 @@ crates/research/src/glioma/
     p10_interpretation_replication/trajectory.rs
                                              P10 longitudinal per-unit trajectory analysis
     p06_experiment_design/dose_response.rs   P06 monotone dose-response curve analysis
+    p03_multimodal_ingestion_qc/concordance.rs
+                                             P03 feature-level modality concordance analysis
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -56,7 +58,7 @@ crates/research/src/glioma/
 | --- | --- | --- | --- |
 | P01 Evidence surveillance | evidence curator | evidence surveillance | qualified source candidates with stale, unknown, contradictory, and negative states |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims and competing explanations bound to source artifacts |
-| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable study-by-modality cells and explicit defects |
+| P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, feature-level concordance, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
 | P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | ranked competing mechanisms and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response fitting, and null-result plan |
@@ -110,3 +112,5 @@ for the remaining programs remains subsequent build work rather than being impli
 P06 now also includes a weighted monotone dose-response analyzer (`analyze_glioma_dose_response`)
 with transparent raw/fitted means, residual noise, monotonicity violations, and half-maximal-dose
 interpolation only on the declared preclinical grid.
+P03 now includes feature-level multimodal concordance (`analyze_multimodal_concordance`) with
+shared-feature alignment, fixed-point correlation, and explicit contradictory or unresolved pairs.
