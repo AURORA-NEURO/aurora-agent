@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 533;
+const TOOL_DEFINITION_COUNT: usize = 534;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -545,6 +545,45 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
     assert_eq!(robustness["dispatch"], json!("not_started"));
     assert_eq!(robustness["suite"]["disposition"], json!("stable"));
     assert_eq!(robustness["suite"]["cases"].as_array().unwrap().len(), 8);
+
+    let trajectory = call(
+        &mut server,
+        "glioma_trajectory_analyze",
+        json!({
+            "request": {
+                "objective": "compare longitudinal glioma invasion trajectories",
+                "control_arm": "control",
+                "treatment_arm": "treated",
+                "model_system": "organoid",
+                "min_timepoints_per_unit": 3,
+                "min_units_per_arm": 2,
+                "slope_threshold_milli_per_tick": 2,
+                "max_residual_milli": 0,
+                "max_monotonicity_violations": 0,
+                "require_balanced_timepoints": true
+            },
+            "observations": [
+                {"observation_id":"tc-0-0","unit_id":"control-0","arm_id":"control","model_system":"organoid","batch_id":"batch-0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"tc-0-1","unit_id":"control-0","arm_id":"control","model_system":"organoid","batch_id":"batch-1","timepoint":1,"outcome_milli":101},
+                {"observation_id":"tc-0-2","unit_id":"control-0","arm_id":"control","model_system":"organoid","batch_id":"batch-2","timepoint":2,"outcome_milli":102},
+                {"observation_id":"tc-1-0","unit_id":"control-1","arm_id":"control","model_system":"organoid","batch_id":"batch-0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"tc-1-1","unit_id":"control-1","arm_id":"control","model_system":"organoid","batch_id":"batch-1","timepoint":1,"outcome_milli":101},
+                {"observation_id":"tc-1-2","unit_id":"control-1","arm_id":"control","model_system":"organoid","batch_id":"batch-2","timepoint":2,"outcome_milli":102},
+                {"observation_id":"tt-0-0","unit_id":"treated-0","arm_id":"treated","model_system":"organoid","batch_id":"batch-0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"tt-0-1","unit_id":"treated-0","arm_id":"treated","model_system":"organoid","batch_id":"batch-1","timepoint":1,"outcome_milli":110},
+                {"observation_id":"tt-0-2","unit_id":"treated-0","arm_id":"treated","model_system":"organoid","batch_id":"batch-2","timepoint":2,"outcome_milli":120},
+                {"observation_id":"tt-1-0","unit_id":"treated-1","arm_id":"treated","model_system":"organoid","batch_id":"batch-0","timepoint":0,"outcome_milli":100},
+                {"observation_id":"tt-1-1","unit_id":"treated-1","arm_id":"treated","model_system":"organoid","batch_id":"batch-1","timepoint":1,"outcome_milli":110},
+                {"observation_id":"tt-1-2","unit_id":"treated-1","arm_id":"treated","model_system":"organoid","batch_id":"batch-2","timepoint":2,"outcome_milli":120}
+            ]
+        }),
+    );
+    assert_eq!(trajectory["dispatch"], json!("not_started"));
+    assert_eq!(trajectory["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        trajectory["analysis"]["slope_effect_milli_per_tick"],
+        json!(9)
+    );
 }
 
 #[test]

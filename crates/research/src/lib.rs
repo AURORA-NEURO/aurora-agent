@@ -90,9 +90,9 @@ pub use findings::{
     sweep_findings, Finding, ObservationLevel,
 };
 pub use glioma::{
-    analyze_preclinical_outcomes, assess_glioma_robustness, assess_replication,
-    build_research_object_manifest, design_preclinical_experiment, execute_glioma_workflow,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    analyze_glioma_trajectories, analyze_preclinical_outcomes, assess_glioma_robustness,
+    assess_replication, build_research_object_manifest, design_preclinical_experiment,
+    execute_glioma_workflow, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_multimodal_inputs, plan_glioma_workflow, protocol_request_from_experiment_design,
     qualify_evidence, simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset,
     AnalysisRequest, AnalysisResult, CatalogError, EvidenceQualification, EvidenceRecord,
@@ -105,7 +105,9 @@ pub use glioma::{
     ProtocolSimulationError, ProtocolSimulationRequest, ProtocolTask, ReplicationAssessment,
     ReplicationRequest, ReplicationStudy, ResearchObjectManifest, ResearchObjectRequest,
     ResourceUtilization, RobustnessCase, RobustnessCaseKind, RobustnessDisposition,
-    RobustnessError, RobustnessRequest, RobustnessSuite, ScheduleEntry, WorkflowNodeDecision,
+    RobustnessError, RobustnessRequest, RobustnessSuite, ScheduleEntry, TrajectoryAnalysis,
+    TrajectoryArmSummary, TrajectoryDisposition, TrajectoryError, TrajectoryObservation,
+    TrajectoryRequest, UnitTrajectory, UnitTrajectoryDisposition, WorkflowNodeDecision,
 };
 pub use glioma_engine::{
     compile_glioma_research, dry_run_glioma_research, execute_glioma_research,

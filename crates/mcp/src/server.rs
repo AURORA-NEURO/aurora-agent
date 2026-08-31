@@ -467,15 +467,16 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    analyze_preclinical_outcomes, assess_glioma_robustness, assess_replication,
-    build_research_object_manifest, design_preclinical_experiment, dry_run_glioma_research,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    analyze_glioma_trajectories, analyze_preclinical_outcomes, assess_glioma_robustness,
+    assess_replication, build_research_object_manifest, design_preclinical_experiment,
+    dry_run_glioma_research, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
     simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
     EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest, GliomaActionCandidate,
     GliomaResearchIntent, GliomaWorkflowRequest, MechanismCandidate, MechanismRequest,
     MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustnessRequest,
+    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
+    TrajectoryRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1913,6 +1914,7 @@ impl Server {
             "glioma_workflow_plan" => self.glioma_workflow_plan(&arguments),
             "glioma_protocol_simulate" => self.glioma_protocol_simulate(&arguments),
             "glioma_robustness_suite" => self.glioma_robustness_suite(&arguments),
+            "glioma_trajectory_analyze" => self.glioma_trajectory_analyze(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
@@ -3116,6 +3118,39 @@ impl Server {
             ]
         }))
         .map_err(|error| format!("cannot encode glioma robustness suite: {error}"))
+    }
+
+    /// Analyze local longitudinal preclinical glioma observations with deterministic per-unit
+    /// slopes. This remains a value-only computation: it never fetches data, dispatches an assay,
+    /// or turns a trajectory into a clinical conclusion.
+    fn glioma_trajectory_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let request: TrajectoryRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_trajectory_analyze requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma trajectory request: {error}"))?;
+        let observations: Vec<TrajectoryObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_trajectory_analyze requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma trajectory observations: {error}"))?;
+        let output = analyze_glioma_trajectories(&request, &observations)
+            .map_err(|error| format!("glioma trajectory analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "per-unit slopes use deterministic integer least squares",
+                "missing, duplicate, noisy, and non-monotone trajectories remain explicit",
+                "time-grid and unit-floor failures are unresolved rather than imputed",
+                "the output is preclinical research analysis, not clinical decision support"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma trajectory analysis: {error}"))
     }
 
     /// Choose a bounded next batch of local glioma actions. This only ranks typed candidates; it
@@ -43345,6 +43380,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_workflow_plan",
                 "glioma_protocol_simulate",
                 "glioma_robustness_suite",
+                "glioma_trajectory_analyze",
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
@@ -50204,6 +50240,25 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             },
             "required": ["request", "dataset"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_trajectory_analyze",
+        "description": "Analyze local longitudinal preclinical glioma observations with deterministic per-unit least-squares slopes. Returns arm-level trajectory effects, residual uncertainty, monotonicity violations, time-grid compatibility, and qualified, negative, or unresolved outcomes. Duplicate or under-observed units are rejected or retained as unresolved; no assay is executed and no clinical decision is produced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "object",
+                    "description": "Serialized TrajectoryRequest1@1 with model/arm bindings, timepoint and unit floors, slope threshold, noise tolerance, and balanced-grid policy."
+                },
+                "observations": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Local TrajectoryObservation1@1 values from de-identified preclinical units."
+                }
+            },
+            "required": ["request", "observations"]
         }
     }));
     definitions.push(json!({

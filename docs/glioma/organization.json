@@ -39,7 +39,7 @@
     {"id": "P07", "slug": "protocol-simulation", "folder": "p07_protocol_simulation", "stage_kinds": ["protocol_simulation"], "surfaces": ["plan_glioma_workflow", "execute_glioma_workflow", "simulate_glioma_protocol", "protocol_request_from_experiment_design"]},
     {"id": "P08", "slug": "instrument-robotics", "folder": "p08_instrument_robotics", "stage_kinds": ["instrument_preflight"]},
     {"id": "P09", "slug": "reproducible-computation", "folder": "p09_reproducible_computation", "stage_kinds": ["computational_execution"], "surfaces": ["assess_glioma_robustness"]},
-    {"id": "P10", "slug": "interpretation-replication", "folder": "p10_interpretation_replication", "stage_kinds": ["statistical_interpretation", "replication_robustness"]},
+    {"id": "P10", "slug": "interpretation-replication", "folder": "p10_interpretation_replication", "stage_kinds": ["statistical_interpretation", "replication_robustness"], "surfaces": ["analyze_glioma_trajectories"]},
     {"id": "P11", "slug": "research-object-release", "folder": "p11_research_object_release", "stage_kinds": ["research_object_release"]},
     {"id": "P12", "slug": "federated-benchmarking", "folder": "p12_federated_benchmarking", "stage_kinds": ["federation_benchmarking"]}
   ],

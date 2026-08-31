@@ -41,6 +41,8 @@ crates/research/src/glioma/
     p07_protocol_simulation/simulator.rs    P07 deterministic resource-constrained scheduling
     p09_reproducible_computation/robustness.rs
                                              P09 leave-one-batch/row-out robustness battery
+    p10_interpretation_replication/trajectory.rs
+                                             P10 longitudinal per-unit trajectory analysis
 ```
 
 `docs/glioma/organization.json` is the machine-readable version of this map. The runtime
@@ -60,7 +62,7 @@ crates/research/src/glioma/
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | signed, interlocked, human-authorized action plan |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
-| P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware effect and cross-site verdict |
+| P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark and governance decision |
 

@@ -2,6 +2,14 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod trajectory;
+
+pub use trajectory::{
+    analyze_glioma_trajectories, TrajectoryAnalysis, TrajectoryArmSummary, TrajectoryDisposition,
+    TrajectoryError, TrajectoryObservation, TrajectoryRequest, UnitTrajectory,
+    UnitTrajectoryDisposition,
+};
+
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::InterpretationReplication;
 
 pub fn descriptor() -> GliomaProgramDescriptor {

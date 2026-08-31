@@ -41,6 +41,11 @@ pub use programs::p09_reproducible_computation::{
     assess_glioma_robustness, RobustnessCase, RobustnessCaseKind, RobustnessDisposition,
     RobustnessError, RobustnessRequest, RobustnessSuite,
 };
+pub use programs::p10_interpretation_replication::{
+    analyze_glioma_trajectories, TrajectoryAnalysis, TrajectoryArmSummary, TrajectoryDisposition,
+    TrajectoryError, TrajectoryObservation, TrajectoryRequest, UnitTrajectory,
+    UnitTrajectoryDisposition,
+};
 pub use release::{build_research_object_manifest, ResearchObjectManifest, ResearchObjectRequest};
 pub use replication::{
     assess_replication, ReplicationAssessment, ReplicationRequest, ReplicationStudy,
