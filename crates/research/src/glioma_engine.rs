@@ -1601,7 +1601,7 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             "adaptive glioma scheduler".into(),
         ]
         .into(),
-        behavior: "compile an adaptive, checkpoint-oriented glioma campaign, compile typed claims and evidence-gap actions, choose the next dependency-safe batch, execute an admitted full preclinical program through caller-owned local stage executors, compare declared multimodal vectors, fit longitudinal, causal-contrast, dose-response, and combination-synergy effects, and stress-test endpoint effects under deterministic omission batteries; every unresolved, contradictory, underpowered, budget, locality, and approval state routes to an explicit hold or abstain branch".into(),
+        behavior: "compile an adaptive, checkpoint-oriented glioma campaign, compile typed claims and evidence-gap actions, choose the next dependency-safe batch, execute an admitted full preclinical program through caller-owned local stage executors, compare and cluster declared multimodal vectors, fit longitudinal, causal-contrast, dose-response, combination-synergy, and replication-meta-analysis effects, and stress-test endpoint effects under deterministic omission batteries; every unresolved, contradictory, underpowered, heterogeneous, budget, locality, and approval state routes to an explicit hold or abstain branch".into(),
         value: "turns a glioma research objective into a usable end-to-end evidence, multimodal, mechanism, experiment, computation, replication, and release workflow while keeping autonomous progress auditable and outside clinical decision support".into(),
         inputs: vec![TypedPort {
             name: "glioma_research_intent".into(),
@@ -1672,6 +1672,11 @@ pub fn glioma_research_engine_manifest() -> CapabilityManifest {
             TypedPort {
                 name: "glioma_decision_context".into(),
                 schema: "GliomaDecisionContext1@1".into(),
+                required: false,
+            },
+            TypedPort {
+                name: "glioma_replication_meta_analysis".into(),
+                schema: "GliomaReplicationMetaAnalysis1@1".into(),
                 required: false,
             },
         ],

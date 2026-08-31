@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 541;
+const TOOL_DEFINITION_COUNT: usize = 542;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -752,6 +752,37 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .len(),
         4
+    );
+
+    let meta_analysis = call(
+        &mut server,
+        "glioma_replication_meta_analyze",
+        json!({
+            "request": {
+                "objective": "pool independent organoid invasion effects",
+                "model_system": "organoid",
+                "min_studies": 3,
+                "min_replicates_per_study": 3,
+                "effect_threshold_milli": 100,
+                "max_i2_milli": 200,
+                "min_signal_to_noise_milli": 1000,
+                "max_leave_one_out_shift_milli": 60
+            },
+            "studies": [
+                {"study_id":"meta-study-1","site_id":"meta-site-a","model_system":"organoid","artifact":{"artifact_id":"meta-artifact-1","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-meta-study+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"effect_milli":300,"uncertainty_milli":20,"replicate_count":4},
+                {"study_id":"meta-study-2","site_id":"meta-site-b","model_system":"organoid","artifact":{"artifact_id":"meta-artifact-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-meta-study+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"effect_milli":310,"uncertainty_milli":25,"replicate_count":4},
+                {"study_id":"meta-study-3","site_id":"meta-site-c","model_system":"organoid","artifact":{"artifact_id":"meta-artifact-3","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-meta-study+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},"effect_milli":295,"uncertainty_milli":22,"replicate_count":4}
+            ]
+        }),
+    );
+    assert_eq!(meta_analysis["dispatch"], json!("not_started"));
+    assert_eq!(meta_analysis["analysis"]["disposition"], json!("qualified"));
+    assert_eq!(
+        meta_analysis["analysis"]["included_order"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
     );
 
     let knowledge = call(

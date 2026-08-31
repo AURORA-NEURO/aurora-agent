@@ -50,6 +50,8 @@ crates/research/src/glioma/
                                              P10 longitudinal per-unit trajectory analysis
     p10_interpretation_replication/causal_contrast.rs
                                              P10 exact pre/post difference-in-differences analysis
+    p10_interpretation_replication/meta_analysis.rs
+                                             P10 inverse-uncertainty replication meta-analysis and influence bounds
     p06_experiment_design/dose_response.rs   P06 monotone dose-response curve analysis
     p06_experiment_design/synergy.rs         P06 Bliss combination-response analysis
     p03_multimodal_ingestion_qc/concordance.rs
@@ -75,7 +77,7 @@ crates/research/src/glioma/
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | signed, interlocked, human-authorized action plan |
 | P09 Reproducible computation | computational scientist | computational execution | checkpointed/replayable computation plus omission-stress robustness suite |
-| P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, causal-contrast, and cross-site verdicts |
+| P10 Causal interpretation and replication | methods reviewer | statistical interpretation, replication/robustness | uncertainty-aware endpoint, longitudinal, causal-contrast, meta-analytic, and cross-site verdicts |
 | P11 Research-object release | reproducibility steward | research-object release | portable manifest with limitations and negative evidence |
 | P12 Federated benchmarking | consortium administrator | federation benchmarking | aggregate-only cross-site benchmark and governance decision |
 
@@ -137,6 +139,9 @@ applies budget and policy gates before any provider dispatch.
 P10 now includes an exact bounded causal contrast (`analyze_glioma_causal_contrast`) using
 pre/post unit changes, treatment-label permutations, and leave-one-unit bounds; null, non-significant,
 or underpowered effects remain explicit rather than being promoted into mechanism claims.
+P10 also includes fixed-point replication meta-analysis (`analyze_replication_meta_analysis`) with
+inverse-uncertainty pooling, Cochran/I² heterogeneity, leave-one-study-out influence, and explicit
+negative or unresolved outcomes for contradiction, underpowered sites, weak signal, and unstable pools.
 P06 now includes combination-response analysis (`analyze_glioma_combination_synergy`) with
 vehicle/single-agent control requirements, integer Bliss expectations, residual noise, synergy,
 antagonism, and explicit unresolved cells for missing controls or replicates.

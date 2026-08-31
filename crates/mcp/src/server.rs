@@ -469,19 +469,20 @@ use bioprism_repair::{
 use bioprism_research::{
     analyze_glioma_causal_contrast, analyze_glioma_combination_synergy,
     analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_multimodal_concordance,
-    analyze_multimodal_consensus, analyze_preclinical_outcomes, assess_glioma_robustness,
-    assess_replication, build_research_object_manifest, compile_decision_context,
-    compile_typed_knowledge, design_preclinical_experiment, dry_run_glioma_research,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    analyze_multimodal_consensus, analyze_preclinical_outcomes, analyze_replication_meta_analysis,
+    assess_glioma_robustness, assess_replication, build_research_object_manifest,
+    compile_decision_context, compile_typed_knowledge, design_preclinical_experiment,
+    dry_run_glioma_research, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
     simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
     CausalContrastRequest, CombinationObservation, CombinationSynergyRequest, ConcordanceRequest,
     ConsensusRequest, DecisionContextRequest, DoseResponseObservation, DoseResponseRequest,
     EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest, GliomaActionCandidate,
     GliomaResearchIntent, GliomaWorkflowRequest, KnowledgeRequest, MechanismCandidate,
-    MechanismRequest, ModalityVector, MultimodalObservation, MultimodalRequest,
-    ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy, ResearchObjectRequest,
-    RobustnessRequest, TrajectoryObservation, TrajectoryRequest, TypedKnowledge,
+    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
+    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest, RobustnessRequest, TrajectoryObservation, TrajectoryRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1935,6 +1936,7 @@ impl Server {
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
             "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
+            "glioma_replication_meta_analyze" => self.glioma_replication_meta_analyze(&arguments),
             "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
@@ -3562,6 +3564,39 @@ impl Server {
             .map_err(|error| format!("glioma replication assessment refused: {error}"))?;
         serde_json::to_value(output)
             .map_err(|error| format!("cannot encode glioma replication assessment: {error}"))
+    }
+
+    /// Pool independent preclinical glioma studies with fixed-point inverse-uncertainty weights.
+    /// Heterogeneity, contradictory directions, and influential sites remain visible and never
+    /// become a clinical or treatment recommendation.
+    fn glioma_replication_meta_analyze(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MetaAnalysisRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_meta_analyze requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication meta-analysis request: {error}"))?;
+        let studies: Vec<ReplicationStudy> = serde_json::from_value(
+            arguments
+                .get("studies")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_meta_analyze requires studies".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication meta-analysis studies: {error}"))?;
+        let output = analyze_replication_meta_analysis(&request, &studies)
+            .map_err(|error| format!("glioma replication meta-analysis refused: {error}"))?;
+        serde_json::to_value(json!({
+            "analysis": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "pooled effects use deterministic inverse-uncertainty fixed-point weights",
+                "Cochran heterogeneity, I2, and leave-one-study-out influence are reported",
+                "underpowered, contradictory, heterogeneous, and signal-poor results remain explicit",
+                "the output is preclinical replication evidence, not a clinical recommendation"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma replication meta-analysis: {error}"))
     }
 
     fn glioma_research_object_prepare(&self, arguments: &Value) -> Result<Value, String> {
@@ -43634,6 +43669,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_experiment_design",
                 "glioma_analysis_run",
                 "glioma_replication_assess",
+                "glioma_replication_meta_analyze",
                 "glioma_research_object_prepare"
             ],
             "cli_entrypoints": [],
@@ -50709,6 +50745,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "properties": {
                 "request": {"type": "object", "description": "ReplicationRequest1@1."},
                 "studies": {"type": "array", "items": {"type": "object"}, "description": "Local ReplicationStudy1@1 values."}
+            },
+            "required": ["request", "studies"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_meta_analyze",
+        "description": "Pool independent local preclinical glioma replication studies with deterministic inverse-uncertainty fixed-point weights. Reports pooled effect and uncertainty, Cochran heterogeneity, I2, leave-one-study-out influence, replicate-floor exclusions, and explicit qualified, heterogeneous, negative, or unresolved outcomes; it never makes a clinical recommendation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MetaAnalysisRequest1@1 with model/study floors, effect and signal thresholds, heterogeneity tolerance, and influence bound."},
+                "studies": {"type": "array", "items": {"type": "object"}, "description": "Local ReplicationStudy1@1 values with declared effect and uncertainty."}
             },
             "required": ["request", "studies"]
         }
