@@ -168,29 +168,40 @@ impl InterweaveFederationEnvelope7 {
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
-        let parts = self
+        let observed_parts = self
             .selected_capability_order
             .iter()
             .chain(self.unresolved_capability_order.iter())
             .chain(self.blocked_capability_order.iter())
-            .chain(self.missing_capability_order.iter())
             .cloned()
             .collect::<BTreeSet<_>>();
-        if all.len() != self.capability_order.len() || parts != all {
-            return Err(invalid(
-                "capability states do not form a complete partition",
-            ));
-        }
-        if !self
+        let missing = self
             .missing_capability_order
             .iter()
-            .all(|id| self.capability_order.contains(id))
-            || !self
-                .missing_provider_order
-                .iter()
-                .all(|id| self.provider_order.contains(id))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if all.len() != self.capability_order.len()
+            || observed_parts != all
+            || missing.len() != self.missing_capability_order.len()
+            || !missing.is_disjoint(&all)
         {
-            return Err(invalid("missing federation state is outside declared axes"));
+            return Err(invalid(
+                "capability states do not form a complete observed partition",
+            ));
+        }
+        let missing_providers = self
+            .missing_provider_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if missing_providers.len() != self.missing_provider_order.len()
+            || !missing_providers.is_disjoint(
+                &self.provider_order.iter().cloned().collect::<BTreeSet<_>>(),
+            )
+        {
+            return Err(invalid(
+                "missing federation providers overlap observed providers",
+            ));
         }
         if !digest(&self.replay_identity)
             || !digest(&self.federation_digest)
