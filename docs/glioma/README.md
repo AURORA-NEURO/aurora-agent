@@ -22,6 +22,8 @@ crates/research/src/glioma/
                                              P02 scoped claim graph and support/contradiction synthesis
   programs/p04_decision_context/context_compiler.rs
                                              P04 evidence-gap to typed next-action compilation
+  programs/p05_mechanism_exploration/discrimination.rs
+                                             P05 residual-likelihood mechanism discrimination and next-assay information gain
   multimodal.rs                            P03 harmonization and QC
   mechanism.rs                             P05 competing mechanism portfolio
   experiment.rs                             P06 fixed-point power and allocation design
@@ -74,7 +76,7 @@ crates/research/src/glioma/
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, feature-level concordance, consensus clusters, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |
-| P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | ranked competing mechanisms and discriminating actions |
+| P05 Mechanism exploration | mechanism scientist | molecular landscape, mechanism exploration | residual-fit competing mechanisms, posterior-weighted next-assay information gain, and discriminating actions |
 | P06 Power-aware experiment design | experimentalist | experiment design | falsifiable allocation, power, blocking, dose-response and combination-synergy fitting, and null-result plan |
 | P07 Protocol simulation | lab operations lead | protocol simulation, adaptive workflow planning | critical-path resource scheduling, utilization, deterministic next batches, and repair/abstain routing before physical effects |
 | P08 Instrument and robotics preflight | instrument operator | instrument preflight | signed, interlocked, human-authorized action plan |

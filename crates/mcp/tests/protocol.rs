@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 543;
+const TOOL_DEFINITION_COUNT: usize = 544;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -821,6 +821,45 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
             .unwrap()
             .len(),
         3
+    );
+
+    let mechanism_discrimination = call(
+        &mut server,
+        "glioma_mechanism_discriminate",
+        json!({
+            "request": {
+                "objective": "discriminate invasion mechanisms",
+                "model_system": "organoid",
+                "min_shared_features": 2,
+                "max_mechanisms": 4,
+                "max_actions": 4,
+                "min_information_gain_milli": 10
+            },
+            "hypotheses": [
+                {"mechanism_id":"motility","statement":"motility pathway drives invasion","predictions":[{"feature_id":"f1","predicted_milli":100,"uncertainty_milli":10},{"feature_id":"f2","predicted_milli":200,"uncertainty_milli":10}]},
+                {"mechanism_id":"matrix","statement":"matrix remodeling drives invasion","predictions":[{"feature_id":"f1","predicted_milli":400,"uncertainty_milli":10},{"feature_id":"f2","predicted_milli":500,"uncertainty_milli":10}]}
+            ],
+            "observations": [
+                {"feature_id":"f1","observed_milli":100,"uncertainty_milli":10,"artifact":{"artifact_id":"mechanism-observation","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-feature+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}},
+                {"feature_id":"f2","observed_milli":200,"uncertainty_milli":10,"artifact":{"artifact_id":"mechanism-observation-2","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-feature+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false}}
+            ],
+            "actions": [
+                {"action_id":"perturb-f1","feature_id":"f1","predicted_milli_by_mechanism":{"matrix":500,"motility":100},"measurement_uncertainty_milli":20,"feasibility_milli":1000,"cost_units":1}
+            ]
+        }),
+    );
+    assert_eq!(mechanism_discrimination["dispatch"], json!("not_started"));
+    assert_eq!(
+        mechanism_discrimination["discrimination"]["disposition"],
+        json!("qualified")
+    );
+    assert_eq!(
+        mechanism_discrimination["discrimination"]["rankings"][0]["mechanism_id"],
+        json!("motility")
+    );
+    assert_eq!(
+        mechanism_discrimination["discrimination"]["selected_action_order"][0],
+        json!("perturb-f1")
     );
 
     let knowledge = call(

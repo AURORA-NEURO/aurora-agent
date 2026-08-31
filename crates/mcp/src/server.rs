@@ -472,18 +472,20 @@ use bioprism_research::{
     analyze_multimodal_concordance, analyze_multimodal_consensus, analyze_preclinical_outcomes,
     analyze_replication_meta_analysis, assess_glioma_robustness, assess_replication,
     build_research_object_manifest, compile_decision_context, compile_typed_knowledge,
-    design_preclinical_experiment, dry_run_glioma_research, explore_mechanisms,
-    generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
-    plan_glioma_workflow, qualify_evidence, select_glioma_actions, simulate_glioma_protocol,
-    validate_feature_catalog, AnalysisDataset, AnalysisRequest, CausalContrastRequest,
-    CombinationObservation, CombinationSynergyRequest, ConcordanceRequest, ConsensusRequest,
-    DecisionContextRequest, DoseResponseObservation, DoseResponseRequest, EvidenceRecord,
-    EvidenceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
+    design_preclinical_experiment, discriminate_mechanisms, dry_run_glioma_research,
+    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
+    simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
+    CausalContrastRequest, CombinationObservation, CombinationSynergyRequest, ConcordanceRequest,
+    ConsensusRequest, DecisionContextRequest, DoseResponseObservation, DoseResponseRequest,
+    EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest, FederatedBenchmarkRequest,
     FederatedBenchmarkSite, GliomaActionCandidate, GliomaResearchIntent, GliomaWorkflowRequest,
-    KnowledgeRequest, MechanismCandidate, MechanismRequest, MetaAnalysisRequest, ModalityVector,
-    MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest,
-    ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
-    TrajectoryRequest, TypedKnowledge,
+    KnowledgeRequest, MechanismCandidate, MechanismDiscriminationRequest,
+    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
+    MechanismRequest, MetaAnalysisRequest, ModalityVector, MultimodalObservation,
+    MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest, RobustnessRequest, TrajectoryObservation, TrajectoryRequest,
+    TypedKnowledge,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1934,6 +1936,7 @@ impl Server {
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
+            "glioma_mechanism_discriminate" => self.glioma_mechanism_discriminate(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
             "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
             "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
@@ -3505,6 +3508,51 @@ impl Server {
             .map_err(|error| format!("glioma mechanism exploration refused: {error}"))?;
         serde_json::to_value(output)
             .map_err(|error| format!("cannot encode glioma mechanism portfolio: {error}"))
+    }
+
+    /// Score competing mechanistic predictions against local observations and rank the next
+    /// assay by expected information gain. This is a bounded planning computation: it does not
+    /// execute an assay or infer a clinical action.
+    fn glioma_mechanism_discriminate(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismDiscriminationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_discriminate requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism discrimination request: {error}"))?;
+        let hypotheses: Vec<MechanismHypothesis> = serde_json::from_value(
+            arguments
+                .get("hypotheses")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_discriminate requires hypotheses".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism hypotheses: {error}"))?;
+        let observations: Vec<MechanismFeatureObservation> =
+            serde_json::from_value(arguments.get("observations").cloned().ok_or_else(|| {
+                "glioma_mechanism_discriminate requires observations".to_string()
+            })?)
+            .map_err(|error| format!("invalid glioma mechanism observations: {error}"))?;
+        let actions: Vec<MechanismDiscriminatorAction> = serde_json::from_value(
+            arguments
+                .get("actions")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_discriminate requires actions".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma discriminator actions: {error}"))?;
+        let output = discriminate_mechanisms(&request, &hypotheses, &observations, &actions)
+            .map_err(|error| format!("glioma mechanism discrimination refused: {error}"))?;
+        serde_json::to_value(json!({
+            "discrimination": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "mechanism fit uses bounded residual likelihood with explicit feature coverage",
+                "action ranking uses posterior-weighted pairwise prediction separation, feasibility, and cost",
+                "missing observations, diffuse posteriors, and information-poor actions remain explicit",
+                "the route plans a preclinical assay and never executes instruments or makes a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma mechanism discrimination: {error}"))
     }
 
     fn glioma_experiment_design(&self, arguments: &Value) -> Result<Value, String> {
@@ -43699,6 +43747,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_decision_context",
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
+                "glioma_mechanism_discriminate",
                 "glioma_experiment_design",
                 "glioma_analysis_run",
                 "glioma_replication_assess",
@@ -50745,6 +50794,20 @@ pub fn tool_definitions() -> Vec<Value> {
                 "candidates": {"type": "array", "items": {"type": "object"}, "description": "MechanismCandidate1@1 values."}
             },
             "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_discriminate",
+        "description": "Compare competing preclinical glioma mechanistic predictions against local feature observations and rank the next assay by posterior-weighted information gain. Reports residual likelihood, feature coverage, mechanism posterior, feasibility/cost-adjusted action separation, and explicit missing, diffuse, or information-poor states; it never executes an assay or makes a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismDiscriminationRequest1@1 with model binding, shared-feature floor, mechanism/action bounds, and information threshold."},
+                "hypotheses": {"type": "array", "items": {"type": "object"}, "description": "MechanismHypothesis1@1 predictions keyed by typed feature identifiers."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "MechanismFeatureObservation1@1 local de-identified feature values with artifact references."},
+                "actions": {"type": "array", "items": {"type": "object"}, "description": "MechanismDiscriminatorAction1@1 candidate assays with per-mechanism predictions, cost, feasibility, and uncertainty."}
+            },
+            "required": ["request", "hypotheses", "observations", "actions"]
         }
     }));
     definitions.push(json!({

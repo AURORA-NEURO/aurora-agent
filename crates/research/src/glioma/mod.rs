@@ -46,6 +46,12 @@ pub use programs::p04_decision_context::{
     compile_decision_context, DecisionAction, DecisionActionKind, DecisionContext,
     DecisionContextDisposition, DecisionContextError, DecisionContextRequest,
 };
+pub use programs::p05_mechanism_exploration::{
+    discriminate_mechanisms, MechanismDiscrimination, MechanismDiscriminationDisposition,
+    MechanismDiscriminationError, MechanismDiscriminationRanking, MechanismDiscriminationRequest,
+    MechanismDiscriminatorAction, MechanismFeatureObservation, MechanismHypothesis,
+    MechanismInformationGain, MechanismPrediction,
+};
 pub use programs::p06_experiment_design::{
     analyze_glioma_combination_synergy, analyze_glioma_dose_response, CombinationCell,
     CombinationCellDisposition, CombinationObservation, CombinationSynergyAnalysis,
