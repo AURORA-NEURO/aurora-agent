@@ -43338,7 +43338,7 @@ pub fn workspace_capabilities() -> Value {
         },
         {
             "id": "glioma_autonomous_research_engine",
-            "domains": ["preclinical glioma research", "evidence surveillance", "multimodal QC", "molecular mechanism exploration", "experiment design", "protocol simulation", "instrument preflight", "reproducible computation", "replication and negative results", "adaptive next-action selection"],
+            "domains": ["preclinical glioma research", "evidence surveillance", "multimodal QC", "molecular mechanism exploration", "experiment design", "protocol simulation", "instrument preflight", "reproducible computation", "omission-stress robustness", "replication and negative results", "adaptive next-action selection"],
             "crates": ["bioprism-research", "bioprism-onco", "bioprism-foundation", "bioprism-mcp"],
             "mcp_tools": [
                 "glioma_research_dry_run",
