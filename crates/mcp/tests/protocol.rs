@@ -36,6 +36,7 @@ use bioprism_evalengine::{
 };
 use bioprism_fabric::synth::{Candidate as FabricCandidate, Goal as FabricGoal, RoleGraph};
 use bioprism_factory::{Idempotency, Job, JobStore, ResourceClass, WorkerCapability};
+use bioprism_foundation::PRECLINICAL_BOUNDARY;
 use bioprism_governance::SchemaVersion;
 use bioprism_hub::{
     AccessTier, Board, BoardId, BudgetEnvelope, BuildProvenance, ComparabilityConditions,
@@ -313,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 522;
+const TOOL_DEFINITION_COUNT: usize = 530;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -372,6 +373,56 @@ fn tools_call_rejects_non_object_arguments_before_dispatch() {
             .unwrap()
             .contains("arguments must be an object"));
     }
+}
+
+#[test]
+fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
+    let mut server = server();
+    let catalog = call(&mut server, "glioma_program_catalog", json!({}));
+    assert_eq!(catalog["program_count"], json!(12));
+    assert_eq!(catalog["feature_count"], json!(384));
+    assert_eq!(catalog["features"].as_array().unwrap().len(), 384);
+
+    let replay_identity = ContentHash::of_value(&json!({"replay": "mcp-glioma"})).unwrap();
+    let artifact_hash = ContentHash::of_value(&json!({"artifact": "local"})).unwrap();
+    let intent = json!({
+        "research_id": "mcp-glioma-research",
+        "study_id": "mcp-glioma-study",
+        "objective": "qualify a local preclinical glioma mechanism program",
+        "output_uses": ["cohort_analysis", "method_development"],
+        "model_systems": ["organoid"],
+        "modalities": ["literature", "genomics", "computational", "replication"],
+        "input_artifacts": [{
+            "artifact_id": "local-glioma-input",
+            "content_hash": artifact_hash,
+            "content_type": "application/vnd.aurora.glioma-input+json",
+            "local_only": true,
+            "contains_human_data": false,
+            "contains_direct_identifiers": false
+        }],
+        "requested_autonomy": "a1",
+        "approval_reference": null,
+        "budget_units": 300,
+        "max_retries": 1,
+        "allow_instrument_execution": false,
+        "allow_federation": false,
+        "raw_data_local": true,
+        "aggregate_only": true,
+        "replay_identity": replay_identity,
+        "boundary": PRECLINICAL_BOUNDARY
+    });
+    let dry_run = call(
+        &mut server,
+        "glioma_research_dry_run",
+        json!({"intent": intent}),
+    );
+    assert_eq!(dry_run["disposition"], json!("succeeded"));
+    assert_eq!(dry_run["completed_order"].as_array().unwrap().len(), 12);
+    assert!(dry_run["negative_evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item.as_str().unwrap().contains("simulation")));
 }
 
 #[test]

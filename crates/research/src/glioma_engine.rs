@@ -97,7 +97,7 @@ pub struct LocalArtifactRef {
 }
 
 impl LocalArtifactRef {
-    fn validate(&self) -> Result<(), GliomaEngineError> {
+    pub(crate) fn validate(&self) -> Result<(), GliomaEngineError> {
         if self.artifact_id.trim().is_empty()
             || self.content_type.trim().is_empty()
             || !self.local_only

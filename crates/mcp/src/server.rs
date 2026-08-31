@@ -467,7 +467,14 @@ use bioprism_repair::{
     DeclaredItem as RepairDeclaredItem, PlanOptions as RepairPlanOptions, RepairPlan,
 };
 use bioprism_research::{
-    dry_run_glioma_research, select_glioma_actions, GliomaActionCandidate, GliomaResearchIntent,
+    analyze_preclinical_outcomes, assess_replication, build_research_object_manifest,
+    design_preclinical_experiment, dry_run_glioma_research, explore_mechanisms,
+    generate_feature_catalog, glioma_program_catalog, harmonize_multimodal_inputs,
+    qualify_evidence, select_glioma_actions, validate_feature_catalog, AnalysisDataset,
+    AnalysisRequest, EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentRequest,
+    GliomaActionCandidate, GliomaResearchIntent, MechanismCandidate, MechanismRequest,
+    MultimodalObservation, MultimodalRequest, ReplicationRequest, ReplicationStudy,
+    ResearchObjectRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1903,6 +1910,14 @@ impl Server {
             "brain_replay_evaluate" => self.brain_replay_evaluate(&arguments),
             "glioma_research_dry_run" => self.glioma_research_dry_run(&arguments),
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
+            "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
+            "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
+            "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
+            "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
+            "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
+            "glioma_analysis_run" => self.glioma_analysis_run(&arguments),
+            "glioma_replication_assess" => self.glioma_replication_assess(&arguments),
+            "glioma_research_object_prepare" => self.glioma_research_object_prepare(&arguments),
             "domain_evidence_harmonization_coverage" => {
                 self.domain_evidence_harmonization_coverage(&arguments)
             }
@@ -3038,6 +3053,163 @@ impl Server {
             .map_err(|error| format!("glioma action selection refused: {error}"))?;
         serde_json::to_value(selection)
             .map_err(|error| format!("cannot encode glioma action selection: {error}"))
+    }
+
+    /// Return the folder-owned glioma program and feature catalog used by local orchestration.
+    fn glioma_program_catalog(&self, _arguments: &Value) -> Result<Value, String> {
+        let programs = glioma_program_catalog();
+        let features = generate_feature_catalog();
+        validate_feature_catalog(&features)
+            .map_err(|error| format!("glioma program catalog is invalid: {error}"))?;
+        serde_json::to_value(json!({
+            "programs": programs,
+            "features": features,
+            "program_count": 12,
+            "features_per_program": 32,
+            "feature_count": 384,
+            "organization_root": "crates/research/src/glioma/programs",
+        }))
+        .map_err(|error| format!("cannot encode glioma program catalog: {error}"))
+    }
+
+    fn glioma_evidence_qualify(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_qualify requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence request: {error}"))?;
+        let records: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("records")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_qualify requires records".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence records: {error}"))?;
+        let output = qualify_evidence(&request, &records)
+            .map_err(|error| format!("glioma evidence qualification refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma evidence qualification: {error}"))
+    }
+
+    fn glioma_multimodal_qc(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MultimodalRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_qc requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal request: {error}"))?;
+        let observations: Vec<MultimodalObservation> = serde_json::from_value(
+            arguments
+                .get("observations")
+                .cloned()
+                .ok_or_else(|| "glioma_multimodal_qc requires observations".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma multimodal observations: {error}"))?;
+        let output = harmonize_multimodal_inputs(&request, &observations)
+            .map_err(|error| format!("glioma multimodal QC refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma multimodal QC: {error}"))
+    }
+
+    fn glioma_mechanism_explore(&self, arguments: &Value) -> Result<Value, String> {
+        let request: MechanismRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_explore requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism request: {error}"))?;
+        let candidates: Vec<MechanismCandidate> = serde_json::from_value(
+            arguments
+                .get("candidates")
+                .cloned()
+                .ok_or_else(|| "glioma_mechanism_explore requires candidates".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma mechanism candidates: {error}"))?;
+        let output = explore_mechanisms(&request, &candidates)
+            .map_err(|error| format!("glioma mechanism exploration refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma mechanism portfolio: {error}"))
+    }
+
+    fn glioma_experiment_design(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ExperimentRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_experiment_design requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma experiment request: {error}"))?;
+        let arms: Vec<ExperimentArm> = serde_json::from_value(
+            arguments
+                .get("arms")
+                .cloned()
+                .ok_or_else(|| "glioma_experiment_design requires arms".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma experiment arms: {error}"))?;
+        let output = design_preclinical_experiment(&request, &arms)
+            .map_err(|error| format!("glioma experiment design refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma experiment design: {error}"))
+    }
+
+    fn glioma_analysis_run(&self, arguments: &Value) -> Result<Value, String> {
+        let request: AnalysisRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_analysis_run requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma analysis request: {error}"))?;
+        let dataset: AnalysisDataset = serde_json::from_value(
+            arguments
+                .get("dataset")
+                .cloned()
+                .ok_or_else(|| "glioma_analysis_run requires dataset".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma analysis dataset: {error}"))?;
+        let output = analyze_preclinical_outcomes(&request, &dataset)
+            .map_err(|error| format!("glioma analysis refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma analysis result: {error}"))
+    }
+
+    fn glioma_replication_assess(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ReplicationRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_assess requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication request: {error}"))?;
+        let studies: Vec<ReplicationStudy> = serde_json::from_value(
+            arguments
+                .get("studies")
+                .cloned()
+                .ok_or_else(|| "glioma_replication_assess requires studies".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma replication studies: {error}"))?;
+        let output = assess_replication(&request, &studies)
+            .map_err(|error| format!("glioma replication assessment refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma replication assessment: {error}"))
+    }
+
+    fn glioma_research_object_prepare(&self, arguments: &Value) -> Result<Value, String> {
+        let request: ResearchObjectRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_research_object_prepare requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma research-object request: {error}"))?;
+        let output = build_research_object_manifest(&request)
+            .map_err(|error| format!("glioma research-object preparation refused: {error}"))?;
+        serde_json::to_value(output)
+            .map_err(|error| format!("cannot encode glioma research-object manifest: {error}"))
     }
 
     fn compiled(
@@ -43075,7 +43247,18 @@ pub fn workspace_capabilities() -> Value {
             "id": "glioma_autonomous_research_engine",
             "domains": ["preclinical glioma research", "evidence surveillance", "multimodal QC", "molecular mechanism exploration", "experiment design", "protocol simulation", "instrument preflight", "reproducible computation", "replication and negative results", "adaptive next-action selection"],
             "crates": ["bioprism-research", "bioprism-onco", "bioprism-foundation", "bioprism-mcp"],
-            "mcp_tools": ["glioma_research_dry_run", "glioma_research_select_actions"],
+            "mcp_tools": [
+                "glioma_research_dry_run",
+                "glioma_research_select_actions",
+                "glioma_program_catalog",
+                "glioma_evidence_qualify",
+                "glioma_multimodal_qc",
+                "glioma_mechanism_explore",
+                "glioma_experiment_design",
+                "glioma_analysis_run",
+                "glioma_replication_assess",
+                "glioma_research_object_prepare"
+            ],
             "cli_entrypoints": [],
             "status": "available"
         },
@@ -49904,6 +50087,92 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             },
             "required": ["candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_program_catalog",
+        "description": "Return the folder-owned glioma program registry and its 384 generated product feature slots. This is an organization and capability discovery surface; it performs no research execution or data movement.",
+        "inputSchema": {"type": "object", "properties": {}, "required": []}
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_qualify",
+        "description": "Qualify caller-supplied local preclinical glioma evidence records with deterministic relevance, quality, reproducibility, modality, and model coverage. Unknown, stale, contradicted, and negative evidence remains visible.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceRequest1@1."},
+                "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values."}
+            },
+            "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_multimodal_qc",
+        "description": "Harmonize local preclinical glioma modality metadata and return comparable cells, missing modality/model coverage, coordinate and unit defects, missingness failures, and an honest QC disposition.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MultimodalRequest1@1."},
+                "observations": {"type": "array", "items": {"type": "object"}, "description": "Local MultimodalObservation1@1 values."}
+            },
+            "required": ["request", "observations"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_mechanism_explore",
+        "description": "Rank competing preclinical glioma mechanism candidates by support, reproducibility, required modality/model coverage, and discriminating actions while retaining disconfirming evidence and unresolved coverage.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "MechanismRequest1@1."},
+                "candidates": {"type": "array", "items": {"type": "object"}, "description": "MechanismCandidate1@1 values."}
+            },
+            "required": ["request", "candidates"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_experiment_design",
+        "description": "Generate a deterministic fixed-point, power-aware preclinical glioma experiment allocation with replicate requirements, blocking factors, randomization tokens, acceptance gates, and explicit underpowered/null-result handling.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ExperimentRequest1@1."},
+                "arms": {"type": "array", "items": {"type": "object"}, "description": "ExperimentArm1@1 values."}
+            },
+            "required": ["request", "arms"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_analysis_run",
+        "description": "Run a local two-arm preclinical glioma analysis with an explicit estimand, uncertainty interval, bounded exact permutation test, batch-overlap warnings, and negative-result classification.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "AnalysisRequest1@1."},
+                "dataset": {"type": "object", "description": "Local AnalysisDataset1@1."}
+            },
+            "required": ["request", "dataset"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_replication_assess",
+        "description": "Assess cross-site preclinical glioma replication with weighted pooled effects, heterogeneity, direction contradictions, site/replicate floors, and explicit replicated, mixed, not-replicated, or unresolved outcomes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "ReplicationRequest1@1."},
+                "studies": {"type": "array", "items": {"type": "object"}, "description": "Local ReplicationStudy1@1 values."}
+            },
+            "required": ["request", "studies"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_research_object_prepare",
+        "description": "Prepare a portable preclinical glioma research-object manifest from local artifacts, plan/execution digests, program outputs, limitations, and negative evidence. The result is never presented as signed without an accountable signer.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"request": {"type": "object", "description": "ResearchObjectRequest1@1."}},
+            "required": ["request"]
         }
     }));
     control.extend(definitions);
