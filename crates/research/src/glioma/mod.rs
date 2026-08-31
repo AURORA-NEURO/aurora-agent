@@ -32,6 +32,10 @@ pub use mechanism::{explore_mechanisms, MechanismCandidate, MechanismPortfolio, 
 pub use multimodal::{
     harmonize_multimodal_inputs, MultimodalObservation, MultimodalQcReport, MultimodalRequest,
 };
+pub use programs::p02_evidence_knowledge::{
+    compile_typed_knowledge, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,
+    KnowledgeError, KnowledgeRequest, TypedKnowledge,
+};
 pub use programs::p03_multimodal_ingestion_qc::{
     analyze_multimodal_concordance, ConcordanceDisposition, ConcordanceError, ConcordanceRequest,
     FeatureValue, ModalityConcordance, ModalityVector, MultimodalConcordance,

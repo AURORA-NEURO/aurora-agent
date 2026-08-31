@@ -314,7 +314,7 @@ const WORLD: &str = "fixtures/fiber-v0.1/radiogenomic_world.json";
 const QUERY: &str = "fixtures/fiber-v0.1/leakage_query.json";
 // Audited registry sizes: changes to either registry should update these contracts deliberately.
 const CAPABILITY_GROUP_COUNT: usize = 57;
-const TOOL_DEFINITION_COUNT: usize = 536;
+const TOOL_DEFINITION_COUNT: usize = 537;
 
 fn ledger_event_fixture(kind: &str, subject: &str, instant: &str, key: &str) -> LedgerEvent {
     LedgerEvent::new(
@@ -660,6 +660,37 @@ fn glioma_program_catalog_and_pipeline_are_reachable_through_mcp() {
         concordance["concordance"]["disposition"],
         json!("qualified")
     );
+
+    let knowledge = call(
+        &mut server,
+        "glioma_knowledge_compile",
+        json!({
+            "request": {
+                "objective": "rank invasion mechanisms",
+                "required_modalities": ["genomics"],
+                "required_model_systems": ["organoid"],
+                "min_support_milli": 700,
+                "min_sources_per_claim": 1,
+                "max_claims": 8
+            },
+            "records": [{
+                "evidence_id": "mcp-evidence-1",
+                "source_artifact": {"artifact_id":"mcp-evidence-artifact","content_hash":artifact_hash,"content_type":"application/vnd.aurora.glioma-evidence+json","local_only":true,"contains_human_data":false,"contains_direct_identifiers":false},
+                "source_kind": "dataset",
+                "claim": "EGFR signaling increases invasion",
+                "scope": "preclinical glioma",
+                "modality": "genomics",
+                "model_system": "organoid",
+                "state": "supported",
+                "relevance_milli": 900,
+                "quality_milli": 900,
+                "reproducibility_milli": 900,
+                "release_epoch": 1
+            }]
+        }),
+    );
+    assert_eq!(knowledge["dispatch"], json!("not_started"));
+    assert_eq!(knowledge["knowledge"]["disposition"], json!("qualified"));
 }
 
 #[test]

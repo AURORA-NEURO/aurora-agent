@@ -470,13 +470,14 @@ use bioprism_research::{
     analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_multimodal_concordance,
     analyze_preclinical_outcomes, assess_glioma_robustness, assess_replication,
     build_research_object_manifest, design_preclinical_experiment, dry_run_glioma_research,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    compile_typed_knowledge, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_multimodal_inputs, plan_glioma_workflow, qualify_evidence, select_glioma_actions,
     simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset, AnalysisRequest,
     ConcordanceRequest, DoseResponseObservation, DoseResponseRequest, EvidenceRecord,
     EvidenceRequest, ExperimentArm, ExperimentRequest, GliomaActionCandidate, GliomaResearchIntent,
     GliomaWorkflowRequest, MechanismCandidate, MechanismRequest, ModalityVector,
-    MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest,
+    KnowledgeRequest, MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest,
+    ReplicationRequest,
     ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
     TrajectoryRequest,
 };
@@ -1922,6 +1923,7 @@ impl Server {
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
+            "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
             "glioma_mechanism_explore" => self.glioma_mechanism_explore(&arguments),
             "glioma_experiment_design" => self.glioma_experiment_design(&arguments),
@@ -3287,6 +3289,38 @@ impl Server {
             .map_err(|error| format!("glioma evidence qualification refused: {error}"))?;
         serde_json::to_value(output)
             .map_err(|error| format!("cannot encode glioma evidence qualification: {error}"))
+    }
+
+    /// Compile caller-supplied local evidence into scoped, ranked preclinical glioma knowledge.
+    /// This is an analysis capability only: it does not infer causality or execute an assay.
+    fn glioma_knowledge_compile(&self, arguments: &Value) -> Result<Value, String> {
+        let request: KnowledgeRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_compile requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge request: {error}"))?;
+        let records: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("records")
+                .cloned()
+                .ok_or_else(|| "glioma_knowledge_compile requires records".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma knowledge records: {error}"))?;
+        let output = compile_typed_knowledge(&request, &records)
+            .map_err(|error| format!("glioma typed-knowledge compilation refused: {error}"))?;
+        serde_json::to_value(json!({
+            "knowledge": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "claims are coalesced only within their declared preclinical scope",
+                "support, negative, contradictory, stale, and unknown evidence remain addressable",
+                "required modality and model coverage is evaluated on supporting records",
+                "the result ranks research claims and never infers causality or clinical action"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma typed knowledge: {error}"))
     }
 
     fn glioma_multimodal_qc(&self, arguments: &Value) -> Result<Value, String> {
@@ -43454,6 +43488,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
+                "glioma_knowledge_compile",
                 "glioma_multimodal_qc",
                 "glioma_mechanism_explore",
                 "glioma_experiment_design",
@@ -50406,6 +50441,18 @@ pub fn tool_definitions() -> Vec<Value> {
             "type": "object",
             "properties": {
                 "request": {"type": "object", "description": "EvidenceRequest1@1."},
+                "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values."}
+            },
+            "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_knowledge_compile",
+        "description": "Compile local preclinical glioma evidence into scoped typed claims for an autonomous research workflow. Coalesces exact scoped claims, scores support versus contradiction, preserves negative/unknown/stale evidence, exposes missing modality/model coverage, and never infers causality or clinical action.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "KnowledgeRequest1@1 with objective, coverage floors, support threshold, and claim bound."},
                 "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values."}
             },
             "required": ["request", "records"]

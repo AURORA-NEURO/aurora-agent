@@ -26,12 +26,13 @@
     "contracts": "crates/research/src/glioma",
     "adaptive_workflow": "crates/research/src/glioma/workflow.rs",
     "robustness_suite": "crates/research/src/glioma/programs/p09_reproducible_computation/robustness.rs",
+    "typed_knowledge": "crates/research/src/glioma/programs/p02_evidence_knowledge/knowledge_graph.rs",
     "documentation": "docs/glioma",
     "mcp": "crates/mcp/src/server.rs"
   },
   "programs": [
     {"id": "P01", "slug": "evidence-surveillance", "folder": "p01_evidence_surveillance", "stage_kinds": ["evidence_surveillance"]},
-    {"id": "P02", "slug": "evidence-knowledge", "folder": "p02_evidence_knowledge", "stage_kinds": ["evidence_compilation"]},
+    {"id": "P02", "slug": "evidence-knowledge", "folder": "p02_evidence_knowledge", "stage_kinds": ["evidence_compilation"], "surfaces": ["compile_typed_knowledge"]},
     {"id": "P03", "slug": "multimodal-ingestion-qc", "folder": "p03_multimodal_ingestion_qc", "stage_kinds": ["multimodal_ingestion_qc"], "surfaces": ["analyze_multimodal_concordance"]},
     {"id": "P04", "slug": "decision-context", "folder": "p04_decision_context", "stage_kinds": ["intent_normalization", "evidence_compilation"]},
     {"id": "P05", "slug": "mechanism-exploration", "folder": "p05_mechanism_exploration", "stage_kinds": ["molecular_landscape", "mechanism_exploration"]},

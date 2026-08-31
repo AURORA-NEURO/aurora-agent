@@ -18,6 +18,8 @@ crates/research/src/glioma/
   mod.rs                                   public program API and ownership boundary
   catalog.rs                               12 programs × 32 feature slots = 384 product features
   evidence.rs                              P01 evidence qualification
+  programs/p02_evidence_knowledge/knowledge_graph.rs
+                                             P02 scoped claim graph and support/contradiction synthesis
   multimodal.rs                            P03 harmonization and QC
   mechanism.rs                             P05 competing mechanism portfolio
   experiment.rs                             P06 fixed-point power and allocation design
@@ -99,12 +101,12 @@ It is a product capability route, not a hypothesis or a to-do item. Stable ids u
 6. Promote a program only when its independent baseline, reproducibility, and preclinical safety
    gates are measured.
 
-The first tranche is implemented in P01, P03, P05, P06, P10, and P11. P07 now also has an
+The first tranche is implemented in P01, P02, P03, P05, P06, P10, and P11. P07 now also has an
 adaptive campaign planner (`plan_glioma_workflow`) and a guarded full-program executor that
 chooses deterministic next batches, closes over dependencies, and routes unresolved evidence,
 QC defects, contradictory mechanisms, underpowered designs, budget exhaustion, and approval gaps
 into explicit hold/abstain branches. Checkpoint output digests are bound into the workflow plan so
-a resumed campaign cannot silently swap a local evidence, QC, mechanism, or design object. P02, P04, P08, P09, and P12 retain explicit ownership folders
+a resumed campaign cannot silently swap a local evidence, QC, mechanism, or design object. P04, P08, and P12 retain explicit ownership folders
 and catalog routes. P09 now includes a bounded robustness suite (`assess_glioma_robustness`) that
 recomputes the declared effect under leave-one-batch-out and optional leave-one-row-out omissions;
 unresolved subsets, fragile effects, and null results remain explicit. Provider-specific execution
@@ -114,3 +116,6 @@ with transparent raw/fitted means, residual noise, monotonicity violations, and 
 interpolation only on the declared preclinical grid.
 P03 now includes feature-level multimodal concordance (`analyze_multimodal_concordance`) with
 shared-feature alignment, fixed-point correlation, and explicit contradictory or unresolved pairs.
+P02 now includes typed-knowledge compilation (`compile_typed_knowledge`) that coalesces scoped
+claims, ranks support against contradiction, preserves negative/unknown evidence, and exposes
+missing modality/model coverage for the next workflow action.

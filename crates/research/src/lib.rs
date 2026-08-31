@@ -92,8 +92,8 @@ pub use findings::{
 pub use glioma::{
     analyze_glioma_dose_response, analyze_glioma_trajectories, analyze_multimodal_concordance,
     analyze_preclinical_outcomes, assess_glioma_robustness, assess_replication,
-    build_research_object_manifest, design_preclinical_experiment, execute_glioma_workflow,
-    explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
+    build_research_object_manifest, compile_typed_knowledge, design_preclinical_experiment,
+    execute_glioma_workflow, explore_mechanisms, generate_feature_catalog, glioma_program_catalog,
     harmonize_multimodal_inputs, plan_glioma_workflow, protocol_request_from_experiment_design,
     qualify_evidence, simulate_glioma_protocol, validate_feature_catalog, AnalysisDataset,
     AnalysisRequest, AnalysisResult, CatalogError, ConcordanceDisposition, ConcordanceError,
@@ -103,7 +103,8 @@ pub use glioma::{
     ExperimentRequest, FeatureValue, GliomaFeatureSpec, GliomaOperatingScale,
     GliomaProgramDescriptor, GliomaProgramId, GliomaWorkflowBranch, GliomaWorkflowError,
     GliomaWorkflowExecution, GliomaWorkflowMode, GliomaWorkflowNode, GliomaWorkflowPlan,
-    GliomaWorkflowRequest, MechanismCandidate, MechanismPortfolio, MechanismRequest,
+    GliomaWorkflowRequest, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,
+    KnowledgeError, KnowledgeRequest, MechanismCandidate, MechanismPortfolio, MechanismRequest,
     ModalityConcordance, ModalityVector, MultimodalConcordance, MultimodalObservation,
     MultimodalQcReport, MultimodalRequest, PairConcordanceDisposition, ProtocolDisposition,
     ProtocolResource, ProtocolResourceKind, ProtocolSimulation, ProtocolSimulationError,
@@ -112,7 +113,7 @@ pub use glioma::{
     RobustnessCase, RobustnessCaseKind, RobustnessDisposition, RobustnessError, RobustnessRequest,
     RobustnessSuite, ScheduleEntry, TrajectoryAnalysis, TrajectoryArmSummary,
     TrajectoryDisposition, TrajectoryError, TrajectoryObservation, TrajectoryRequest,
-    UnitTrajectory, UnitTrajectoryDisposition, WorkflowNodeDecision,
+    TypedKnowledge, UnitTrajectory, UnitTrajectoryDisposition, WorkflowNodeDecision,
 };
 pub use glioma_engine::{
     compile_glioma_research, dry_run_glioma_research, execute_glioma_research,

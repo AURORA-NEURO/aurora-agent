@@ -1,5 +1,12 @@
 //! Evidence-to-typed-knowledge program ownership.
 
+pub mod knowledge_graph;
+
+pub use knowledge_graph::{
+    compile_typed_knowledge, KnowledgeClaim, KnowledgeClaimDisposition, KnowledgeDisposition,
+    KnowledgeError, KnowledgeRequest, TypedKnowledge,
+};
+
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::EvidenceKnowledge;
