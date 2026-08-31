@@ -2,6 +2,14 @@
 
 use crate::glioma::catalog::{glioma_program_catalog, GliomaProgramDescriptor, GliomaProgramId};
 
+pub mod surveillance;
+
+pub use surveillance::{
+    surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind, EvidenceSurveillance,
+    EvidenceSurveillanceAction, EvidenceSurveillanceActionKind, EvidenceSurveillanceDisposition,
+    EvidenceSurveillanceError, EvidenceSurveillanceRequest,
+};
+
 pub const PROGRAM_ID: GliomaProgramId = GliomaProgramId::EvidenceSurveillance;
 
 pub fn descriptor() -> GliomaProgramDescriptor {

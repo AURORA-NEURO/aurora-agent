@@ -24,6 +24,8 @@ crates/research/src/glioma/
                                              P04 evidence-gap to typed next-action compilation
   programs/p05_mechanism_exploration/discrimination.rs
                                              P05 residual-likelihood mechanism discrimination and next-assay information gain
+  programs/p01_evidence_surveillance/surveillance.rs
+                                             P01 snapshot delta surveillance and prioritized evidence review actions
   programs/p08_instrument_robotics/calibration.rs
                                              P08 robust control calibration and Theil-Sen instrument drift detection
   multimodal.rs                            P03 harmonization and QC
@@ -74,7 +76,7 @@ crates/research/src/glioma/
 
 | Program | Product owner | Engine stages | Observable product result |
 | --- | --- | --- | --- |
-| P01 Evidence surveillance | evidence curator | evidence surveillance | qualified source candidates with stale, unknown, contradictory, and negative states |
+| P01 Evidence surveillance | evidence curator | evidence surveillance | snapshot deltas, prioritized review/revalidation actions, and stale/unknown/contradictory coverage |
 | P02 Evidence-to-typed-knowledge | knowledge engineer | evidence compilation | scoped claims and competing explanations bound to source artifacts |
 | P03 Multimodal ingestion and QC | data steward | multimodal ingestion/QC | comparable cells, feature-level concordance, consensus clusters, and explicit defects |
 | P04 Question-to-decision context | principal investigator | intent normalization, context compilation | bounded decision context and unresolved omissions |

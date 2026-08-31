@@ -109,7 +109,10 @@ pub use glioma::{
     DecisionActionKind, DecisionContext, DecisionContextDisposition, DecisionContextError,
     DecisionContextRequest, DoseDirection, DosePair, DoseResponseAnalysis, DoseResponseDisposition,
     DoseResponseError, DoseResponseObservation, DoseResponsePoint, DoseResponseRequest,
-    EvidenceQualification, EvidenceRecord, EvidenceRequest, ExperimentArm, ExperimentDesign,
+    EvidenceChange, EvidenceChangeKind, EvidenceQualification, EvidenceRecord, EvidenceRequest,
+    EvidenceSurveillance, EvidenceSurveillanceAction, EvidenceSurveillanceActionKind,
+    EvidenceSurveillanceDisposition, EvidenceSurveillanceError, EvidenceSurveillanceRequest,
+    ExperimentArm, ExperimentDesign,
     ExperimentRequest, FeatureValue, FederatedBenchmarkConsensus, FederatedBenchmarkContribution,
     FederatedBenchmarkDisposition, FederatedBenchmarkError, FederatedBenchmarkRequest,
     FederatedBenchmarkSite, FederatedBenchmarkSiteDisposition, GliomaFeatureSpec,
@@ -131,7 +134,7 @@ pub use glioma::{
     RobustnessDisposition, RobustnessError, RobustnessRequest, RobustnessSuite, ScheduleEntry,
     TrajectoryAnalysis, TrajectoryArmSummary, TrajectoryDisposition, TrajectoryError,
     TrajectoryObservation, TrajectoryRequest, TypedKnowledge, UnitContrast, UnitTrajectory,
-    UnitTrajectoryDisposition, WorkflowNodeDecision,
+    UnitTrajectoryDisposition, WorkflowNodeDecision, surveil_glioma_evidence,
 };
 pub use glioma_engine::{
     compile_glioma_research, dry_run_glioma_research, execute_glioma_research,

@@ -25,6 +25,11 @@ pub use catalog::{
     GliomaFeatureSpec, GliomaOperatingScale, GliomaProgramDescriptor, GliomaProgramId,
 };
 pub use evidence::{qualify_evidence, EvidenceQualification, EvidenceRecord, EvidenceRequest};
+pub use programs::p01_evidence_surveillance::{
+    surveil_glioma_evidence, EvidenceChange, EvidenceChangeKind, EvidenceSurveillance,
+    EvidenceSurveillanceAction, EvidenceSurveillanceActionKind, EvidenceSurveillanceDisposition,
+    EvidenceSurveillanceError, EvidenceSurveillanceRequest,
+};
 pub use experiment::{
     design_preclinical_experiment, ExperimentArm, ExperimentDesign, ExperimentRequest,
 };

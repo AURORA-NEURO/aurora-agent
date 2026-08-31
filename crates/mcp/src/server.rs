@@ -485,7 +485,7 @@ use bioprism_research::{
     MechanismHypothesis, MechanismRequest, MetaAnalysisRequest, ModalityVector,
     MultimodalObservation, MultimodalRequest, ProtocolSimulationRequest, ReplicationRequest,
     ReplicationStudy, ResearchObjectRequest, RobustnessRequest, TrajectoryObservation,
-    TrajectoryRequest, TypedKnowledge,
+    TrajectoryRequest, TypedKnowledge, surveil_glioma_evidence, EvidenceSurveillanceRequest,
 };
 use bioprism_routing::{
     lab::{run as run_routing_lab, LabSettings, Task},
@@ -1932,6 +1932,7 @@ impl Server {
             "glioma_research_select_actions" => self.glioma_research_select_actions(&arguments),
             "glioma_program_catalog" => self.glioma_program_catalog(&arguments),
             "glioma_evidence_qualify" => self.glioma_evidence_qualify(&arguments),
+            "glioma_evidence_surveillance" => self.glioma_evidence_surveillance(&arguments),
             "glioma_knowledge_compile" => self.glioma_knowledge_compile(&arguments),
             "glioma_decision_context" => self.glioma_decision_context(&arguments),
             "glioma_multimodal_qc" => self.glioma_multimodal_qc(&arguments),
@@ -3402,6 +3403,45 @@ impl Server {
             .map_err(|error| format!("glioma evidence qualification refused: {error}"))?;
         serde_json::to_value(output)
             .map_err(|error| format!("cannot encode glioma evidence qualification: {error}"))
+    }
+
+    /// Detect changes between local evidence snapshots and compile bounded review actions for a
+    /// continuing glioma research campaign. No external retrieval or source movement occurs.
+    fn glioma_evidence_surveillance(&self, arguments: &Value) -> Result<Value, String> {
+        let request: EvidenceSurveillanceRequest = serde_json::from_value(
+            arguments
+                .get("request")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_surveillance requires request".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma evidence surveillance request: {error}"))?;
+        let previous: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("previous")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_surveillance requires previous".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma previous evidence snapshot: {error}"))?;
+        let current: Vec<EvidenceRecord> = serde_json::from_value(
+            arguments
+                .get("current")
+                .cloned()
+                .ok_or_else(|| "glioma_evidence_surveillance requires current".to_string())?,
+        )
+        .map_err(|error| format!("invalid glioma current evidence snapshot: {error}"))?;
+        let output = surveil_glioma_evidence(&request, &previous, &current)
+            .map_err(|error| format!("glioma evidence surveillance refused: {error}"))?;
+        serde_json::to_value(json!({
+            "surveillance": output,
+            "dispatch": "not_started",
+            "guarantees": [
+                "additions, removals, state transitions, score shifts, and scope changes are detected deterministically",
+                "contradictory, negative, stale, unknown, and removed evidence produce explicit review actions",
+                "required modality/model coverage and snapshot omissions remain visible",
+                "the route does not fetch literature, move source bytes, infer causality, or make a clinical decision"
+            ]
+        }))
+        .map_err(|error| format!("cannot encode glioma evidence surveillance: {error}"))
     }
 
     /// Compile caller-supplied local evidence into scoped, ranked preclinical glioma knowledge.
@@ -43777,6 +43817,7 @@ pub fn workspace_capabilities() -> Value {
                 "glioma_research_select_actions",
                 "glioma_program_catalog",
                 "glioma_evidence_qualify",
+                "glioma_evidence_surveillance",
                 "glioma_knowledge_compile",
                 "glioma_decision_context",
                 "glioma_multimodal_qc",
@@ -50781,6 +50822,19 @@ pub fn tool_definitions() -> Vec<Value> {
                 "records": {"type": "array", "items": {"type": "object"}, "description": "Local EvidenceRecord1@1 values."}
             },
             "required": ["request", "records"]
+        }
+    }));
+    definitions.push(json!({
+        "name": "glioma_evidence_surveillance",
+        "description": "Compare two local preclinical glioma evidence snapshots and compile prioritized review or revalidation actions for additions, removals, state transitions, score shifts, and scope changes. Preserves contradictory, negative, stale, unknown, and missing modality/model states; it does not fetch literature, move source bytes, infer causality, or make a clinical decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "object", "description": "EvidenceSurveillanceRequest1@1 with objective, required coverage, priority/action bounds, and score-shift threshold."},
+                "previous": {"type": "array", "items": {"type": "object"}, "description": "Prior local EvidenceRecord1@1 snapshot."},
+                "current": {"type": "array", "items": {"type": "object"}, "description": "Current local EvidenceRecord1@1 snapshot."}
+            },
+            "required": ["request", "previous", "current"]
         }
     }));
     definitions.push(json!({
