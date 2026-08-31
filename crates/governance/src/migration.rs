@@ -524,20 +524,31 @@ impl MigrationRegistry {
         let mut reversed: Vec<(&str, &str)> = Vec::new();
         let mut cursor = goal.as_str();
         while cursor != start {
-            let previous = came_from[cursor];
+            let Some(previous) = came_from.get(cursor).copied() else {
+                return Err(MigrationError::NoPath {
+                    from: start.clone(),
+                    to: goal.clone(),
+                });
+            };
             reversed.push((previous, cursor));
             cursor = previous;
         }
         reversed.reverse();
 
-        Ok(reversed
-            .into_iter()
-            .map(|(source, target)| {
-                self.migrations
-                    .get(&(source.to_string(), target.to_string()))
-                    .expect("edge came from the registry")
-            })
-            .collect())
+        let mut path = Vec::with_capacity(reversed.len());
+        for (source, target) in reversed {
+            let Some(migration) = self
+                .migrations
+                .get(&(source.to_string(), target.to_string()))
+            else {
+                return Err(MigrationError::NoPath {
+                    from: start.clone(),
+                    to: goal.clone(),
+                });
+            };
+            path.push(migration);
+        }
+        Ok(path)
     }
 
     /// Migrates a document along the registered chain.

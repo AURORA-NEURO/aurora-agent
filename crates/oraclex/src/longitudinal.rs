@@ -187,11 +187,7 @@ impl<T> Escrow<T> {
 
     /// The only reader. Takes a token, so no call site can reach the outcome by accident.
     pub fn open(&self, token: &RevealToken) -> Result<&T, OracleXError> {
-        if self
-            .rules
-            .iter()
-            .any(|rule| rule.name == token.rule)
-        {
+        if self.rules.iter().any(|rule| rule.name == token.rule) {
             Ok(&self.outcome)
         } else {
             Err(OracleXError::EscrowSealed {
@@ -210,7 +206,10 @@ pub struct Forecast {
 }
 
 impl Forecast {
-    pub fn new(claim: impl Into<String>, basis: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    pub fn new(
+        claim: impl Into<String>,
+        basis: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
         Forecast {
             claim: claim.into(),
             basis: basis.into_iter().map(Into::into).collect(),
@@ -240,7 +239,10 @@ pub fn score_forecast(
             EvidenceTier::Deterministic,
             Witness::RelationViolated {
                 relation: "forecast basis is contained in the frozen snapshot".to_string(),
-                expected: format!("every cited item present at {}", snapshot.frozen_at().as_str()),
+                expected: format!(
+                    "every cited item present at {}",
+                    snapshot.frozen_at().as_str()
+                ),
                 observed: format!("'{item}' was cited and is not in the snapshot"),
             },
         );

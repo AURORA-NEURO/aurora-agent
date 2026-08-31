@@ -122,6 +122,16 @@ pub enum CaptureError {
     GappedSession { session: String, missing: Vec<u64> },
     #[error("redaction policy names field `{0}`, which no span carries")]
     RedactionTargetAbsent(String),
+    #[error(
+        "session `{session}` has inconsistent redaction accounting: declared {redacted}/{total} fields, observed {observed_redacted}/{observed_total}"
+    )]
+    InconsistentAccounting {
+        session: String,
+        redacted: usize,
+        total: usize,
+        observed_redacted: usize,
+        observed_total: usize,
+    },
 }
 
 /// Failures in boundary detection and agreement measurement (35.07).
@@ -138,6 +148,8 @@ pub enum BoundaryError {
     BoundaryOutsideSession { seq: u64, first: u64, last: u64 },
     #[error("cell span {start}..{end} is empty")]
     EmptyCellSpan { start: u64, end: u64 },
+    #[error("session sequence {seq} cannot be extended to the exclusive cell boundary")]
+    SequenceExhausted { seq: u64 },
 }
 
 /// Failures in placement, fencing, and execution accounting (35.13).

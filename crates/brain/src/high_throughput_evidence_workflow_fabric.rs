@@ -20,6 +20,9 @@ use thiserror::Error;
 pub const FEATURE_ID: &str = "AFA-brain-P01-F15";
 pub const CONTRACT_VERSION: &str = "brain-high-throughput-evidence-workflow-fabric/1.0";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet3@1";
+const WORKFLOW_CONTENT_TYPE: &str =
+    "application/vnd.aurora.high-throughput-research-workflow-receipt+json";
+const MAX_ITEMS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HighThroughputWorkflowRequest {
@@ -100,18 +103,7 @@ impl HighThroughputWorkflowReceipt {
         {
             return Err(HighThroughputWorkflowError::Invalid("throughput workflow identity, batch, stages, plan, locality, budget, or effects are incomplete".into()));
         }
-        if self
-            .admitted_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
-            return Err(HighThroughputWorkflowError::Invalid(
-                "throughput workflow state is not covered by candidates".into(),
-            ));
-        }
-        for values in [
+        let collections = [
             &self.stage_order,
             &self.plan_order,
             &self.completed_order,
@@ -124,41 +116,180 @@ impl HighThroughputWorkflowReceipt {
             &self.uncertainty,
             &self.negative_evidence,
             &self.effect_receipts,
-        ] {
+        ];
+        if collections.iter().any(|values| values.len() > MAX_ITEMS) {
+            return Err(HighThroughputWorkflowError::Invalid(
+                "throughput workflow collection exceeds the bounded contract limit".into(),
+            ));
+        }
+        let candidates = self.candidate_order.iter().collect::<BTreeSet<_>>();
+        let admitted = self.admitted_order.iter().collect::<BTreeSet<_>>();
+        let blocked = self.blocked_order.iter().collect::<BTreeSet<_>>();
+        let unknown = self.unknown_order.iter().collect::<BTreeSet<_>>();
+        let mut covered = admitted.clone();
+        covered.extend(blocked.iter());
+        if covered != candidates || !admitted.is_disjoint(&blocked) || !unknown.is_subset(&blocked)
+        {
+            return Err(HighThroughputWorkflowError::Invalid(
+                "throughput workflow states must partition candidates without overlap".into(),
+            ));
+        }
+        for values in collections {
             if values.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(HighThroughputWorkflowError::Invalid(
                     "throughput workflow ordering is not canonical".into(),
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("schedule:research-work:")
-                && !effect.starts_with("compensate:research-work:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_stages = vec![
+            "stage:admit-batch".to_string(),
+            "stage:checkpoint".to_string(),
+            "stage:persist-queue".to_string(),
+            "stage:validate-input".to_string(),
+        ];
+        if self.stage_order != expected_stages {
             return Err(HighThroughputWorkflowError::Invalid(
-                "throughput workflow effect is outside schedule/compensation gate".into(),
+                "throughput workflow stages are not canonical".into(),
             ));
         }
-        if self.disposition == HighThroughputDisposition::Qualified
-            && !self
-                .effect_receipts
-                .iter()
-                .any(|effect| effect.starts_with("schedule:research-work:"))
-        {
+        let mut expected_plan = expected_stages
+            .iter()
+            .map(|stage| format!("plan:{stage}"))
+            .collect::<Vec<_>>();
+        expected_plan.push(if self.admitted_order.is_empty() {
+            "plan:retain-unknown-batch".into()
+        } else {
+            "plan:publish-admitted-batch".into()
+        });
+        expected_plan.sort();
+        if self.plan_order != expected_plan {
             return Err(HighThroughputWorkflowError::Invalid(
-                "qualified throughput workflow requires schedule receipt".into(),
+                "throughput workflow plan does not match admission state".into(),
             ));
         }
-        if self.disposition == HighThroughputDisposition::Blocked
-            && self.effect_receipts != ["block:unsafe-release"]
+        let mut expected_completed = expected_stages.clone();
+        expected_completed.sort();
+        if self.completed_order != expected_completed {
+            return Err(HighThroughputWorkflowError::Invalid(
+                "throughput workflow completion state is not canonical".into(),
+            ));
+        }
+        let gate_blocked = self.omissions.iter().any(|item| {
+            item == "workflow:batch-not-schedulable"
+                || item == "workflow:budget-exhausted"
+                || item == "workflow:approval-missing"
+                || item == "workflow:policy-denied"
+                || item == "workflow:protected-closure-incomplete"
+                || item == "workflow:raw-data-locality-failed"
+        }) || self.negative_evidence.iter().any(|item| {
+            item == "request:policy-denied" || item == "request:raw-data-locality-failed"
+        }) || self
+            .uncertainty
+            .iter()
+            .any(|item| item == "request:protected-closure-incomplete");
+        let expected_disposition = if gate_blocked {
+            HighThroughputDisposition::Blocked
+        } else if self.admitted_order.is_empty() {
+            HighThroughputDisposition::Unknown
+        } else if self.blocked_order.is_empty()
+            && self.omissions.is_empty()
+            && self.uncertainty.is_empty()
+            && self.negative_evidence.is_empty()
+        {
+            HighThroughputDisposition::Qualified
+        } else {
+            HighThroughputDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
+            return Err(HighThroughputWorkflowError::Invalid(
+                "throughput workflow disposition does not match state or gates".into(),
+            ));
+        }
+        let has_capacity_compensation = self
+            .omissions
+            .iter()
+            .any(|item| item == "workflow:capacity-overflow-requires-compensation");
+        let expected_compensation: Vec<String> = if has_capacity_compensation {
+            vec!["compensate:research-work:capacity-overflow".into()]
+        } else {
+            Vec::new()
+        };
+        if self.compensation_order != expected_compensation {
+            return Err(HighThroughputWorkflowError::Invalid(
+                "throughput workflow compensation is not bound to capacity state".into(),
+            ));
+        }
+        for value in [
+            &self.queue_digest,
+            &self.checkpoint_digest,
+            &self.workflow_digest,
+            &self.approval_reference,
+            &self.replay_identity,
+        ] {
+            if value.as_str().len() != 64 {
+                return Err(HighThroughputWorkflowError::Invalid(
+                    "throughput workflow digest length is invalid".into(),
+                ));
+            }
+        }
+        let expected_queue_digest = ContentHash::of_value(&json!({
+            "batch_id": self.batch_id,
+            "partition": self.partition,
+            "candidate_order": self.candidate_order,
+            "checkpoint_seq": self.checkpoint_seq,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| HighThroughputWorkflowError::Artifact(error.to_string()))?;
+        if self.queue_digest != expected_queue_digest {
+            return Err(HighThroughputWorkflowError::Invalid(
+                "throughput workflow queue digest is not bound to batch state".into(),
+            ));
+        }
+        let expected_workflow_digest = ContentHash::of_value(&json!({
+            "workflow_id": self.workflow_id,
+            "plan_order": self.plan_order,
+            "completed_order": self.completed_order,
+            "checkpoint_digest": self.checkpoint_digest,
+            "approval_reference": self.approval_reference,
+            "budget_units": self.budget_units,
+            "replay_identity": self.replay_identity
+        }))
+        .map_err(|error| HighThroughputWorkflowError::Artifact(error.to_string()))?;
+        if self.workflow_digest != expected_workflow_digest {
+            return Err(HighThroughputWorkflowError::Invalid(
+                "throughput workflow digest does not match its receipt fields".into(),
+            ));
+        }
+        let expected_effect = if self.disposition == HighThroughputDisposition::Qualified {
+            vec![format!("schedule:research-work:{}", self.workflow_id)]
+        } else if has_capacity_compensation {
+            vec![format!("compensate:research-work:{}", self.workflow_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect {
+            return Err(HighThroughputWorkflowError::Invalid(
+                "throughput workflow effect does not match disposition".into(),
+            ));
+        }
+        let expected_artifact_id = format!(
+            "brain-high-throughput-evidence-workflow:{}",
+            self.workflow_id
+        );
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != WORKFLOW_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
         {
             return Err(HighThroughputWorkflowError::Invalid(
-                "blocked throughput workflow must be explicitly blocked".into(),
+                "throughput workflow artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| HighThroughputWorkflowError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| HighThroughputWorkflowError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, HighThroughputWorkflowError> {
@@ -204,11 +335,12 @@ pub fn compile_high_throughput_evidence_workflow(
         plan_order.insert(format!("plan:{stage}"));
         completed_order.insert(stage.clone());
     }
+    let plan_count = u64::try_from(plan_order.len()).unwrap_or(u64::MAX);
     let actionable = request.policy_allow
         && request.protected_closure
         && request.raw_data_local
         && request.approval_reference != ContentHash::of_bytes(&[])
-        && request.budget_units >= plan_order.len() as u32
+        && u64::from(request.budget_units) >= plan_count
         && evidence.disposition != HighThroughputDisposition::Blocked;
     if evidence.disposition == HighThroughputDisposition::Partial
         && request.policy_allow
@@ -221,7 +353,7 @@ pub fn compile_high_throughput_evidence_workflow(
     if !actionable {
         omissions.insert("workflow:batch-not-schedulable".into());
     }
-    if request.budget_units < plan_order.len() as u32 {
+    if u64::from(request.budget_units) < plan_count {
         omissions.insert("workflow:budget-exhausted".into());
     }
     if request.approval_reference == ContentHash::of_bytes(&[]) {
@@ -250,13 +382,13 @@ pub fn compile_high_throughput_evidence_workflow(
     let completed_vec = completed_order.into_iter().collect::<Vec<_>>();
     let checkpoint_digest = ContentHash::of_value(&json!({"workflow_id": request.workflow_id, "checkpoint_id": request.checkpoint_id, "checkpoint_seq": evidence.checkpoint_seq, "queue_digest": evidence.queue_digest, "stage_order": stage_order, "replay_identity": request.replay_identity})).map_err(|error| HighThroughputWorkflowError::Artifact(error.to_string()))?;
     let workflow_digest = ContentHash::of_value(&json!({"workflow_id": request.workflow_id, "plan_order": plan_vec, "completed_order": completed_vec, "checkpoint_digest": checkpoint_digest, "approval_reference": request.approval_reference, "budget_units": request.budget_units, "replay_identity": request.replay_identity})).map_err(|error| HighThroughputWorkflowError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "workflow_id": request.workflow_id, "batch_id": request.request.batch_id, "partition": request.request.partition, "disposition": disposition, "stage_order": stage_order, "plan_order": plan_vec, "completed_order": completed_vec, "compensation_order": compensation_order, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "checkpoint_seq": evidence.checkpoint_seq, "queue_digest": evidence.queue_digest, "checkpoint_digest": checkpoint_digest, "workflow_digest": workflow_digest, "approval_reference": request.approval_reference, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "workflow_id": request.workflow_id, "batch_id": request.request.batch_id, "partition": request.request.partition, "disposition": disposition, "stage_order": stage_order, "plan_order": plan_vec, "completed_order": completed_vec, "compensation_order": compensation_order, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "checkpoint_seq": evidence.checkpoint_seq, "queue_digest": evidence.queue_digest, "checkpoint_digest": checkpoint_digest, "workflow_digest": workflow_digest, "approval_reference": request.approval_reference, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!(
             "brain-high-throughput-evidence-workflow:{}",
             request.workflow_id
         ),
-        "application/vnd.aurora.high-throughput-research-workflow-receipt+json",
+        WORKFLOW_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -272,18 +404,9 @@ pub fn compile_high_throughput_evidence_workflow(
         batch_id: request.request.batch_id.clone(),
         partition: request.request.partition.clone(),
         disposition,
-        stage_order: payload
-            .get("stage_order")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default(),
-        plan_order: payload
-            .get("plan_order")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default(),
-        completed_order: payload
-            .get("completed_order")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default(),
+        stage_order,
+        plan_order: plan_vec.clone(),
+        completed_order: completed_vec.clone(),
         blocked_order: evidence.blocked_order.clone(),
         compensation_order: compensation_order.into_iter().collect(),
         candidate_order: evidence.candidate_order.clone(),
@@ -312,6 +435,39 @@ pub fn compile_high_throughput_evidence_workflow(
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn receipt_payload(receipt: &HighThroughputWorkflowReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "workflow_id": receipt.workflow_id,
+        "batch_id": receipt.batch_id,
+        "partition": receipt.partition,
+        "disposition": receipt.disposition,
+        "stage_order": receipt.stage_order,
+        "plan_order": receipt.plan_order,
+        "completed_order": receipt.completed_order,
+        "compensation_order": receipt.compensation_order,
+        "candidate_order": receipt.candidate_order,
+        "admitted_order": receipt.admitted_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "checkpoint_seq": receipt.checkpoint_seq,
+        "queue_digest": receipt.queue_digest,
+        "checkpoint_digest": receipt.checkpoint_digest,
+        "workflow_digest": receipt.workflow_digest,
+        "approval_reference": receipt.approval_reference,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 fn validate_request(

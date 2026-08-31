@@ -41,6 +41,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::DesignError;
 
+const MAX_DESIGN_TEXT_BYTES: usize = 256;
+const MAX_FACTORS: usize = 256;
+const MAX_ARMS: usize = 4096;
+
 /// One arm of a factorial design: a complete assignment of every declared factor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Arm {
@@ -72,7 +76,7 @@ impl Arm {
 }
 
 /// A pair of arms differing in exactly one factor.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Contrast {
     pub factor: String,
     pub baseline: String,
@@ -82,13 +86,39 @@ pub struct Contrast {
 }
 
 /// A declared factor set and the arms that populate it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FactorialDesign {
     /// The decision cell all arms resume from. 26.18 step 1: "freeze world and decision state".
     pub cell_id: String,
     factors: BTreeSet<String>,
     arms: Vec<Arm>,
     baseline: String,
+}
+
+#[derive(Deserialize)]
+struct FactorialDesignWire {
+    cell_id: String,
+    factors: BTreeSet<String>,
+    arms: Vec<Arm>,
+    baseline: String,
+}
+
+impl<'de> Deserialize<'de> for FactorialDesign {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = FactorialDesignWire::deserialize(deserializer)?;
+        let mut design =
+            FactorialDesign::declare(wire.cell_id, wire.factors.into_iter(), wire.baseline);
+        for arm in wire.arms {
+            design.add(arm).map_err(serde::de::Error::custom)?;
+        }
+        if !design.arms.is_empty() {
+            design.validate().map_err(serde::de::Error::custom)?;
+        }
+        Ok(design)
+    }
 }
 
 impl FactorialDesign {
@@ -113,6 +143,11 @@ impl FactorialDesign {
 
     /// Add an arm, refusing an incomplete or duplicated assignment.
     pub fn add(&mut self, arm: Arm) -> Result<(), DesignError> {
+        self.validate_metadata()?;
+        if self.arms.len() >= MAX_ARMS {
+            return Err(DesignError::TooManyArms(MAX_ARMS));
+        }
+        validate_arm_identity(&arm)?;
         if self.arms.iter().any(|a| a.id == arm.id) {
             return Err(DesignError::DuplicateArm(arm.id));
         }
@@ -144,11 +179,43 @@ impl FactorialDesign {
 
     /// Check the design is usable at all.
     pub fn validate(&self) -> Result<(), DesignError> {
+        self.validate_metadata()?;
         if self.arms.len() < 2 {
             return Err(DesignError::TooFewArms);
         }
         if !self.arms.iter().any(|a| a.id == self.baseline) {
             return Err(DesignError::DuplicateArm(self.baseline.clone()));
+        }
+        let mut ids = BTreeSet::new();
+        let mut cells: Vec<(BTreeMap<String, String>, String)> = Vec::new();
+        for arm in &self.arms {
+            validate_arm_identity(arm)?;
+            if !ids.insert(&arm.id) {
+                return Err(DesignError::DuplicateArm(arm.id.clone()));
+            }
+            for factor in &self.factors {
+                if !arm.levels.contains_key(factor) {
+                    return Err(DesignError::UnassignedFactor {
+                        arm: arm.id.clone(),
+                        factor: factor.clone(),
+                    });
+                }
+            }
+            for factor in arm.levels.keys() {
+                if !self.factors.contains(factor) {
+                    return Err(DesignError::UndeclaredFactor {
+                        arm: arm.id.clone(),
+                        factor: factor.clone(),
+                    });
+                }
+            }
+            if let Some(other) = cells.iter().find(|(levels, _)| levels == &arm.levels) {
+                return Err(DesignError::DuplicateCell {
+                    arm: arm.id.clone(),
+                    other: other.1.clone(),
+                });
+            }
+            cells.push((arm.levels.clone(), arm.id.clone()));
         }
         Ok(())
     }
@@ -213,8 +280,10 @@ impl FactorialDesign {
     /// Empty means estimable. A non-empty list is the actionable form of the refusal: it says what
     /// to run, rather than only that the question cannot be answered.
     pub fn missing_for_interaction(&self, a: &str, b: &str) -> Vec<(String, String)> {
-        let levels_a: BTreeSet<&String> = self.arms.iter().filter_map(|x| x.levels.get(a)).collect();
-        let levels_b: BTreeSet<&String> = self.arms.iter().filter_map(|x| x.levels.get(b)).collect();
+        let levels_a: BTreeSet<&String> =
+            self.arms.iter().filter_map(|x| x.levels.get(a)).collect();
+        let levels_b: BTreeSet<&String> =
+            self.arms.iter().filter_map(|x| x.levels.get(b)).collect();
         if levels_a.len() < 2 || levels_b.len() < 2 {
             return Vec::new();
         }
@@ -242,8 +311,18 @@ impl FactorialDesign {
         self.validate()?;
         let mut out = Vec::new();
         for contrast in self.single_factor_contrasts() {
-            let base = self.arm(&contrast.baseline).expect("contrast names known arms");
-            let var = self.arm(&contrast.variant).expect("contrast names known arms");
+            let Some(base) = self.arm(&contrast.baseline) else {
+                return Err(DesignError::InvalidDesign {
+                    field: "contrast.baseline".into(),
+                    detail: format!("arm `{}` is not present", contrast.baseline),
+                });
+            };
+            let Some(var) = self.arm(&contrast.variant) else {
+                return Err(DesignError::InvalidDesign {
+                    field: "contrast.variant".into(),
+                    detail: format!("arm `{}` is not present", contrast.variant),
+                });
+            };
             let mut fork = MatchedFork::new(
                 format!("{}::{}", self.cell_id, contrast.factor),
                 &self.cell_id,
@@ -299,4 +378,77 @@ impl FactorialDesign {
             .map(|a| a.id.as_str())
             .collect()
     }
+
+    fn validate_metadata(&self) -> Result<(), DesignError> {
+        validate_design_text(&self.cell_id, "cell_id").map_err(|detail| {
+            DesignError::InvalidDesign {
+                field: "cell_id".into(),
+                detail,
+            }
+        })?;
+        validate_design_text(&self.baseline, "baseline").map_err(|detail| {
+            DesignError::InvalidDesign {
+                field: "baseline".into(),
+                detail,
+            }
+        })?;
+        if self.factors.is_empty() {
+            return Err(DesignError::InvalidDesign {
+                field: "factors".into(),
+                detail: "at least one factor is required".into(),
+            });
+        }
+        if self.factors.len() > MAX_FACTORS {
+            return Err(DesignError::TooManyFactors(MAX_FACTORS));
+        }
+        for factor in &self.factors {
+            validate_design_text(factor, "factor").map_err(|detail| {
+                DesignError::InvalidDesign {
+                    field: "factor".into(),
+                    detail,
+                }
+            })?;
+        }
+        if self.arms.len() > MAX_ARMS {
+            return Err(DesignError::TooManyArms(MAX_ARMS));
+        }
+        Ok(())
+    }
+}
+
+fn validate_arm_identity(arm: &Arm) -> Result<(), DesignError> {
+    validate_design_text(&arm.id, "arm id").map_err(|detail| DesignError::InvalidArm {
+        arm: arm.id.clone(),
+        detail,
+    })?;
+    if arm.levels.is_empty() {
+        return Err(DesignError::InvalidArm {
+            arm: arm.id.clone(),
+            detail: "an arm must assign at least one factor".into(),
+        });
+    }
+    for (factor, level) in &arm.levels {
+        validate_design_text(factor, "factor name").map_err(|detail| DesignError::InvalidArm {
+            arm: arm.id.clone(),
+            detail,
+        })?;
+        validate_design_text(level, "factor level").map_err(|detail| DesignError::InvalidArm {
+            arm: arm.id.clone(),
+            detail,
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_design_text(value: &str, field: &str) -> Result<(), String> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_DESIGN_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(format!(
+            "{field} must be bounded, trimmed, and control-free"
+        ));
+    }
+    Ok(())
 }

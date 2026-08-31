@@ -26,6 +26,8 @@ pub const ACTION_ORDER: [&str; 4] = [
     "control:authorize",
     "control:publish",
 ];
+const CONTROL_CONTENT_TYPE: &str = "application/vnd.aurora.multimodal-retrieval-control-plane+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MultimodalRetrievalControlPlaneRequest {
@@ -90,7 +92,6 @@ impl MultimodalRetrievalControlPlaneReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.plane_id.trim().is_empty()
             || self.session_id.trim().is_empty()
@@ -137,37 +138,66 @@ impl MultimodalRetrievalControlPlaneReceipt {
                 ));
             }
         }
-        if self
-            .ranked_order
-            .iter()
-            .chain(self.qualified_order.iter())
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
+        if self.completed_action_order.len() > self.action_order.len()
+            || self.completed_action_order != self.action_order[..self.completed_action_order.len()]
+            || self.blocked_action_order != self.action_order[self.completed_action_order.len()..]
         {
             return Err(MultimodalRetrievalControlPlaneError::Invalid(
-                "multimodal control-plane evidence state is not covered by candidates".into(),
+                "multimodal control-plane actions are not a canonical prefix and suffix".into(),
             ));
         }
-        for values in [
-            &self.study_order,
-            &self.modality_order,
-            &self.compensation_order,
-            &self.candidate_order,
-            &self.ranked_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        validate_sorted_unique(&self.study_order, "study_order")?;
+        validate_sorted_unique(&self.modality_order, "modality_order")?;
+        validate_sorted_unique(&self.compensation_order, "compensation_order")?;
+        validate_sorted_unique(&self.candidate_order, "candidate_order")?;
+        for (values, field) in [
+            (&self.ranked_order, "ranked_order"),
+            (&self.qualified_order, "qualified_order"),
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(MultimodalRetrievalControlPlaneError::Invalid(
-                    "multimodal control-plane ordering is not canonical".into(),
-                ));
-            }
+            validate_unique(values, field)?;
+        }
+        for (values, field) in [
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
+        let candidate_values = self
+            .candidate_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let ranked_values = self.ranked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let qualified_values = self
+            .qualified_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let blocked_values = self.blocked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let unknown_values = self.unknown_order.iter().cloned().collect::<BTreeSet<_>>();
+        if ranked_values != candidate_values {
+            return Err(MultimodalRetrievalControlPlaneError::Invalid(
+                "multimodal control-plane ranked order must contain every candidate exactly once"
+                    .into(),
+            ));
+        }
+        if !qualified_values.is_subset(&candidate_values)
+            || !blocked_values.is_subset(&candidate_values)
+            || !unknown_values.is_subset(&blocked_values)
+            || !qualified_values.is_disjoint(&blocked_values)
+            || qualified_values
+                .union(&blocked_values)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_values
+        {
+            return Err(MultimodalRetrievalControlPlaneError::Invalid(
+                "multimodal control-plane candidate states must partition candidates".into(),
+            ));
         }
         for digest in [
             &self.comparability_digest,
@@ -189,8 +219,75 @@ impl MultimodalRetrievalControlPlaneReceipt {
                 "multimodal control-plane effect is outside local management gate".into(),
             ));
         }
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            SynthesisDisposition::Qualified | SynthesisDisposition::Partial
+        ) {
+            vec![format!(
+                "manage:local-multimodal-retrieval-control:{}",
+                self.plane_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(MultimodalRetrievalControlPlaneError::Invalid(
+                "multimodal control-plane effects do not match disposition".into(),
+            ));
+        }
+        if !self.raw_data_local
+            && (self.disposition != SynthesisDisposition::Blocked
+                || !self
+                    .omissions
+                    .iter()
+                    .any(|item| item == "control:raw-data-locality-failed"))
+        {
+            return Err(MultimodalRetrievalControlPlaneError::Invalid(
+                "non-local control planes must be blocked and retain locality evidence".into(),
+            ));
+        }
+        let expected_control_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "plane_id": self.plane_id,
+            "session_id": self.session_id,
+            "study_order": self.study_order,
+            "modality_order": self.modality_order,
+            "action_order": self.action_order,
+            "completed": self.completed_action_order,
+            "blocked": self.blocked_action_order,
+            "compensation": self.compensation_order,
+            "candidate_order": self.candidate_order,
+            "ranked_order": self.ranked_order,
+            "qualified_order": self.qualified_order,
+            "blocked_order": self.blocked_order,
+            "unknown_order": self.unknown_order,
+            "comparability_digest": self.comparability_digest,
+            "synthesis_digest": self.synthesis_digest,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| MultimodalRetrievalControlPlaneError::Artifact(error.to_string()))?;
+        if self.control_digest != expected_control_digest {
+            return Err(MultimodalRetrievalControlPlaneError::Invalid(
+                "multimodal control-plane digest is not bound to control state".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-multimodal-retrieval-control-plane:{}", self.plane_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != CONTROL_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(MultimodalRetrievalControlPlaneError::Invalid(
+                "multimodal control-plane artifact identity or provenance is inconsistent".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| MultimodalRetrievalControlPlaneError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| MultimodalRetrievalControlPlaneError::Artifact(error.to_string()))
     }
 
@@ -228,9 +325,14 @@ pub fn multimodal_retrieval_control_plane_manifest() -> CapabilityManifest {
 pub fn operate_multimodal_retrieval_control_plane(
     request: &MultimodalRetrievalControlPlaneRequest,
 ) -> Result<MultimodalRetrievalControlPlaneReceipt, MultimodalRetrievalControlPlaneError> {
-    if request.plane_id.trim().is_empty()
-        || request.session_id.trim().is_empty()
-        || request.boundary != PRECLINICAL_BOUNDARY
+    for (value, field) in [
+        (&request.plane_id, "plane_id"),
+        (&request.session_id, "session_id"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    if request.boundary != PRECLINICAL_BOUNDARY
         || request.request.boundary != PRECLINICAL_BOUNDARY
         || request.requested_action_order != ACTION_ORDER
         || request.budget_units == 0
@@ -242,10 +344,11 @@ pub fn operate_multimodal_retrieval_control_plane(
     }
     let synthesis = synthesize_multimodal_retrieval(&request.request)
         .map_err(|error| MultimodalRetrievalControlPlaneError::Engine(error.to_string()))?;
+    let locality_gate = request.raw_data_local && request.request.raw_data_local;
     let gate = request.policy_allow
         && request.protected_closure
-        && request.raw_data_local
-        && request.budget_units >= ACTION_ORDER.len() as u32;
+        && locality_gate
+        && u64::from(request.budget_units) >= u64::try_from(ACTION_ORDER.len()).unwrap_or(u64::MAX);
     let disposition = if gate {
         synthesis.disposition
     } else {
@@ -290,25 +393,34 @@ pub fn operate_multimodal_retrieval_control_plane(
         omissions.insert("control:protected-closure-incomplete".into());
         compensation.insert("compensate:retain-closure-gap".into());
     }
-    if !request.raw_data_local {
+    if !locality_gate {
         omissions.insert("control:raw-data-locality-failed".into());
         compensation.insert("compensate:retain-locality-failure".into());
     }
     if disposition != SynthesisDisposition::Qualified {
         compensation.insert("compensate:retain-unresolved-multimodal-retrieval".into());
     }
-    let control_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "plane_id": request.plane_id, "session_id": request.session_id, "study_order": synthesis.study_order, "modality_order": synthesis.modality_order, "action_order": ACTION_ORDER, "completed": completed_action_order, "blocked": blocked_action_order, "compensation": compensation, "comparability_digest": synthesis.comparability_digest, "synthesis_digest": synthesis.synthesis_digest, "replay_identity": request.request.replay_identity})).map_err(|error| MultimodalRetrievalControlPlaneError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "plane_id": request.plane_id, "session_id": request.session_id, "study_order": synthesis.study_order, "modality_order": synthesis.modality_order, "disposition": disposition, "action_order": ACTION_ORDER, "completed_action_order": completed_action_order, "blocked_action_order": blocked_action_order, "compensation_order": compensation, "comparability_digest": synthesis.comparability_digest, "synthesis_digest": synthesis.synthesis_digest, "control_digest": control_digest, "replay_identity": request.request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
-    let artifact = TypedResearchArtifact::from_payload(
-        format!(
-            "brain-multimodal-retrieval-control-plane:{}",
-            request.plane_id
-        ),
-        "application/vnd.aurora.multimodal-retrieval-control-plane+json",
-        &payload,
-        Vec::new(),
-        Vec::new(),
-    )
+    let raw_data_local = true;
+    let control_digest = ContentHash::of_value(&json!({
+        "feature_id": FEATURE_ID,
+        "plane_id": request.plane_id,
+        "session_id": request.session_id,
+        "study_order": synthesis.study_order,
+        "modality_order": synthesis.modality_order,
+        "action_order": ACTION_ORDER,
+        "completed": completed_action_order,
+        "blocked": blocked_action_order,
+        "compensation": compensation,
+        "candidate_order": synthesis.candidate_order,
+        "ranked_order": synthesis.ranked_order,
+        "qualified_order": synthesis.qualified_order,
+        "blocked_order": synthesis.blocked_order,
+        "unknown_order": synthesis.unknown_order,
+        "comparability_digest": synthesis.comparability_digest,
+        "synthesis_digest": synthesis.synthesis_digest,
+        "replay_identity": request.request.replay_identity,
+        "raw_data_local": raw_data_local,
+    }))
     .map_err(|error| MultimodalRetrievalControlPlaneError::Artifact(error.to_string()))?;
     let effect_receipts = if matches!(
         disposition,
@@ -321,6 +433,48 @@ pub fn operate_multimodal_retrieval_control_plane(
     } else {
         vec!["block:unsafe-release".into()]
     };
+    let payload = json!({
+        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "feature_id": FEATURE_ID,
+        "request_id": request.request.request_id,
+        "plane_id": request.plane_id,
+        "session_id": request.session_id,
+        "study_order": synthesis.study_order,
+        "modality_order": synthesis.modality_order,
+        "disposition": disposition,
+        "action_order": ACTION_ORDER,
+        "completed_action_order": completed_action_order,
+        "blocked_action_order": blocked_action_order,
+        "compensation_order": compensation,
+        "candidate_order": synthesis.candidate_order,
+        "ranked_order": synthesis.ranked_order,
+        "qualified_order": synthesis.qualified_order,
+        "blocked_order": synthesis.blocked_order,
+        "unknown_order": synthesis.unknown_order,
+        "comparability_digest": synthesis.comparability_digest,
+        "synthesis_digest": synthesis.synthesis_digest,
+        "control_digest": control_digest,
+        "replay_identity": request.request.replay_identity,
+        "budget_units": request.budget_units,
+        "omissions": omissions,
+        "uncertainty": uncertainty,
+        "negative_evidence": negative,
+        "effect_receipts": effect_receipts,
+        "raw_data_local": raw_data_local,
+        "boundary": PRECLINICAL_BOUNDARY,
+    });
+    let artifact = TypedResearchArtifact::from_payload(
+        format!(
+            "brain-multimodal-retrieval-control-plane:{}",
+            request.plane_id
+        ),
+        CONTROL_CONTENT_TYPE,
+        &payload,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|error| MultimodalRetrievalControlPlaneError::Artifact(error.to_string()))?;
     let receipt = MultimodalRetrievalControlPlaneReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -350,11 +504,87 @@ pub fn operate_multimodal_retrieval_control_plane(
         negative_evidence: negative.into_iter().collect(),
         effect_receipts,
         artifact,
-        raw_data_local: true,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), MultimodalRetrievalControlPlaneError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(MultimodalRetrievalControlPlaneError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), MultimodalRetrievalControlPlaneError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(MultimodalRetrievalControlPlaneError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), MultimodalRetrievalControlPlaneError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(MultimodalRetrievalControlPlaneError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &MultimodalRetrievalControlPlaneReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "plane_id": receipt.plane_id,
+        "session_id": receipt.session_id,
+        "study_order": receipt.study_order,
+        "modality_order": receipt.modality_order,
+        "disposition": receipt.disposition,
+        "action_order": receipt.action_order,
+        "completed_action_order": receipt.completed_action_order,
+        "blocked_action_order": receipt.blocked_action_order,
+        "compensation_order": receipt.compensation_order,
+        "candidate_order": receipt.candidate_order,
+        "ranked_order": receipt.ranked_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "comparability_digest": receipt.comparability_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "control_digest": receipt.control_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -427,6 +657,34 @@ mod tests {
         assert_eq!(receipt.disposition, SynthesisDisposition::Blocked);
         assert!(!receipt.compensation_order.is_empty());
     }
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut value = request();
+        value.request.raw_data_local = false;
+        let receipt = operate_multimodal_retrieval_control_plane(&value).unwrap();
+        assert_eq!(receipt.disposition, SynthesisDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "control:raw-data-locality-failed"));
+        assert!(receipt.validate().is_ok());
+    }
+
+    #[test]
+    fn control_artifact_payload_is_bound() {
+        let mut receipt = operate_multimodal_retrieval_control_plane(&request()).unwrap();
+        receipt.session_id = "session:tampered".into();
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn case_mismatched_candidate_identity_is_rejected() {
+        let mut receipt = operate_multimodal_retrieval_control_plane(&request()).unwrap();
+        receipt.ranked_order[0] = receipt.ranked_order[0].to_ascii_uppercase();
+        assert!(receipt.validate().is_err());
+    }
+
     #[test]
     fn digest_is_stable() {
         let receipt = operate_multimodal_retrieval_control_plane(&request()).unwrap();

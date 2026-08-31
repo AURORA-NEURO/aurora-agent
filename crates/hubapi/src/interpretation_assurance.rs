@@ -159,26 +159,32 @@ impl MultimodalInterpretationAssuranceReceipt {
             ));
         }
         if self.support_order.len() != self.ranked_order.len()
+            || self.support_order.iter().any(|support| *support > 1_000)
+            || self.ranked_order.windows(2).any(|pair| pair[0] == pair[1])
             || self
                 .admitted_order
-                .iter()
-                .any(|value| !self.ranked_order.contains(value))
-            || self
-                .blocked_order
-                .iter()
-                .any(|value| !self.ranked_order.contains(value))
-            || self
-                .unknown_order
-                .iter()
-                .any(|value| !self.ranked_order.contains(value))
+                .windows(2)
+                .any(|pair| pair[0] == pair[1])
         {
             return Err(InterpretationAssuranceError::Invalid(
                 "support or disposition linkage is incomplete".into(),
             ));
         }
+        let ranked = self.ranked_order.iter().collect::<BTreeSet<_>>();
+        let admitted = self.admitted_order.iter().collect::<BTreeSet<_>>();
+        let blocked = self.blocked_order.iter().collect::<BTreeSet<_>>();
+        let unknown = self.unknown_order.iter().collect::<BTreeSet<_>>();
+        let classified = admitted.union(&blocked).collect::<BTreeSet<_>>();
+        if admitted.intersection(&blocked).next().is_some()
+            || classified.iter().any(|id| !ranked.contains(*id))
+            || ranked.iter().any(|id| !classified.contains(id))
+            || unknown.iter().any(|id| !blocked.contains(id))
+        {
+            return Err(InterpretationAssuranceError::Invalid(
+                "interpretation dispositions do not partition the ranking".into(),
+            ));
+        }
         for values in [
-            &self.ranked_order,
-            &self.admitted_order,
             &self.blocked_order,
             &self.unknown_order,
             &self.result_order,
@@ -218,8 +224,68 @@ impl MultimodalInterpretationAssuranceReceipt {
                 "effect is outside the interpretation release gate".into(),
             ));
         }
+        let expected_effects = if self.admitted_order.is_empty() {
+            vec!["block:unsafe-release".to_string()]
+        } else {
+            vec![format!(
+                "evaluate:interpretation-assurance:{}",
+                self.request_id
+            )]
+        };
+        if self.effect_receipts != expected_effects {
+            return Err(InterpretationAssuranceError::Invalid(
+                "interpretation effects do not match admission state".into(),
+            ));
+        }
+        if self.artifact.artifact_id
+            != format!("multimodal-interpretation-assurance:{}", self.request_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.multimodal-interpretation-assurance+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(InterpretationAssuranceError::Artifact(
+                "interpretation artifact identity or provenance is invalid".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| InterpretationAssuranceError::Artifact(error.to_string()))?;
+        let payload = json!({
+            "schema_version": self.schema_version,
+            "contract_version": self.contract_version,
+            "feature_id": self.feature_id,
+            "request_id": self.request_id,
+            "workflow_id": self.workflow_id,
+            "objective_id": self.objective_id,
+            "scope": self.scope,
+            "disposition": self.disposition,
+            "ranked_order": self.ranked_order,
+            "admitted_order": self.admitted_order,
+            "blocked_order": self.blocked_order,
+            "unknown_order": self.unknown_order,
+            "result_order": self.result_order,
+            "visualization_order": self.visualization_order,
+            "study_order": self.study_order,
+            "modality_order": self.modality_order,
+            "support_order": self.support_order,
+            "semantic_order": self.semantic_order,
+            "artifact_order": self.artifact_order,
+            "evidence_order": self.evidence_order,
+            "provenance_order": self.provenance_order,
+            "comparability_order": self.comparability_order,
+            "baseline_order": self.baseline_order,
+            "omissions": self.omissions,
+            "uncertainty": self.uncertainty,
+            "negative_evidence": self.negative_evidence,
+            "replay_identity": self.replay_identity,
+            "benchmark_digest": self.benchmark_digest,
+            "effect_receipts": self.effect_receipts,
+            "raw_data_local": self.raw_data_local,
+            "boundary": self.boundary,
+        });
+        self.artifact
+            .verify_payload(&payload)
             .map_err(|error| InterpretationAssuranceError::Artifact(error.to_string()))
     }
 
@@ -343,13 +409,22 @@ pub fn assure_multimodal_interpretations(
     let mut negative = BTreeSet::new();
     let mut spent = 0_u64;
     for candidate in &candidates {
-        let budget_cost = (candidate.interpretation_id.len()
-            + candidate.result_id.len()
-            + candidate.visualization_id.len()
-            + candidate.study_ids.len()
-            + candidate.modality_ids.len()) as u64
-            + 1;
-        let budget_ok = budget_cost <= request.budget.saturating_sub(spent);
+        let budget_cost = candidate
+            .interpretation_id
+            .len()
+            .checked_add(candidate.result_id.len())
+            .and_then(|total| total.checked_add(candidate.visualization_id.len()))
+            .and_then(|total| total.checked_add(candidate.study_ids.len()))
+            .and_then(|total| total.checked_add(candidate.modality_ids.len()))
+            .and_then(|total| u64::try_from(total).ok())
+            .and_then(|total| total.checked_add(1))
+            .ok_or_else(|| {
+                InterpretationAssuranceError::Invalid(
+                    "interpretation candidate cost exceeds the representable budget range".into(),
+                )
+            })?;
+        let next_spent = spent.checked_add(budget_cost);
+        let budget_ok = next_spent.is_some_and(|total| total <= request.budget);
         let has_modalities = request
             .required_modality_ids
             .iter()
@@ -379,7 +454,11 @@ pub fn assure_multimodal_interpretations(
             && complete
             && admitted.len() < request.max_admissions;
         if admitted_now {
-            spent = spent.saturating_add(budget_cost);
+            spent = next_spent.ok_or_else(|| {
+                InterpretationAssuranceError::Invalid(
+                    "interpretation budget accounting overflowed before admission".into(),
+                )
+            })?;
             admitted.push(candidate.interpretation_id.clone());
             results.insert(candidate.result_id.clone());
             visualizations.insert(candidate.visualization_id.clone());
@@ -549,6 +628,14 @@ pub fn assure_multimodal_interpretations(
     } else {
         InterpretationDisposition::Partial
     };
+    let effect_receipts = if admitted.is_empty() {
+        vec!["block:unsafe-release".into()]
+    } else {
+        vec![format!(
+            "evaluate:interpretation-assurance:{}",
+            request.request_id
+        )]
+    };
     let payload = json!({
         "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
         "contract_version": CONTRACT_VERSION,
@@ -562,13 +649,24 @@ pub fn assure_multimodal_interpretations(
         "admitted_order": admitted,
         "blocked_order": blocked,
         "unknown_order": unknown,
+        "result_order": results,
+        "visualization_order": visualizations,
         "study_order": studies,
         "modality_order": modalities,
+        "support_order": support_order,
+        "semantic_order": semantics,
+        "artifact_order": artifacts,
+        "evidence_order": evidence,
+        "provenance_order": provenance,
+        "comparability_order": comparability,
+        "baseline_order": baselines,
         "omissions": omissions,
         "uncertainty": uncertainty,
         "negative_evidence": negative,
         "replay_identity": request.replay_identity,
         "benchmark_digest": request.benchmark_digest,
+        "effect_receipts": effect_receipts,
+        "raw_data_local": true,
         "boundary": PRECLINICAL_BOUNDARY,
     });
     let artifact = TypedResearchArtifact::from_payload(
@@ -579,14 +677,6 @@ pub fn assure_multimodal_interpretations(
         Vec::new(),
     )
     .map_err(|error| InterpretationAssuranceError::Artifact(error.to_string()))?;
-    let effect_receipts = if admitted.is_empty() {
-        vec!["block:unsafe-release".into()]
-    } else {
-        vec![format!(
-            "evaluate:interpretation-assurance:{}",
-            request.request_id
-        )]
-    };
     let receipt = MultimodalInterpretationAssuranceReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -830,5 +920,18 @@ mod tests {
             candidate("interpretation:a", 800, InterpretationState::Supported),
         ]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn tampered_interpretation_artifact_is_rejected() {
+        let mut receipt = assure_multimodal_interpretations(&request(vec![candidate(
+            "interpretation:a",
+            900,
+            InterpretationState::Supported,
+        )]))
+        .unwrap();
+        receipt.result_order.push("result:tampered".into());
+        receipt.result_order.sort();
+        assert!(receipt.validate().is_err());
     }
 }

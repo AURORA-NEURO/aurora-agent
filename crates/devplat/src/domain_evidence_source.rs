@@ -9,7 +9,7 @@
 
 use bioprism_ids::ContentHash;
 use serde_json::{json, Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION: &str =
@@ -37,6 +37,26 @@ const LOCATOR_KINDS: &[&str] = &["uri", "path", "opaque"];
 const RETRIEVAL_MODES: &[&str] = &["reference_only", "metadata_only", "content"];
 const NETWORK_MODES: &[&str] = &["disabled", "caller_managed", "enabled"];
 const CACHE_MODES: &[&str] = &["no_cache", "content_addressed"];
+
+fn canonical_guarantees() -> Vec<String> {
+    let mut values = vec![
+        "the source locator, connector kind, retrieval mode, and policy are retained under an explicit domain scope".into(),
+        "embedded credentials, malformed digests, duplicate labels, and unbounded policy values are refused".into(),
+        "the plan is deterministic and can be used as a parent identity for later caller-controlled intake".into(),
+    ];
+    values.sort();
+    values
+}
+
+fn canonical_limitations() -> Vec<String> {
+    let mut values = vec![
+        "the core does not fetch, resolve credentials, follow redirects, or turn a locator into provenance".into(),
+        "locator and availability are caller assertions and do not prove store durability or accessibility".into(),
+        "payload identity does not establish provider authenticity, scientific, clinical, provenance, or release validity".into(),
+    ];
+    values.sort();
+    values
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DomainEvidenceSourcePlanError {
@@ -117,11 +137,8 @@ pub fn plan_domain_evidence_source(
         "readiness_claimed": false,
         "execution": "not_started",
         "retrieval_status": "not_started",
-        "guarantees": [
-            "the source locator, connector kind, retrieval mode, and policy are retained under an explicit domain scope",
-            "embedded credentials, malformed digests, duplicate labels, and unbounded policy values are refused",
-            "the plan is deterministic and can be used as a parent identity for later caller-controlled intake"
-        ],
+        "guarantees": canonical_guarantees(),
+        "limitations": canonical_limitations(),
         "does_not_claim": does_not_claim,
     });
     let digest = digest_without_field(&result, "plan_digest")?;
@@ -138,6 +155,36 @@ pub fn validate_domain_evidence_source_plan(
     let object = plan
         .as_object()
         .ok_or(DomainEvidenceSourcePlanError::NotObject)?;
+    let known_fields = [
+        "schema",
+        "workflow",
+        "group_id",
+        "domains",
+        "subject_id",
+        "source_tool",
+        "connector_kind",
+        "locator_kind",
+        "locator",
+        "retrieval_mode",
+        "expected_content_digest",
+        "parent_digests",
+        "retrieval_policy",
+        "plan_digest",
+        "readiness_claimed",
+        "execution",
+        "retrieval_status",
+        "guarantees",
+        "limitations",
+        "does_not_claim",
+    ];
+    if object
+        .keys()
+        .any(|field| !known_fields.contains(&field.as_str()))
+    {
+        return Err(DomainEvidenceSourcePlanError::InvalidField(
+            "unknown field".into(),
+        ));
+    }
     exact_text(object, "schema", DOMAIN_EVIDENCE_SOURCE_PLAN_SCHEMA_VERSION)?;
     exact_text(object, "workflow", DOMAIN_EVIDENCE_SOURCE_PLAN_WORKFLOW)?;
     required_text(object, "group_id")?;
@@ -145,6 +192,11 @@ pub fn validate_domain_evidence_source_plan(
     if domains.is_empty() {
         return Err(DomainEvidenceSourcePlanError::InvalidField(
             "domains".into(),
+        ));
+    }
+    if object.get("domains") != Some(&json!(domains)) {
+        return Err(DomainEvidenceSourcePlanError::InvalidField(
+            "domains are not in canonical order".into(),
         ));
     }
     required_text(object, "subject_id")?;
@@ -159,17 +211,32 @@ pub fn validate_domain_evidence_source_plan(
     validate_locator(&locator)?;
     choice(object, "retrieval_mode", RETRIEVAL_MODES)?;
     let _ = optional_digest(object, "expected_content_digest")?;
-    let _ = digest_set(
+    let parent_digests = digest_set(
         object,
         "parent_digests",
         MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_PARENTS,
     )?;
-    normalize_policy(object.get("retrieval_policy"))?;
-    let _ = required_text_set(
+    if object.get("parent_digests") != Some(&json!(parent_digests)) {
+        return Err(DomainEvidenceSourcePlanError::InvalidField(
+            "parent_digests are not in canonical order".into(),
+        ));
+    }
+    let retrieval_policy = normalize_policy(object.get("retrieval_policy"))?;
+    if object.get("retrieval_policy") != Some(&retrieval_policy) {
+        return Err(DomainEvidenceSourcePlanError::InvalidField(
+            "retrieval_policy is not canonical".into(),
+        ));
+    }
+    let does_not_claim = required_text_set(
         object,
         "does_not_claim",
         MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_NON_CLAIMS,
     )?;
+    if object.get("does_not_claim") != Some(&json!(does_not_claim)) {
+        return Err(DomainEvidenceSourcePlanError::InvalidField(
+            "does_not_claim is not in canonical order".into(),
+        ));
+    }
     if object.get("readiness_claimed") != Some(&Value::Bool(false)) {
         return Err(DomainEvidenceSourcePlanError::InvalidField(
             "readiness_claimed".into(),
@@ -184,13 +251,19 @@ pub fn validate_domain_evidence_source_plan(
             "plan_digest does not match canonical plan".into(),
         ));
     }
-    if object
-        .get("guarantees")
-        .and_then(Value::as_array)
-        .is_none_or(|values| values.is_empty())
+    let guarantees = required_text_set(object, "guarantees", 16)?;
+    if guarantees != canonical_guarantees() || object.get("guarantees") != Some(&json!(guarantees))
     {
         return Err(DomainEvidenceSourcePlanError::InvalidField(
-            "guarantees".into(),
+            "guarantees are not canonical".into(),
+        ));
+    }
+    let limitations = required_text_set(object, "limitations", 16)?;
+    if limitations != canonical_limitations()
+        || object.get("limitations") != Some(&json!(limitations))
+    {
+        return Err(DomainEvidenceSourcePlanError::InvalidField(
+            "limitations are not canonical".into(),
         ));
     }
     ensure_size(plan)
@@ -203,39 +276,63 @@ fn normalize_policy(value: Option<&Value>) -> Result<Value, DomainEvidenceSource
             DomainEvidenceSourcePlanError::InvalidField("retrieval_policy".into())
         })?,
     };
-    let network = object
-        .get("network")
-        .and_then(Value::as_str)
-        .unwrap_or("caller_managed");
+    let network = match object.get("network") {
+        None => "caller_managed",
+        Some(Value::String(value)) => value.as_str(),
+        Some(_) => {
+            return Err(DomainEvidenceSourcePlanError::InvalidField(
+                "retrieval_policy.network".into(),
+            ));
+        }
+    };
     if !NETWORK_MODES.contains(&network) {
         return Err(DomainEvidenceSourcePlanError::InvalidChoice {
             field: "retrieval_policy.network".into(),
             allowed: NETWORK_MODES.join(", "),
         });
     }
-    let max_bytes = object
-        .get("max_bytes")
-        .and_then(Value::as_u64)
-        .unwrap_or(2 * 1024 * 1024);
+    let max_bytes = match object.get("max_bytes") {
+        None => 2 * 1024 * 1024,
+        Some(Value::Number(value)) => value.as_u64().ok_or_else(|| {
+            DomainEvidenceSourcePlanError::InvalidField("retrieval_policy.max_bytes".into())
+        })?,
+        Some(_) => {
+            return Err(DomainEvidenceSourcePlanError::InvalidField(
+                "retrieval_policy.max_bytes".into(),
+            ));
+        }
+    };
     if !(1..=MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_BYTES_LIMIT).contains(&max_bytes) {
         return Err(DomainEvidenceSourcePlanError::InvalidField(
             "retrieval_policy.max_bytes".into(),
         ));
     }
-    let cache = object
-        .get("cache")
-        .and_then(Value::as_str)
-        .unwrap_or("content_addressed");
+    let cache = match object.get("cache") {
+        None => "content_addressed",
+        Some(Value::String(value)) => value.as_str(),
+        Some(_) => {
+            return Err(DomainEvidenceSourcePlanError::InvalidField(
+                "retrieval_policy.cache".into(),
+            ));
+        }
+    };
     if !CACHE_MODES.contains(&cache) {
         return Err(DomainEvidenceSourcePlanError::InvalidChoice {
             field: "retrieval_policy.cache".into(),
             allowed: CACHE_MODES.join(", "),
         });
     }
-    let timeout_ms = object
-        .get("timeout_ms")
-        .and_then(Value::as_u64)
-        .unwrap_or(5_000);
+    let timeout_ms = match object.get("timeout_ms") {
+        None => 5_000,
+        Some(Value::Number(value)) => value.as_u64().ok_or_else(|| {
+            DomainEvidenceSourcePlanError::InvalidField("retrieval_policy.timeout_ms".into())
+        })?,
+        Some(_) => {
+            return Err(DomainEvidenceSourcePlanError::InvalidField(
+                "retrieval_policy.timeout_ms".into(),
+            ));
+        }
+    };
     if !(1..=MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TIMEOUT_MS).contains(&timeout_ms) {
         return Err(DomainEvidenceSourcePlanError::InvalidField(
             "retrieval_policy.timeout_ms".into(),
@@ -282,15 +379,17 @@ fn text_set_value(
     for value in values {
         let host = value
             .as_str()
-            .map(str::trim)
-            .filter(|host| !host.is_empty())
+            .filter(|host| !host.trim().is_empty() && *host == host.trim())
             .ok_or_else(|| DomainEvidenceSourcePlanError::InvalidField(field.into()))?;
         if host.len() > MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TEXT_BYTES
+            || host.chars().any(char::is_control)
             || host.contains(['\r', '\n', '/', '?', '#', '@', ':', ' '])
         {
             return Err(DomainEvidenceSourcePlanError::InvalidField(field.into()));
         }
-        result.insert(host.trim_end_matches('.').to_ascii_lowercase());
+        if !result.insert(host.trim_end_matches('.').to_ascii_lowercase()) {
+            return Err(DomainEvidenceSourcePlanError::InvalidField(field.into()));
+        }
     }
     Ok(result.into_iter().collect())
 }
@@ -309,6 +408,9 @@ fn required_text(
             field: field.into(),
             maximum: MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TEXT_BYTES,
         });
+    }
+    if value.chars().any(char::is_control) || value != value.trim() {
+        return Err(DomainEvidenceSourcePlanError::InvalidField(field.into()));
     }
     Ok(value.to_string())
 }
@@ -383,6 +485,7 @@ fn required_text_set(
         });
     }
     let mut result = BTreeSet::new();
+    let mut identity_keys = BTreeMap::new();
     for value in values {
         let text = value
             .as_str()
@@ -394,7 +497,20 @@ fn required_text_set(
                 maximum: MAX_DOMAIN_EVIDENCE_SOURCE_PLAN_TEXT_BYTES,
             });
         }
-        result.insert(text.to_string());
+        if text.chars().any(char::is_control) || text != text.trim() {
+            return Err(DomainEvidenceSourcePlanError::InvalidField(field.into()));
+        }
+        let identity_key = text.to_ascii_lowercase();
+        if let Some(existing) = identity_keys.get(&identity_key) {
+            if existing != text {
+                return Err(DomainEvidenceSourcePlanError::InvalidField(field.into()));
+            }
+        } else {
+            identity_keys.insert(identity_key, text.to_string());
+        }
+        if !result.insert(text.to_string()) {
+            return Err(DomainEvidenceSourcePlanError::InvalidField(field.into()));
+        }
     }
     Ok(result.into_iter().collect())
 }
@@ -422,6 +538,15 @@ fn digest_set(
             .as_str()
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| DomainEvidenceSourcePlanError::InvalidField(field.into()))?;
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(DomainEvidenceSourcePlanError::InvalidDigest {
+                field: field.into(),
+            });
+        }
         ContentHash::parse(digest.to_string()).map_err(|_| {
             DomainEvidenceSourcePlanError::InvalidDigest {
                 field: field.into(),
@@ -443,6 +568,15 @@ fn optional_digest(
                 .as_str()
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| DomainEvidenceSourcePlanError::InvalidField(field.into()))?;
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(DomainEvidenceSourcePlanError::InvalidDigest {
+                    field: field.into(),
+                });
+            }
             ContentHash::parse(digest.to_string()).map_err(|_| {
                 DomainEvidenceSourcePlanError::InvalidDigest {
                     field: field.into(),
@@ -495,7 +629,7 @@ mod tests {
     fn request() -> Value {
         json!({
             "group_id": "biological_domains",
-            "domains": ["modalities", "modalities"],
+            "domains": ["modalities", "oncology"],
             "subject_id": "source-subject",
             "source_tool": "modality_catalog",
             "connector_kind": "literature",
@@ -541,6 +675,64 @@ mod tests {
         assert!(matches!(
             validate_domain_evidence_source_plan(&plan),
             Err(DomainEvidenceSourcePlanError::InvalidField(_))
+        ));
+    }
+
+    #[test]
+    fn validator_refuses_resealed_noncanonical_arrays_and_unknown_fields() {
+        let mut reordered = plan_domain_evidence_source(&request()).unwrap();
+        reordered["domains"] = json!(["oncology", "modalities"]);
+        reordered["plan_digest"] = json!(digest_without_field(&reordered, "plan_digest").unwrap());
+        assert!(matches!(
+            validate_domain_evidence_source_plan(&reordered),
+            Err(DomainEvidenceSourcePlanError::InvalidField(field))
+                if field.contains("canonical order")
+        ));
+
+        let mut unknown = plan_domain_evidence_source(&request()).unwrap();
+        unknown["unexpected"] = json!(true);
+        unknown["plan_digest"] = json!(digest_without_field(&unknown, "plan_digest").unwrap());
+        assert_eq!(
+            validate_domain_evidence_source_plan(&unknown).unwrap_err(),
+            DomainEvidenceSourcePlanError::InvalidField("unknown field".into())
+        );
+
+        let mut duplicate = request();
+        duplicate["domains"] = json!(["modalities", "modalities"]);
+        assert!(matches!(
+            plan_domain_evidence_source(&duplicate),
+            Err(DomainEvidenceSourcePlanError::InvalidField(field)) if field == "domains"
+        ));
+    }
+
+    #[test]
+    fn rejects_case_aliases_control_metadata_wrong_policy_types_and_uppercase_digests() {
+        let mut invalid = request();
+        invalid["domains"] = json!(["Modalities", "modalities"]);
+        assert!(matches!(
+            plan_domain_evidence_source(&invalid),
+            Err(DomainEvidenceSourcePlanError::InvalidField(field)) if field == "domains"
+        ));
+
+        let mut invalid = request();
+        invalid["group_id"] = json!("biological\n_domains");
+        assert!(matches!(
+            plan_domain_evidence_source(&invalid),
+            Err(DomainEvidenceSourcePlanError::InvalidField(field)) if field == "group_id"
+        ));
+
+        let mut invalid = request();
+        invalid["retrieval_policy"]["max_bytes"] = json!("4096");
+        assert!(matches!(
+            plan_domain_evidence_source(&invalid),
+            Err(DomainEvidenceSourcePlanError::InvalidField(field)) if field == "retrieval_policy.max_bytes"
+        ));
+
+        let mut invalid = request();
+        invalid["expected_content_digest"] = json!("A".repeat(64));
+        assert!(matches!(
+            plan_domain_evidence_source(&invalid),
+            Err(DomainEvidenceSourcePlanError::InvalidDigest { field }) if field == "expected_content_digest"
         ));
     }
 }

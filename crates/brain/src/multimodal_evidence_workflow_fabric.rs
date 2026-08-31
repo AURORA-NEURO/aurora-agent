@@ -225,13 +225,14 @@ pub fn compile_multimodal_evidence_workflow(
     } else {
         plan_order.insert("plan:publish-qualified-multimodal-artifact".into());
     }
-    let actionable = request.budget_units >= plan_order.len() as u32
+    let plan_count = u64::try_from(plan_order.len()).unwrap_or(u64::MAX);
+    let actionable = u64::from(request.budget_units) >= plan_count
         && request.approval_reference != ContentHash::of_bytes(&[])
         && request.policy_allow
         && request.protected_closure
         && request.raw_data_local
         && evidence.disposition != MultimodalEvidenceDisposition::Blocked;
-    if request.budget_units < plan_order.len() as u32 {
+    if u64::from(request.budget_units) < plan_count {
         omissions.insert("workflow:budget-exhausted".into());
     }
     if request.approval_reference == ContentHash::of_bytes(&[]) {

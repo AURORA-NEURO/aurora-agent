@@ -1117,10 +1117,10 @@ impl MissionPersistence {
             ]
         });
         let state_digest = mission_checkpoint_digest(&document)?;
-        document
-            .as_object_mut()
-            .expect("mission checkpoint document is an object")
-            .insert("state_digest".into(), Value::String(state_digest));
+        let Some(document_object) = document.as_object_mut() else {
+            return Err("mission checkpoint document is not an object".into());
+        };
+        document_object.insert("state_digest".into(), Value::String(state_digest));
         let bytes = serde_json::to_vec_pretty(&document)
             .map_err(|error| format!("mission state could not be serialized: {error}"))?;
         if bytes.len() > MAX_MISSION_STATE_FILE_BYTES {
@@ -2764,7 +2764,8 @@ impl ApiRouter {
             let missing_tool_count = group
                 .get("missing_tool_count")
                 .and_then(Value::as_u64)
-                .unwrap_or(0) as usize;
+                .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+                .unwrap_or(0);
             if missing_tool_count > 0 {
                 groups_with_gaps += 1;
             }
@@ -3033,7 +3034,8 @@ impl ApiRouter {
             let matching_artifact_records = artifact_evidence
                 .get("matching_record_count")
                 .and_then(Value::as_u64)
-                .unwrap_or(0) as usize;
+                .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+                .unwrap_or(0);
             if matching_artifact_records > 0 {
                 groups_with_artifact_evidence += 1;
                 artifact_evidence_records =
@@ -3052,7 +3054,8 @@ impl ApiRouter {
             let missing_tool_count = group
                 .get("missing_tool_count")
                 .and_then(Value::as_u64)
-                .unwrap_or(0) as usize;
+                .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
+                .unwrap_or(0);
             let mut observed_tools = BTreeSet::new();
             let mut completed_tools = BTreeSet::new();
             let mut refused_tools = BTreeSet::new();
@@ -4079,7 +4082,14 @@ impl ApiRouter {
             (Some(review_id), None) => events.events_for_review(after, limit, review_id),
             (None, Some(receipt_id)) => events.events_for_receipt(after, limit, receipt_id),
             (None, None) => events.events(after, limit),
-            (Some(_), Some(_)) => unreachable!("mutually exclusive event filters were checked"),
+            (Some(_), Some(_)) => {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "review_id and receipt_id are mutually exclusive event filters",
+                    "query",
+                )
+            }
         };
         match page {
             Ok(page) => HttpResponse::json(200, &json!({ "ok": true, "page": page })),
@@ -4125,7 +4135,14 @@ impl ApiRouter {
             (Some(review_id), None) => events.events_for_review(after, limit, review_id),
             (None, Some(receipt_id)) => events.events_for_receipt(after, limit, receipt_id),
             (None, None) => events.events(after, limit),
-            (Some(_), Some(_)) => unreachable!("mutually exclusive event filters were checked"),
+            (Some(_), Some(_)) => {
+                return self.error(
+                    400,
+                    "invalid_query",
+                    "review_id and receipt_id are mutually exclusive event filters",
+                    "query",
+                )
+            }
         };
         match page {
             Ok(page) => {
@@ -10017,10 +10034,10 @@ fn checkpoint_integrity_from_path(path: Option<&Path>, expected_schema: u64) -> 
         Some(object) => Value::Object(object.clone()),
         None => return Some(false),
     };
-    unsigned
-        .as_object_mut()
-        .expect("checkpoint object was cloned from an object")
-        .remove("state_digest");
+    let Some(unsigned_object) = unsigned.as_object_mut() else {
+        return Some(false);
+    };
+    unsigned_object.remove("state_digest");
     let Ok(computed) = mission_checkpoint_digest(&unsigned) else {
         return Some(false);
     };
@@ -10523,10 +10540,10 @@ fn trim_mission_snapshot_to_bound(missions: &mut [Value]) -> Result<(), String> 
             ]
         });
         let state_digest = mission_checkpoint_digest(&document)?;
-        document
-            .as_object_mut()
-            .expect("mission checkpoint document is an object")
-            .insert("state_digest".into(), Value::String(state_digest));
+        let Some(document_object) = document.as_object_mut() else {
+            return Err("mission checkpoint document is not an object".into());
+        };
+        document_object.insert("state_digest".into(), Value::String(state_digest));
         let size = serde_json::to_vec(&document)
             .map_err(|error| format!("mission state could not be sized: {error}"))?
             .len();
@@ -11623,8 +11640,8 @@ mod tests {
             "mission_plan_digest": "d".repeat(64),
             "source": "mission_report",
             "completion": {"status": "partial", "ready": false, "review_required": true},
-            "evidence": {"evidence_valid": true},
-            "integrity": {"valid": true, "finding_count": 1},
+            "evidence": {"evidence_valid": false},
+            "integrity": {"valid": true, "finding_count": 1, "findings": [{"code": "evidence_incomplete", "severity": "warning", "message": "evidence remains incomplete"}]},
             "execution": "not_started"
         });
         incomplete_reconciliation["reconciliation_digest"] =
@@ -11695,8 +11712,8 @@ mod tests {
                 "mission_plan_digest": "d".repeat(64),
                 "source": "mission_report",
                 "completion": {"status": "partial", "ready": false, "review_required": true},
-                "evidence": {"evidence_valid": true},
-                "integrity": {"valid": true, "finding_count": 1},
+                "evidence": {"evidence_valid": false},
+                "integrity": {"valid": true, "finding_count": 1, "findings": [{"code": "evidence_incomplete", "severity": "warning", "message": "evidence remains incomplete"}]},
                 "execution": "not_started"
             });
             record["reconciliation_digest"] =
@@ -13097,7 +13114,7 @@ mod tests {
             "source": "mission_report",
             "completion": {"status": "complete", "ready": true, "review_required": true},
             "evidence": {"evidence_valid": true},
-            "integrity": {"valid": true, "finding_count": 0},
+            "integrity": {"valid": true, "finding_count": 0, "findings": []},
             "execution": "not_started"
         });
         record["reconciliation_digest"] =
@@ -13410,7 +13427,12 @@ mod tests {
         assert_eq!(coverage.status, 200);
         let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
         assert_eq!(coverage["workflow"], "domain_report_coverage");
-        assert_eq!(coverage["group_count"], 30);
+        let group_count = coverage["group_count"].as_u64().unwrap();
+        assert_eq!(
+            group_count as usize,
+            coverage["groups"].as_array().unwrap().len()
+        );
+        assert!(group_count >= 30);
         assert_eq!(coverage["reported_group_count"], 1);
         assert!(coverage["groups"]
             .as_array()
@@ -14188,9 +14210,14 @@ mod tests {
         assert_eq!(coverage.status, 200);
         let coverage: Value = serde_json::from_slice(&coverage.body).unwrap();
         assert_eq!(coverage["workflow"], "domain_evidence_intake_coverage");
-        assert_eq!(coverage["group_count"], 30);
+        let group_count = coverage["group_count"].as_u64().unwrap();
+        assert_eq!(
+            group_count as usize,
+            coverage["groups"].as_array().unwrap().len()
+        );
+        assert!(group_count >= 30);
         assert_eq!(coverage["reported_group_count"], 1);
-        assert_eq!(coverage["missing_group_count"], 29);
+        assert_eq!(coverage["missing_group_count"], group_count - 1);
         assert_eq!(coverage["complete"], false);
         assert_eq!(coverage["groups_with_artifact_evidence"], 1);
         assert_eq!(coverage["artifact_evidence_records"], 2);
@@ -14330,7 +14357,11 @@ mod tests {
         assert_eq!(catalogue.status, 200);
         let catalogue: Value = serde_json::from_slice(&catalogue.body).unwrap();
         assert_eq!(catalogue["workflow"], "domain_workflow_catalogue");
-        assert_eq!(catalogue["workflow_count"], 30);
+        assert_eq!(
+            catalogue["workflow_count"],
+            catalogue["workflows"].as_array().unwrap().len()
+        );
+        assert!(catalogue["workflow_count"].as_u64().unwrap() >= 30);
         assert_eq!(catalogue["coverage"]["all_groups_have_workflow"], true);
         assert_eq!(
             catalogue["coverage"]["all_workflows_have_domain_contract"],

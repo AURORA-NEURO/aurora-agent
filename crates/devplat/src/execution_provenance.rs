@@ -12,11 +12,15 @@ use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::mission::{MissionReport, MissionTraceEvent};
+use crate::mission::{
+    MissionReport, MissionTraceEvent, MISSION_SCHEMA_VERSION, MISSION_TRACE_SCHEMA_VERSION,
+};
 
 pub const EXECUTION_PROVENANCE_SCHEMA: &str = "bioprism-devplat-execution-provenance/0.1";
 pub const MAX_DELEGATED_CHECKS: usize = 64;
 pub const MAX_FINDINGS: usize = 128;
+const MAX_TRACE_EVENTS: usize = 4_096;
+const MAX_TEXT_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DelegatedCheckEvidence {
@@ -81,7 +85,23 @@ pub struct ExecutionProvenanceAudit {
 }
 
 fn valid_digest(value: &str) -> bool {
-    value.len() == 64 && value.chars().all(|character| character.is_ascii_hexdigit())
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
+}
+
+fn valid_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && value == trimmed
+        && value.len() <= MAX_TEXT_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_identifier(value: &str) -> bool {
+    valid_text(value) && value == value.trim()
 }
 
 fn finding(
@@ -92,6 +112,18 @@ fn finding(
     detail: impl Into<String>,
 ) {
     if findings.len() >= MAX_FINDINGS {
+        if findings.iter().any(|item| item.code == "finding_overflow") {
+            return;
+        }
+        findings.truncate(MAX_FINDINGS - 1);
+        findings.push(ExecutionProvenanceFinding {
+            code: "finding_overflow".into(),
+            severity: "blocking".into(),
+            subject: "findings".into(),
+            detail: format!(
+                "more than {MAX_FINDINGS} findings were generated; the audit is incomplete"
+            ),
+        });
         return;
     }
     findings.push(ExecutionProvenanceFinding {
@@ -106,6 +138,32 @@ fn terminal_event(event: &str) -> bool {
     matches!(
         event,
         "step.completed" | "step.refused" | "step.blocked" | "step.cancelled"
+    )
+}
+
+fn terminal_event_matches_result(event: &str, status: &str) -> bool {
+    match event {
+        "step.completed" => matches!(status, "succeeded" | "completed"),
+        "step.refused" => status == "refused",
+        "step.blocked" => status == "blocked",
+        "step.cancelled" => status == "cancelled",
+        _ => true,
+    }
+}
+
+fn supported_trace_event(event: &str) -> bool {
+    matches!(
+        event,
+        "mission.started"
+            | "mission.cancelled"
+            | "mission.completed"
+            | "wave.started"
+            | "wave.completed"
+            | "step.started"
+            | "step.completed"
+            | "step.refused"
+            | "step.blocked"
+            | "step.cancelled"
     )
 }
 
@@ -127,13 +185,49 @@ pub fn audit_execution_provenance(
     let plan = &mission.plan;
     let mut findings = Vec::new();
 
-    if plan.mission_id.is_empty() {
+    if mission.schema_version != MISSION_SCHEMA_VERSION {
+        finding(
+            &mut findings,
+            "mission_schema_invalid",
+            "blocking",
+            "mission",
+            "mission report schema version is not supported",
+        );
+    }
+    if plan.schema_version != MISSION_SCHEMA_VERSION {
+        finding(
+            &mut findings,
+            "plan_schema_invalid",
+            "blocking",
+            "plan",
+            "mission plan schema version is not supported",
+        );
+    }
+    if mission.execution_trace_schema_version != MISSION_TRACE_SCHEMA_VERSION {
+        finding(
+            &mut findings,
+            "trace_schema_invalid",
+            "blocking",
+            "execution_trace",
+            "execution trace schema version is not supported",
+        );
+    }
+
+    if plan.mission_id.trim().is_empty() {
         finding(
             &mut findings,
             "mission_id_missing",
             "blocking",
             "mission",
             "mission and plan identifiers are required",
+        );
+    } else if !valid_identifier(&plan.mission_id) {
+        finding(
+            &mut findings,
+            "mission_id_invalid",
+            "blocking",
+            "mission",
+            "mission and plan identifiers must be bounded visible identifiers",
         );
     }
     if !valid_digest(&plan.digest) {
@@ -145,6 +239,63 @@ pub fn audit_execution_provenance(
             "plan digest must be a 64-character hexadecimal content digest",
         );
     }
+    if !valid_identifier(&mission.execution) {
+        finding(
+            &mut findings,
+            "mission_execution_invalid",
+            "blocking",
+            "mission",
+            "mission execution state must be bounded visible text",
+        );
+    }
+    if !matches!(plan.execution.as_str(), "authorized" | "planned") {
+        finding(
+            &mut findings,
+            "plan_execution_invalid",
+            "blocking",
+            "plan",
+            "mission plan execution posture must be authorized or planned",
+        );
+    }
+    if matches!(mission.execution.as_str(), "executed" | "planned") {
+        let expected = if mission.execution == "executed" {
+            "authorized"
+        } else {
+            "planned"
+        };
+        if plan.execution != expected {
+            finding(
+                &mut findings,
+                "plan_execution_mismatch",
+                "blocking",
+                "plan",
+                format!(
+                    "mission execution `{}` requires plan execution posture `{expected}`",
+                    mission.execution
+                ),
+            );
+        }
+    }
+    if !matches!(plan.execution_mode.as_str(), "serial" | "parallel_waves")
+        || plan.max_parallelism == 0
+    {
+        finding(
+            &mut findings,
+            "plan_execution_mode_invalid",
+            "blocking",
+            "plan",
+            "mission plan execution mode and parallelism must be bounded supported values",
+        );
+    }
+    if !valid_identifier(&mission.mission_status) {
+        finding(
+            &mut findings,
+            "mission_status_invalid",
+            "blocking",
+            "mission",
+            "mission status must be bounded visible text",
+        );
+    }
     if mission.execution != "executed" {
         finding(
             &mut findings,
@@ -154,8 +305,10 @@ pub fn audit_execution_provenance(
             "the supplied report is not marked as an executed mission",
         );
     }
-    if mission.execution_trace.len() > 4096 {
-        return Err("mission execution_trace exceeds the 4096-event safety bound".into());
+    if mission.execution_trace.len() > MAX_TRACE_EVENTS {
+        return Err(format!(
+            "mission execution_trace exceeds the {MAX_TRACE_EVENTS}-event safety bound"
+        ));
     }
     if mission.results.len() > plan.steps.len().saturating_add(64) {
         finding(
@@ -172,18 +325,110 @@ pub fn audit_execution_provenance(
         ));
     }
 
-    let planned: BTreeMap<&str, (&str, bool)> = plan
+    if plan.steps.is_empty() {
+        finding(
+            &mut findings,
+            "plan_steps_missing",
+            "blocking",
+            "plan",
+            "an executable provenance report must contain at least one planned step",
+        );
+    }
+    if plan.step_count != plan.steps.len() {
+        finding(
+            &mut findings,
+            "plan_step_count_mismatch",
+            "blocking",
+            "plan",
+            format!(
+                "plan declares {} steps but embeds {}",
+                plan.step_count,
+                plan.steps.len()
+            ),
+        );
+    }
+    let mut planned = BTreeMap::new();
+    let mut planned_ids = BTreeSet::new();
+    for step in &plan.steps {
+        if !valid_identifier(&step.id) || !valid_text(&step.tool) {
+            finding(
+                &mut findings,
+                "planned_step_identity_invalid",
+                "blocking",
+                step.id.clone(),
+                "planned step id and tool must be bounded visible metadata",
+            );
+        }
+        if !planned_ids.insert(step.id.to_ascii_lowercase()) {
+            finding(
+                &mut findings,
+                "duplicate_planned_step",
+                "blocking",
+                step.id.clone(),
+                "planned step identifiers must be unique without case-folding collisions",
+            );
+        }
+        planned.insert(step.id.as_str(), (step.tool.as_str(), step.required));
+    }
+    let ordered_step_ids = plan
         .steps
         .iter()
-        .map(|step| (step.id.as_str(), (step.tool.as_str(), step.required)))
-        .collect();
+        .map(|step| step.id.clone())
+        .collect::<Vec<_>>();
+    if plan.ordered_steps != ordered_step_ids {
+        finding(
+            &mut findings,
+            "plan_order_mismatch",
+            "blocking",
+            "plan",
+            "ordered_steps must match the embedded mission step order",
+        );
+    }
+    let wave_step_ids = plan.waves.iter().flatten().cloned().collect::<Vec<_>>();
+    if plan.ordered_steps != wave_step_ids {
+        finding(
+            &mut findings,
+            "plan_wave_mismatch",
+            "blocking",
+            "plan",
+            "flattened mission waves must match ordered_steps",
+        );
+    }
+    if plan.critical_path_length != plan.waves.len() {
+        finding(
+            &mut findings,
+            "plan_wave_count_mismatch",
+            "blocking",
+            "plan",
+            "critical_path_length must match the number of mission waves",
+        );
+    }
     let mut results = BTreeMap::new();
     let mut succeeded_step_count = 0;
     let mut refused_step_count = 0;
     let mut blocked_step_count = 0;
     let mut cancelled_step_count = 0;
     let mut required_failure_count = 0;
+    let mut result_ids = BTreeSet::new();
     for result in &mission.results {
+        if !valid_identifier(&result.id) || !valid_text(&result.tool) {
+            finding(
+                &mut findings,
+                "step_result_identity_invalid",
+                "blocking",
+                result.id.clone(),
+                "step result id and tool must be bounded visible metadata",
+            );
+        }
+        if !result_ids.insert(result.id.to_ascii_lowercase()) {
+            finding(
+                &mut findings,
+                "duplicate_step_result",
+                "blocking",
+                result.id.clone(),
+                "step result identifiers must be unique without case-folding collisions",
+            );
+        }
         if results.insert(result.id.as_str(), result).is_some() {
             finding(
                 &mut findings,
@@ -210,6 +455,50 @@ pub fn audit_execution_provenance(
                 "blocking",
                 result.id.clone(),
                 "step result tool does not match the planned tool",
+            );
+        }
+        if result.required != *required {
+            finding(
+                &mut findings,
+                "step_required_mismatch",
+                "blocking",
+                result.id.clone(),
+                "step result required flag does not match the planned step",
+            );
+        }
+        if !valid_identifier(&result.status) {
+            finding(
+                &mut findings,
+                "step_result_status_invalid",
+                "blocking",
+                result.id.clone(),
+                "step result status must be bounded visible text",
+            );
+        }
+        if result
+            .arguments_digest
+            .as_deref()
+            .is_some_and(|digest| !valid_digest(digest))
+        {
+            finding(
+                &mut findings,
+                "step_result_digest_invalid",
+                "blocking",
+                result.id.clone(),
+                "step result arguments_digest must be a canonical content digest",
+            );
+        }
+        if result
+            .error
+            .as_deref()
+            .is_some_and(|error| !valid_text(error))
+        {
+            finding(
+                &mut findings,
+                "step_result_error_invalid",
+                "blocking",
+                result.id.clone(),
+                "step result error text must be bounded visible text",
             );
         }
         match result.status.as_str() {
@@ -242,6 +531,28 @@ pub fn audit_execution_provenance(
         }
     }
 
+    for (label, declared, observed) in [
+        ("succeeded", mission.succeeded, succeeded_step_count),
+        ("refused", mission.refused, refused_step_count),
+        ("blocked", mission.blocked, blocked_step_count),
+        ("cancelled", mission.cancelled, cancelled_step_count),
+        (
+            "required_failures",
+            mission.required_failures,
+            required_failure_count,
+        ),
+    ] {
+        if declared != observed {
+            finding(
+                &mut findings,
+                "mission_counter_mismatch",
+                "blocking",
+                label,
+                format!("mission declares {declared} {label} outcomes but reconciled {observed}"),
+            );
+        }
+    }
+
     let missing_step_results = planned
         .keys()
         .filter(|id| !results.contains_key(**id))
@@ -268,6 +579,35 @@ pub fn audit_execution_provenance(
     let mut trace_identity_errors = Vec::new();
     let mut terminal_steps = BTreeSet::new();
     for (index, event) in mission.execution_trace.iter().enumerate() {
+        if !supported_trace_event(&event.event) {
+            trace_identity_errors.push(format!(
+                "trace contains unsupported event type at index {index}: {}",
+                event.event
+            ));
+        }
+        if !valid_text(&event.event)
+            || event
+                .step_id
+                .as_deref()
+                .is_some_and(|step_id| !valid_identifier(step_id))
+            || event.tool.as_deref().is_some_and(|tool| !valid_text(tool))
+            || event
+                .status
+                .as_deref()
+                .is_some_and(|status| !valid_text(status))
+            || event
+                .detail
+                .as_deref()
+                .is_some_and(|detail| !valid_text(detail))
+            || event
+                .arguments_digest
+                .as_deref()
+                .is_some_and(|digest| !valid_digest(digest))
+        {
+            trace_identity_errors.push(format!(
+                "trace event at index {index} contains invalid bounded identity metadata"
+            ));
+        }
         if event.sequence != index {
             trace_identity_errors.push(format!(
                 "trace event at index {index} declares sequence {}",
@@ -284,6 +624,26 @@ pub fn audit_execution_provenance(
             };
             if event.tool.as_deref() != Some(*tool) {
                 trace_identity_errors.push(format!("trace tool mismatch for step: {step_id}"));
+            }
+            if terminal_event(&event.event) {
+                if let Some(result) = results.get(step_id) {
+                    if !terminal_event_matches_result(&event.event, result.status.as_str()) {
+                        trace_identity_errors.push(format!(
+                            "terminal trace event {} does not match result status {} for step: {step_id}",
+                            event.event, result.status
+                        ));
+                    }
+                    if event
+                        .status
+                        .as_deref()
+                        .is_none_or(|status| !terminal_event_matches_result(&event.event, status))
+                    {
+                        trace_identity_errors.push(format!(
+                            "terminal trace event status does not match event {} for step: {step_id}",
+                            event.event
+                        ));
+                    }
+                }
             }
             if terminal_event(&event.event) && !terminal_steps.insert(step_id.to_string()) {
                 trace_identity_errors
@@ -356,7 +716,11 @@ pub fn audit_execution_provenance(
     let mut passed_check_count = 0;
     let mut nonpassing_required_checks = Vec::new();
     for check in &request.delegated_checks {
-        if check.name.is_empty() || check.kind.is_empty() || check.source.is_empty() {
+        if !valid_identifier(&check.name)
+            || !valid_identifier(&check.kind)
+            || !valid_text(&check.source)
+            || !valid_identifier(&check.status)
+        {
             finding(
                 &mut findings,
                 "delegated_check_identity_missing",
@@ -365,7 +729,7 @@ pub fn audit_execution_provenance(
                 "name, kind, and source are required",
             );
         }
-        if !delegated_names.insert(check.name.clone()) {
+        if !delegated_names.insert(check.name.to_ascii_lowercase()) {
             finding(
                 &mut findings,
                 "duplicate_delegated_check",
@@ -529,7 +893,7 @@ mod tests {
             limitations: vec![],
         };
         MissionReport {
-            schema_version: "bioprism-devplat-mission-report/0.1".into(),
+            schema_version: MISSION_SCHEMA_VERSION.into(),
             plan,
             execution: "executed".into(),
             mission_status: "succeeded".into(),
@@ -640,5 +1004,144 @@ mod tests {
             .iter()
             .any(|finding| finding.code == "trace_completion_missing"));
         assert_eq!(audit.nonpassing_required_checks, vec!["unit_tests"]);
+    }
+
+    #[test]
+    fn provenance_reconciles_declared_counters_and_canonical_evidence() {
+        let mut mission = report();
+        mission.succeeded = 2;
+        mission.execution_trace[1].tool = Some("echo\u{0000}".into());
+        let audit = audit_execution_provenance(&ExecutionProvenanceRequest {
+            mission,
+            delegated_checks: vec![DelegatedCheckEvidence {
+                name: "unit_tests".into(),
+                kind: "test".into(),
+                required: true,
+                status: "passed".into(),
+                result_digest: "A".repeat(64),
+                source: "caller_attested".into(),
+                trace_sequence: Some(1),
+            }],
+        })
+        .expect("audit");
+        assert!(!audit.structurally_valid);
+        for code in [
+            "mission_counter_mismatch",
+            "trace_identity_error",
+            "delegated_check_digest_invalid",
+        ] {
+            assert!(
+                audit.findings.iter().any(|finding| finding.code == code),
+                "missing {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn provenance_rejects_padded_and_noncanonical_nested_metadata() {
+        let mut mission = report();
+        mission.results[0].status = " succeeded".into();
+        mission.results[0].error = Some(" caller error".into());
+        mission.execution_trace[1].status = Some(" succeeded".into());
+        mission.execution_trace[1].arguments_digest = Some("A".repeat(64));
+        let audit = audit_execution_provenance(&ExecutionProvenanceRequest {
+            mission,
+            delegated_checks: vec![DelegatedCheckEvidence {
+                name: "unit_tests".into(),
+                kind: "test".into(),
+                required: true,
+                status: " passed".into(),
+                result_digest: "e".repeat(64),
+                source: "caller_attested".into(),
+                trace_sequence: Some(1),
+            }],
+        })
+        .expect("audit");
+        assert!(!audit.structurally_valid);
+        for code in [
+            "step_result_status_invalid",
+            "step_result_error_invalid",
+            "trace_identity_error",
+            "delegated_check_identity_missing",
+        ] {
+            assert!(
+                audit.findings.iter().any(|finding| finding.code == code),
+                "missing {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn provenance_rejects_case_colliding_planned_steps() {
+        let mut mission = report();
+        let mut duplicate = mission.plan.steps[0].clone();
+        duplicate.id = "ONE".into();
+        mission.plan.steps.push(duplicate);
+        mission.plan.step_count = 2;
+
+        let audit = audit_execution_provenance(&ExecutionProvenanceRequest {
+            mission,
+            delegated_checks: vec![],
+        })
+        .expect("audit");
+        assert!(!audit.structurally_valid);
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.code == "duplicate_planned_step"));
+    }
+
+    #[test]
+    fn provenance_rejects_plan_schema_and_terminal_trace_drift() {
+        let mut mission = report();
+        mission.plan.execution = "planned".into();
+        mission.execution_trace[1].event = "step.refused".into();
+        mission.execution_trace[1].status = Some("refused".into());
+        let audit = audit_execution_provenance(&ExecutionProvenanceRequest {
+            mission,
+            delegated_checks: vec![],
+        })
+        .expect("audit");
+        assert!(!audit.structurally_valid);
+        for code in ["plan_execution_mismatch", "trace_identity_error"] {
+            assert!(
+                audit.findings.iter().any(|finding| finding.code == code),
+                "missing {code}"
+            );
+        }
+
+        let mut invalid_schema = report();
+        invalid_schema.schema_version = "legacy-mission-report/0.1".into();
+        invalid_schema.execution_trace_schema_version = "legacy-trace/0.1".into();
+        let audit = audit_execution_provenance(&ExecutionProvenanceRequest {
+            mission: invalid_schema,
+            delegated_checks: vec![],
+        })
+        .expect("audit");
+        assert!(!audit.structurally_valid);
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.code == "mission_schema_invalid"));
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.code == "trace_schema_invalid"));
+    }
+
+    #[test]
+    fn provenance_rejects_unknown_trace_event_types() {
+        let mut mission = report();
+        mission.execution_trace[1].event = "trace.synthetic".into();
+        let audit = audit_execution_provenance(&ExecutionProvenanceRequest {
+            mission,
+            delegated_checks: vec![],
+        })
+        .expect("audit");
+        assert!(!audit.structurally_valid);
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.code == "trace_identity_error"));
     }
 }

@@ -344,11 +344,16 @@ impl CapacityModel {
             }
         }
 
-        let work_per_call: f64 = workload
-            .operations
-            .iter()
-            .map(|operation| operation.work_per_call().expect("bounds checked above"))
-            .sum();
+        let mut work_per_call = 0.0;
+        for operation in &workload.operations {
+            let Some(work) = operation.work_per_call() else {
+                return Err(OpsError::UnboundedWorkload {
+                    workload: workload.name.clone(),
+                    operation: operation.name.clone(),
+                });
+            };
+            work_per_call += work;
+        }
         let demand = work_per_call * workload.calls_per_epoch.value;
         let supply = self.work_units_per_epoch.value;
 

@@ -8,7 +8,7 @@
 //! actions stay visible in the workspace receipt.
 
 use bioprism_foundation::{
-    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    ProvenanceLink, TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,10 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-adapter-P24-F18";
 pub const CONTRACT_VERSION: &str = "multimodal-research-workbench/1.0";
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_STUDIES: usize = 8192;
+const MAX_VIEWS: usize = 8192;
+const MAX_ITEMS: usize = 16384;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -73,6 +77,7 @@ pub struct InteractiveResearchWorkspace {
     pub contract_version: String,
     pub feature_id: String,
     pub workspace_id: String,
+    pub policy_allow: bool,
     pub disposition: WorkspaceDisposition,
     pub study_order: Vec<String>,
     pub modality_order: Vec<String>,
@@ -108,29 +113,78 @@ impl InteractiveResearchWorkspace {
         {
             return Err(ResearchWorkbenchError::InvalidRequest("workspace identity, studies, views, panels, actions, locality, and boundary are required".into()));
         }
-        for values in [
-            &self.study_order,
-            &self.modality_order,
-            &self.view_order,
-            &self.panel_order,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(ResearchWorkbenchError::InvalidRequest(
-                    "workspace output ordering is not canonical".into(),
-                ));
-            }
-        }
-        if self
-            .artifact_order
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
+        validate_sorted_strings(&self.study_order, "study_order")?;
+        validate_sorted_strings(&self.modality_order, "modality_order")?;
+        validate_sorted_strings(&self.view_order, "view_order")?;
+        validate_sorted_strings(&self.panel_order, "panel_order")?;
+        validate_sorted_strings(&self.action_receipts, "action_receipts")?;
+        validate_sorted_strings(&self.omissions, "omissions")?;
+        validate_sorted_strings(&self.uncertainty, "uncertainty")?;
+        validate_sorted_strings(&self.negative_evidence, "negative_evidence")?;
+        if self.artifact_order.len() > MAX_ITEMS
+            || self
+                .artifact_order
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+            || self
+                .artifact_order
+                .iter()
+                .any(|digest| *digest == ContentHash::of_bytes(b""))
         {
             return Err(ResearchWorkbenchError::InvalidRequest(
-                "workspace artifact ordering is not canonical".into(),
+                "workspace artifact ordering or digest identity is invalid".into(),
             ));
         }
+        if self.panel_order
+            != self
+                .view_order
+                .iter()
+                .map(|view| format!("panel:{view}"))
+                .collect::<Vec<_>>()
+        {
+            return Err(ResearchWorkbenchError::InvalidRequest(
+                "workspace panels are not bound to view order".into(),
+            ));
+        }
+        if !self.policy_allow
+            && (self.disposition != WorkspaceDisposition::Blocked
+                || self
+                    .action_receipts
+                    .iter()
+                    .any(|receipt| !receipt.ends_with(":blocked-policy")))
+        {
+            return Err(ResearchWorkbenchError::InvalidRequest(
+                "policy-denied workspaces must block every view action".into(),
+            ));
+        }
+        if self.policy_allow
+            && self
+                .action_receipts
+                .iter()
+                .any(|receipt| receipt.ends_with(":blocked-policy"))
+        {
+            return Err(ResearchWorkbenchError::InvalidRequest(
+                "policy-allowed workspaces cannot retain policy-blocked actions".into(),
+            ));
+        }
+        if self.artifact.artifact_id != format!("research-workbench:{}", self.workspace_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.interactive-research-workspace+json"
+            || !self.artifact.semantic_loss.is_empty()
+        {
+            return Err(ResearchWorkbenchError::Contract(
+                "workspace artifact is not bound to the projection".into(),
+            ));
+        }
+        let expected_provenance = workspace_provenance(&self.workspace_id, &self.artifact_order);
+        if self.artifact.provenance != expected_provenance {
+            return Err(ResearchWorkbenchError::Contract(
+                "workspace artifact provenance is not bound to input artifacts".into(),
+            ));
+        }
+        let payload = workspace_payload(self);
         self.artifact
-            .validate_metadata()
+            .verify_payload(&payload)
             .map_err(|error| ResearchWorkbenchError::Contract(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, ResearchWorkbenchError> {
@@ -150,6 +204,121 @@ pub enum ResearchWorkbenchError {
     Contract(String),
     #[error("research workbench serialization failed: {0}")]
     Serialization(String),
+}
+
+fn validate_text(field: &str, value: &str) -> Result<(), ResearchWorkbenchError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(ResearchWorkbenchError::InvalidRequest(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(ResearchWorkbenchError::InvalidRequest(format!(
+            "{field} is outside its bounded text contract"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique_strings(
+    values: &[String],
+    field: &str,
+    max_items: usize,
+) -> Result<(), ResearchWorkbenchError> {
+    if values.len() > max_items {
+        return Err(ResearchWorkbenchError::InvalidRequest(format!(
+            "{field} exceeds its item bound"
+        )));
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(ResearchWorkbenchError::InvalidRequest(format!(
+                "{field} contains duplicate values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_strings(values: &[String], field: &str) -> Result<(), ResearchWorkbenchError> {
+    validate_unique_strings(values, field, MAX_ITEMS)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(ResearchWorkbenchError::InvalidRequest(format!(
+            "{field} ordering is not canonical"
+        )));
+    }
+    Ok(())
+}
+
+fn workspace_provenance(workspace_id: &str, artifact_order: &[ContentHash]) -> Vec<ProvenanceLink> {
+    artifact_order
+        .iter()
+        .cloned()
+        .map(|digest| ProvenanceLink {
+            source_id: workspace_id.into(),
+            relation: "workspace-input-artifact".into(),
+            digest,
+        })
+        .collect()
+}
+
+fn workspace_payload(workspace: &InteractiveResearchWorkspace) -> serde_json::Value {
+    workspace_payload_from_parts(
+        &workspace.workspace_id,
+        workspace.policy_allow,
+        workspace.disposition,
+        &workspace.study_order,
+        &workspace.modality_order,
+        &workspace.view_order,
+        &workspace.panel_order,
+        &workspace.artifact_order,
+        &workspace.omissions,
+        &workspace.uncertainty,
+        &workspace.negative_evidence,
+        &workspace.action_receipts,
+        workspace.raw_data_local,
+        &workspace.boundary,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn workspace_payload_from_parts(
+    workspace_id: &str,
+    policy_allow: bool,
+    disposition: WorkspaceDisposition,
+    study_order: &[String],
+    modality_order: &[String],
+    view_order: &[String],
+    panel_order: &[String],
+    artifact_order: &[ContentHash],
+    omissions: &[String],
+    uncertainty: &[String],
+    negative_evidence: &[String],
+    action_receipts: &[String],
+    raw_data_local: bool,
+    boundary: &str,
+) -> serde_json::Value {
+    json!({
+        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "feature_id": FEATURE_ID,
+        "workspace_id": workspace_id,
+        "policy_allow": policy_allow,
+        "disposition": disposition,
+        "study_order": study_order,
+        "modality_order": modality_order,
+        "view_order": view_order,
+        "panel_order": panel_order,
+        "artifact_order": artifact_order,
+        "omissions": omissions,
+        "uncertainty": uncertainty,
+        "negative_evidence": negative_evidence,
+        "action_receipts": action_receipts,
+        "raw_data_local": raw_data_local,
+        "boundary": boundary,
+    })
 }
 
 pub fn compile_research_workbench(
@@ -266,15 +435,39 @@ pub fn compile_research_workbench(
     } else {
         WorkspaceDisposition::Ready
     };
+    omissions.sort();
+    omissions.dedup();
+    uncertainty.sort();
+    uncertainty.dedup();
+    negative_evidence.sort();
+    negative_evidence.dedup();
+    action_receipts.sort();
+    action_receipts.dedup();
     let modality_order = modalities.into_iter().collect::<Vec<_>>();
     let artifact_order = artifacts.into_iter().collect::<Vec<_>>();
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "workspace_id": state.workspace_id, "disposition": disposition, "study_order": study_order, "modality_order": modality_order, "view_order": view_order, "panel_order": panel_order, "artifact_order": artifact_order, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative_evidence, "action_receipts": action_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
+    let payload = workspace_payload_from_parts(
+        &state.workspace_id,
+        state.policy_allow,
+        disposition,
+        &study_order,
+        &modality_order,
+        &view_order,
+        &panel_order,
+        &artifact_order,
+        &omissions,
+        &uncertainty,
+        &negative_evidence,
+        &action_receipts,
+        state.raw_data_local,
+        &state.boundary,
+    );
+    let provenance = workspace_provenance(&state.workspace_id, &artifact_order);
     let artifact = TypedResearchArtifact::from_payload(
         format!("research-workbench:{}", state.workspace_id),
         "application/vnd.aurora.interactive-research-workspace+json",
         &payload,
         Vec::new(),
-        Vec::new(),
+        provenance,
     )
     .map_err(|error| ResearchWorkbenchError::Contract(error.to_string()))?;
     let result = InteractiveResearchWorkspace {
@@ -282,6 +475,7 @@ pub fn compile_research_workbench(
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
         workspace_id: state.workspace_id.clone(),
+        policy_allow: state.policy_allow,
         disposition,
         study_order,
         modality_order,
@@ -312,30 +506,55 @@ fn validate_state(state: &ResearchWorkspaceState) -> Result<(), ResearchWorkbenc
             "workspace identity, studies, views, locality, and boundary are required".into(),
         ));
     }
+    validate_text("workspace_id", &state.workspace_id)?;
+    validate_text("boundary", &state.boundary)?;
+    if state.studies.len() > MAX_STUDIES || state.views.len() > MAX_VIEWS {
+        return Err(ResearchWorkbenchError::InvalidRequest(
+            "workspace studies or views exceed their bounds".into(),
+        ));
+    }
     let mut ids = BTreeSet::new();
     for study in &state.studies {
-        if study.study_id.trim().is_empty()
-            || !ids.insert(study.study_id.clone())
+        validate_text("study_id", &study.study_id)?;
+        if !ids.insert(study.study_id.clone())
             || study.modalities.is_empty()
             || study.artifact_ids.is_empty()
-            || study.modalities.iter().any(|value| value.trim().is_empty())
         {
             return Err(ResearchWorkbenchError::InvalidRequest(format!(
                 "study {} is invalid or duplicated",
                 study.study_id
             )));
         }
+        validate_unique_strings(&study.modalities, "study.modalities", MAX_ITEMS)?;
+        if study
+            .artifact_ids
+            .iter()
+            .any(|digest| *digest == ContentHash::of_bytes(b""))
+        {
+            return Err(ResearchWorkbenchError::InvalidRequest(format!(
+                "study {} contains an empty artifact digest",
+                study.study_id
+            )));
+        }
+        let unique_artifacts = study.artifact_ids.iter().collect::<BTreeSet<_>>();
+        if study.artifact_ids.len() > MAX_ITEMS
+            || unique_artifacts.len() != study.artifact_ids.len()
+        {
+            return Err(ResearchWorkbenchError::InvalidRequest(format!(
+                "study {} contains duplicate or excessive artifacts",
+                study.study_id
+            )));
+        }
+        if let Some(result) = &study.negative_result {
+            validate_text("study.negative_result", result)?;
+        }
     }
     let mut view_ids = BTreeSet::new();
     for view in &state.views {
-        if view.view_id.trim().is_empty()
-            || !view_ids.insert(view.view_id.clone())
-            || view.view_kind.trim().is_empty()
+        validate_text("view_id", &view.view_id)?;
+        validate_text("view_kind", &view.view_kind)?;
+        if !view_ids.insert(view.view_id.clone())
             || view.study_ids.is_empty()
-            || view
-                .required_modalities
-                .iter()
-                .any(|value| value.trim().is_empty())
             || view.study_ids.iter().any(|id| !ids.contains(id))
         {
             return Err(ResearchWorkbenchError::InvalidRequest(format!(
@@ -343,6 +562,12 @@ fn validate_state(state: &ResearchWorkspaceState) -> Result<(), ResearchWorkbenc
                 view.view_id
             )));
         }
+        validate_unique_strings(&view.study_ids, "view.study_ids", MAX_STUDIES)?;
+        validate_unique_strings(
+            &view.required_modalities,
+            "view.required_modalities",
+            MAX_ITEMS,
+        )?;
     }
     Ok(())
 }
@@ -436,5 +661,27 @@ mod tests {
             .uncertainty
             .iter()
             .any(|value| value.contains("comparability")));
+    }
+
+    #[test]
+    fn workspace_artifact_payload_is_verified() {
+        let mut workspace = compile_research_workbench(&state()).unwrap();
+        workspace.artifact.content_hash = ContentHash::of_bytes(b"tampered");
+        assert!(workspace.validate().is_err());
+    }
+
+    #[test]
+    fn workspace_panels_cannot_be_reassigned_to_views() {
+        let mut workspace = compile_research_workbench(&state()).unwrap();
+        workspace.panel_order[0] = "panel:view:other".into();
+        assert!(workspace.validate().is_err());
+    }
+
+    #[test]
+    fn duplicate_study_artifacts_are_rejected() {
+        let mut value = state();
+        let artifact = value.studies[0].artifact_ids[0].clone();
+        value.studies[0].artifact_ids.push(artifact);
+        assert!(compile_research_workbench(&value).is_err());
     }
 }

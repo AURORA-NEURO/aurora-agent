@@ -20,6 +20,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-brain-P02-F26";
 pub const CONTRACT_VERSION: &str = "brain-multimodal-retrieval-assurance-harness/1.0";
+const ASSURANCE_CONTENT_TYPE: &str = "application/vnd.aurora.multimodal-retrieval-assurance+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,7 +76,6 @@ impl MultimodalRetrievalAssuranceReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.study_order.len() < 2
             || self.modality_order.len() < 2
@@ -85,36 +86,44 @@ impl MultimodalRetrievalAssuranceReceipt {
         {
             return Err(MultimodalRetrievalAssuranceError::Invalid("multimodal retrieval assurance identity, closure, witnesses, locality, or effects are incomplete".into()));
         }
-        if self
-            .qualified_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.scope, "scope"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        validate_sorted_unique(&self.study_order, "study_order")?;
+        validate_sorted_unique(&self.modality_order, "modality_order")?;
+        validate_sorted_unique(&self.candidate_order, "candidate_order")?;
+        for (values, field) in [
+            (&self.qualified_order, "qualified_order"),
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
+            (&self.witness_order, "witness_order"),
+            (&self.counterexample_order, "counterexample_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
+        let candidate_keys = identity_keys(&self.candidate_order);
+        let qualified_keys = identity_keys(&self.qualified_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        if !qualified_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+            || qualified_keys
+                .union(&blocked_keys)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_keys
         {
             return Err(MultimodalRetrievalAssuranceError::Invalid(
-                "multimodal retrieval assurance state is not covered by candidates".into(),
+                "multimodal assurance candidate states must partition candidates".into(),
             ));
-        }
-        for values in [
-            &self.study_order,
-            &self.modality_order,
-            &self.candidate_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.witness_order,
-            &self.counterexample_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(MultimodalRetrievalAssuranceError::Invalid(
-                    "multimodal retrieval assurance ordering is not canonical".into(),
-                ));
-            }
         }
         for digest in [
             &self.comparability_digest,
@@ -128,16 +137,69 @@ impl MultimodalRetrievalAssuranceReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("assurance:local-multimodal-retrieval:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_effect_receipts =
+            if self.verdict == MultimodalRetrievalAssuranceVerdict::Qualified {
+                vec![format!(
+                    "assurance:local-multimodal-retrieval:{}",
+                    self.request_id
+                )]
+            } else {
+                vec!["block:unsafe-release".into()]
+            };
+        if self.effect_receipts != expected_effect_receipts {
             return Err(MultimodalRetrievalAssuranceError::Invalid(
-                "multimodal retrieval assurance effect is outside the local gate".into(),
+                "multimodal retrieval assurance effect does not match verdict".into(),
+            ));
+        }
+        if !self.raw_data_local
+            && (self.verdict != MultimodalRetrievalAssuranceVerdict::Blocked
+                || !self
+                    .omissions
+                    .iter()
+                    .any(|item| item == "assurance:raw-data-locality-failed"))
+        {
+            return Err(MultimodalRetrievalAssuranceError::Invalid(
+                "non-local multimodal assurance must be blocked and retain locality evidence"
+                    .into(),
+            ));
+        }
+        let expected_verification_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "study_order": self.study_order,
+            "modality_order": self.modality_order,
+            "candidate_order": self.candidate_order,
+            "qualified_order": self.qualified_order,
+            "blocked_order": self.blocked_order,
+            "unknown_order": self.unknown_order,
+            "witness_order": self.witness_order,
+            "counterexample_order": self.counterexample_order,
+            "verdict": self.verdict,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| MultimodalRetrievalAssuranceError::Artifact(error.to_string()))?;
+        if self.verification_digest != expected_verification_digest {
+            return Err(MultimodalRetrievalAssuranceError::Invalid(
+                "multimodal assurance verification digest is not bound to witnesses".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-multimodal-retrieval-assurance:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != ASSURANCE_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(MultimodalRetrievalAssuranceError::Invalid(
+                "multimodal assurance artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| MultimodalRetrievalAssuranceError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| MultimodalRetrievalAssuranceError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, MultimodalRetrievalAssuranceError> {
@@ -208,14 +270,29 @@ pub fn verify_multimodal_retrieval_assurance(
         MultimodalRetrievalAssuranceVerdict::Unresolved
     };
     let synthesis_digest = synthesis.synthesis_digest.clone();
-    let verification_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "study_order": request.study_ids, "modality_order": request.required_modalities, "candidate_order": synthesis.candidate_order, "witness_order": witnesses, "counterexample_order": counterexamples, "verdict": verdict, "replay_identity": request.replay_identity})).map_err(|error| MultimodalRetrievalAssuranceError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_order": request.study_ids, "modality_order": request.required_modalities, "scope": request.scope, "verdict": verdict, "candidate_order": synthesis.candidate_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "witness_order": witnesses, "counterexample_order": counterexamples, "comparability_digest": synthesis.comparability_digest, "synthesis_digest": synthesis_digest, "verification_digest": verification_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let raw_data_local = true;
+    let effect_receipts = if verdict == MultimodalRetrievalAssuranceVerdict::Qualified {
+        vec![format!(
+            "assurance:local-multimodal-retrieval:{}",
+            request.request_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let candidate_order = synthesis.candidate_order.clone();
+    let qualified_order = synthesis.qualified_order.clone();
+    let blocked_order = synthesis.blocked_order.clone();
+    let unknown_order = synthesis.unknown_order.clone();
+    let witness_order = witnesses.iter().cloned().collect::<Vec<_>>();
+    let counterexample_order = counterexamples.iter().cloned().collect::<Vec<_>>();
+    let verification_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "study_order": request.study_ids, "modality_order": request.required_modalities, "candidate_order": candidate_order, "qualified_order": qualified_order, "blocked_order": blocked_order, "unknown_order": unknown_order, "witness_order": witness_order, "counterexample_order": counterexample_order, "verdict": verdict, "replay_identity": request.replay_identity, "raw_data_local": raw_data_local})).map_err(|error| MultimodalRetrievalAssuranceError::Artifact(error.to_string()))?;
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_order": request.study_ids, "modality_order": request.required_modalities, "scope": request.scope, "verdict": verdict, "candidate_order": candidate_order, "qualified_order": qualified_order, "blocked_order": blocked_order, "unknown_order": unknown_order, "witness_order": witness_order, "counterexample_order": counterexample_order, "comparability_digest": synthesis.comparability_digest, "synthesis_digest": synthesis_digest, "verification_digest": verification_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": raw_data_local, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!(
             "brain-multimodal-retrieval-assurance:{}",
             request.request_id
         ),
-        "application/vnd.aurora.multimodal-retrieval-assurance+json",
+        ASSURANCE_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -243,20 +320,91 @@ pub fn verify_multimodal_retrieval_assurance(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if verdict == MultimodalRetrievalAssuranceVerdict::Qualified {
-            vec![format!(
-                "assurance:local-multimodal-retrieval:{}",
-                request.request_id
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
-        raw_data_local: true,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), MultimodalRetrievalAssuranceError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(MultimodalRetrievalAssuranceError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), MultimodalRetrievalAssuranceError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(MultimodalRetrievalAssuranceError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), MultimodalRetrievalAssuranceError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(MultimodalRetrievalAssuranceError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &MultimodalRetrievalAssuranceReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "study_order": receipt.study_order,
+        "modality_order": receipt.modality_order,
+        "scope": receipt.scope,
+        "verdict": receipt.verdict,
+        "candidate_order": receipt.candidate_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "witness_order": receipt.witness_order,
+        "counterexample_order": receipt.counterexample_order,
+        "comparability_digest": receipt.comparability_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "verification_digest": receipt.verification_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -335,5 +483,30 @@ mod tests {
         let receipt =
             verify_multimodal_retrieval_assurance(&request(EvidenceState::Supported)).unwrap();
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut input = request(EvidenceState::Supported);
+        input.raw_data_local = false;
+        let receipt = verify_multimodal_retrieval_assurance(&input).unwrap();
+        assert_eq!(
+            receipt.verdict,
+            MultimodalRetrievalAssuranceVerdict::Blocked
+        );
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "assurance:raw-data-locality-failed"));
+        assert!(receipt.validate().is_ok());
+    }
+
+    #[test]
+    fn assurance_artifact_payload_is_bound() {
+        let mut receipt =
+            verify_multimodal_retrieval_assurance(&request(EvidenceState::Supported)).unwrap();
+        receipt.scope = "scope:tampered".into();
+        assert!(receipt.validate().is_err());
     }
 }

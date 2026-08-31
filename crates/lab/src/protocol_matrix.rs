@@ -223,11 +223,12 @@ pub fn simulate_protocol_matrix(
         .iter()
         .filter(|cell| cell.status == ScenarioStatus::RequiresApproval)
         .count();
+    let total_cells = cells.len();
     let payload = json!({
         "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
         "feature_id": FEATURE_ID,
         "protocol_id": request.protocol_id,
-        "total_cells": cells.len(),
+        "total_cells": total_cells,
         "passed_cells": passed_cells,
         "failed_closed_cells": failed_closed_cells,
         "approval_cells": approval_cells,
@@ -246,7 +247,7 @@ pub fn simulate_protocol_matrix(
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         feature_id: FEATURE_ID.into(),
         protocol_id: request.protocol_id.clone(),
-        total_cells: payload["total_cells"].as_u64().unwrap_or_default() as usize,
+        total_cells,
         passed_cells,
         failed_closed_cells,
         approval_cells,

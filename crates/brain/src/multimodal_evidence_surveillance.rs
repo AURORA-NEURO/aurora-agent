@@ -18,6 +18,9 @@ use thiserror::Error;
 pub const FEATURE_ID: &str = "AFA-brain-P01-F02";
 pub const CONTRACT_VERSION: &str = "brain-evidence-surveillance-multimodal/1.0";
 pub const MAX_OBSERVATIONS: usize = 4096;
+const SURVEILLANCE_CONTENT_TYPE: &str =
+    "application/vnd.aurora.qualified-multimodal-evidence-set+json";
+const MAX_ITEMS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MultimodalEvidenceFeedRequest {
@@ -100,18 +103,7 @@ impl QualifiedMultimodalEvidenceSet {
                     .into(),
             ));
         }
-        if self
-            .qualified_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
-            return Err(MultimodalEvidenceError::Invalid(
-                "state is not covered by candidate order".into(),
-            ));
-        }
-        for values in [
+        let collections = [
             &self.study_order,
             &self.candidate_order,
             &self.qualified_order,
@@ -123,12 +115,86 @@ impl QualifiedMultimodalEvidenceSet {
             &self.uncertainty,
             &self.negative_evidence,
             &self.effect_receipts,
-        ] {
+        ];
+        if collections.iter().any(|values| values.len() > MAX_ITEMS) {
+            return Err(MultimodalEvidenceError::Invalid(
+                "multimodal evidence collection exceeds the bounded contract limit".into(),
+            ));
+        }
+        if self.relevance_order.iter().any(|value| *value > 1000) {
+            return Err(MultimodalEvidenceError::Invalid(
+                "multimodal evidence relevance is outside the bounded range".into(),
+            ));
+        }
+        let candidates = self.candidate_order.iter().collect::<BTreeSet<_>>();
+        let qualified = self.qualified_order.iter().collect::<BTreeSet<_>>();
+        let blocked = self.blocked_order.iter().collect::<BTreeSet<_>>();
+        let unknown = self.unknown_order.iter().collect::<BTreeSet<_>>();
+        let mut covered = qualified.clone();
+        covered.extend(blocked.iter());
+        if covered != candidates || !qualified.is_disjoint(&blocked) || !unknown.is_subset(&blocked)
+        {
+            return Err(MultimodalEvidenceError::Invalid(
+                "multimodal evidence states must partition candidates without overlap".into(),
+            ));
+        }
+        for values in collections {
             if values.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(MultimodalEvidenceError::Invalid(
                     "ordering is not canonical".into(),
                 ));
             }
+        }
+        let gate_blocked = self.negative_evidence.iter().any(|item| {
+            item == "request:policy-denied" || item == "request:raw-data-locality-failed"
+        }) || self
+            .uncertainty
+            .iter()
+            .any(|item| item == "request:protected-closure-incomplete");
+        let expected_disposition = if gate_blocked {
+            MultimodalEvidenceDisposition::Blocked
+        } else if self.qualified_order.is_empty() {
+            MultimodalEvidenceDisposition::Unknown
+        } else if self.blocked_order.is_empty()
+            && self.omissions.is_empty()
+            && self.uncertainty.is_empty()
+            && self.negative_evidence.is_empty()
+        {
+            MultimodalEvidenceDisposition::Qualified
+        } else {
+            MultimodalEvidenceDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
+            return Err(MultimodalEvidenceError::Invalid(
+                "multimodal evidence disposition does not match state or gates".into(),
+            ));
+        }
+        let expected_effect = if self.qualified_order.is_empty() {
+            vec!["block:unsafe-release".into()]
+        } else {
+            vec![format!("read:local-research-artifacts:{}", self.request_id)]
+        };
+        if self.effect_receipts != expected_effect {
+            return Err(MultimodalEvidenceError::Invalid(
+                "multimodal evidence effect does not match qualified state".into(),
+            ));
+        }
+        for digest in [&self.replay_identity, &self.artifact.content_hash] {
+            if digest.as_str().len() != 64 {
+                return Err(MultimodalEvidenceError::Invalid(
+                    "multimodal evidence digest is invalid".into(),
+                ));
+            }
+        }
+        let expected_artifact_id = format!("brain-multimodal-evidence:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != SURVEILLANCE_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(MultimodalEvidenceError::Invalid(
+                "multimodal evidence artifact identity or provenance is inconsistent".into(),
+            ));
         }
         for values in [
             &self.semantic_order,
@@ -141,16 +207,11 @@ impl QualifiedMultimodalEvidenceSet {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("read:local-research-artifacts:")
-                && effect != "block:unsafe-release"
-        }) {
-            return Err(MultimodalEvidenceError::Invalid(
-                "effect is outside the multimodal evidence gate".into(),
-            ));
-        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| MultimodalEvidenceError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| MultimodalEvidenceError::Artifact(error.to_string()))
     }
 
@@ -350,16 +411,16 @@ pub fn surveil_multimodal_evidence(
         } else {
             MultimodalEvidenceDisposition::Partial
         };
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_order": request.study_ids, "scope": request.scope, "disposition": disposition, "candidate_order": candidate_order, "qualified_order": qualified, "blocked_order": blocked, "unknown_order": unknown, "source_order": sources, "modality_order": modalities, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
+    let has_qualified = !qualified.is_empty();
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_order": request.study_ids, "scope": request.scope, "disposition": disposition, "candidate_order": candidate_order, "qualified_order": qualified, "blocked_order": blocked, "unknown_order": unknown, "source_order": sources, "modality_order": modalities, "relevance_order": relevance_order, "semantic_order": semantics, "artifact_order": artifacts, "provenance_order": provenance, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "replay_identity": request.replay_identity, "effect_receipts": if has_qualified { vec![format!("read:local-research-artifacts:{}", request.request_id)] } else { vec!["block:unsafe-release".to_string()] }, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-multimodal-evidence:{}", request.request_id),
-        "application/vnd.aurora.qualified-multimodal-evidence-set+json",
+        SURVEILLANCE_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
     )
     .map_err(|error| MultimodalEvidenceError::Artifact(error.to_string()))?;
-    let has_qualified = !qualified.is_empty();
     let receipt = QualifiedMultimodalEvidenceSet {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -396,6 +457,35 @@ pub fn surveil_multimodal_evidence(
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn receipt_payload(receipt: &QualifiedMultimodalEvidenceSet) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "study_order": receipt.study_order,
+        "scope": receipt.scope,
+        "disposition": receipt.disposition,
+        "candidate_order": receipt.candidate_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "source_order": receipt.source_order,
+        "modality_order": receipt.modality_order,
+        "relevance_order": receipt.relevance_order,
+        "semantic_order": receipt.semantic_order,
+        "artifact_order": receipt.artifact_order,
+        "provenance_order": receipt.provenance_order,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "replay_identity": receipt.replay_identity,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 fn validate_request(

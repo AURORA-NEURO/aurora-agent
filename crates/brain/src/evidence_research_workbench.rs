@@ -24,6 +24,8 @@ pub const VIEW_ORDER: [&str; 3] = [
     "view:omission-audit",
     "view:source-lineage",
 ];
+const WORKBENCH_CONTENT_TYPE: &str = "application/vnd.aurora.evidence-workbench-receipt+json";
+const MAX_ITEMS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceWorkbenchRequest {
@@ -99,18 +101,7 @@ impl EvidenceWorkbenchReceipt {
         {
             return Err(EvidenceWorkbenchError::Invalid("workbench identity, views, panels, evidence, locality, budget, or effects are incomplete".into()));
         }
-        if self
-            .qualified_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
-            return Err(EvidenceWorkbenchError::Invalid(
-                "workbench evidence state is not covered by candidates".into(),
-            ));
-        }
-        for values in [
+        let collections = [
             &self.view_order,
             &self.panel_order,
             &self.action_receipts,
@@ -122,19 +113,91 @@ impl EvidenceWorkbenchReceipt {
             &self.uncertainty,
             &self.negative_evidence,
             &self.effect_receipts,
-        ] {
+        ];
+        if collections.iter().any(|values| values.len() > MAX_ITEMS) {
+            return Err(EvidenceWorkbenchError::Invalid(
+                "workbench collection exceeds the bounded contract limit".into(),
+            ));
+        }
+        let qualified = self.qualified_order.iter().collect::<BTreeSet<_>>();
+        let blocked = self.blocked_order.iter().collect::<BTreeSet<_>>();
+        let unknown = self.unknown_order.iter().collect::<BTreeSet<_>>();
+        let candidates = self.candidate_order.iter().collect::<BTreeSet<_>>();
+        let mut covered = qualified.clone();
+        covered.extend(blocked.iter());
+        if covered != candidates || !qualified.is_disjoint(&blocked) || !unknown.is_subset(&blocked)
+        {
+            return Err(EvidenceWorkbenchError::Invalid(
+                "workbench evidence states must partition candidates without overlap".into(),
+            ));
+        }
+        for values in collections {
             if values.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(EvidenceWorkbenchError::Invalid(
                     "workbench ordering is not canonical".into(),
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("view:local-research-artifacts:")
-                && effect != "block:unsafe-release"
-        }) {
+        if self.action_receipts
+            != [
+                "action:render-evidence-table",
+                "action:render-omission-audit",
+                "action:render-source-lineage",
+            ]
+        {
             return Err(EvidenceWorkbenchError::Invalid(
-                "workbench effect is not read-only".into(),
+                "workbench actions are not canonical".into(),
+            ));
+        }
+        if self.view_order
+            != VIEW_ORDER
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        {
+            return Err(EvidenceWorkbenchError::Invalid(
+                "workbench views are not canonical".into(),
+            ));
+        }
+        let gate_blocked = self.omissions.iter().any(|item| {
+            item == "workbench:policy-denied"
+                || item == "workbench:protected-closure-incomplete"
+                || item == "workbench:raw-data-locality-failed"
+        }) || self.negative_evidence.iter().any(|item| {
+            item == "request:policy-denied" || item == "request:raw-data-locality-failed"
+        }) || self
+            .uncertainty
+            .iter()
+            .any(|item| item == "request:protected-closure-incomplete");
+        let expected_disposition = if gate_blocked {
+            EvidenceSurveillanceDisposition::Blocked
+        } else if self.qualified_order.is_empty() {
+            EvidenceSurveillanceDisposition::Unknown
+        } else if self.blocked_order.is_empty()
+            && self.omissions.is_empty()
+            && self.uncertainty.is_empty()
+            && self.negative_evidence.is_empty()
+        {
+            EvidenceSurveillanceDisposition::Qualified
+        } else {
+            EvidenceSurveillanceDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
+            return Err(EvidenceWorkbenchError::Invalid(
+                "workbench disposition does not match evidence state or gates".into(),
+            ));
+        }
+        let expected_effects = if self.disposition == EvidenceSurveillanceDisposition::Blocked {
+            vec!["block:unsafe-release".into()]
+        } else {
+            vec![format!(
+                "view:local-research-artifacts:{}",
+                self.workspace_id
+            )]
+        };
+        if self.effect_receipts != expected_effects {
+            return Err(EvidenceWorkbenchError::Invalid(
+                "workbench effect does not match disposition".into(),
             ));
         }
         for value in [
@@ -142,10 +205,42 @@ impl EvidenceWorkbenchReceipt {
             &self.workbench_digest,
             &self.replay_identity,
         ] {
-            let _ = value;
+            if value.as_str().len() != 64 {
+                return Err(EvidenceWorkbenchError::Invalid(
+                    "workbench digest length is invalid".into(),
+                ));
+            }
+        }
+        let expected_digest = ContentHash::of_value(&json!({
+            "workspace_id": self.workspace_id,
+            "view_order": self.view_order,
+            "panel_order": self.panel_order,
+            "action_receipts": self.action_receipts,
+            "evidence_digest": self.evidence_digest,
+            "replay_identity": self.replay_identity,
+            "budget_units": self.budget_units
+        }))
+        .map_err(|error| EvidenceWorkbenchError::Artifact(error.to_string()))?;
+        if self.workbench_digest != expected_digest {
+            return Err(EvidenceWorkbenchError::Invalid(
+                "workbench digest does not match its receipt fields".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-evidence-workbench:{}", self.workspace_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != WORKBENCH_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(EvidenceWorkbenchError::Invalid(
+                "workbench artifact identity or provenance is inconsistent".into(),
+            ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| EvidenceWorkbenchError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| EvidenceWorkbenchError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, EvidenceWorkbenchError> {
@@ -191,9 +286,10 @@ pub fn compile_evidence_research_workbench(
     let actionable = request.policy_allow
         && request.protected_closure
         && request.raw_data_local
-        && request.budget_units >= action_receipts.len() as u32
+        && u64::from(request.budget_units)
+            >= u64::try_from(action_receipts.len()).unwrap_or(u64::MAX)
         && evidence.disposition != EvidenceSurveillanceDisposition::Blocked;
-    if request.budget_units < action_receipts.len() as u32 {
+    if u64::from(request.budget_units) < u64::try_from(action_receipts.len()).unwrap_or(u64::MAX) {
         omissions.insert("workbench:budget-exhausted".into());
     }
     if !request.policy_allow {
@@ -214,10 +310,10 @@ pub fn compile_evidence_research_workbench(
         .digest()
         .map_err(|error| EvidenceWorkbenchError::Engine(error.to_string()))?;
     let workbench_digest = ContentHash::of_value(&json!({"workspace_id": request.workspace_id, "view_order": view_order, "panel_order": panel_order, "action_receipts": action_receipts, "evidence_digest": evidence_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units})).map_err(|error| EvidenceWorkbenchError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "workspace_id": request.workspace_id, "study_id": request.request.study_id, "scope": request.request.scope, "disposition": disposition, "view_order": view_order, "panel_order": panel_order, "action_receipts": action_receipts, "candidate_order": evidence.candidate_order, "qualified_order": evidence.qualified_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "evidence_digest": evidence_digest, "workbench_digest": workbench_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "workspace_id": request.workspace_id, "study_id": request.request.study_id, "scope": request.request.scope, "disposition": disposition, "view_order": view_order, "panel_order": panel_order, "action_receipts": action_receipts, "candidate_order": evidence.candidate_order, "qualified_order": evidence.qualified_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "evidence_digest": evidence_digest, "workbench_digest": workbench_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-evidence-workbench:{}", request.workspace_id),
-        "application/vnd.aurora.evidence-workbench-receipt+json",
+        WORKBENCH_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -260,6 +356,35 @@ pub fn compile_evidence_research_workbench(
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn receipt_payload(receipt: &EvidenceWorkbenchReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "workspace_id": receipt.workspace_id,
+        "study_id": receipt.study_id,
+        "scope": receipt.scope,
+        "disposition": receipt.disposition,
+        "view_order": receipt.view_order,
+        "panel_order": receipt.panel_order,
+        "action_receipts": receipt.action_receipts,
+        "candidate_order": receipt.candidate_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "evidence_digest": receipt.evidence_digest,
+        "workbench_digest": receipt.workbench_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 fn validate_request(request: &EvidenceWorkbenchRequest) -> Result<(), EvidenceWorkbenchError> {
@@ -380,5 +505,13 @@ mod tests {
         let receipt =
             compile_evidence_research_workbench(&request(EvidenceState::Supported)).unwrap();
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+
+    #[test]
+    fn workbench_digest_tampering_is_rejected() {
+        let mut receipt =
+            compile_evidence_research_workbench(&request(EvidenceState::Supported)).unwrap();
+        receipt.workbench_digest = hash("tampered-workbench");
+        assert!(receipt.validate().is_err());
     }
 }

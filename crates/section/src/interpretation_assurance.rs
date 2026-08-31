@@ -318,6 +318,11 @@ pub fn assure_interpretations(
             && request.benchmark_digest.is_some()
             && budget_ok;
         if complete {
+            let Some(cmp) = candidate.comparability_digest.clone() else {
+                return Err(InterpretationAssuranceError::Invalid(
+                    "admitted interpretation is missing its comparability digest".into(),
+                ));
+            };
             spent = spent.saturating_add(cost);
             admitted.push(candidate.interpretation_id.clone());
             results.insert(candidate.result_id.clone());
@@ -328,10 +333,6 @@ pub fn assure_interpretations(
             artifacts.insert(candidate.artifact_digest.clone());
             evidence.insert(candidate.evidence_digest.clone());
             provenance.insert(candidate.provenance_digest.clone());
-            let cmp = candidate
-                .comparability_digest
-                .clone()
-                .expect("checked above");
             comparability.insert(cmp.clone());
             interpretations.push(InteractiveInterpretation {
                 interpretation_id: candidate.interpretation_id.clone(),

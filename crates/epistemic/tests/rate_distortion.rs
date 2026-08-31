@@ -8,6 +8,7 @@ use bioprism_epistemic::ratedistortion::{
 };
 use bioprism_epistemic::rng::SplitMix64;
 use bioprism_epistemic::EpistemicError;
+use serde_json::json;
 use std::collections::BTreeSet;
 
 const FLOOR: f64 = 0.01;
@@ -461,4 +462,63 @@ fn a_zero_distortion_context_can_still_change_the_action_when_two_actions_tie() 
         empty.action_preserved(),
         "the deterministic tie-break must make the two evaluations agree, or replay is not stable"
     );
+}
+
+#[test]
+fn deserialized_beliefs_must_remain_normalized_before_analysis() {
+    let problem = two_model_problem();
+    let prior: Belief = serde_json::from_value(json!({ "mass": [2.0, 1.0] }))
+        .expect("serde can construct the adversarial wire value");
+    let pool = pool_of(&[("evidence", [0.9, 0.1])]);
+
+    assert!(matches!(
+        evaluate_context(
+            &problem,
+            &prior,
+            &pool,
+            &BTreeSet::new(),
+            DistortionCriterion::BayesRegret,
+            FLOOR,
+        ),
+        Err(EpistemicError::InvalidBeliefNormalization { .. })
+    ));
+}
+
+#[test]
+fn invalid_compatibility_floors_are_refused_instead_of_emptying_the_model_set() {
+    let problem = two_model_problem();
+    let prior = Belief::uniform(2).expect("uniform");
+    let pool = pool_of(&[("evidence", [0.9, 0.1])]);
+
+    assert!(matches!(
+        identification(
+            &problem,
+            &prior,
+            &pool,
+            0.0,
+            1.1,
+        ),
+        Err(EpistemicError::InadmissibleCompatibilityFloor { .. })
+    ));
+}
+
+#[test]
+fn deserialized_evidence_items_are_revalidated_before_they_affect_a_frontier() {
+    let problem = two_model_problem();
+    let prior = Belief::uniform(2).expect("uniform");
+    let mut raw = serde_json::to_value(pool_of(&[("evidence", [0.9, 0.1])]))
+        .expect("pool serializes");
+    raw["items"][0]["cost"] = json!(-1.0);
+    let pool: EvidencePool = serde_json::from_value(raw).expect("serde can construct the wire value");
+
+    assert!(matches!(
+        frontier(
+            &problem,
+            &prior,
+            &pool,
+            DistortionCriterion::BayesRegret,
+            FLOOR,
+        ),
+        Err(EpistemicError::InadmissibleCost { .. })
+    ));
 }

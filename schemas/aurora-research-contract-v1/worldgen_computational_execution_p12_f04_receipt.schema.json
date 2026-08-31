@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-computational-execution-p12-f04.json",
+  "title": "AFA-worldgen-P12-F04 receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "run_id",
+    "workflow_id",
+    "scope",
+    "disposition",
+    "plan_order",
+    "topological_order",
+    "completed_order",
+    "unresolved_order",
+    "blocked_order",
+    "cycle_order",
+    "missing_dependency_order",
+    "compensation_order",
+    "decisions",
+    "checkpoint_digest",
+    "replay_identity",
+    "run_digest",
+    "semantic_loss",
+    "omissions",
+    "uncertainty",
+    "negative_evidence",
+    "artifact",
+    "effect_receipts",
+    "raw_data_local",
+    "federation_export",
+    "boundary"
+  ],
+  "properties": {
+    "scope": {
+      "type": "string"
+    },
+    "federation_export": {
+      "const": "aggregate-digest-only"
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "semantic_loss": {
+      "type": "array"
+    },
+    "blocked_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P12-F04"
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "cycle_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "topological_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "compensation_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "completed_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "unresolved",
+        "blocked"
+      ]
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "uncertainty": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "checkpoint_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "contract_version": {
+      "const": "worldgen-federated_continual-computational_execution/1.0"
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.execution-run-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "run_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "negative_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "missing_dependency_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "unresolved_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "decisions": {
+      "type": "array"
+    },
+    "workflow_id": {
+      "type": "string"
+    },
+    "plan_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "request_id": {
+      "type": "string"
+    }
+  }
+}

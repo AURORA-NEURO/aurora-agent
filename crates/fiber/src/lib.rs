@@ -43,12 +43,32 @@
 //! so rather than leaving a reader to infer it from a digest that did not move.
 
 pub mod closure;
+pub mod fibration_integrity_support;
+pub mod local_fibration_integrity_inference;
+pub mod multimodal_fibration_integrity_inference;
+pub mod throughput_fibration_integrity_inference;
+pub mod federated_continual_fibration_integrity_inference;
+pub mod local_fibration_integrity_contract_model;
+pub mod multimodal_fibration_integrity_contract_model;
+pub mod throughput_fibration_integrity_contract_model;
+pub mod federated_continual_fibration_integrity_contract_model;
+pub mod local_fibration_integrity_research_copilot;
+pub mod multimodal_fibration_integrity_research_copilot;
+pub mod throughput_fibration_integrity_research_copilot;
+pub mod federated_continual_fibration_integrity_research_copilot;
+pub mod local_fibration_integrity_workflow_fabric;
+pub mod multimodal_fibration_integrity_workflow_fabric;
+pub mod throughput_fibration_integrity_workflow_fabric;
+pub mod federated_continual_fibration_integrity_workflow_fabric;
 pub mod compile;
 pub mod error;
+pub mod federated_analysis_control_plane;
+pub mod federated_execution_interoperability;
+pub mod federated_protocol_simulation_assurance;
+pub mod federated_resource_workbench;
 pub mod influence;
 pub mod mechanism_assurance;
 pub mod mechanism_contract_model;
-pub mod semantic_parity_assurance;
 pub mod mechanism_gateway;
 pub mod oracle;
 pub mod plan;
@@ -57,16 +77,52 @@ pub mod qir;
 pub mod research_context;
 pub mod resource_workbench;
 pub mod retrieval_assurance;
-pub mod federated_protocol_simulation_assurance;
-pub mod federated_execution_interoperability;
+pub mod semantic_parity_assurance;
 pub mod slice;
 pub mod temporal;
+
+pub use federated_analysis_control_plane::{
+    admit_federated_analysis, capability_manifest as federated_analysis_control_manifest,
+    FederatedAnalysisCandidate8, FederatedAnalysisControlError, FederatedAnalysisControlReceipt,
+    FederatedAnalysisControlRequest, CONTENT_TYPE as FEDERATED_ANALYSIS_CONTENT_TYPE,
+    CONTRACT_VERSION as FEDERATED_ANALYSIS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_ANALYSIS_FEATURE_ID, INPUT_SCHEMA as FEDERATED_ANALYSIS_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_ANALYSIS_OUTPUT_SCHEMA,
+};
 
 pub use compile::{
     compile, AdaptiveAcquisitionTrace, CompileOutput, CompileTrace, PassReceipt,
     RateDistortionTrace,
 };
 pub use error::FiberError;
+pub use federated_execution_interoperability::{
+    assure as assure_federated_execution_interoperability,
+    capability_manifest as federated_execution_interoperability_manifest,
+    ExecutionArtifactCandidate, ExecutionInteroperabilityEnvelope, ExecutionInteroperabilityError,
+    ExecutionInteroperabilityRequest,
+    CONTRACT_VERSION as FEDERATED_EXECUTION_INTEROPERABILITY_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_EXECUTION_INTEROPERABILITY_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_EXECUTION_INTEROPERABILITY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_EXECUTION_INTEROPERABILITY_OUTPUT_SCHEMA,
+};
+pub use federated_protocol_simulation_assurance::{
+    assure as assure_federated_protocol_simulation,
+    capability_manifest as federated_protocol_simulation_manifest, PeerProtocolSummary,
+    ProtocolDraft, ProtocolSimulationAssuranceError, ProtocolSimulationReport,
+    CONTRACT_VERSION as FEDERATED_PROTOCOL_SIMULATION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_PROTOCOL_SIMULATION_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_PROTOCOL_SIMULATION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_PROTOCOL_SIMULATION_OUTPUT_SCHEMA,
+};
+pub use federated_resource_workbench::{
+    federated_resource_workbench_manifest, qualify_federated_resources,
+    FederatedResourceCandidate5, FederatedResourceDiscoveryRequest7, FederatedResourceDisposition,
+    FederatedResourceWorkbenchError, FederatedResourceWorkbenchReceipt8,
+    CONTENT_TYPE as FEDERATED_RESOURCE_CONTENT_TYPE,
+    CONTRACT_VERSION as FEDERATED_RESOURCE_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RESOURCE_FEATURE_ID, INPUT_SCHEMA as FEDERATED_RESOURCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_RESOURCE_OUTPUT_SCHEMA,
+};
 pub use influence::{CorrespondenceCheck, NotPosable, WithheldSplit, WithholdingAnalysis};
 pub use mechanism_assurance::{
     assure as assure_mechanisms, capability_manifest as mechanism_assurance_manifest,
@@ -75,28 +131,19 @@ pub use mechanism_assurance::{
     CONTRACT_VERSION as MECHANISM_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as MECHANISM_ASSURANCE_FEATURE_ID,
 };
+pub use mechanism_contract_model::{
+    mechanism_contract_model_manifest, model_mechanism_contract, MechanismContractCandidate,
+    MechanismContractDisposition, MechanismContractError, MechanismPortfolioContract,
+    MechanismQuestionContract, CONTRACT_VERSION as MECHANISM_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_CONTRACT_MODEL_FEATURE_ID,
+    INPUT_SCHEMA as MECHANISM_CONTRACT_MODEL_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as MECHANISM_CONTRACT_MODEL_OUTPUT_SCHEMA,
+};
 pub use mechanism_gateway::{
     admit_mechanism_gateway, MechanismGatewayDisposition, MechanismGatewayError,
     MechanismGatewayReceipt, MechanismGatewayRequest,
     CONTRACT_VERSION as MECHANISM_GATEWAY_CONTRACT_VERSION,
     FEATURE_ID as MECHANISM_GATEWAY_FEATURE_ID,
-};
-pub use mechanism_contract_model::{
-    mechanism_contract_model_manifest, model_mechanism_contract, MechanismContractCandidate,
-    MechanismContractDisposition, MechanismContractError, MechanismPortfolioContract,
-    MechanismQuestionContract,
-    CONTRACT_VERSION as MECHANISM_CONTRACT_MODEL_CONTRACT_VERSION,
-    FEATURE_ID as MECHANISM_CONTRACT_MODEL_FEATURE_ID,
-    INPUT_SCHEMA as MECHANISM_CONTRACT_MODEL_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as MECHANISM_CONTRACT_MODEL_OUTPUT_SCHEMA,
-};
-pub use semantic_parity_assurance::{
-    assure_semantic_parity, semantic_parity_assurance_manifest, FiberParityCase,
-    FiberParityFixture, FiberParityWitness, ParityDisposition, SemanticParityError,
-    CONTRACT_VERSION as SEMANTIC_PARITY_CONTRACT_VERSION,
-    FEATURE_ID as SEMANTIC_PARITY_FEATURE_ID,
-    INPUT_SCHEMA as SEMANTIC_PARITY_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as SEMANTIC_PARITY_OUTPUT_SCHEMA,
 };
 pub use plan::{PlanEvaluation, PortfolioOutcome, RegionStatistics, DELIVERING_BACKEND};
 pub use policy::{PolicyEnvelope, PolicyOutcome, PolicyScreen, PolicyViolation};
@@ -123,25 +170,28 @@ pub use retrieval_assurance::{
     CONTRACT_VERSION as FEDERATED_RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_RETRIEVAL_ASSURANCE_FEATURE_ID,
 };
-pub use federated_protocol_simulation_assurance::{
-    assure as assure_federated_protocol_simulation,
-    capability_manifest as federated_protocol_simulation_manifest,
-    PeerProtocolSummary, ProtocolDraft, ProtocolSimulationAssuranceError,
-    ProtocolSimulationReport,
-    CONTRACT_VERSION as FEDERATED_PROTOCOL_SIMULATION_CONTRACT_VERSION,
-    FEATURE_ID as FEDERATED_PROTOCOL_SIMULATION_FEATURE_ID,
-    INPUT_SCHEMA as FEDERATED_PROTOCOL_SIMULATION_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as FEDERATED_PROTOCOL_SIMULATION_OUTPUT_SCHEMA,
+pub use semantic_parity_assurance::{
+    assure_semantic_parity, semantic_parity_assurance_manifest, FiberParityCase,
+    FiberParityFixture, FiberParityWitness, ParityDisposition, SemanticParityError,
+    CONTRACT_VERSION as SEMANTIC_PARITY_CONTRACT_VERSION, FEATURE_ID as SEMANTIC_PARITY_FEATURE_ID,
+    INPUT_SCHEMA as SEMANTIC_PARITY_INPUT_SCHEMA, OUTPUT_SCHEMA as SEMANTIC_PARITY_OUTPUT_SCHEMA,
 };
-pub use federated_execution_interoperability::{
-    assure as assure_federated_execution_interoperability,
-    capability_manifest as federated_execution_interoperability_manifest,
-    ExecutionArtifactCandidate, ExecutionInteroperabilityEnvelope,
-    ExecutionInteroperabilityError, ExecutionInteroperabilityRequest,
-    CONTRACT_VERSION as FEDERATED_EXECUTION_INTEROPERABILITY_CONTRACT_VERSION,
-    FEATURE_ID as FEDERATED_EXECUTION_INTEROPERABILITY_FEATURE_ID,
-    INPUT_SCHEMA as FEDERATED_EXECUTION_INTEROPERABILITY_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as FEDERATED_EXECUTION_INTEROPERABILITY_OUTPUT_SCHEMA,
-};
+pub use fibration_integrity_support::{certify as certify_fibration_integrity, manifest as fibration_integrity_manifest, FiberRegion4, FibrationIntegrityArtifact4, FibrationIntegrityCard7, FibrationIntegrityError, FibrationIntegrityRequest4, BOUNDARY as FIBRATION_INTEGRITY_BOUNDARY, CONTENT_TYPE as FIBRATION_INTEGRITY_CONTENT_TYPE};
+pub use local_fibration_integrity_inference::*;
+pub use multimodal_fibration_integrity_inference::*;
+pub use throughput_fibration_integrity_inference::*;
+pub use federated_continual_fibration_integrity_inference::*;
+pub use local_fibration_integrity_contract_model::*;
+pub use multimodal_fibration_integrity_contract_model::*;
+pub use throughput_fibration_integrity_contract_model::*;
+pub use federated_continual_fibration_integrity_contract_model::*;
+pub use local_fibration_integrity_research_copilot::*;
+pub use multimodal_fibration_integrity_research_copilot::*;
+pub use throughput_fibration_integrity_research_copilot::*;
+pub use federated_continual_fibration_integrity_research_copilot::*;
+pub use local_fibration_integrity_workflow_fabric::*;
+pub use multimodal_fibration_integrity_workflow_fabric::*;
+pub use throughput_fibration_integrity_workflow_fabric::*;
+pub use federated_continual_fibration_integrity_workflow_fabric::*;
 pub use slice::{backward_slice, Slice};
 pub use temporal::{temporal_cut, TemporalCut};

@@ -19,6 +19,8 @@ pub const FEATURE_ID: &str = "AFA-brain-P02-F07";
 pub const CONTRACT_VERSION: &str = "brain-throughput-retrieval-contract-model/1.0";
 pub const INPUT_SCHEMA: &str = "ScopedRetrievalQuery3@1";
 pub const OUTPUT_SCHEMA: &str = "EvidenceSynthesis2@1";
+const CONTRACT_CONTENT_TYPE: &str = "application/vnd.aurora.throughput-retrieval-contract+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThroughputRetrievalContractRequest {
@@ -92,7 +94,6 @@ impl ThroughputRetrievalContractReceipt {
             || self.input_schema != INPUT_SCHEMA
             || self.output_schema != OUTPUT_SCHEMA
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.batch_id.trim().is_empty()
             || self.partition.trim().is_empty()
@@ -104,45 +105,155 @@ impl ThroughputRetrievalContractReceipt {
         {
             return Err(ThroughputRetrievalContractError::Invalid("throughput contract identity, capacity, checkpoint, schemas, closure, locality, or effects are incomplete".into()));
         }
-        if self
-            .missing_order
-            .iter()
-            .any(|field| !self.required_order.contains(field))
-            || self
-                .semantic_loss_order
-                .iter()
-                .any(|field| !self.provided_order.contains(field))
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.batch_id, "batch_id"),
+            (&self.partition, "partition"),
+            (&self.input_schema, "input_schema"),
+            (&self.output_schema, "output_schema"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        for (values, field) in [
+            (&self.required_order, "required_order"),
+            (&self.provided_order, "provided_order"),
+            (&self.missing_order, "missing_order"),
+            (&self.semantic_loss_order, "semantic_loss_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
+        let required = identity_keys(&self.required_order);
+        let provided = identity_keys(&self.provided_order);
+        let expected_missing = required
+            .difference(&provided)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let expected_loss = provided
+            .difference(&required)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if identity_keys(&self.missing_order) != expected_missing
+            || identity_keys(&self.semantic_loss_order) != expected_loss
         {
             return Err(ThroughputRetrievalContractError::Invalid(
-                "throughput contract loss state is outside declared fields".into(),
+                "throughput contract loss state does not match declared fields".into(),
             ));
         }
-        for values in [
-            &self.required_order,
-            &self.provided_order,
-            &self.missing_order,
-            &self.semantic_loss_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        let expected_disposition = if !self.missing_order.is_empty()
+            || self.max_items == 0
+            || self
+                .negative_evidence
+                .iter()
+                .any(|value| value == "request:policy-denied")
+            || self.omissions.iter().any(|value| {
+                value == "request:protected-closure-incomplete"
+                    || value == "request:raw-data-locality-failed"
+            })
+            || matches!(self.compatibility, ContractCompatibility::Breaking)
+        {
+            ContractDisposition::Blocked
+        } else if !self.semantic_loss_order.is_empty()
+            || self.provided_order.len() > self.max_items
+            || !matches!(self.compatibility, ContractCompatibility::Additive)
+            || !self.negative_evidence.is_empty()
+        {
+            ContractDisposition::Partial
+        } else {
+            ContractDisposition::Qualified
+        };
+        if self.disposition != expected_disposition {
+            return Err(ThroughputRetrievalContractError::Invalid(
+                "throughput contract disposition does not match capacity, loss, and safety state"
+                    .into(),
+            ));
+        }
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            ContractDisposition::Qualified | ContractDisposition::Partial
+        ) {
+            vec![format!(
+                "read:local-throughput-artifacts:{}",
+                self.request_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(ThroughputRetrievalContractError::Invalid(
+                "throughput contract effects do not match disposition".into(),
+            ));
+        }
+        for digest in [
+            &self.queue_digest,
+            &self.semantic_digest,
+            &self.artifact_digest,
+            &self.provenance_digest,
+            &self.contract_digest,
+            &self.replay_identity,
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+            if digest.as_str().len() != 64 {
                 return Err(ThroughputRetrievalContractError::Invalid(
-                    "throughput contract ordering is not canonical".into(),
+                    "throughput contract digest is invalid".into(),
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("read:local-throughput-artifacts:")
-                && effect != "block:unsafe-release"
-        }) {
+        if !self.raw_data_local
+            && (self.disposition != ContractDisposition::Blocked
+                || !self
+                    .omissions
+                    .iter()
+                    .any(|value| value == "request:raw-data-locality-failed"))
+        {
             return Err(ThroughputRetrievalContractError::Invalid(
-                "effect is outside throughput contract gate".into(),
+                "non-local throughput contracts must be blocked and retain locality evidence"
+                    .into(),
+            ));
+        }
+        let expected_contract_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "batch_id": self.batch_id,
+            "partition": self.partition,
+            "max_items": self.max_items,
+            "checkpoint_seq": self.checkpoint_seq,
+            "queue_digest": self.queue_digest,
+            "required_order": self.required_order,
+            "provided_order": self.provided_order,
+            "compatibility": self.compatibility,
+            "semantic_digest": self.semantic_digest,
+            "artifact_digest": self.artifact_digest,
+            "provenance_digest": self.provenance_digest,
+            "replay_identity": self.replay_identity,
+            "disposition": self.disposition,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| ThroughputRetrievalContractError::Artifact(error.to_string()))?;
+        if self.contract_digest != expected_contract_digest {
+            return Err(ThroughputRetrievalContractError::Invalid(
+                "throughput contract digest is not bound to declared state".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-throughput-retrieval-contract:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != CONTRACT_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(ThroughputRetrievalContractError::Invalid(
+                "throughput contract artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| ThroughputRetrievalContractError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| ThroughputRetrievalContractError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, ThroughputRetrievalContractError> {
@@ -206,8 +317,12 @@ pub fn model_throughput_retrieval_contract(
     if !request.protected_closure {
         omissions.insert("request:protected-closure-incomplete".into());
     }
+    if !request.raw_data_local {
+        omissions.insert("request:raw-data-locality-failed".into());
+    }
     let disposition = if !request.policy_allow
         || !request.protected_closure
+        || !request.raw_data_local
         || !missing.is_empty()
         || matches!(request.compatibility, ContractCompatibility::Breaking)
     {
@@ -221,11 +336,22 @@ pub fn model_throughput_retrieval_contract(
     } else {
         ContractDisposition::Qualified
     };
-    let contract_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "max_items": request.max_items, "checkpoint_seq": request.checkpoint_seq, "queue_digest": request.queue_digest, "required_order": required, "provided_order": provided, "compatibility": request.compatibility, "semantic_digest": request.semantic_digest, "artifact_digest": request.artifact_digest, "provenance_digest": request.provenance_digest, "replay_identity": request.replay_identity, "disposition": disposition})).map_err(|error| ThroughputRetrievalContractError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "max_items": request.max_items, "checkpoint_seq": request.checkpoint_seq, "disposition": disposition, "compatibility": request.compatibility, "input_schema": request.input_schema, "output_schema": request.output_schema, "required_order": required, "provided_order": provided, "missing_order": missing, "semantic_loss_order": semantic_loss, "queue_digest": request.queue_digest, "semantic_digest": request.semantic_digest, "artifact_digest": request.artifact_digest, "provenance_digest": request.provenance_digest, "contract_digest": contract_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let contract_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "max_items": request.max_items, "checkpoint_seq": request.checkpoint_seq, "queue_digest": request.queue_digest, "required_order": required, "provided_order": provided, "compatibility": request.compatibility, "semantic_digest": request.semantic_digest, "artifact_digest": request.artifact_digest, "provenance_digest": request.provenance_digest, "replay_identity": request.replay_identity, "disposition": disposition, "raw_data_local": true})).map_err(|error| ThroughputRetrievalContractError::Artifact(error.to_string()))?;
+    let effect_receipts = if matches!(
+        disposition,
+        ContractDisposition::Qualified | ContractDisposition::Partial
+    ) {
+        vec![format!(
+            "read:local-throughput-artifacts:{}",
+            request.request_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "max_items": request.max_items, "checkpoint_seq": request.checkpoint_seq, "disposition": disposition, "compatibility": request.compatibility, "input_schema": request.input_schema, "output_schema": request.output_schema, "required_order": required, "provided_order": provided, "missing_order": missing, "semantic_loss_order": semantic_loss, "queue_digest": request.queue_digest, "semantic_digest": request.semantic_digest, "artifact_digest": request.artifact_digest, "provenance_digest": request.provenance_digest, "contract_digest": contract_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-throughput-retrieval-contract:{}", request.request_id),
-        "application/vnd.aurora.throughput-retrieval-contract+json",
+        CONTRACT_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -257,17 +383,7 @@ pub fn model_throughput_retrieval_contract(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if matches!(
-            disposition,
-            ContractDisposition::Qualified | ContractDisposition::Partial
-        ) {
-            vec![format!(
-                "read:local-throughput-artifacts:{}",
-                request.request_id
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -279,6 +395,16 @@ pub fn model_throughput_retrieval_contract(
 fn validate_request(
     request: &ThroughputRetrievalContractRequest,
 ) -> Result<(), ThroughputRetrievalContractError> {
+    for (value, field) in [
+        (&request.request_id, "request_id"),
+        (&request.batch_id, "batch_id"),
+        (&request.partition, "partition"),
+        (&request.input_schema, "input_schema"),
+        (&request.output_schema, "output_schema"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
     if request.request_id.trim().is_empty()
         || request.batch_id.trim().is_empty()
         || request.partition.trim().is_empty()
@@ -292,8 +418,103 @@ fn validate_request(
     {
         return Err(ThroughputRetrievalContractError::Invalid("throughput contract identity, capacity, checkpoint, schemas, fields, or boundary is incomplete".into()));
     }
+    validate_unique(&request.required_fields, "required_fields")?;
+    validate_unique(&request.provided_fields, "provided_fields")?;
+    for digest in [
+        &request.queue_digest,
+        &request.semantic_digest,
+        &request.artifact_digest,
+        &request.provenance_digest,
+        &request.replay_identity,
+    ] {
+        if digest.as_str().len() != 64 {
+            return Err(ThroughputRetrievalContractError::Invalid(
+                "throughput contract request digest is invalid".into(),
+            ));
+        }
+    }
     Ok(())
 }
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), ThroughputRetrievalContractError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(ThroughputRetrievalContractError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), ThroughputRetrievalContractError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(ThroughputRetrievalContractError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), ThroughputRetrievalContractError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(ThroughputRetrievalContractError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &ThroughputRetrievalContractReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "batch_id": receipt.batch_id,
+        "partition": receipt.partition,
+        "max_items": receipt.max_items,
+        "checkpoint_seq": receipt.checkpoint_seq,
+        "disposition": receipt.disposition,
+        "compatibility": receipt.compatibility,
+        "input_schema": receipt.input_schema,
+        "output_schema": receipt.output_schema,
+        "required_order": receipt.required_order,
+        "provided_order": receipt.provided_order,
+        "missing_order": receipt.missing_order,
+        "semantic_loss_order": receipt.semantic_loss_order,
+        "queue_digest": receipt.queue_digest,
+        "semantic_digest": receipt.semantic_digest,
+        "artifact_digest": receipt.artifact_digest,
+        "provenance_digest": receipt.provenance_digest,
+        "contract_digest": receipt.contract_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
+}
+
 fn compatibility_label(value: ContractCompatibility) -> &'static str {
     match value {
         ContractCompatibility::Additive => "additive",
@@ -368,6 +589,30 @@ mod tests {
         let r = model_throughput_retrieval_contract(&q).unwrap();
         assert_eq!(r.disposition, ContractDisposition::Blocked);
     }
+
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut q = request(vec!["scope".into(), "evidence".into()]);
+        q.raw_data_local = false;
+        let r = model_throughput_retrieval_contract(&q).unwrap();
+        assert_eq!(r.disposition, ContractDisposition::Blocked);
+        assert!(r.raw_data_local);
+        assert!(r
+            .omissions
+            .iter()
+            .any(|value| value == "request:raw-data-locality-failed"));
+        assert!(r.validate().is_ok());
+    }
+
+    #[test]
+    fn contract_artifact_payload_is_bound() {
+        let mut r =
+            model_throughput_retrieval_contract(&request(vec!["scope".into(), "evidence".into()]))
+                .unwrap();
+        r.partition = "partition:tampered".into();
+        assert!(r.validate().is_err());
+    }
+
     #[test]
     fn digest_is_stable() {
         let r =

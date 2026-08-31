@@ -133,16 +133,36 @@ pub mod context_value;
 pub mod design_frontier;
 pub mod error;
 pub mod evidence_surveillance;
-pub mod federated_retrieval_synthesis_assurance;
 pub mod evolution;
 pub mod experiment_design;
+pub mod federated_experiment_design_interoperability_gateway;
+pub mod federated_retrieval_synthesis_assurance;
 pub mod holdout;
 pub mod hypothesis;
+pub mod instrument_interoperability_gateway;
 pub mod instrument_preflight;
+pub mod instrument_execution_integrity_support;
+pub mod local_instrument_execution_integrity_inference;
+pub mod multimodal_instrument_execution_integrity_inference;
+pub mod throughput_instrument_execution_integrity_inference;
+pub mod federated_continual_instrument_execution_integrity_inference;
+pub mod local_instrument_execution_integrity_contract_model;
+pub mod multimodal_instrument_execution_integrity_contract_model;
+pub mod throughput_instrument_execution_integrity_contract_model;
+pub mod federated_continual_instrument_execution_integrity_contract_model;
+pub mod local_instrument_execution_integrity_research_copilot;
+pub mod multimodal_instrument_execution_integrity_research_copilot;
+pub mod throughput_instrument_execution_integrity_research_copilot;
+pub mod federated_continual_instrument_execution_integrity_research_copilot;
+pub mod local_instrument_execution_integrity_workflow_fabric;
+pub mod multimodal_instrument_execution_integrity_workflow_fabric;
+pub mod throughput_instrument_execution_integrity_workflow_fabric;
+pub mod federated_continual_instrument_execution_integrity_workflow_fabric;
 pub mod pareto;
 pub mod protocol_matrix;
 pub mod protocol_simulation;
 pub mod report;
+pub mod retrieval_synthesis_operations;
 pub mod risk;
 pub mod rollback;
 pub mod semantic_parity;
@@ -167,15 +187,6 @@ pub use evidence_surveillance::{
     FEATURE_CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_COPILOT_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_COPILOT_FEATURE_ID,
 };
-pub use federated_retrieval_synthesis_assurance::{
-    assure_federated_retrieval_synthesis, federated_retrieval_synthesis_manifest,
-    EvidenceSynthesis, PeerSynthesisSummary, RetrievalCandidate, RetrievalSynthesisError,
-    ScopedRetrievalQuery, SynthesisDisposition,
-    CONTRACT_VERSION as FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
-    FEATURE_ID as FEDERATED_RETRIEVAL_SYNTHESIS_FEATURE_ID,
-    INPUT_SCHEMA as FEDERATED_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as FEDERATED_RETRIEVAL_SYNTHESIS_OUTPUT_SCHEMA,
-};
 pub use evolution::{
     ChangeProposal, ContaminationRecord, EvolutionArchive, EvolutionCard, ImprovementClaim,
     MeasurementSurface,
@@ -186,6 +197,31 @@ pub use experiment_design::{
     NullResultPolicy, PowerProjection, RandomizationScheme, SampleAllocation, StudyPopulation,
     TestTail,
 };
+pub use federated_experiment_design_interoperability_gateway::{
+    lab_experiment_design_interoperability_manifest,
+    negotiate_lab_experiment_design,
+    negotiate_lab_experiment_design_json,
+    validate_lab_experiment_design_json,
+    DesignAssignment8,
+    DesignCapability4,
+    ExecutableExperimentDesign8,
+    LabExperimentDesignGatewayError,
+    ExperimentObjective4,
+    ExperimentDesignRequest4,
+    CONTRACT_VERSION as LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_CONTRACT_VERSION,
+    FEATURE_ID as LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_FEATURE_ID,
+    INPUT_SCHEMA as LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as LAB_EXPERIMENT_DESIGN_INTEROPERABILITY_OUTPUT_SCHEMA,
+};
+pub use federated_retrieval_synthesis_assurance::{
+    assure_federated_retrieval_synthesis, federated_retrieval_synthesis_manifest,
+    EvidenceSynthesis, PeerSynthesisSummary, RetrievalCandidate, RetrievalSynthesisError,
+    ScopedRetrievalQuery, SynthesisDisposition,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_SYNTHESIS_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_RETRIEVAL_SYNTHESIS_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_RETRIEVAL_SYNTHESIS_OUTPUT_SCHEMA,
+};
 pub use holdout::{
     CleanMeasurement, ExposureEvent, ExposureKind, ExposureWatermark, Holdout, HoldoutId,
     HoldoutLedger, Partition,
@@ -194,12 +230,35 @@ pub use hypothesis::{
     separate, DisagreementPoint, DischargedSeparator, Hypothesis, HypothesisSet, Locus,
     NotSeparableReason, Observations, PendingSeparator, Retirement, SeparationVerdict, Stance,
 };
+pub use instrument_interoperability_gateway::{
+    laboratory_integration_manifest, negotiate_laboratory_integration, InstrumentEndpoint5,
+    LaboratoryIntegrationDisposition, LaboratoryIntegrationError, LaboratoryIntegrationReceipt7,
+    LaboratoryIntegrationRequest4, CONTRACT_VERSION as LABORATORY_INTEGRATION_CONTRACT_VERSION,
+    FEATURE_ID as LABORATORY_INTEGRATION_FEATURE_ID,
+};
 pub use instrument_preflight::{
     instrument_preflight, instrument_preflight_manifest, InstrumentAction,
     InstrumentPreflightError, InstrumentPreflightReceipt, InstrumentPreflightRequest,
     PreflightDecision, FEATURE_CONTRACT_VERSION as INSTRUMENT_PREFLIGHT_FEATURE_VERSION,
     FEATURE_ID as INSTRUMENT_PREFLIGHT_FEATURE_ID,
 };
+pub use instrument_execution_integrity_support::*;
+pub use local_instrument_execution_integrity_inference::*;
+pub use multimodal_instrument_execution_integrity_inference::*;
+pub use throughput_instrument_execution_integrity_inference::*;
+pub use federated_continual_instrument_execution_integrity_inference::*;
+pub use local_instrument_execution_integrity_contract_model::*;
+pub use multimodal_instrument_execution_integrity_contract_model::*;
+pub use throughput_instrument_execution_integrity_contract_model::*;
+pub use federated_continual_instrument_execution_integrity_contract_model::*;
+pub use local_instrument_execution_integrity_research_copilot::*;
+pub use multimodal_instrument_execution_integrity_research_copilot::*;
+pub use throughput_instrument_execution_integrity_research_copilot::*;
+pub use federated_continual_instrument_execution_integrity_research_copilot::*;
+pub use local_instrument_execution_integrity_workflow_fabric::*;
+pub use multimodal_instrument_execution_integrity_workflow_fabric::*;
+pub use throughput_instrument_execution_integrity_workflow_fabric::*;
+pub use federated_continual_instrument_execution_integrity_workflow_fabric::*;
 pub use pareto::{
     compare, Admission, AxisValue, Direction, Dominance, Incomparability, Objective, ParetoFront,
     Profile, Selection, Unresolved,
@@ -215,6 +274,12 @@ pub use protocol_simulation::{
     ScenarioResult, ScenarioStatus,
 };
 pub use report::LabReport;
+pub use retrieval_synthesis_operations::{
+    operate_retrieval_synthesis, retrieval_synthesis_operations_manifest, RetrievalOperationsError,
+    RetrievalOperationsReceipt9, RetrievalOperationsRequest7,
+    CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_OPERATIONS_CONTRACT_VERSION,
+    FEATURE_ID as RETRIEVAL_SYNTHESIS_OPERATIONS_FEATURE_ID,
+};
 pub use risk::{
     BranchAction, BranchCeiling, BranchCost, BranchLedger, BranchOutcome, BranchPlan, BranchPolicy,
     BranchRule, BranchVerdict, BranchYield, Catch, PermissionLevel, Reversibility, RiskFeatures,

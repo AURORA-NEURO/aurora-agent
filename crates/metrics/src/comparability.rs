@@ -115,6 +115,17 @@ pub fn comparable_under(
     right: &MeasurementConditions,
     policy: &ComparabilityPolicy,
 ) -> Result<(), ScoreIncomparability> {
+    left.validate()
+        .map_err(|detail| ScoreIncomparability::MalformedConditions {
+            side: "left".to_string(),
+            detail,
+        })?;
+    right
+        .validate()
+        .map_err(|detail| ScoreIncomparability::MalformedConditions {
+            side: "right".to_string(),
+            detail,
+        })?;
     policy.filter(check_subject(left, right))?;
     policy.filter(check_scoring_rule(left, right))?;
     policy.filter(compare_condition(
@@ -247,21 +258,30 @@ impl ComparisonReport {
                 right.rule().as_str()
             ));
         }
-        if let (Some(a), Some(b)) = (left.weighting_digest(), right.weighting_digest()) {
-            if a != b {
+        for (side, aggregate) in [("left", left), ("right", right)] {
+            let unrecorded = aggregate.conditions().unrecorded_coordinates();
+            if !unrecorded.is_empty() {
+                caveats.push(format!(
+                    "{side} conditions leave {} of 33.01's stratification coordinates unrecorded: {}",
+                    unrecorded.len(),
+                    unrecorded.join(", ")
+                ));
+            }
+        }
+        match (left.weighting_digest(), right.weighting_digest()) {
+            (Some(a), Some(b)) if a != b => {
                 caveats.push(
                     "the two aggregates were produced under different declared weightings"
                         .to_string(),
                 );
             }
-        }
-        let unrecorded = left.conditions().unrecorded_coordinates();
-        if !unrecorded.is_empty() {
-            caveats.push(format!(
-                "left conditions leave {} of 33.01's stratification coordinates unrecorded: {}",
-                unrecorded.len(),
-                unrecorded.join(", ")
-            ));
+            (Some(_), None) | (None, Some(_)) => {
+                caveats.push(
+                    "weighting provenance is missing on one aggregate, so the constructions are not fully disclosed"
+                        .to_string(),
+                );
+            }
+            _ => {}
         }
 
         let verdict = match aggregates_comparable(left, right, policy) {

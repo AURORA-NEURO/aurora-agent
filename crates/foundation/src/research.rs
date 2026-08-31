@@ -280,6 +280,7 @@ impl ResearchWorkflowSpec {
                 });
             }
         }
+        let mut edge_ids = BTreeSet::new();
         for edge in &self.edges {
             if !node_ids.contains(&edge.from) || !node_ids.contains(&edge.to) {
                 return Err(ResearchContractError::UnknownWorkflowNode {
@@ -290,6 +291,12 @@ impl ResearchWorkflowSpec {
             if edge.from == edge.to {
                 return Err(ResearchContractError::WorkflowSelfEdge {
                     node: edge.from.clone(),
+                });
+            }
+            if !edge_ids.insert((edge.from.clone(), edge.to.clone())) {
+                return Err(ResearchContractError::DuplicateId {
+                    kind: "workflow edge",
+                    id: format!("{} -> {}", edge.from, edge.to),
                 });
             }
         }
@@ -313,8 +320,15 @@ impl ResearchWorkflowSpec {
                 });
             }
         }
+        let mut checkpoint_ids = BTreeSet::new();
         for checkpoint in &self.checkpoints {
             require_field("checkpoint_id", &checkpoint.checkpoint_id)?;
+            if !checkpoint_ids.insert(checkpoint.checkpoint_id.clone()) {
+                return Err(ResearchContractError::DuplicateId {
+                    kind: "workflow checkpoint",
+                    id: checkpoint.checkpoint_id.clone(),
+                });
+            }
             if checkpoint.after_nodes.is_empty()
                 || !checkpoint
                     .after_nodes
@@ -327,11 +341,43 @@ impl ResearchWorkflowSpec {
                 });
             }
         }
+        let mut budget_resources = BTreeSet::new();
         for budget in &self.budgets {
             require_field("budget.resource", &budget.resource)?;
+            if !budget_resources.insert(budget.resource.clone()) {
+                return Err(ResearchContractError::DuplicateId {
+                    kind: "workflow budget resource",
+                    id: budget.resource.clone(),
+                });
+            }
             if !budget.amount.is_finite() || budget.amount < 0.0 {
                 return Err(ResearchContractError::InvalidBudget {
                     resource: budget.resource.clone(),
+                });
+            }
+        }
+        let mut compensation_pairs = BTreeSet::new();
+        for compensation in &self.compensations {
+            require_field("compensation.effect", &compensation.effect)?;
+            require_field("compensation.action", &compensation.action)?;
+            if !compensation_pairs
+                .insert((compensation.effect.clone(), compensation.action.clone()))
+            {
+                return Err(ResearchContractError::DuplicateId {
+                    kind: "workflow compensation",
+                    id: format!("{} -> {}", compensation.effect, compensation.action),
+                });
+            }
+        }
+        let mut approval_ids = BTreeSet::new();
+        for approval in &self.approvals {
+            require_field("approval_id", &approval.approval_id)?;
+            require_field("approval.actor", &approval.actor)?;
+            require_field("approval.action", &approval.action)?;
+            if !approval_ids.insert(approval.approval_id.clone()) {
+                return Err(ResearchContractError::DuplicateId {
+                    kind: "workflow approval",
+                    id: approval.approval_id.clone(),
                 });
             }
         }
@@ -458,6 +504,8 @@ impl TypedResearchArtifact {
     /// recipient can therefore reject a malformed or out-of-boundary artifact before asking the
     /// origin to release any content, while payload verification remains an explicit second step.
     pub fn validate_metadata(&self) -> Result<(), ResearchContractError> {
+        require_field("artifact_id", &self.artifact_id)?;
+        require_field("content_type", &self.content_type)?;
         if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION {
             return Err(ResearchContractError::SchemaVersion {
                 expected: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
@@ -503,7 +551,17 @@ impl AutonomyGrant {
                 capability: self.actor.clone(),
             });
         }
-        if self.permitted_actions.is_empty() || self.resource_budget.is_empty() {
+        if self.permitted_actions.is_empty()
+            || self.resource_budget.is_empty()
+            || self
+                .permitted_actions
+                .iter()
+                .any(|action| action.trim().is_empty())
+            || self
+                .resource_budget
+                .keys()
+                .any(|resource| resource.trim().is_empty())
+        {
             return Err(ResearchContractError::IncompleteGrant {
                 actor: self.actor.clone(),
             });
@@ -570,7 +628,7 @@ impl PolicyReceipt {
                 capability: self.receipt_id.clone(),
             });
         }
-        if self.reasons.is_empty() {
+        if self.reasons.is_empty() || self.reasons.iter().any(|reason| reason.trim().is_empty()) {
             return Err(ResearchContractError::MissingReason {
                 item: self.receipt_id.clone(),
             });
@@ -677,6 +735,7 @@ impl ExecutionRun {
                 found: event.sequence,
             });
         }
+        require_field("event_type", &event.event_type)?;
         if event.effect == Some(Effect::InstrumentExecution) && event.payload_hash.is_none() {
             return Err(ResearchContractError::MissingEffectEvidence {
                 run: self.run_id.to_string(),
@@ -691,8 +750,26 @@ impl ExecutionRun {
         &mut self,
         checkpoint_id: impl Into<String>,
     ) -> Result<(), ResearchContractError> {
+        if matches!(
+            self.status,
+            ExecutionStatus::Succeeded | ExecutionStatus::Failed | ExecutionStatus::Cancelled
+        ) {
+            return Err(ResearchContractError::RunClosed {
+                run: self.run_id.to_string(),
+            });
+        }
         let checkpoint_id = checkpoint_id.into();
         require_field("checkpoint_id", &checkpoint_id)?;
+        if self
+            .checkpoints
+            .iter()
+            .any(|checkpoint| checkpoint.checkpoint_id == checkpoint_id)
+        {
+            return Err(ResearchContractError::DuplicateId {
+                kind: "execution checkpoint",
+                id: checkpoint_id,
+            });
+        }
         let events_value = serde_json::to_value(&self.events).map_err(|error| {
             ResearchContractError::Serialization {
                 item: self.run_id.to_string(),
@@ -720,7 +797,107 @@ impl ExecutionRun {
         ) {
             return Err(ResearchContractError::InvalidFinalStatus);
         }
+        if matches!(
+            self.status,
+            ExecutionStatus::Succeeded | ExecutionStatus::Failed | ExecutionStatus::Cancelled
+        ) {
+            return Err(ResearchContractError::RunClosed {
+                run: self.run_id.to_string(),
+            });
+        }
         self.status = status;
+        Ok(())
+    }
+
+    /// Validates a reconstructed execution ledger without requiring its source workflow.
+    ///
+    /// The append methods protect live mutation, but this type is also transported over JSON.
+    /// A caller must not be able to deserialize skipped events, duplicate checkpoints, or replay
+    /// hashes for a different prefix and have the record accepted as execution evidence.
+    pub fn validate(&self) -> Result<(), ResearchContractError> {
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION {
+            return Err(ResearchContractError::SchemaVersion {
+                expected: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+                found: self.schema_version.clone(),
+            });
+        }
+        require_field("workflow_id", &self.workflow_id)?;
+        if self.boundary != PRECLINICAL_BOUNDARY {
+            return Err(ResearchContractError::BoundaryMismatch {
+                capability: self.workflow_id.clone(),
+            });
+        }
+        let expected_identity =
+            ContentHash::of_bytes(format!("{}:{}", self.workflow_id, self.plan_hash).as_bytes());
+        if self.replay_identity != expected_identity {
+            return Err(ResearchContractError::BoundaryMismatch {
+                capability: self.workflow_id.clone(),
+            });
+        }
+        for (sequence, event) in self.events.iter().enumerate() {
+            if event.sequence != sequence as u64 {
+                return Err(ResearchContractError::EventSequence {
+                    run: self.run_id.to_string(),
+                    expected: sequence as u64,
+                    found: event.sequence,
+                });
+            }
+            require_field("event_type", &event.event_type)?;
+            if event.effect == Some(Effect::InstrumentExecution) && event.payload_hash.is_none() {
+                return Err(ResearchContractError::MissingEffectEvidence {
+                    run: self.run_id.to_string(),
+                });
+            }
+        }
+        if self.status == ExecutionStatus::Planned && !self.events.is_empty() {
+            return Err(ResearchContractError::EventSequence {
+                run: self.run_id.to_string(),
+                expected: 0,
+                found: self.events.len() as u64,
+            });
+        }
+        let mut checkpoint_ids = BTreeSet::new();
+        for checkpoint in &self.checkpoints {
+            require_field("checkpoint_id", &checkpoint.checkpoint_id)?;
+            if !checkpoint_ids.insert(checkpoint.checkpoint_id.clone()) {
+                return Err(ResearchContractError::DuplicateId {
+                    kind: "execution checkpoint",
+                    id: checkpoint.checkpoint_id.clone(),
+                });
+            }
+            if checkpoint.event_sequence > self.events.len() as u64 {
+                return Err(ResearchContractError::EventSequence {
+                    run: self.run_id.to_string(),
+                    expected: self.events.len() as u64,
+                    found: checkpoint.event_sequence,
+                });
+            }
+            let end = usize::try_from(checkpoint.event_sequence).map_err(|_| {
+                ResearchContractError::Serialization {
+                    item: self.run_id.to_string(),
+                    message: "checkpoint sequence exceeds addressable memory".into(),
+                }
+            })?;
+            let events = serde_json::to_value(&self.events[..end]).map_err(|error| {
+                ResearchContractError::Serialization {
+                    item: self.run_id.to_string(),
+                    message: error.to_string(),
+                }
+            })?;
+            let expected_hash = ContentHash::of_value(&events).map_err(|error| {
+                ResearchContractError::Serialization {
+                    item: self.run_id.to_string(),
+                    message: error.to_string(),
+                }
+            })?;
+            if checkpoint.replay_hash != expected_hash {
+                return Err(ResearchContractError::DigestMismatch {
+                    item: checkpoint.checkpoint_id.clone(),
+                    expected: expected_hash.to_string(),
+                    found: checkpoint.replay_hash.to_string(),
+                });
+            }
+        }
         Ok(())
     }
 }
@@ -1079,6 +1256,62 @@ mod tests {
     }
 
     #[test]
+    fn workflow_collections_reject_ambiguous_duplicates() {
+        let mut workflow = ResearchWorkflowSpec {
+            schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+            workflow_id: "wf-duplicates".into(),
+            intent: "duplicate validation fixture".into(),
+            nodes: vec![WorkflowNode {
+                node_id: "node".into(),
+                capability_id: "capability".into(),
+                actor: "operator".into(),
+                requires_approval: false,
+            }],
+            edges: Vec::new(),
+            checkpoints: Vec::new(),
+            budgets: vec![ResourceBudget {
+                resource: "cpu".into(),
+                amount: 1.0,
+            }],
+            compensations: Vec::new(),
+            approvals: Vec::new(),
+            autonomy_tier: AutonomyTier::A0,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+
+        workflow.budgets.push(ResourceBudget {
+            resource: "cpu".into(),
+            amount: 2.0,
+        });
+        assert!(matches!(
+            workflow.validate(),
+            Err(ResearchContractError::DuplicateId {
+                kind: "workflow budget resource",
+                ..
+            })
+        ));
+
+        workflow.budgets.pop();
+        workflow.compensations = vec![
+            Compensation {
+                effect: "compute".into(),
+                action: "stop".into(),
+            },
+            Compensation {
+                effect: "compute".into(),
+                action: "stop".into(),
+            },
+        ];
+        assert!(matches!(
+            workflow.validate(),
+            Err(ResearchContractError::DuplicateId {
+                kind: "workflow compensation",
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn artifact_hash_rejects_tampering() {
         let artifact = TypedResearchArtifact::from_payload(
             "artifact-1",
@@ -1090,6 +1323,41 @@ mod tests {
         .unwrap();
         assert!(artifact.verify_payload(&json!({"x": 2})).is_err());
         artifact.verify_payload(&json!({"x": 1})).unwrap();
+    }
+
+    #[test]
+    fn artifact_metadata_rejects_empty_identity_fields() {
+        let mut artifact = TypedResearchArtifact::from_payload(
+            "artifact-identity",
+            "application/json",
+            &json!({"x": 1}),
+            vec![],
+            vec![],
+        )
+        .unwrap();
+        artifact.artifact_id.clear();
+        assert!(matches!(
+            artifact.validate_metadata(),
+            Err(ResearchContractError::MissingField {
+                field: "artifact_id"
+            })
+        ));
+
+        let mut artifact = TypedResearchArtifact::from_payload(
+            "artifact-content-type",
+            "application/json",
+            &json!({"x": 1}),
+            vec![],
+            vec![],
+        )
+        .unwrap();
+        artifact.content_type.clear();
+        assert!(matches!(
+            artifact.validate_metadata(),
+            Err(ResearchContractError::MissingField {
+                field: "content_type"
+            })
+        ));
     }
 
     #[test]
@@ -1106,6 +1374,50 @@ mod tests {
         assert!(matches!(
             receipt.validate(),
             Err(ResearchContractError::UnresolvedAllow { .. })
+        ));
+    }
+
+    #[test]
+    fn policy_receipts_reject_blank_reasons() {
+        let receipt = PolicyReceipt {
+            schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+            receipt_id: "policy-blank-reason".into(),
+            decision: PolicyDecision::Deny,
+            reasons: vec!["   ".into()],
+            evaluated_artifacts: vec![],
+            authority_reference: None,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        assert!(matches!(
+            receipt.validate(),
+            Err(ResearchContractError::MissingReason { .. })
+        ));
+    }
+
+    #[test]
+    fn autonomy_grants_reject_blank_permission_and_resource_names() {
+        let mut grant = AutonomyGrant {
+            schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+            actor: "operator".into(),
+            permitted_actions: ["".into()].into(),
+            resource_budget: [("cpu".into(), 1.0)].into(),
+            scope: "study:demo".into(),
+            expires_at: "2099-01-01T00:00:00Z".into(),
+            revoked: false,
+            autonomy_tier: AutonomyTier::A0,
+            approval_reference: None,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        assert!(matches!(
+            grant.validate(),
+            Err(ResearchContractError::IncompleteGrant { .. })
+        ));
+
+        grant.permitted_actions = ["read".into()].into();
+        grant.resource_budget = [("   ".into(), 1.0)].into();
+        assert!(matches!(
+            grant.validate(),
+            Err(ResearchContractError::IncompleteGrant { .. })
         ));
     }
 
@@ -1140,6 +1452,52 @@ mod tests {
                 payload_hash: None
             }),
             Err(ResearchContractError::RunClosed { .. })
+        ));
+    }
+
+    #[test]
+    fn execution_run_rejects_duplicate_checkpoints_and_repeated_finish() {
+        let plan = ContentHash::of_bytes(b"plan");
+        let mut run = ExecutionRun::planned(
+            RunId::parse("run-checkpoint-boundary").unwrap(),
+            "wf-1",
+            plan,
+        )
+        .unwrap();
+        run.checkpoint("admission").unwrap();
+        assert!(matches!(
+            run.checkpoint("admission"),
+            Err(ResearchContractError::DuplicateId { .. })
+        ));
+        run.finish(ExecutionStatus::Failed).unwrap();
+        assert!(matches!(
+            run.finish(ExecutionStatus::Succeeded),
+            Err(ResearchContractError::RunClosed { .. })
+        ));
+        run.validate().unwrap();
+    }
+
+    #[test]
+    fn execution_run_validation_rejects_tampered_checkpoint_replay_hash() {
+        let plan = ContentHash::of_bytes(b"plan");
+        let mut run = ExecutionRun::planned(
+            RunId::parse("run-checkpoint-integrity").unwrap(),
+            "wf-1",
+            plan,
+        )
+        .unwrap();
+        run.append_event(ExecutionEvent {
+            sequence: 0,
+            event_type: "local.compute".into(),
+            effect: Some(Effect::ExecuteLocalComputation),
+            payload_hash: None,
+        })
+        .unwrap();
+        run.checkpoint("admission").unwrap();
+        run.checkpoints[0].replay_hash = ContentHash::of_bytes(b"tampered");
+        assert!(matches!(
+            run.validate(),
+            Err(ResearchContractError::DigestMismatch { .. })
         ));
     }
 

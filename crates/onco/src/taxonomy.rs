@@ -375,11 +375,18 @@ pub fn classify(histology: Histology, panel: &MarkerPanel) -> DiagnosticResoluti
 
     match (satisfied.len(), pending.len()) {
         (1, _) => {
-            let entity = *satisfied.iter().next().expect("length checked to be one");
-            let criteria = table
-                .iter()
-                .find(|c| c.entity == entity)
-                .expect("satisfied entities come from the filtered table");
+            let Some(&entity) = satisfied.iter().next() else {
+                return DiagnosticResolution::Unresolved {
+                    candidates: BTreeSet::new(),
+                    obligations: Vec::new(),
+                };
+            };
+            let Some(criteria) = table.iter().find(|c| c.entity == entity) else {
+                return DiagnosticResolution::Unresolved {
+                    candidates: satisfied,
+                    obligations: Vec::new(),
+                };
+            };
             DiagnosticResolution::Integrated {
                 entity,
                 grade: grade_for(entity, panel),
@@ -389,7 +396,10 @@ pub fn classify(histology: Histology, panel: &MarkerPanel) -> DiagnosticResoluti
         (n, _) if n > 1 => DiagnosticResolution::Mixed {
             candidates: satisfied,
         },
-        (0, 0) => DiagnosticResolution::NotOtherwiseResolved { histology, excluded },
+        (0, 0) => DiagnosticResolution::NotOtherwiseResolved {
+            histology,
+            excluded,
+        },
         (0, 1) => DiagnosticResolution::Provisional {
             candidate: pending[0].entity,
             obligations: obligations_for(&pending, panel),
@@ -398,7 +408,10 @@ pub fn classify(histology: Histology, panel: &MarkerPanel) -> DiagnosticResoluti
             candidates: pending.iter().map(|c| c.entity).collect(),
             obligations: obligations_for(&pending, panel),
         },
-        _ => unreachable!("satisfied.len() is exhaustively covered above"),
+        _ => DiagnosticResolution::Unresolved {
+            candidates: pending.iter().map(|c| c.entity).collect(),
+            obligations: obligations_for(&pending, panel),
+        },
     }
 }
 

@@ -1,0 +1,29 @@
+"""Bounded read-only retrieval copilot for Worldgen P02 F09–F12."""
+from __future__ import annotations
+from dataclasses import dataclass
+import hashlib, json, re
+from typing import Any
+from .research_contracts import PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION, ResearchContractError
+from .worldgen_retrieval_support import RetrievalQuery, RetrievalReceipt, infer as infer_retrieval
+CONTENT_TYPE="application/vnd.aurora.worldgen.retrieval-copilot-receipt+json"; _HEX=re.compile(r"^[0-9a-f]{64}$")
+@dataclass(frozen=True)
+class RetrievalCopilotRequest:
+    agent_id:str; query:RetrievalQuery; allowed_actions:tuple[str,...]; requested_actions:tuple[str,...]; action_budget:int; dry_run:bool=False; signed_approval:bool=True; federation_approved:bool=True
+@dataclass(frozen=True)
+class RetrievalCopilotReceipt:
+    value:dict[str,Any]
+    def validate(self, *, feature_id:str, contract_version:str)->None:
+        v=self.value; a=v.get("artifact",{}); syn=v.get("synthesis",{})
+        if v.get("schema_version")!=RESEARCH_CONTRACT_SCHEMA_VERSION or v.get("contract_version")!=contract_version or v.get("feature_id")!=feature_id or v.get("boundary")!=PRECLINICAL_BOUNDARY or a.get("boundary")!=PRECLINICAL_BOUNDARY or a.get("content_type")!=CONTENT_TYPE or v.get("raw_data_local") is not True or v.get("aggregate_only") is not True or not v.get("request_id","").strip() or not v.get("agent_id","").strip() or not v.get("action_order") or not v.get("tool_receipts") or not v.get("effect_receipts") or not _HEX.fullmatch(v.get("copilot_digest","")) or a.get("content_hash")!=v.get("copilot_digest"): raise ResearchContractError("worldgen retrieval copilot identity, locality, actions, or effects are incomplete")
+        for key in ("action_order","denied_action_order","tool_receipts","effect_receipts"):
+            vals=tuple(v.get(key,()));
+            if vals!=tuple(sorted(set(vals))): raise ResearchContractError("worldgen retrieval copilot ordering is not canonical")
+        RetrievalReceipt(syn).validate(feature_id=feature_id,contract_version=contract_version)
+    def digest(self, *, feature_id:str, contract_version:str)->str: self.validate(feature_id=feature_id,contract_version=contract_version); return _digest(self.value)
+def _digest(value:Any)->str: return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+def manifest(*,feature_id:str,contract_version:str,input_schema:str,scale:str,autonomy_tier:str)->dict[str,Any]: return {"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"capability_id":feature_id,"version":contract_version,"owner_crate":"worldgen","consumers":["research program lead","preclinical neuroscientist","bioinformatician","imaging core scientist"],"behavior":f"run a bounded read-only retrieval copilot for {scale}","value":"turns typed evidence synthesis into approval-aware, omission-visible agent actions","input_schema":input_schema,"output_schema":"EvidenceSynthesis3@1","effects":["invoke:bounded-retrieval-tool","block:unsafe-release"],"permissions":["read:local-research-artifacts"],"determinism":"byte_stable","autonomy_tier":autonomy_tier,"boundary":PRECLINICAL_BOUNDARY}
+def run(request:RetrievalCopilotRequest, *, feature_id:str, contract_version:str, require_approval:bool, require_federation:bool)->RetrievalCopilotReceipt:
+    if not request.agent_id.strip() or not request.allowed_actions or not request.requested_actions or request.action_budget<=0: raise ResearchContractError("worldgen retrieval copilot agent, actions, or budget is invalid")
+    synthesis=infer_retrieval(request.query,feature_id=feature_id,contract_version=contract_version); actions=sorted(set(request.requested_actions)); denied=[a for a in actions if a not in request.allowed_actions]; approval_missing=require_approval and not request.signed_approval; federation_missing=require_federation and not request.federation_approved; budget_exceeded=len(actions)>request.action_budget; authorized=not denied and not approval_missing and not federation_missing and not budget_exceeded and request.query.policy_allow and request.query.protected_closure; disposition="blocked" if not authorized else "qualified" if synthesis.value["disposition"]=="qualified" else "partial"; denied_all=list(denied); denied_all += [x for x,missing in (("request:signed-approval-missing",approval_missing),("request:federation-approval-missing",federation_missing),("request:action-budget-exceeded",budget_exceeded),("request:policy-denied",not request.query.policy_allow),("request:protected-closure-incomplete",not request.query.protected_closure)) if missing]; denied_all=sorted(set(denied_all)); tools=[f"tool:bounded-retrieval:{request.query.request_id}"] if authorized else ["tool:blocked-retrieval"]; effects=[f"invoke:bounded-retrieval-tool:{request.query.request_id}"] if disposition=="qualified" and not request.dry_run else ["block:unsafe-release"]
+    payload={"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":contract_version,"feature_id":feature_id,"request_id":request.query.request_id,"agent_id":request.agent_id,"disposition":disposition,"action_order":actions,"denied_action_order":denied_all,"tool_receipts":tools,"synthesis":synthesis.value,"dry_run":request.dry_run,"effect_receipts":sorted(effects),"raw_data_local":True,"aggregate_only":True,"boundary":PRECLINICAL_BOUNDARY}; digest=_digest(payload); payload["copilot_digest"]=digest; payload["artifact"]={"artifact_id":f"retrieval-copilot:{request.query.request_id}","content_type":CONTENT_TYPE,"content_hash":digest,"boundary":PRECLINICAL_BOUNDARY}; receipt=RetrievalCopilotReceipt(payload); receipt.validate(feature_id=feature_id,contract_version=contract_version); return receipt
+__all__=["RetrievalCopilotRequest","RetrievalCopilotReceipt","run","manifest"]

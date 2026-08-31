@@ -10,8 +10,8 @@ use bioprism_bioir::{
 };
 use bioprism_foundation::{
     AutonomyGrant, AutonomyTier, Effect as ResearchEffect, ExecutionStatus, ResearchContractError,
-    ResearchWorkflowSpec, ResourceBudget, WorkflowNode,
-    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    ResearchWorkflowSpec, ResourceBudget, WorkflowNode, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::RunId;
 use bioprism_runtime::{
@@ -54,7 +54,7 @@ impl ResearchWorkflowService {
         query: &ScopedRetrievalQuery,
         run_id: RunId,
     ) -> Result<EvidenceWorkflowResult, ResearchServiceError> {
-        let compiler = KnowledgeCompiler::default();
+        let compiler = KnowledgeCompiler;
         let synthesis = compiler.compile(ledger, query)?;
         let manifest = KnowledgeCompiler::manifest();
         let workflow = workflow_spec(query);
@@ -146,9 +146,9 @@ mod tests {
         AccessPolicy, EvidenceId, EvidenceObject, Locator, MeasurementContext, Modality,
         Provenance, QualityAssertion,
     };
+    use bioprism_foundation::PolicyDecision;
     use bioprism_ids::ContentHash;
     use bioprism_scope::{Interval, Timestamp};
-    use bioprism_foundation::PolicyDecision;
     use std::collections::BTreeSet;
 
     fn fixture_evidence() -> EvidenceObject {

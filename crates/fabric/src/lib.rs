@@ -161,6 +161,8 @@ pub mod algebra;
 pub mod blackboard;
 pub mod contract;
 pub mod effect;
+pub mod experiment_design_interoperability_gateway;
+pub mod experiment_design_contract_model;
 pub mod flow;
 pub mod ground;
 pub mod lifecycle;
@@ -170,6 +172,27 @@ pub mod reputation;
 pub mod stack;
 pub mod synth;
 pub mod topology;
+
+pub use experiment_design_interoperability_gateway::{
+    negotiate_experiment_design, negotiate_experiment_design_json,
+    validate_experiment_design_json, experiment_design_interoperability_manifest,
+    DesignAssignment8, DesignCapability4, ExecutableExperimentDesign8,
+    ExperimentDesignGatewayError, ExperimentDesignRequest4, ExperimentObjective4,
+    CONTENT_TYPE as EXPERIMENT_DESIGN_GATEWAY_CONTENT_TYPE,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_GATEWAY_FEATURE_ID,
+    INPUT_SCHEMA as EXPERIMENT_DESIGN_GATEWAY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EXPERIMENT_DESIGN_GATEWAY_OUTPUT_SCHEMA,
+};
+pub use experiment_design_contract_model::{
+    negotiate_experiment_design_contract, experiment_design_contract_manifest,
+    DesignContractCandidate4, DesignContractError, ExecutableExperimentDesign2,
+    ExecutableExperimentDesignArtifact2, FabricExperimentDesignContractRequest4,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_CONTRACT_MODEL_FEATURE_ID,
+    INPUT_SCHEMA as EXPERIMENT_DESIGN_CONTRACT_MODEL_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EXPERIMENT_DESIGN_CONTRACT_MODEL_OUTPUT_SCHEMA,
+};
 
 pub use algebra::{
     check_affine_non_duplication, check_authority_attenuation, check_commitment_conservation,

@@ -19,6 +19,8 @@ pub const FEATURE_ID: &str = "AFA-brain-P01-F05";
 pub const CONTRACT_VERSION: &str = "brain-evidence-contract-model/1.0";
 pub const INPUT_SCHEMA: &str = "EvidenceFeed1@1";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet2@1";
+const CONTRACT_CONTENT_TYPE: &str = "application/vnd.aurora.evidence-contract+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -104,7 +106,6 @@ impl EvidenceContractModelReceipt {
             || self.input_schema != INPUT_SCHEMA
             || self.output_schema != OUTPUT_SCHEMA
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.study_id.trim().is_empty()
             || self.scope.trim().is_empty()
@@ -117,6 +118,26 @@ impl EvidenceContractModelReceipt {
                     .into(),
             ));
         }
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.study_id, "study_id"),
+            (&self.scope, "scope"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        for (values, field) in [
+            (&self.required_order, "required_order"),
+            (&self.provided_order, "provided_order"),
+            (&self.missing_order, "missing_order"),
+            (&self.semantic_loss_order, "semantic_loss_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
         if self
             .missing_order
             .iter()
@@ -125,37 +146,94 @@ impl EvidenceContractModelReceipt {
                 .semantic_loss_order
                 .iter()
                 .any(|field| !self.provided_order.contains(field))
+            || !identity_keys(&self.missing_order)
+                .is_disjoint(&identity_keys(&self.semantic_loss_order))
         {
             return Err(EvidenceContractModelError::Invalid(
                 "contract loss state is outside declared fields".into(),
             ));
         }
-        for values in [
-            &self.required_order,
-            &self.provided_order,
-            &self.missing_order,
-            &self.semantic_loss_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        for digest in [
+            &self.semantic_digest,
+            &self.artifact_digest,
+            &self.provenance_digest,
+            &self.contract_digest,
+            &self.replay_identity,
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+            if digest.as_str().len() != 64 {
                 return Err(EvidenceContractModelError::Invalid(
-                    "contract ordering is not canonical".into(),
+                    "contract digest is invalid".into(),
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("read:local-research-artifacts:")
-                && effect != "block:unsafe-release"
-        }) {
+        let gate_blocked = self.negative_evidence.iter().any(|item| {
+            item == "request:policy-denied" || item == "request:raw-data-locality-failed"
+        }) || self
+            .uncertainty
+            .iter()
+            .any(|item| item == "request:protected-closure-incomplete");
+        let expected_disposition = if gate_blocked || !self.raw_data_local {
+            ContractDisposition::Blocked
+        } else if self.missing_order.is_empty()
+            && self.semantic_loss_order.is_empty()
+            && self.compatibility == ContractCompatibility::Additive
+        {
+            ContractDisposition::Qualified
+        } else {
+            ContractDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
             return Err(EvidenceContractModelError::Invalid(
-                "effect is outside the contract-model gate".into(),
+                "contract disposition does not match field loss, compatibility, or gates".into(),
+            ));
+        }
+        if !self.raw_data_local {
+            return Err(EvidenceContractModelError::Invalid(
+                "evidence contract receipts must declare local emitted data".into(),
+            ));
+        }
+        let expected_effect_receipts = if self.disposition == ContractDisposition::Qualified {
+            vec![format!("read:local-research-artifacts:{}", self.request_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(EvidenceContractModelError::Invalid(
+                "contract effect does not match disposition".into(),
+            ));
+        }
+        let expected_contract_digest = ContentHash::of_value(&json!({
+            "input_schema": self.input_schema,
+            "output_schema": self.output_schema,
+            "compatibility": self.compatibility,
+            "required_order": self.required_order,
+            "provided_order": self.provided_order,
+            "semantic_digest": self.semantic_digest,
+            "artifact_digest": self.artifact_digest,
+            "provenance_digest": self.provenance_digest,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| EvidenceContractModelError::Artifact(error.to_string()))?;
+        if self.contract_digest != expected_contract_digest {
+            return Err(EvidenceContractModelError::Invalid(
+                "contract digest is not bound to declared fields".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-evidence-contract:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != CONTRACT_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(EvidenceContractModelError::Invalid(
+                "contract artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| EvidenceContractModelError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| EvidenceContractModelError::Artifact(error.to_string()))
     }
 
@@ -166,6 +244,82 @@ impl EvidenceContractModelReceipt {
         ContentHash::of_value(&value)
             .map_err(|error| EvidenceContractModelError::Artifact(error.to_string()))
     }
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), EvidenceContractModelError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(EvidenceContractModelError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), EvidenceContractModelError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(EvidenceContractModelError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), EvidenceContractModelError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(EvidenceContractModelError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn receipt_payload(receipt: &EvidenceContractModelReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "study_id": receipt.study_id,
+        "scope": receipt.scope,
+        "disposition": receipt.disposition,
+        "compatibility": receipt.compatibility,
+        "input_schema": receipt.input_schema,
+        "output_schema": receipt.output_schema,
+        "required_order": receipt.required_order,
+        "provided_order": receipt.provided_order,
+        "missing_order": receipt.missing_order,
+        "semantic_loss_order": receipt.semantic_loss_order,
+        "semantic_digest": receipt.semantic_digest,
+        "artifact_digest": receipt.artifact_digest,
+        "provenance_digest": receipt.provenance_digest,
+        "contract_digest": receipt.contract_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn evidence_contract_model_manifest() -> CapabilityManifest {
@@ -257,18 +411,33 @@ pub fn model_evidence_contract(
     } else {
         ContractDisposition::Partial
     };
-    let contract_digest = ContentHash::of_value(&json!({"input_schema": request.input_schema, "output_schema": request.output_schema, "compatibility": request.compatibility, "required_order": required, "provided_order": provided, "semantic_digest": request.semantic_digest, "artifact_digest": request.artifact_digest, "provenance_digest": request.provenance_digest})).map_err(|error| EvidenceContractModelError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_id": request.study_id, "scope": request.scope, "disposition": disposition, "compatibility": request.compatibility, "input_schema": INPUT_SCHEMA, "output_schema": OUTPUT_SCHEMA, "required_order": required, "provided_order": provided, "missing_order": missing, "semantic_loss_order": semantic_loss, "semantic_digest": request.semantic_digest, "artifact_digest": request.artifact_digest, "provenance_digest": request.provenance_digest, "contract_digest": contract_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
-    let artifact = TypedResearchArtifact::from_payload(
-        format!("brain-evidence-contract:{}", request.request_id),
-        "application/vnd.aurora.evidence-contract+json",
-        &payload,
-        Vec::new(),
-        Vec::new(),
-    )
+    let required_order = required.into_iter().collect::<Vec<_>>();
+    let provided_order = provided.into_iter().collect::<Vec<_>>();
+    let omissions = omissions.into_iter().collect::<Vec<_>>();
+    let uncertainty = uncertainty.into_iter().collect::<Vec<_>>();
+    let negative_evidence = negative.into_iter().collect::<Vec<_>>();
+    let raw_data_local = true;
+    let contract_digest = ContentHash::of_value(&json!({
+        "input_schema": request.input_schema,
+        "output_schema": request.output_schema,
+        "compatibility": request.compatibility,
+        "required_order": required_order,
+        "provided_order": provided_order,
+        "semantic_digest": request.semantic_digest,
+        "artifact_digest": request.artifact_digest,
+        "provenance_digest": request.provenance_digest,
+        "raw_data_local": raw_data_local,
+    }))
     .map_err(|error| EvidenceContractModelError::Artifact(error.to_string()))?;
-    let has_qualified = disposition == ContractDisposition::Qualified;
-    let receipt = EvidenceContractModelReceipt {
+    let effect_receipts = if disposition == ContractDisposition::Qualified {
+        vec![format!(
+            "read:local-research-artifacts:{}",
+            request.request_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let receipt_without_artifact = EvidenceContractModelReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
@@ -279,8 +448,8 @@ pub fn model_evidence_contract(
         compatibility: request.compatibility,
         input_schema: INPUT_SCHEMA.into(),
         output_schema: OUTPUT_SCHEMA.into(),
-        required_order: required.into_iter().collect(),
-        provided_order: provided.into_iter().collect(),
+        required_order,
+        provided_order,
         missing_order: missing,
         semantic_loss_order: semantic_loss,
         semantic_digest: request.semantic_digest.clone(),
@@ -288,20 +457,32 @@ pub fn model_evidence_contract(
         provenance_digest: request.provenance_digest.clone(),
         contract_digest,
         replay_identity: request.replay_identity.clone(),
-        omissions: omissions.into_iter().collect(),
-        uncertainty: uncertainty.into_iter().collect(),
-        negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if has_qualified {
-            vec![format!(
-                "read:local-research-artifacts:{}",
-                request.request_id
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
-        artifact,
-        raw_data_local: true,
+        omissions,
+        uncertainty,
+        negative_evidence,
+        effect_receipts,
+        artifact: TypedResearchArtifact::from_payload(
+            "placeholder",
+            CONTRACT_CONTENT_TYPE,
+            &json!({}),
+            Vec::new(),
+            Vec::new(),
+        )
+        .map_err(|error| EvidenceContractModelError::Artifact(error.to_string()))?,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
+    };
+    let artifact = TypedResearchArtifact::from_payload(
+        format!("brain-evidence-contract:{}", request.request_id),
+        CONTRACT_CONTENT_TYPE,
+        &receipt_payload(&receipt_without_artifact),
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|error| EvidenceContractModelError::Artifact(error.to_string()))?;
+    let receipt = EvidenceContractModelReceipt {
+        artifact,
+        ..receipt_without_artifact
     };
     receipt.validate()?;
     Ok(receipt)
@@ -323,6 +504,18 @@ fn validate_request(
             "contract identity, schemas, fields, or boundary is incomplete".into(),
         ));
     }
+    for (value, field) in [
+        (&request.request_id, "request_id"),
+        (&request.study_id, "study_id"),
+        (&request.scope, "scope"),
+        (&request.input_schema, "input_schema"),
+        (&request.output_schema, "output_schema"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_unique(&request.required_fields, "required_fields")?;
+    validate_unique(&request.provided_fields, "provided_fields")?;
     if request
         .required_fields
         .windows(2)
@@ -335,6 +528,18 @@ fn validate_request(
         return Err(EvidenceContractModelError::Invalid(
             "contract fields must be unique and canonical".into(),
         ));
+    }
+    for digest in [
+        &request.semantic_digest,
+        &request.artifact_digest,
+        &request.provenance_digest,
+        &request.replay_identity,
+    ] {
+        if digest.as_str().len() != 64 {
+            return Err(EvidenceContractModelError::Invalid(
+                "contract request digest is invalid".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -422,6 +627,37 @@ mod tests {
             .iter()
             .any(|item| item.contains("migration_required")));
     }
+    #[test]
+    fn non_local_contract_is_blocked_and_retained() {
+        let mut input = request(vec![
+            "artifact_digest".into(),
+            "provenance_digest".into(),
+            "scope".into(),
+        ]);
+        input.raw_data_local = false;
+        let receipt = model_evidence_contract(&input).unwrap();
+        assert_eq!(receipt.disposition, ContractDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .negative_evidence
+            .contains(&"request:raw-data-locality-failed".into()));
+    }
+
+    #[test]
+    fn artifact_payload_is_bound() {
+        let mut receipt = model_evidence_contract(&request(vec![
+            "artifact_digest".into(),
+            "provenance_digest".into(),
+            "scope".into(),
+        ]))
+        .unwrap();
+        receipt.artifact.content_hash = hash("tampered");
+        assert!(matches!(
+            receipt.validate(),
+            Err(EvidenceContractModelError::Artifact(_))
+        ));
+    }
+
     #[test]
     fn policy_denial_blocks_contract() {
         let mut input = request(vec![

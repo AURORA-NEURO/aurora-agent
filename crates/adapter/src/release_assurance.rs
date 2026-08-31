@@ -8,8 +8,8 @@
 //! publication.
 
 use bioprism_foundation::{
-    LossSeverity, PolicyDecision, PolicyReceipt, SemanticLoss, TypedResearchArtifact,
-    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    LossSeverity, PolicyDecision, PolicyReceipt, ProvenanceLink, SemanticLoss,
+    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -67,6 +67,7 @@ pub struct ReleaseAssuranceReceipt {
     pub feature_id: String,
     pub run_id: String,
     pub release_id: String,
+    pub run: ValidatedResearchRun,
     pub verdict: ReleaseAssuranceVerdict,
     pub study_order: Vec<String>,
     pub modality_order: Vec<String>,
@@ -117,9 +118,38 @@ impl ReleaseAssuranceReceipt {
                 "release orders must be canonical and unique".into(),
             ));
         }
+        let expected_effect = if self.verdict == ReleaseAssuranceVerdict::Released {
+            "write_signed_research_object_metadata_local_only"
+        } else {
+            "block_unsafe_release_and_retain_local_receipt"
+        };
+        if self.effect_receipt != expected_effect {
+            return Err(ReleaseAssuranceError::InvalidRequest(
+                "release effect does not match its verdict".into(),
+            ));
+        }
+        if self.artifact.artifact_id != format!("release-assurance:{}", self.release_id)
+            || self.artifact.content_type != "application/vnd.aurora.signed-research-object+json"
+            || self.artifact.semantic_loss != self.semantic_loss
+            || self.artifact.provenance != release_provenance(&self.run)
+        {
+            return Err(ReleaseAssuranceError::Contract(
+                "release artifact is not bound to the validated run".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
-            .map_err(|error| ReleaseAssuranceError::Contract(error.to_string()))
+            .map_err(|error| ReleaseAssuranceError::Contract(error.to_string()))?;
+        self.artifact
+            .verify_payload(&release_payload(self))
+            .map_err(|error| ReleaseAssuranceError::Contract(error.to_string()))?;
+        let expected = assure_release_internal(&self.run, false)?;
+        if self != &expected {
+            return Err(ReleaseAssuranceError::Contract(
+                "release receipt is not derived from its validated run".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub fn digest(&self) -> Result<ContentHash, ReleaseAssuranceError> {
@@ -146,9 +176,16 @@ pub enum ReleaseAssuranceError {
 pub fn assure_release(
     run: &ValidatedResearchRun,
 ) -> Result<ReleaseAssuranceReceipt, ReleaseAssuranceError> {
+    assure_release_internal(run, true)
+}
+
+fn assure_release_internal(
+    run: &ValidatedResearchRun,
+    validate_output: bool,
+) -> Result<ReleaseAssuranceReceipt, ReleaseAssuranceError> {
     validate_run(run)?;
-    let mut studies = run.studies.clone();
-    studies.sort_by(|left, right| left.study_id.cmp(&right.study_id));
+    let run = canonical_run(run);
+    let studies = run.studies.clone();
     let study_order = studies
         .iter()
         .map(|study| study.study_id.clone())
@@ -185,9 +222,7 @@ pub fn assure_release(
         ReleaseAssuranceVerdict::Incomplete
     } else if !comparable {
         ReleaseAssuranceVerdict::Incomparable
-    } else if !modalities_complete {
-        ReleaseAssuranceVerdict::Conditional
-    } else if !omissions.is_empty() || !negative_evidence.is_empty() {
+    } else if !modalities_complete || !omissions.is_empty() || !negative_evidence.is_empty() {
         ReleaseAssuranceVerdict::Conditional
     } else {
         ReleaseAssuranceVerdict::Released
@@ -221,38 +256,40 @@ pub fn assure_release(
     if run.policy.decision != PolicyDecision::Allow {
         reasons.push("policy did not authorize release; no export effect is admitted".into());
     }
-    let effect_receipt = if verdict == ReleaseAssuranceVerdict::Released {
+    let effect_receipt: String = if verdict == ReleaseAssuranceVerdict::Released {
         "write_signed_research_object_metadata_local_only".into()
     } else {
         "block_unsafe_release_and_retain_local_receipt".into()
     };
-    let payload = json!({
-        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
-        "contract_version": CONTRACT_VERSION,
-        "feature_id": FEATURE_ID,
-        "run_id": run.run_id,
-        "release_id": run.release_id,
-        "verdict": verdict,
-        "study_order": study_order,
-        "modality_order": modality_order,
-        "artifact_order": artifact_order,
-        "evidence_receipt_order": evidence_receipt_order,
-        "omissions": omissions,
-        "uncertainty": uncertainty,
-        "negative_evidence": negative_evidence,
-        "semantic_loss": semantic_loss,
-        "reasons": reasons,
-        "policy_decision": run.policy.decision,
-        "effect_receipt": effect_receipt,
-        "raw_data_local": true,
-        "boundary": PRECLINICAL_BOUNDARY,
-    });
+    let policy_decision = run.policy.decision;
+    let provenance = release_provenance(&run);
+    let payload = release_payload_from_parts(
+        RESEARCH_CONTRACT_SCHEMA_VERSION,
+        CONTRACT_VERSION,
+        FEATURE_ID,
+        &run,
+        &verdict,
+        &study_order,
+        &modality_order,
+        &artifact_order,
+        &evidence_receipt_order,
+        &omissions,
+        &uncertainty,
+        &negative_evidence,
+        &semantic_loss,
+        &reasons,
+        policy_decision,
+        &effect_receipt,
+        &provenance,
+        true,
+        PRECLINICAL_BOUNDARY,
+    );
     let artifact = TypedResearchArtifact::from_payload(
         format!("release-assurance:{}", run.release_id),
         "application/vnd.aurora.signed-research-object+json",
         &payload,
         semantic_loss.clone(),
-        Vec::new(),
+        provenance,
     )
     .map_err(|error| ReleaseAssuranceError::Contract(error.to_string()))?;
     let receipt = ReleaseAssuranceReceipt {
@@ -261,6 +298,7 @@ pub fn assure_release(
         feature_id: FEATURE_ID.into(),
         run_id: run.run_id.clone(),
         release_id: run.release_id.clone(),
+        run,
         verdict,
         study_order,
         modality_order,
@@ -271,13 +309,15 @@ pub fn assure_release(
         negative_evidence,
         semantic_loss,
         reasons,
-        policy_decision: run.policy.decision,
+        policy_decision,
         effect_receipt,
         artifact,
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
-    receipt.validate()?;
+    if validate_output {
+        receipt.validate()?;
+    }
     Ok(receipt)
 }
 
@@ -290,11 +330,10 @@ fn validate_run(run: &ValidatedResearchRun) -> Result<(), ReleaseAssuranceError>
         || run.studies.len() < 2
         || run.evidence_receipt_ids.is_empty()
         || !run.raw_data_local
-        || run
+        || !run
             .localization_statement
             .to_ascii_lowercase()
             .contains("local")
-            == false
     {
         return Err(ReleaseAssuranceError::InvalidRequest(
             "release run is incomplete, non-local, or lacks multimodal studies".into(),
@@ -330,6 +369,106 @@ fn validate_run(run: &ValidatedResearchRun) -> Result<(), ReleaseAssuranceError>
 
 fn canonical_unique(values: &[String]) -> bool {
     !values.is_empty() && values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+fn canonical_run(run: &ValidatedResearchRun) -> ValidatedResearchRun {
+    let mut run = run.clone();
+    run.studies
+        .sort_by(|left, right| left.study_id.cmp(&right.study_id));
+    for study in &mut run.studies {
+        study.artifact_ids.sort();
+    }
+    run.evidence_receipt_ids.sort();
+    run.policy.reasons.sort();
+    run.policy.evaluated_artifacts.sort();
+    run.protected_omissions.sort();
+    run.protected_omissions.dedup();
+    run.negative_evidence.sort();
+    run.negative_evidence.dedup();
+    run
+}
+
+fn release_provenance(run: &ValidatedResearchRun) -> Vec<ProvenanceLink> {
+    let mut provenance = vec![ProvenanceLink {
+        source_id: run.release_id.clone(),
+        relation: "release-input-digest".into(),
+        digest: run.release_digest.clone(),
+    }];
+    provenance.extend(run.studies.iter().map(|study| ProvenanceLink {
+        source_id: study.study_id.clone(),
+        relation: "release-study-protocol".into(),
+        digest: study.protocol_digest.clone(),
+    }));
+    provenance
+}
+
+fn release_payload(receipt: &ReleaseAssuranceReceipt) -> serde_json::Value {
+    release_payload_from_parts(
+        &receipt.schema_version,
+        &receipt.contract_version,
+        &receipt.feature_id,
+        &receipt.run,
+        &receipt.verdict,
+        &receipt.study_order,
+        &receipt.modality_order,
+        &receipt.artifact_order,
+        &receipt.evidence_receipt_order,
+        &receipt.omissions,
+        &receipt.uncertainty,
+        &receipt.negative_evidence,
+        &receipt.semantic_loss,
+        &receipt.reasons,
+        receipt.policy_decision,
+        &receipt.effect_receipt,
+        &receipt.artifact.provenance,
+        receipt.raw_data_local,
+        &receipt.boundary,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn release_payload_from_parts(
+    schema_version: &str,
+    contract_version: &str,
+    feature_id: &str,
+    run: &ValidatedResearchRun,
+    verdict: &ReleaseAssuranceVerdict,
+    study_order: &[String],
+    modality_order: &[String],
+    artifact_order: &[String],
+    evidence_receipt_order: &[String],
+    omissions: &[String],
+    uncertainty: &[String],
+    negative_evidence: &[String],
+    semantic_loss: &[SemanticLoss],
+    reasons: &[String],
+    policy_decision: PolicyDecision,
+    effect_receipt: &str,
+    provenance: &[ProvenanceLink],
+    raw_data_local: bool,
+    boundary: &str,
+) -> serde_json::Value {
+    json!({
+        "schema_version": schema_version,
+        "contract_version": contract_version,
+        "feature_id": feature_id,
+        "run": run,
+        "verdict": verdict,
+        "study_order": study_order,
+        "modality_order": modality_order,
+        "artifact_order": artifact_order,
+        "evidence_receipt_order": evidence_receipt_order,
+        "omissions": omissions,
+        "uncertainty": uncertainty,
+        "negative_evidence": negative_evidence,
+        "semantic_loss": semantic_loss,
+        "reasons": reasons,
+        "policy_decision": policy_decision,
+        "effect_receipt": effect_receipt,
+        "provenance": provenance,
+        "raw_data_local": raw_data_local,
+        "boundary": boundary,
+    })
 }
 
 #[cfg(test)]
@@ -421,5 +560,26 @@ mod tests {
         let receipt = assure_release(&run).unwrap();
         assert_eq!(receipt.verdict, ReleaseAssuranceVerdict::Conditional);
         assert!(!receipt.omissions.is_empty());
+    }
+
+    #[test]
+    fn retained_study_input_tampering_is_rejected() {
+        let mut receipt = assure_release(&run()).unwrap();
+        receipt.run.studies[0].comparable = false;
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn release_artifact_provenance_tampering_is_rejected() {
+        let mut receipt = assure_release(&run()).unwrap();
+        receipt.artifact.provenance[0].digest = ContentHash::of_bytes(b"tampered");
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn retained_policy_decision_tampering_is_rejected() {
+        let mut receipt = assure_release(&run()).unwrap();
+        receipt.policy_decision = PolicyDecision::Deny;
+        assert!(receipt.validate().is_err());
     }
 }

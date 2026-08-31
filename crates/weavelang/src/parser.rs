@@ -99,6 +99,11 @@ pub fn parse(source: &str) -> Result<Program, ParseError> {
         source,
         tokens,
         position: 0,
+        eof: Token {
+            kind: TokenKind::Eof,
+            text: String::new(),
+            span: Span::empty_at(source.len(), 1, 1),
+        },
     };
     parser.program()
 }
@@ -107,19 +112,18 @@ struct Parser<'a> {
     source: &'a str,
     tokens: Vec<Token>,
     position: usize,
+    eof: Token,
 }
 
 impl Parser<'_> {
     fn peek(&self) -> &Token {
-        self.tokens
-            .get(self.position)
-            .unwrap_or_else(|| self.tokens.last().expect("tokenize always emits Eof"))
+        self.tokens.get(self.position).unwrap_or(&self.eof)
     }
 
     fn peek_at(&self, ahead: usize) -> &Token {
         self.tokens
-            .get(self.position + ahead)
-            .unwrap_or_else(|| self.tokens.last().expect("tokenize always emits Eof"))
+            .get(self.position.saturating_add(ahead))
+            .unwrap_or(&self.eof)
     }
 
     fn kind(&self) -> TokenKind {

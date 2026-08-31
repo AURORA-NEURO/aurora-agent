@@ -43,7 +43,9 @@
 //! corroborating it. No key lifecycle beyond an action name for one, no revocation, and no
 //! redaction-with-proof.
 
-use crate::attestation::{Attestation, AttestationPurpose, ClaimedProducer, KeyHolderAuthenticated};
+use crate::attestation::{
+    Attestation, AttestationPurpose, ClaimedProducer, KeyHolderAuthenticated,
+};
 use crate::error::BundleError;
 use crate::mac::{KeyIdentity, SecretKey};
 use bioprism_ids::ContentHash;
@@ -214,7 +216,12 @@ impl AuditLog {
             digest,
             event,
         });
-        Ok(self.entries.last().expect("just pushed"))
+        self.entries
+            .last()
+            .ok_or_else(|| BundleError::SerializationFailed {
+                context: "audit entry",
+                detail: "entry disappeared immediately after append".to_string(),
+            })
     }
 
     /// Recomputes every link. Never reads a recorded digest and calls it checked.
@@ -254,21 +261,19 @@ impl AuditLog {
         key: &SecretKey,
         claimed_producer: ClaimedProducer,
     ) -> Result<AuditCheckpoint, BundleError> {
-        let verification = self.verify_chain()?;
-        let ChainVerification::Intact { length, head } = verification else {
-            let ChainVerification::BrokenAt {
+        let (length, head) = match self.verify_chain()? {
+            ChainVerification::Intact { length, head } => (length, head),
+            ChainVerification::BrokenAt {
                 sequence,
                 recorded,
                 computed,
-            } = verification
-            else {
-                unreachable!("ChainVerification has two variants")
-            };
-            return Err(BundleError::AuditChainBroken {
-                sequence,
-                recorded: recorded.as_str().to_string(),
-                computed: computed.as_str().to_string(),
-            });
+            } => {
+                return Err(BundleError::AuditChainBroken {
+                    sequence,
+                    recorded: recorded.as_str().to_string(),
+                    computed: computed.as_str().to_string(),
+                });
+            }
         };
         let subject = checkpoint_digest(&head, length)?;
         let attestation = Attestation::produce(
@@ -289,7 +294,10 @@ impl AuditLog {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "chain", rename_all = "snake_case")]
 pub enum ChainVerification {
-    Intact { length: usize, head: ContentHash },
+    Intact {
+        length: usize,
+        head: ContentHash,
+    },
     BrokenAt {
         sequence: u64,
         recorded: ContentHash,
@@ -375,7 +383,10 @@ fn link_digest(
     map.insert("previous".into(), json!(previous.as_str()));
     map.insert(
         "event".into(),
-        serde_json::to_value(event).expect("an event is serialisable"),
+        serde_json::to_value(event).map_err(|error| BundleError::SerializationFailed {
+            context: "audit event",
+            detail: error.to_string(),
+        })?,
     );
     let bytes = bioprism_ids::to_canonical_bytes(&Value::Object(map))?;
     Ok(ContentHash::of_bytes(&bytes))
@@ -410,7 +421,8 @@ mod tests {
     fn log_of(count: usize) -> AuditLog {
         let mut log = AuditLog::new();
         for index in 0..count {
-            log.append(event(&format!("bundle-{index}"))).expect("appends");
+            log.append(event(&format!("bundle-{index}")))
+                .expect("appends");
         }
         log
     }
@@ -530,7 +542,9 @@ mod tests {
 
         let mut rewritten = AuditLog::new();
         rewritten.append(event("bundle-0")).expect("appends");
-        rewritten.append(event("bundle-rewritten")).expect("appends");
+        rewritten
+            .append(event("bundle-rewritten"))
+            .expect("appends");
         rewritten.append(event("bundle-2")).expect("appends");
         let forged = rewritten
             .checkpoint(&key(), ClaimedProducer::new("hub"))

@@ -269,6 +269,9 @@ pub fn assure_knowledge_world(
             && claim.replay_identity == request.replay_identity
             && request.benchmark_digest.is_some();
         if complete {
+            let Some(comparability_digest) = claim.comparability_digest.clone() else {
+                continue;
+            };
             admitted.push(claim.claim_id.clone());
             predicates.insert(claim.predicate.clone());
             studies.extend(claim.study_ids.iter().cloned());
@@ -277,12 +280,7 @@ pub fn assure_knowledge_world(
             artifacts.insert(claim.artifact_digest.clone());
             evidence.insert(claim.evidence_digest.clone());
             provenance.insert(claim.provenance_digest.clone());
-            comparability.insert(
-                claim
-                    .comparability_digest
-                    .clone()
-                    .expect("comparability checked"),
-            );
+            comparability.insert(comparability_digest);
         } else {
             blocked.insert(claim.claim_id.clone());
             if matches!(

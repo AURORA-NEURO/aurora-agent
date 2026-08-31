@@ -343,7 +343,12 @@ pub fn compile_bundle(
 
     let mut entries: Vec<BundleEntry> = Vec::new();
     for (module, reason) in &mandatory {
-        let node = graph.node(module).expect("checked above");
+        let Some(node) = graph.node(module) else {
+            return Err(BundleError::RouteReferencesMissingModule {
+                route: route.id.clone(),
+                module: module.clone(),
+            });
+        };
         let level = mandatory_level(node);
         entries.push(BundleEntry {
             module: module.clone(),
@@ -404,7 +409,12 @@ pub fn compile_bundle(
         if fits {
             spent += cost;
             admitted.insert(module.clone());
-            let node = graph.node(&module).expect("candidate came from the graph");
+            let Some(node) = graph.node(&module) else {
+                return Err(BundleError::RouteReferencesMissingModule {
+                    route: route.id.clone(),
+                    module,
+                });
+            };
             entries.push(BundleEntry {
                 module,
                 level: ProfileLevel::Card,

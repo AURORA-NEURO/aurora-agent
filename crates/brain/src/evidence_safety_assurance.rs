@@ -20,6 +20,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-brain-P01-F25";
 pub const CONTRACT_VERSION: &str = "brain-evidence-assurance/1.0";
+const ASSURANCE_CONTENT_TYPE: &str = "application/vnd.aurora.evidence-assurance+json";
+const MAX_ITEMS: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -84,18 +86,7 @@ impl EvidenceAssuranceReceipt {
                 "assurance identity, witness coverage, locality, or effects are incomplete".into(),
             ));
         }
-        if self
-            .qualified_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
-            return Err(EvidenceAssuranceError::Invalid(
-                "assurance state is not covered by candidates".into(),
-            ));
-        }
-        for values in [
+        let collections = [
             &self.candidate_order,
             &self.qualified_order,
             &self.blocked_order,
@@ -106,7 +97,25 @@ impl EvidenceAssuranceReceipt {
             &self.uncertainty,
             &self.negative_evidence,
             &self.effect_receipts,
-        ] {
+        ];
+        if collections.iter().any(|values| values.len() > MAX_ITEMS) {
+            return Err(EvidenceAssuranceError::Invalid(
+                "assurance collection exceeds the bounded contract limit".into(),
+            ));
+        }
+        let qualified = self.qualified_order.iter().collect::<BTreeSet<_>>();
+        let blocked = self.blocked_order.iter().collect::<BTreeSet<_>>();
+        let unknown = self.unknown_order.iter().collect::<BTreeSet<_>>();
+        let candidates = self.candidate_order.iter().collect::<BTreeSet<_>>();
+        let mut covered = qualified.clone();
+        covered.extend(blocked.iter());
+        if covered != candidates || !qualified.is_disjoint(&blocked) || !unknown.is_subset(&blocked)
+        {
+            return Err(EvidenceAssuranceError::Invalid(
+                "assurance evidence states must partition candidates without overlap".into(),
+            ));
+        }
+        for values in collections {
             if values.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(EvidenceAssuranceError::Invalid(
                     "assurance ordering is not canonical".into(),
@@ -124,15 +133,91 @@ impl EvidenceAssuranceReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("assurance:local-evidence:") && effect != "block:unsafe-release"
-        }) {
+        let gate_blocked = !self.counterexample_order.is_empty()
+            || self.negative_evidence.iter().any(|item| {
+                item == "request:policy-denied" || item == "request:raw-data-locality-failed"
+            })
+            || self
+                .uncertainty
+                .iter()
+                .any(|item| item == "request:protected-closure-incomplete");
+        let expected_verdict = if gate_blocked {
+            AssuranceVerdict::Blocked
+        } else if self.qualified_order.is_empty() {
+            AssuranceVerdict::Unresolved
+        } else if self.blocked_order.is_empty()
+            && self.omissions.is_empty()
+            && self.uncertainty.is_empty()
+            && self.negative_evidence.is_empty()
+        {
+            AssuranceVerdict::Qualified
+        } else {
+            AssuranceVerdict::Unresolved
+        };
+        if self.verdict != expected_verdict {
             return Err(EvidenceAssuranceError::Invalid(
-                "assurance effect is outside the local release gate".into(),
+                "assurance verdict does not match evidence state or gates".into(),
+            ));
+        }
+        let expected_witnesses = BTreeSet::from([
+            "gate:typed-contract".to_string(),
+            "gate:protected-closure".to_string(),
+            "gate:provenance".to_string(),
+            "gate:replay-identity".to_string(),
+            "gate:locality".to_string(),
+            "gate:effect-allow-list".to_string(),
+        ])
+        .into_iter()
+        .chain(
+            (self.verdict != AssuranceVerdict::Qualified)
+                .then_some("gate:non-qualified-evidence-retained".to_string()),
+        )
+        .collect::<BTreeSet<_>>();
+        if self.witness_order.iter().cloned().collect::<BTreeSet<_>>() != expected_witnesses {
+            return Err(EvidenceAssuranceError::Invalid(
+                "assurance witnesses do not match the verdict".into(),
+            ));
+        }
+        let expected_effects = if self.verdict == AssuranceVerdict::Qualified {
+            vec![format!("assurance:local-evidence:{}", self.request_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effects {
+            return Err(EvidenceAssuranceError::Invalid(
+                "assurance effect does not match verdict".into(),
+            ));
+        }
+        let expected_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "candidate_order": self.candidate_order,
+            "witness_order": self.witness_order,
+            "counterexample_order": self.counterexample_order,
+            "verdict": self.verdict,
+            "replay_identity": self.replay_identity
+        }))
+        .map_err(|error| EvidenceAssuranceError::Artifact(error.to_string()))?;
+        if self.verification_digest != expected_digest {
+            return Err(EvidenceAssuranceError::Invalid(
+                "assurance verification digest does not match its receipt fields".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-evidence-assurance:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != ASSURANCE_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(EvidenceAssuranceError::Invalid(
+                "assurance artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| EvidenceAssuranceError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| EvidenceAssuranceError::Artifact(error.to_string()))
     }
 
@@ -209,10 +294,10 @@ pub fn verify_evidence_safety(
     if evidence.disposition != EvidenceSurveillanceDisposition::Qualified {
         witnesses.insert("gate:non-qualified-evidence-retained".into());
     }
-    let verdict = if !request.policy_allow || !request.protected_closure || !request.raw_data_local
-    {
-        AssuranceVerdict::Blocked
-    } else if !counterexamples.is_empty()
+    let verdict = if !request.policy_allow
+        || !request.protected_closure
+        || !request.raw_data_local
+        || !counterexamples.is_empty()
         || evidence.disposition == EvidenceSurveillanceDisposition::Blocked
     {
         AssuranceVerdict::Blocked
@@ -226,10 +311,10 @@ pub fn verify_evidence_safety(
         .map_err(|error| EvidenceAssuranceError::Engine(error.to_string()))?;
     let verification_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "candidate_order": evidence.candidate_order, "witness_order": witnesses, "counterexample_order": counterexamples, "verdict": verdict, "replay_identity": request.replay_identity}))
         .map_err(|error| EvidenceAssuranceError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_id": request.study_id, "scope": request.scope, "verdict": verdict, "candidate_order": evidence.candidate_order, "qualified_order": evidence.qualified_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "witness_order": witnesses, "counterexample_order": counterexamples, "evidence_digest": evidence_digest, "verification_digest": verification_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_id": request.study_id, "scope": request.scope, "verdict": verdict, "candidate_order": evidence.candidate_order, "qualified_order": evidence.qualified_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "witness_order": witnesses, "counterexample_order": counterexamples, "evidence_digest": evidence_digest, "verification_digest": verification_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-evidence-assurance:{}", request.request_id),
-        "application/vnd.aurora.evidence-assurance+json",
+        ASSURANCE_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -266,6 +351,32 @@ pub fn verify_evidence_safety(
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn receipt_payload(receipt: &EvidenceAssuranceReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "study_id": receipt.study_id,
+        "scope": receipt.scope,
+        "verdict": receipt.verdict,
+        "candidate_order": receipt.candidate_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "witness_order": receipt.witness_order,
+        "counterexample_order": receipt.counterexample_order,
+        "evidence_digest": receipt.evidence_digest,
+        "verification_digest": receipt.verification_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]

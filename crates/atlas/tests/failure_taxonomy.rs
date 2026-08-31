@@ -11,6 +11,7 @@ use bioprism_atlas::{
     Inducement, LabelDistribution, OracleTier, Reversibility, Severity, TrialOutcome,
 };
 use bioprism_ids::RunId;
+use serde_json::json;
 
 const VERSION: &str = "capability-ontology/2026-08-07";
 
@@ -127,6 +128,26 @@ fn a_causal_chain_whose_terminal_failure_precedes_its_first_divergence_is_refuse
 }
 
 #[test]
+fn causal_chain_deserialization_cannot_bypass_ordering() {
+    let decoded = serde_json::from_value::<CausalChain>(json!({
+        "initiating_cause": {
+            "mechanism": "relevant_evidence_not_acquired",
+            "step": 1
+        },
+        "first_divergence": {
+            "mechanism": "hypothesis_collapsed_too_early",
+            "step": 9
+        },
+        "manifestations": [],
+        "terminal": {
+            "mechanism": "safety_boundary_crossed",
+            "step": 4
+        }
+    }));
+    assert!(decoded.is_err());
+}
+
+#[test]
 fn a_manifestation_before_the_first_divergence_is_refused() {
     let built = CausalChain::new(
         "f4",
@@ -182,10 +203,10 @@ fn an_unclassified_failure_is_reported_as_taxonomy_debt_rather_than_silently_buc
         .build()
         .unwrap();
 
-    assert!(atlas.inconsistencies().iter().any(|i| matches!(
-        i,
-        Inconsistency::UnclassifiedFailure { .. }
-    )));
+    assert!(atlas
+        .inconsistencies()
+        .iter()
+        .any(|i| matches!(i, Inconsistency::UnclassifiedFailure { .. })));
     assert_eq!(
         bioprism_atlas::CoverageReport::of(&atlas)
             .debt
@@ -269,6 +290,26 @@ fn a_label_distribution_whose_weights_do_not_sum_to_one_is_refused() {
 }
 
 #[test]
+fn label_distribution_deserialization_cannot_bypass_weight_invariants() {
+    let duplicate = serde_json::from_value::<LabelDistribution>(json!({
+        "weights": [
+            {"mechanism": "tool_schema_misunderstood", "weight": 0.5},
+            {"mechanism": "tool_schema_misunderstood", "weight": 0.5}
+        ],
+        "rationale": "duplicate reviewer bucket"
+    }));
+    assert!(duplicate.is_err());
+
+    let incomplete = serde_json::from_value::<LabelDistribution>(json!({
+        "weights": [
+            {"mechanism": "tool_schema_misunderstood", "weight": 0.5}
+        ],
+        "rationale": "incomplete reviewer bucket"
+    }));
+    assert!(incomplete.is_err());
+}
+
+#[test]
 fn a_flattened_causal_chain_is_recorded_but_does_not_count_as_a_diagnosis() {
     let flat = CausalChain::new(
         "f10",
@@ -287,7 +328,10 @@ fn a_flattened_causal_chain_is_recorded_but_does_not_count_as_a_diagnosis() {
         VERSION,
         flat,
         axes(),
-        LabelDistribution::certain(FailureMechanism::SafetyBoundaryCrossed, "one label, one step"),
+        LabelDistribution::certain(
+            FailureMechanism::SafetyBoundaryCrossed,
+            "one label, one step",
+        ),
     );
     assert!(!record.is_diagnosed());
 }

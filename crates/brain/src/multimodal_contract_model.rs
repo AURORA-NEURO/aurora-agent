@@ -19,6 +19,8 @@ pub const FEATURE_ID: &str = "AFA-brain-P01-F06";
 pub const CONTRACT_VERSION: &str = "brain-multimodal-evidence-contract/1.0";
 pub const INPUT_SCHEMA: &str = "EvidenceFeed2@1";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet2@1";
+const CONTRACT_CONTENT_TYPE: &str = "application/vnd.aurora.multimodal-evidence-contract+json";
+const MAX_ITEMS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModalitySchemaBinding {
@@ -122,7 +124,7 @@ impl MultimodalEvidenceContractReceipt {
                 "multimodal identity, schema, study/modality closure, locality, or effects are incomplete".into(),
             ));
         }
-        for values in [
+        let collections = [
             &self.study_order,
             &self.modality_order,
             &self.binding_order,
@@ -135,12 +137,36 @@ impl MultimodalEvidenceContractReceipt {
             &self.uncertainty,
             &self.negative_evidence,
             &self.effect_receipts,
-        ] {
+        ];
+        if collections.iter().any(|values| values.len() > MAX_ITEMS) {
+            return Err(MultimodalContractModelError::Invalid(
+                "multimodal contract collection exceeds the bounded contract limit".into(),
+            ));
+        }
+        for values in collections {
             if values.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(MultimodalContractModelError::Invalid(
                     "multimodal contract ordering is not canonical".into(),
                 ));
             }
+        }
+        let binding_keys = self.binding_order.iter().collect::<BTreeSet<_>>();
+        if binding_keys.len() != self.binding_order.len()
+            || self.binding_order.iter().any(|key| {
+                key.split_once(':')
+                    .map(|(study, modality)| study.is_empty() || modality.is_empty())
+                    .unwrap_or(true)
+            })
+            || self.missing_order.iter().any(|key| {
+                !self
+                    .study_order
+                    .iter()
+                    .any(|study| key.starts_with(&format!("{study}:")))
+            })
+        {
+            return Err(MultimodalContractModelError::Invalid(
+                "multimodal binding identity or missing closure is invalid".into(),
+            ));
         }
         for values in [
             &self.semantic_order,
@@ -153,16 +179,82 @@ impl MultimodalEvidenceContractReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("read:local-research-artifacts:")
-                && effect != "block:unsafe-release"
-        }) {
+        let gate_blocked = self.negative_evidence.iter().any(|item| {
+            item == "request:policy-denied" || item == "request:raw-data-locality-failed"
+        }) || self
+            .uncertainty
+            .iter()
+            .any(|item| item == "request:protected-closure-incomplete");
+        let expected_disposition = if gate_blocked {
+            MultimodalContractDisposition::Blocked
+        } else if self.binding_order.is_empty() {
+            MultimodalContractDisposition::Unknown
+        } else if self.missing_order.is_empty()
+            && self.semantic_disagreement_order.is_empty()
+            && self.compatibility == ContractCompatibility::Additive
+        {
+            MultimodalContractDisposition::Qualified
+        } else {
+            MultimodalContractDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
             return Err(MultimodalContractModelError::Invalid(
-                "effect is outside the multimodal contract gate".into(),
+                "multimodal disposition does not match closure or gates".into(),
+            ));
+        }
+        let expected_digest = ContentHash::of_value(&json!({
+            "study_order": self.study_order,
+            "modality_order": self.modality_order,
+            "binding_order": self.binding_order,
+            "schema_order": self.schema_order,
+            "unit_order": self.unit_order,
+            "coordinate_order": self.coordinate_order,
+            "semantic_order": self.semantic_order,
+            "compatibility": self.compatibility,
+            "comparability_profile": self.comparability_profile
+        }))
+        .map_err(|error| MultimodalContractModelError::Artifact(error.to_string()))?;
+        if self.contract_digest != expected_digest {
+            return Err(MultimodalContractModelError::Invalid(
+                "multimodal contract digest does not match its bindings".into(),
+            ));
+        }
+        let expected_effect = if self.disposition == MultimodalContractDisposition::Qualified {
+            vec![format!("read:local-research-artifacts:{}", self.request_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect {
+            return Err(MultimodalContractModelError::Invalid(
+                "multimodal effect does not match disposition".into(),
+            ));
+        }
+        for digest in [
+            &self.replay_identity,
+            &self.contract_digest,
+            &self.artifact.content_hash,
+        ] {
+            if digest.as_str().len() != 64 {
+                return Err(MultimodalContractModelError::Invalid(
+                    "multimodal contract digest is invalid".into(),
+                ));
+            }
+        }
+        let expected_artifact_id = format!("brain-multimodal-contract:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != CONTRACT_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(MultimodalContractModelError::Invalid(
+                "multimodal artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| MultimodalContractModelError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| MultimodalContractModelError::Artifact(error.to_string()))
     }
 
@@ -297,10 +389,10 @@ pub fn model_multimodal_evidence_contract(
     };
     let binding_order = binding_map.keys().cloned().collect::<Vec<_>>();
     let contract_digest = ContentHash::of_value(&json!({"study_order": studies, "modality_order": modalities, "binding_order": binding_order, "schema_order": schema_order, "unit_order": unit_order, "coordinate_order": coordinate_order, "semantic_order": semantic_order, "compatibility": request.compatibility, "comparability_profile": request.comparability_profile})).map_err(|error| MultimodalContractModelError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_order": studies, "scope": request.scope, "comparability_profile": request.comparability_profile, "disposition": disposition, "compatibility": request.compatibility, "input_schema": INPUT_SCHEMA, "output_schema": OUTPUT_SCHEMA, "modality_order": modalities, "binding_order": binding_order, "missing_order": missing, "semantic_disagreement_order": disagreement, "schema_order": schema_order, "unit_order": unit_order, "coordinate_order": coordinate_order, "semantic_order": semantic_order, "artifact_order": artifact_order, "provenance_order": provenance_order, "contract_digest": contract_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_order": studies, "scope": request.scope, "comparability_profile": request.comparability_profile, "disposition": disposition, "compatibility": request.compatibility, "input_schema": INPUT_SCHEMA, "output_schema": OUTPUT_SCHEMA, "modality_order": modalities, "binding_order": binding_order, "missing_order": missing, "semantic_disagreement_order": disagreement, "schema_order": schema_order, "unit_order": unit_order, "coordinate_order": coordinate_order, "semantic_order": semantic_order, "artifact_order": artifact_order, "provenance_order": provenance_order, "contract_digest": contract_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-multimodal-contract:{}", request.request_id),
-        "application/vnd.aurora.multimodal-evidence-contract+json",
+        CONTRACT_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -348,6 +440,39 @@ pub fn model_multimodal_evidence_contract(
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn receipt_payload(receipt: &MultimodalEvidenceContractReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "study_order": receipt.study_order,
+        "scope": receipt.scope,
+        "comparability_profile": receipt.comparability_profile,
+        "disposition": receipt.disposition,
+        "compatibility": receipt.compatibility,
+        "input_schema": receipt.input_schema,
+        "output_schema": receipt.output_schema,
+        "modality_order": receipt.modality_order,
+        "binding_order": receipt.binding_order,
+        "missing_order": receipt.missing_order,
+        "semantic_disagreement_order": receipt.semantic_disagreement_order,
+        "schema_order": receipt.schema_order,
+        "unit_order": receipt.unit_order,
+        "coordinate_order": receipt.coordinate_order,
+        "semantic_order": receipt.semantic_order,
+        "artifact_order": receipt.artifact_order,
+        "provenance_order": receipt.provenance_order,
+        "contract_digest": receipt.contract_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 fn validate_request(

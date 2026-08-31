@@ -21,6 +21,9 @@ use thiserror::Error;
 pub const FEATURE_ID: &str = "AFA-brain-P01-F16";
 pub const CONTRACT_VERSION: &str = "brain-federated-evidence-workflow-fabric/1.0";
 pub const OUTPUT_SCHEMA: &str = "FederationEnvelope1@1";
+const WORKFLOW_CONTENT_TYPE: &str =
+    "application/vnd.aurora.federated-research-workflow-receipt+json";
+const MAX_TEXT_BYTES: usize = 512;
 pub const STAGE_ORDER: [&str; 4] = [
     "stage:admit-federation",
     "stage:checkpoint",
@@ -50,6 +53,7 @@ pub struct FederatedWorkflowReceipt {
     pub feature_id: String,
     pub request_id: String,
     pub workflow_id: String,
+    pub checkpoint_id: String,
     pub federation_id: String,
     pub institution_id: String,
     pub purpose: String,
@@ -94,91 +98,181 @@ impl FederatedWorkflowReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
-            || self.request_id.trim().is_empty()
-            || self.workflow_id.trim().is_empty()
-            || self.federation_id.trim().is_empty()
-            || self.institution_id.trim().is_empty()
-            || self.purpose.trim().is_empty()
-            || self.endpoint.trim().is_empty()
-            || self.stage_order.is_empty()
             || self.plan_order.is_empty()
-            || self.completed_order.is_empty()
-            || self.effect_receipts.is_empty()
             || self.budget_units == 0
         {
             return Err(FederatedWorkflowError::Invalid(
                 "federation workflow identity, stages, plan, locality, budget, or effects are incomplete".into(),
             ));
         }
-        if self
-            .admitted_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.workflow_id, "workflow_id"),
+            (&self.checkpoint_id, "checkpoint_id"),
+            (&self.federation_id, "federation_id"),
+            (&self.institution_id, "institution_id"),
+            (&self.purpose, "purpose"),
+            (&self.endpoint, "endpoint"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        if self.stage_order != STAGE_ORDER {
             return Err(FederatedWorkflowError::Invalid(
-                "federation workflow state is not covered by candidates".into(),
+                "federation workflow stage order is not canonical".into(),
             ));
         }
-        for values in [
-            &self.stage_order,
-            &self.plan_order,
-            &self.completed_order,
-            &self.blocked_order,
-            &self.compensation_order,
-            &self.candidate_order,
-            &self.admitted_order,
-            &self.unknown_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        if self.completed_order != self.stage_order {
+            return Err(FederatedWorkflowError::Invalid(
+                "federation workflow completed order does not cover stages".into(),
+            ));
+        }
+        validate_sorted_unique(&self.plan_order, "plan_order")?;
+        validate_sorted_unique(&self.blocked_order, "blocked_order")?;
+        validate_sorted_unique(&self.compensation_order, "compensation_order")?;
+        validate_sorted_unique(&self.candidate_order, "candidate_order")?;
+        validate_sorted_unique(&self.admitted_order, "admitted_order")?;
+        validate_sorted_unique(&self.unknown_order, "unknown_order")?;
+        for (values, field) in [
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+            validate_sorted_unique(values, field)?;
+        }
+        let required_plans = STAGE_ORDER
+            .iter()
+            .map(|stage| format!("plan:{stage}"))
+            .collect::<BTreeSet<_>>();
+        let plan_keys = self.plan_order.iter().cloned().collect::<BTreeSet<_>>();
+        if !required_plans.is_subset(&plan_keys)
+            || self
+                .plan_order
+                .iter()
+                .filter(|plan| plan.starts_with("plan:"))
+                .count()
+                != required_plans.len() + 1
+        {
+            return Err(FederatedWorkflowError::Invalid(
+                "federation workflow plan does not contain exactly one terminal branch".into(),
+            ));
+        }
+        let expected_terminal_plan = if self.admitted_order.is_empty() {
+            "plan:retain-unresolved-federation"
+        } else if self.disposition == FederatedEvidenceDisposition::Qualified {
+            "plan:publish-permitted-aggregate"
+        } else {
+            "plan:retain-partial-federation"
+        };
+        if !self
+            .plan_order
+            .iter()
+            .any(|plan| plan == expected_terminal_plan)
+        {
+            return Err(FederatedWorkflowError::Invalid(
+                "federation workflow terminal plan does not match disposition and admission".into(),
+            ));
+        }
+        let candidate_keys = identity_keys(&self.candidate_order);
+        let admitted_keys = identity_keys(&self.admitted_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        if admitted_keys
+            .union(&blocked_keys)
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            != candidate_keys
+            || !admitted_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+            || self.aggregate_order.len() != self.admitted_order.len()
+        {
+            return Err(FederatedWorkflowError::Invalid(
+                "federation workflow states and aggregates do not partition candidates".into(),
+            ));
+        }
+        validate_digest_order(&self.aggregate_order)?;
+        if !self.raw_data_local {
+            return Err(FederatedWorkflowError::Invalid(
+                "federated evidence workflow receipts must declare local emitted data".into(),
+            ));
+        }
+        let expected_effect_receipts =
+            if self.disposition == FederatedEvidenceDisposition::Qualified {
+                if self.compensation_order.is_empty() {
+                    vec![format!("schedule:research-work:{}", self.workflow_id)]
+                } else {
+                    return Err(FederatedWorkflowError::Invalid(
+                        "qualified federation workflows cannot carry compensation".into(),
+                    ));
+                }
+            } else if self.disposition != FederatedEvidenceDisposition::Blocked
+                && !self.compensation_order.is_empty()
+            {
+                vec![format!("compensate:research-work:{}", self.workflow_id)]
+            } else {
+                vec!["block:unsafe-release".into()]
+            };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(FederatedWorkflowError::Invalid(
+                "federation workflow effects do not match disposition and compensation".into(),
+            ));
+        }
+        for digest in [
+            &self.checkpoint_digest,
+            &self.workflow_digest,
+            &self.approval_reference,
+            &self.replay_identity,
+        ] {
+            if digest.as_str().len() != 64 {
                 return Err(FederatedWorkflowError::Invalid(
-                    "federation workflow ordering is not canonical".into(),
+                    "federation workflow digest is invalid".into(),
                 ));
             }
         }
-        if self
-            .aggregate_order
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
-        {
+        let expected_checkpoint_digest = ContentHash::of_value(&json!({
+            "workflow_id": self.workflow_id,
+            "checkpoint_id": self.checkpoint_id,
+            "stage_order": self.stage_order,
+            "replay_identity": self.replay_identity,
+            "federation_id": self.federation_id,
+        }))
+        .map_err(|error| FederatedWorkflowError::Artifact(error.to_string()))?;
+        if self.checkpoint_digest != expected_checkpoint_digest {
             return Err(FederatedWorkflowError::Invalid(
-                "aggregate ordering is not canonical".into(),
+                "federation checkpoint digest is not bound to checkpoint state".into(),
             ));
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("schedule:research-work:")
-                && !effect.starts_with("compensate:research-work:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_workflow_digest = ContentHash::of_value(&json!({
+            "workflow_id": self.workflow_id,
+            "plan_order": self.plan_order,
+            "completed_order": self.completed_order,
+            "checkpoint_digest": self.checkpoint_digest,
+            "approval_reference": self.approval_reference,
+            "budget_units": self.budget_units,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| FederatedWorkflowError::Artifact(error.to_string()))?;
+        if self.workflow_digest != expected_workflow_digest {
             return Err(FederatedWorkflowError::Invalid(
-                "federation workflow effect is outside schedule/compensation gate".into(),
+                "federation workflow digest is not bound to workflow state".into(),
             ));
         }
-        if self.disposition == FederatedEvidenceDisposition::Qualified
-            && !self
-                .effect_receipts
-                .iter()
-                .any(|effect| effect.starts_with("schedule:research-work:"))
+        let expected_artifact_id =
+            format!("brain-federated-evidence-workflow:{}", self.workflow_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != WORKFLOW_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
         {
             return Err(FederatedWorkflowError::Invalid(
-                "qualified federation workflow requires schedule receipt".into(),
-            ));
-        }
-        if self.disposition == FederatedEvidenceDisposition::Blocked
-            && self.effect_receipts != ["block:unsafe-release"]
-        {
-            return Err(FederatedWorkflowError::Invalid(
-                "blocked federation workflow must be explicitly blocked".into(),
+                "federation workflow artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedWorkflowError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedWorkflowError::Artifact(error.to_string()))
     }
 
@@ -189,6 +283,96 @@ impl FederatedWorkflowReceipt {
         ContentHash::of_value(&value)
             .map_err(|error| FederatedWorkflowError::Artifact(error.to_string()))
     }
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedWorkflowError> {
+    if value.trim() != value
+        || value.is_empty()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedWorkflowError::Invalid(format!(
+            "{field} is empty, padded, oversized, or contains control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), FederatedWorkflowError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedWorkflowError::Invalid(format!(
+                "{field} contains a duplicate or case-colliding identity"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(values: &[String], field: &str) -> Result<(), FederatedWorkflowError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedWorkflowError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn validate_digest_order(values: &[ContentHash]) -> Result<(), FederatedWorkflowError> {
+    if values.windows(2).any(|pair| pair[0] >= pair[1])
+        || values.iter().any(|value| value.as_str().len() != 64)
+    {
+        return Err(FederatedWorkflowError::Invalid(
+            "federated aggregate ordering or digest is invalid".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &FederatedWorkflowReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "workflow_id": receipt.workflow_id,
+        "checkpoint_id": receipt.checkpoint_id,
+        "federation_id": receipt.federation_id,
+        "institution_id": receipt.institution_id,
+        "purpose": receipt.purpose,
+        "endpoint": receipt.endpoint,
+        "disposition": receipt.disposition,
+        "stage_order": receipt.stage_order,
+        "plan_order": receipt.plan_order,
+        "completed_order": receipt.completed_order,
+        "blocked_order": receipt.blocked_order,
+        "compensation_order": receipt.compensation_order,
+        "candidate_order": receipt.candidate_order,
+        "admitted_order": receipt.admitted_order,
+        "unknown_order": receipt.unknown_order,
+        "aggregate_order": receipt.aggregate_order,
+        "checkpoint_digest": receipt.checkpoint_digest,
+        "workflow_digest": receipt.workflow_digest,
+        "approval_reference": receipt.approval_reference,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn federated_evidence_workflow_fabric_manifest() -> CapabilityManifest {
@@ -235,17 +419,11 @@ pub fn compile_federated_evidence_workflow(
         .map(|value| (*value).to_string())
         .collect::<Vec<_>>();
     let mut plan_order = BTreeSet::new();
-    let completed_order = stage_order.iter().cloned().collect::<BTreeSet<_>>();
+    let completed_order = stage_order.clone();
     let mut compensation_order = BTreeSet::new();
     for stage in &stage_order {
         plan_order.insert(format!("plan:{stage}"));
     }
-    let actionable = request.policy_allow
-        && request.protected_closure
-        && request.raw_data_local
-        && request.approval_reference != ContentHash::of_bytes(&[])
-        && request.budget_units >= plan_order.len() as u32
-        && evidence.disposition != FederatedEvidenceDisposition::Blocked;
     if evidence.disposition == FederatedEvidenceDisposition::Partial
         && request.policy_allow
         && request.protected_closure
@@ -257,10 +435,22 @@ pub fn compile_federated_evidence_workflow(
     if evidence.admitted_order.is_empty() {
         plan_order.insert("plan:retain-unresolved-federation".into());
         omissions.insert("workflow:no-admitted-aggregate-to-publish".into());
-    } else {
+    } else if request.policy_allow
+        && request.protected_closure
+        && request.raw_data_local
+        && request.approval_reference != ContentHash::of_bytes(&[])
+        && u64::from(request.budget_units)
+            >= u64::try_from(STAGE_ORDER.len())
+                .unwrap_or(u64::MAX)
+                .saturating_add(1)
+        && evidence.disposition == FederatedEvidenceDisposition::Qualified
+    {
         plan_order.insert("plan:publish-permitted-aggregate".into());
+    } else {
+        plan_order.insert("plan:retain-partial-federation".into());
     }
-    if request.budget_units < plan_order.len() as u32 {
+    let plan_count = u64::try_from(plan_order.len()).unwrap_or(u64::MAX);
+    if u64::from(request.budget_units) < plan_count {
         omissions.insert("workflow:budget-exhausted".into());
     }
     if request.approval_reference == ContentHash::of_bytes(&[]) {
@@ -275,31 +465,48 @@ pub fn compile_federated_evidence_workflow(
     if !request.raw_data_local {
         omissions.insert("workflow:raw-data-locality-failed".into());
     }
-    let disposition = if !actionable {
+    let disposition = if !request.policy_allow
+        || !request.protected_closure
+        || !request.raw_data_local
+        || request.approval_reference == ContentHash::of_bytes(&[])
+        || u64::from(request.budget_units) < plan_count
+        || evidence.disposition == FederatedEvidenceDisposition::Blocked
+    {
         FederatedEvidenceDisposition::Blocked
     } else {
         evidence.disposition
     };
+    if disposition == FederatedEvidenceDisposition::Blocked {
+        compensation_order.clear();
+    }
     let plan_vec = plan_order.into_iter().collect::<Vec<_>>();
-    let completed_vec = completed_order.into_iter().collect::<Vec<_>>();
+    let completed_vec = completed_order;
+    let compensation_vec = compensation_order.into_iter().collect::<Vec<_>>();
+    let effect_receipts = if disposition == FederatedEvidenceDisposition::Qualified {
+        vec![format!("schedule:research-work:{}", request.workflow_id)]
+    } else if disposition != FederatedEvidenceDisposition::Blocked && !compensation_vec.is_empty() {
+        vec![format!("compensate:research-work:{}", request.workflow_id)]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
     let checkpoint_digest = ContentHash::of_value(&json!({"workflow_id": request.workflow_id, "checkpoint_id": request.checkpoint_id, "stage_order": stage_order, "replay_identity": request.replay_identity, "federation_id": request.request.federation_id})).map_err(|error| FederatedWorkflowError::Artifact(error.to_string()))?;
     let workflow_digest = ContentHash::of_value(&json!({"workflow_id": request.workflow_id, "plan_order": plan_vec, "completed_order": completed_vec, "checkpoint_digest": checkpoint_digest, "approval_reference": request.approval_reference, "budget_units": request.budget_units, "replay_identity": request.replay_identity})).map_err(|error| FederatedWorkflowError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "workflow_id": request.workflow_id, "federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "purpose": request.request.purpose, "endpoint": request.request.endpoint, "disposition": disposition, "stage_order": stage_order, "plan_order": plan_vec, "completed_order": completed_vec, "blocked_order": evidence.blocked_order, "compensation_order": compensation_order, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "unknown_order": evidence.unknown_order, "aggregate_order": evidence.aggregate_order, "checkpoint_digest": checkpoint_digest, "workflow_digest": workflow_digest, "approval_reference": request.approval_reference, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "workflow_id": request.workflow_id, "checkpoint_id": request.checkpoint_id, "federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "purpose": request.request.purpose, "endpoint": request.request.endpoint, "disposition": disposition, "stage_order": stage_order, "plan_order": plan_vec, "completed_order": completed_vec, "blocked_order": evidence.blocked_order, "compensation_order": compensation_vec, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "unknown_order": evidence.unknown_order, "aggregate_order": evidence.aggregate_order, "checkpoint_digest": checkpoint_digest, "workflow_digest": workflow_digest, "approval_reference": request.approval_reference, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-federated-evidence-workflow:{}", request.workflow_id),
-        "application/vnd.aurora.federated-research-workflow-receipt+json",
+        WORKFLOW_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
     )
     .map_err(|error| FederatedWorkflowError::Artifact(error.to_string()))?;
-    let has_compensation = !compensation_order.is_empty();
     let receipt = FederatedWorkflowReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
         request_id: request.request.request_id.clone(),
         workflow_id: request.workflow_id.clone(),
+        checkpoint_id: request.checkpoint_id.clone(),
         federation_id: request.request.federation_id.clone(),
         institution_id: request.request.institution_id.clone(),
         purpose: request.request.purpose.clone(),
@@ -309,7 +516,7 @@ pub fn compile_federated_evidence_workflow(
         plan_order: plan_vec.clone(),
         completed_order: completed_vec,
         blocked_order: evidence.blocked_order.clone(),
-        compensation_order: compensation_order.into_iter().collect(),
+        compensation_order: compensation_vec,
         candidate_order: evidence.candidate_order.clone(),
         admitted_order: evidence.admitted_order.clone(),
         unknown_order: evidence.unknown_order.clone(),
@@ -322,13 +529,7 @@ pub fn compile_federated_evidence_workflow(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if disposition == FederatedEvidenceDisposition::Qualified {
-            vec![format!("schedule:research-work:{}", request.workflow_id)]
-        } else if has_compensation {
-            vec![format!("compensate:research-work:{}", request.workflow_id)]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -338,20 +539,45 @@ pub fn compile_federated_evidence_workflow(
 }
 
 fn validate_request(request: &FederatedWorkflowRequest) -> Result<(), FederatedWorkflowError> {
-    if request.workflow_id.trim().is_empty()
-        || request.checkpoint_id.trim().is_empty()
-        || request.requested_stage_order
-            != STAGE_ORDER
-                .iter()
-                .map(|value| (*value).to_string())
-                .collect::<Vec<_>>()
+    let expected_stage_order = STAGE_ORDER
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    if request.requested_stage_order != expected_stage_order
         || request.budget_units == 0
         || request.approval_reference == ContentHash::of_bytes(&[])
         || request.request.replay_identity != request.replay_identity
+        || request.request.policy_allow != request.policy_allow
+        || request.request.protected_closure != request.protected_closure
+        || request.request.raw_data_local != request.raw_data_local
+        || !request.request.signer_valid
         || request.boundary != PRECLINICAL_BOUNDARY
         || request.request.boundary != PRECLINICAL_BOUNDARY
     {
-        return Err(FederatedWorkflowError::Invalid("federation workflow identity, canonical stages, approval, budget, replay, or boundary is incomplete".into()));
+        return Err(FederatedWorkflowError::Invalid(
+            "federation workflow identity, canonical stages, approval, budget, replay, policy, signer, locality, or boundary is incomplete".into(),
+        ));
+    }
+    for (value, field) in [
+        (&request.request.request_id, "request_id"),
+        (&request.workflow_id, "workflow_id"),
+        (&request.checkpoint_id, "checkpoint_id"),
+        (&request.request.federation_id, "federation_id"),
+        (&request.request.institution_id, "institution_id"),
+        (&request.request.purpose, "purpose"),
+        (&request.request.semantic_profile, "semantic_profile"),
+        (&request.request.endpoint, "endpoint"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_unique(&request.request.allowed_artifacts, "allowed_artifacts")?;
+    for digest in [&request.approval_reference, &request.replay_identity] {
+        if digest.as_str().len() != 64 {
+            return Err(FederatedWorkflowError::Invalid(
+                "federation workflow approval or replay digest is invalid".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -449,6 +675,43 @@ mod tests {
         let receipt = compile_federated_evidence_workflow(&input).unwrap();
         assert_eq!(receipt.disposition, FederatedEvidenceDisposition::Blocked);
         assert_eq!(receipt.effect_receipts, vec!["block:unsafe-release"]);
+    }
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut input = request(vec![observation("a", EvidenceState::Supported)]);
+        input.raw_data_local = false;
+        input.request.raw_data_local = false;
+        let receipt = compile_federated_evidence_workflow(&input).unwrap();
+        assert_eq!(receipt.disposition, FederatedEvidenceDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "workflow:raw-data-locality-failed"));
+        receipt.validate().unwrap();
+    }
+    #[test]
+    fn plan_and_payload_drift_are_rejected() {
+        let receipt = compile_federated_evidence_workflow(&request(vec![observation(
+            "a",
+            EvidenceState::Supported,
+        )]))
+        .unwrap();
+        let mut plan_drift = receipt.clone();
+        plan_drift
+            .plan_order
+            .retain(|item| item != "plan:publish-permitted-aggregate");
+        assert!(plan_drift.validate().is_err());
+
+        let mut payload_drift = receipt;
+        payload_drift.endpoint = "https://other.example/research".into();
+        assert!(payload_drift.validate().is_err());
+    }
+    #[test]
+    fn padded_workflow_identity_is_rejected() {
+        let mut input = request(vec![observation("a", EvidenceState::Supported)]);
+        input.workflow_id = " workflow:federated".into();
+        assert!(compile_federated_evidence_workflow(&input).is_err());
     }
     #[test]
     fn approval_failure_is_explicit() {

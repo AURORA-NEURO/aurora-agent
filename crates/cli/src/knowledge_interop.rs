@@ -157,6 +157,51 @@ impl TypedKnowledgeWorld {
                 ));
             }
         }
+        let claim_ids = self.claim_order.iter().collect::<BTreeSet<_>>();
+        let mut classified_ids = BTreeSet::new();
+        for values in [
+            &self.admitted_order,
+            &self.blocked_order,
+            &self.unknown_order,
+        ] {
+            for claim_id in values {
+                if !claim_ids.contains(claim_id) {
+                    if !claim_id.starts_with("request:") {
+                        return Err(KnowledgeInteropError::Invalid(
+                            "typed knowledge-world disposition is outside the claim set".into(),
+                        ));
+                    }
+                    continue;
+                }
+                if !classified_ids.insert(claim_id) {
+                    return Err(KnowledgeInteropError::Invalid(
+                        "typed knowledge-world claim is classified more than once".into(),
+                    ));
+                }
+            }
+        }
+        if classified_ids != claim_ids {
+            return Err(KnowledgeInteropError::Invalid(
+                "typed knowledge-world claims are not completely classified".into(),
+            ));
+        }
+        let mut digest_payload = serde_json::to_value(self)
+            .map_err(|error| KnowledgeInteropError::Serialization(error.to_string()))?;
+        digest_payload
+            .as_object_mut()
+            .ok_or_else(|| {
+                KnowledgeInteropError::Serialization(
+                    "typed knowledge-world did not serialize as an object".into(),
+                )
+            })?
+            .remove("world_digest");
+        let expected_digest = ContentHash::of_value(&digest_payload)
+            .map_err(|error| KnowledgeInteropError::Serialization(error.to_string()))?;
+        if expected_digest != self.world_digest {
+            return Err(KnowledgeInteropError::Invalid(
+                "typed knowledge-world digest does not match its canonical payload".into(),
+            ));
+        }
         Ok(())
     }
 }
@@ -273,7 +318,9 @@ pub fn operate(
     let mut spent = 0_u64;
 
     for claim in &claims {
-        let cost = claim.claim_id.len() as u64 + 1;
+        let cost = u64::try_from(claim.claim_id.len())
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
         if !studies.contains(&claim.study_id) || claim.scope != request.scope {
             blocked.insert(claim.claim_id.clone());
             omissions.insert(format!("claim:{}:scope-or-study-mismatch", claim.claim_id));
@@ -326,14 +373,17 @@ pub fn operate(
             );
             continue;
         }
-        if claim.evidence_digest.is_none() || claim.provenance_digest.is_none() {
+        let (Some(evidence_digest), Some(provenance_digest)) = (
+            claim.evidence_digest.clone(),
+            claim.provenance_digest.clone(),
+        ) else {
             unknown.insert(claim.claim_id.clone());
             omissions.insert(format!(
                 "claim:{}:evidence-or-provenance-digest-missing",
                 claim.claim_id
             ));
             continue;
-        }
+        };
         if admitted.len() >= request.max_claims {
             blocked.insert(claim.claim_id.clone());
             omissions.insert(format!(
@@ -345,8 +395,8 @@ pub fn operate(
         admitted.insert(claim.claim_id.clone());
         subjects.insert(claim.subject_id.clone());
         predicates.insert(claim.predicate.clone());
-        evidence.insert(claim.evidence_digest.clone().expect("checked above"));
-        provenance.insert(claim.provenance_digest.clone().expect("checked above"));
+        evidence.insert(evidence_digest);
+        provenance.insert(provenance_digest);
         spent = spent.saturating_add(cost);
         if claim.negative_result {
             negative.insert(format!("claim:{}:negative-result-retained", claim.claim_id));
@@ -642,5 +692,17 @@ mod tests {
             claim("claim:a", ClaimState::Supported, false),
         ]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn tampered_world_digest_is_rejected() {
+        let mut world = operate(&request(vec![
+            claim("claim:a", ClaimState::Supported, false),
+            claim("claim:b", ClaimState::Supported, false),
+        ]))
+        .unwrap()
+        .world;
+        world.world_digest = hash("tampered-world-digest");
+        assert!(world.validate().is_err());
     }
 }

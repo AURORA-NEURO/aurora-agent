@@ -17,6 +17,11 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
 #[serde(tag = "error", rename_all = "snake_case")]
 pub enum EvalError {
+    /// Internal maps or derived state no longer agree. Refuse the aggregate rather than
+    /// fabricating a missing capability estimate.
+    #[error("evaluation engine invariant violated: {detail}")]
+    InvariantViolation { detail: String },
+
     /// Composition was asked to score a result with no evidence at all.
     ///
     /// The absence of evaluators is not a failing result. It is an unscored one, and the caller

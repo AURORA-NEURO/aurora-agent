@@ -296,10 +296,33 @@ pub mod error;
 pub mod flags;
 pub mod hardening;
 pub mod knowledge_representation_assurance;
-pub mod federated_analysis_assurance;
 pub mod retrieval_assurance;
-pub mod replication_negative_results_assurance;
 pub mod telemetry;
+pub mod run_integrity_support;
+pub mod local_run_integrity_inference;
+pub mod multimodal_run_integrity_inference;
+pub mod throughput_run_integrity_inference;
+pub mod federated_continual_run_integrity_inference;
+pub mod local_run_integrity_contract_model;
+pub mod multimodal_run_integrity_contract_model;
+pub mod throughput_run_integrity_contract_model;
+pub mod federated_continual_run_integrity_contract_model;
+pub mod local_run_integrity_research_copilot;
+pub mod multimodal_run_integrity_research_copilot;
+pub mod throughput_run_integrity_research_copilot;
+pub mod federated_continual_run_integrity_research_copilot;
+pub mod local_run_integrity_workflow_fabric;
+pub mod multimodal_run_integrity_workflow_fabric;
+pub mod throughput_run_integrity_workflow_fabric;
+pub mod federated_continual_run_integrity_workflow_fabric;
+
+pub use context_compilation_federated_control_plane::{
+    context_compilation_control_manifest, operate_context_compilation,
+    operate_context_compilation_json, validate_context_compilation_json,
+    CertifiedDecisionSection as ContextCompilationDecisionSection, ContextAttestation,
+    ControlDisposition, ControlPlaneError, DecisionQuery as ContextDecisionQuery,
+    PeerOperationsSummary,
+};
 
 pub use alpha::{AlphaSummary, Basis, Criterion, Finding, Verdict};
 pub use capacity::{
@@ -310,16 +333,6 @@ pub use config::{
     Binding, ConfigStack, DeploymentProfile, EffectiveConfig, Influence, Layer, Resolution, Schema,
     SecretLease, SecretRef, SecretSource, SettingKey, SettingKind, SettingSpec, SettingValue,
     Source, ValueType,
-};
-pub use context_compilation_federated_control_plane::{
-    context_compilation_control_manifest, operate_context_compilation,
-    operate_context_compilation_json, validate_context_compilation_json,
-    CertifiedDecisionSection as ContextCompilationDecisionSection,
-    ContextAttestation, ControlDisposition, ControlPlaneError, DecisionQuery as ContextDecisionQuery,
-    PeerOperationsSummary,
-    CONTRACT_VERSION as CONTEXT_COMPILATION_CONTROL_CONTRACT_VERSION,
-    FEATURE_ID as CONTEXT_COMPILATION_CONTROL_FEATURE_ID,
-    TOOL_NAME as CONTEXT_COMPILATION_CONTROL_TOOL,
 };
 pub use error::OpsError;
 pub use flags::{
@@ -336,32 +349,34 @@ pub use knowledge_representation_assurance::{
     CONTRACT_VERSION as KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
 };
-pub use federated_analysis_assurance::{
-    assure as assure_federated_analysis, capability_manifest as federated_analysis_manifest,
-    AnalysisCandidate, AnalysisDecision, AnalysisAdmission, FederatedAnalysisError,
-    FederatedAnalysisReceipt, FederatedAnalysisRequest,
-    FEATURE_ID as FEDERATED_ANALYSIS_FEATURE_ID,
-    CONTRACT_VERSION as FEDERATED_ANALYSIS_CONTRACT_VERSION,
-};
 pub use retrieval_assurance::{
     assure_retrieval, retrieval_assurance_manifest, EvidenceSynthesisReceipt,
     RetrievalAssuranceError, RetrievalCandidate, RetrievalDisposition, ScopedRetrievalQuery,
     CONTRACT_VERSION as RETRIEVAL_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_ASSURANCE_FEATURE_ID,
 };
-pub use replication_negative_results_assurance::{
-    assure_replication, replication_negative_results_manifest, ClaimAndProtocol, ReplicationClaim,
-    ReplicationAssuranceError, ReplicationDisposition, ReplicationOutcome, ReplicationRecord,
-    CONTRACT_VERSION as REPLICATION_NEGATIVE_RESULTS_CONTRACT_VERSION,
-    FEATURE_ID as REPLICATION_NEGATIVE_RESULTS_FEATURE_ID,
-    INPUT_SCHEMA as REPLICATION_NEGATIVE_RESULTS_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as REPLICATION_NEGATIVE_RESULTS_OUTPUT_SCHEMA,
-};
 pub use telemetry::{
     audit_statement, Derivation, DomainEvent, ExportBatch, Field, LabelBudget, MetricDefinition,
     MetricValue, Observations, Projected, RedactionPolicy, Sample, Sampling, SemanticLoss,
     SignalId, TelemetryRecord, TraceId, Treatment,
 };
+pub use run_integrity_support::{qualify as qualify_run_integrity, manifest as run_integrity_manifest, ExecutionEvent4, RunIntegrityArtifact4, RunIntegrityCard7, RunIntegrityError, RunIntegrityRequest4, BOUNDARY as RUN_INTEGRITY_BOUNDARY, CONTENT_TYPE as RUN_INTEGRITY_CONTENT_TYPE};
+pub use local_run_integrity_inference::*;
+pub use multimodal_run_integrity_inference::*;
+pub use throughput_run_integrity_inference::*;
+pub use federated_continual_run_integrity_inference::*;
+pub use local_run_integrity_contract_model::*;
+pub use multimodal_run_integrity_contract_model::*;
+pub use throughput_run_integrity_contract_model::*;
+pub use federated_continual_run_integrity_contract_model::*;
+pub use local_run_integrity_research_copilot::*;
+pub use multimodal_run_integrity_research_copilot::*;
+pub use throughput_run_integrity_research_copilot::*;
+pub use federated_continual_run_integrity_research_copilot::*;
+pub use local_run_integrity_workflow_fabric::*;
+pub use multimodal_run_integrity_workflow_fabric::*;
+pub use throughput_run_integrity_workflow_fabric::*;
+pub use federated_continual_run_integrity_workflow_fabric::*;
 
 /// The share of §40's 45 modules that is template rather than content.
 ///

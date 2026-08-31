@@ -8,8 +8,8 @@ repository.workspace = true
 description = "Equal-engineering context baselines: full-context, k-hop incidence, connected component, lexical top-k and query-graph"
 
 [dependencies]
-bioprism-fiber = { workspace = true }
 bioprism-foundation = { workspace = true }
+bioprism-fiber = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-world = { workspace = true }

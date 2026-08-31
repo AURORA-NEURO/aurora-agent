@@ -140,6 +140,27 @@ impl QualityVerdict {
                 "quality verdict ranking contains duplicate metric identity".into(),
             ));
         }
+        let ranked = self.ranked_metric_order.iter().collect::<BTreeSet<_>>();
+        let passed = self.passed_order.iter().collect::<BTreeSet<_>>();
+        let failed = self.failed_order.iter().collect::<BTreeSet<_>>();
+        let unknown = self.unknown_order.iter().collect::<BTreeSet<_>>();
+        let classified = passed
+            .union(&failed)
+            .chain(passed.union(&unknown))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if passed.intersection(&failed).next().is_some()
+            || passed.intersection(&unknown).next().is_some()
+            || failed.intersection(&unknown).next().is_some()
+            || classified
+                .iter()
+                .any(|id| !ranked.contains(*id) && !id.starts_with("object:"))
+            || ranked.iter().any(|id| !classified.contains(id))
+        {
+            return Err(QualityAssuranceError::Contract(
+                "quality verdict metric dispositions do not partition the ranking".into(),
+            ));
+        }
         for values in [
             &self.passed_order,
             &self.failed_order,
@@ -177,8 +198,66 @@ impl QualityVerdict {
                 "quality verdict effect is outside the unsafe-release gate".into(),
             ));
         }
+        let expected_effects = if self.disposition == QualityDisposition::Qualified {
+            Vec::new()
+        } else {
+            vec!["block:unsafe-release".to_string()]
+        };
+        if self.effect_receipts != expected_effects {
+            return Err(QualityAssuranceError::Contract(
+                "quality verdict effects do not match its disposition".into(),
+            ));
+        }
+        if self.artifact.artifact_id != format!("quality-verdict:{}", self.object_id)
+            || self.artifact.content_type != "application/vnd.aurora.quality-verdict+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || self.artifact.provenance.len() != self.evidence_order.len()
+            || self
+                .artifact
+                .provenance
+                .iter()
+                .zip(&self.evidence_order)
+                .any(|(link, digest)| {
+                    link.source_id != digest.to_string()
+                        || link.relation != "quality-evidence"
+                        || link.digest != *digest
+                })
+        {
+            return Err(QualityAssuranceError::Contract(
+                "quality verdict artifact identity or provenance is invalid".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| QualityAssuranceError::Contract(error.to_string()))?;
+        let payload = json!({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "object_id": self.object_id,
+            "study_id": self.study_id,
+            "scope": self.scope,
+            "target_schema": self.target_schema,
+            "disposition": self.disposition,
+            "ranked_metric_order": self.ranked_metric_order,
+            "passed_order": self.passed_order,
+            "failed_order": self.failed_order,
+            "unknown_order": self.unknown_order,
+            "witness_order": self.witness_order,
+            "modality_order": self.modality_order,
+            "artifact_order": self.artifact_order,
+            "evidence_order": self.evidence_order,
+            "provenance_order": self.provenance_order,
+            "omissions": self.omissions,
+            "uncertainty": self.uncertainty,
+            "negative_evidence": self.negative_evidence,
+            "replay_identity": self.replay_identity,
+            "effect_receipts": self.effect_receipts,
+            "raw_data_local": self.raw_data_local,
+            "boundary": self.boundary,
+        });
+        self.artifact
+            .verify_payload(&payload)
             .map_err(|error| QualityAssuranceError::Contract(error.to_string()))?;
         Ok(())
     }
@@ -244,8 +323,19 @@ pub fn assure(object: &ResearchObject) -> Result<QualityVerdict, QualityAssuranc
     let mut negative = BTreeSet::new();
     let mut spent = 0_u64;
     for metric in &metrics {
-        let cost = metric.metric_id.len() as u64 + metric.modality_id.len() as u64 + 1;
-        if cost > object.budget.saturating_sub(spent) {
+        let cost = metric
+            .metric_id
+            .len()
+            .checked_add(metric.modality_id.len())
+            .and_then(|total| u64::try_from(total).ok())
+            .and_then(|total| total.checked_add(1))
+            .ok_or_else(|| {
+                QualityAssuranceError::Invalid(
+                    "quality metric cost exceeds the representable budget range".into(),
+                )
+            })?;
+        let next_spent = spent.checked_add(cost);
+        if !next_spent.is_some_and(|total| total <= object.budget) {
             unknown.insert(metric.metric_id.clone());
             omissions.insert(format!(
                 "metric:{}:budget-ceiling-exceeded",
@@ -289,7 +379,11 @@ pub fn assure(object: &ResearchObject) -> Result<QualityVerdict, QualityAssuranc
         artifacts.insert(artifact_digest);
         evidence.insert(evidence_digest);
         provenance.insert(provenance_digest);
-        spent = spent.saturating_add(cost);
+        spent = next_spent.ok_or_else(|| {
+            QualityAssuranceError::Invalid(
+                "quality budget accounting overflowed before admission".into(),
+            )
+        })?;
         match metric.state {
             MetricState::Contradicted => {
                 failed.insert(metric.metric_id.clone());
@@ -633,5 +727,16 @@ mod tests {
             metric("metric:a", MetricState::Supported, Some(900), false),
         ]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn tampered_quality_artifact_is_rejected() {
+        let mut verdict = assure(&object(vec![
+            metric("metric:a", MetricState::Supported, Some(900), false),
+            metric("metric:b", MetricState::Supported, Some(800), true),
+        ]))
+        .unwrap();
+        verdict.artifact.content_hash = hash("tampered-quality-verdict");
+        assert!(verdict.validate().is_err());
     }
 }

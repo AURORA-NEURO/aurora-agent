@@ -108,6 +108,11 @@ pub enum LocalContextControlError {
 
 impl LocalContextControlReceipt {
     pub fn validate(&self) -> Result<(), LocalContextControlError> {
+        let stage_count = u64::try_from(self.stage_order.len()).map_err(|_| {
+            LocalContextControlError::Invalid(
+                "local control stage count exceeds checkpoint sequence width".into(),
+            )
+        })?;
         if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
@@ -119,7 +124,7 @@ impl LocalContextControlReceipt {
             || self.scope.trim().is_empty()
             || self.goal.trim().is_empty()
             || self.stage_order.is_empty()
-            || self.checkpoint_seq != self.stage_order.len() as u64
+            || self.checkpoint_seq != stage_count
             || self.effect_receipts.is_empty()
         {
             return Err(LocalContextControlError::Invalid(
@@ -145,7 +150,11 @@ impl LocalContextControlReceipt {
                 ));
             }
         }
-        if self.exchange_order.windows(2).any(|pair| pair[0] >= pair[1]) {
+        if self
+            .exchange_order
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
             return Err(LocalContextControlError::Invalid(
                 "local control exchange ordering is not canonical".into(),
             ));
@@ -172,16 +181,12 @@ impl LocalContextControlReceipt {
                 "local control exchange or retry accounting is invalid".into(),
             ));
         }
-        for digest in self
-            .exchange_order
-            .iter()
-            .chain([
-                &self.run_digest,
-                &self.telemetry_digest,
-                &self.federation_digest,
-                &self.replay_identity,
-            ])
-        {
+        for digest in self.exchange_order.iter().chain([
+            &self.run_digest,
+            &self.telemetry_digest,
+            &self.federation_digest,
+            &self.replay_identity,
+        ]) {
             if digest.as_str().len() != 64 {
                 return Err(LocalContextControlError::Invalid(
                     "local control digest is invalid".into(),
@@ -300,6 +305,11 @@ pub fn operate_local_context_compilation(
         }
     }
     let ordered = stage_order.iter().cloned().collect::<Vec<_>>();
+    let checkpoint_seq = u64::try_from(ordered.len()).map_err(|_| {
+        LocalContextControlError::Invalid(
+            "local control stage count exceeds checkpoint sequence width".into(),
+        )
+    })?;
     let mut completed = BTreeSet::new();
     let mut degraded = BTreeSet::new();
     let mut unresolved = BTreeSet::new();
@@ -331,10 +341,13 @@ pub fn operate_local_context_compilation(
             omissions.insert(format!("stage:{}:missing-checkpoint", stage_id));
             continue;
         };
-        retries = retries.saturating_add(stage.retry_count as u64);
+        retries = retries.saturating_add(u64::from(stage.retry_count));
         if !global_open || !stage.raw_data_local || stage.boundary != PRECLINICAL_BOUNDARY {
             denied.insert(stage_id.clone());
-            counterexamples.insert(format!("counterexample:{}:policy-approval-locality", stage_id));
+            counterexamples.insert(format!(
+                "counterexample:{}:policy-approval-locality",
+                stage_id
+            ));
         } else if stage.retry_count > request.max_retries {
             degraded.insert(stage_id.clone());
             omissions.insert(format!("stage:{}:retry-budget-exhausted", stage_id));
@@ -353,7 +366,10 @@ pub fn operate_local_context_compilation(
         } else if stage.evidence_digest.is_none() || stage.provenance_digest.is_none() {
             unresolved.insert(stage_id.clone());
             omissions.insert(format!("stage:{}:evidence-or-provenance-missing", stage_id));
-        } else if matches!(stage.state, EvidenceState::Unknown | EvidenceState::Speculative) {
+        } else if matches!(
+            stage.state,
+            EvidenceState::Unknown | EvidenceState::Speculative
+        ) {
             unresolved.insert(stage_id.clone());
             uncertainty.insert(format!("stage:{}:evidence-uncertain", stage_id));
         } else if matches!(stage.state, EvidenceState::Contradicted) {
@@ -408,11 +424,12 @@ pub fn operate_local_context_compilation(
         "exchange_order": exchange_order,
     }))
     .map_err(|error| LocalContextControlError::Artifact(error.to_string()))?;
+    let raw_data_local = true;
     let federation_digest = ContentHash::of_value(&json!({
         "node_id": request.node_id,
         "workflow_id": request.workflow_id,
         "exchange_order": exchange_order,
-        "raw_data_local": request.raw_data_local,
+        "raw_data_local": raw_data_local,
         "replay_identity": request.replay_identity,
     }))
     .map_err(|error| LocalContextControlError::Artifact(error.to_string()))?;
@@ -424,7 +441,7 @@ pub fn operate_local_context_compilation(
         "degraded_order": degraded,
         "unresolved_order": unresolved,
         "denied_order": denied,
-        "checkpoint_seq": ordered.len(),
+        "checkpoint_seq": checkpoint_seq,
         "consumed_budget_units": consumed_budget,
         "telemetry_digest": telemetry_digest,
         "federation_digest": federation_digest,
@@ -447,7 +464,7 @@ pub fn operate_local_context_compilation(
         "unresolved_order": unresolved,
         "denied_order": denied,
         "exchange_order": exchange_order,
-        "checkpoint_seq": ordered.len(),
+        "checkpoint_seq": checkpoint_seq,
         "retry_count": retries,
         "consumed_budget_units": consumed_budget,
         "run_digest": run_digest,
@@ -462,7 +479,10 @@ pub fn operate_local_context_compilation(
         "boundary": PRECLINICAL_BOUNDARY,
     });
     let artifact = TypedResearchArtifact::from_payload(
-        format!("brain-local-context-compilation-federated-control-plane:{}", request.request_id),
+        format!(
+            "brain-local-context-compilation-federated-control-plane:{}",
+            request.request_id
+        ),
         "application/vnd.aurora.local-context-control+json",
         &payload,
         Vec::new(),
@@ -485,7 +505,7 @@ pub fn operate_local_context_compilation(
         unresolved_order: unresolved.into_iter().collect(),
         denied_order: denied.into_iter().collect(),
         exchange_order,
-        checkpoint_seq: ordered.len() as u64,
+        checkpoint_seq,
         retry_count: retries,
         consumed_budget_units: consumed_budget,
         run_digest,
@@ -506,7 +526,7 @@ pub fn operate_local_context_compilation(
             vec!["block:unsafe-release".into()]
         },
         artifact,
-        raw_data_local: request.raw_data_local,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
@@ -517,7 +537,9 @@ pub fn operate_local_context_compilation(
 mod tests {
     use super::*;
 
-    fn hash(value: &str) -> ContentHash { ContentHash::of_bytes(value.as_bytes()) }
+    fn hash(value: &str) -> ContentHash {
+        ContentHash::of_bytes(value.as_bytes())
+    }
 
     fn request() -> LocalContextControlRequest {
         let replay = hash("local-context-control");
@@ -556,17 +578,76 @@ mod tests {
     }
 
     #[test]
-    fn manifest_is_a1() { assert_eq!(local_context_compilation_federated_control_plane_manifest().autonomy_tier, AutonomyTier::A1); }
+    fn manifest_is_a1() {
+        assert_eq!(
+            local_context_compilation_federated_control_plane_manifest().autonomy_tier,
+            AutonomyTier::A1
+        );
+    }
     #[test]
-    fn complete_is_completed() { assert_eq!(operate_local_context_compilation(&request()).unwrap().disposition, LocalContextControlDisposition::Completed); }
+    fn complete_is_completed() {
+        assert_eq!(
+            operate_local_context_compilation(&request())
+                .unwrap()
+                .disposition,
+            LocalContextControlDisposition::Completed
+        );
+    }
     #[test]
-    fn not_ready_is_unresolved() { let mut value=request(); value.stages[0].ready=false; assert_eq!(operate_local_context_compilation(&value).unwrap().disposition, LocalContextControlDisposition::Unresolved); }
+    fn not_ready_is_unresolved() {
+        let mut value = request();
+        value.stages[0].ready = false;
+        assert_eq!(
+            operate_local_context_compilation(&value)
+                .unwrap()
+                .disposition,
+            LocalContextControlDisposition::Unresolved
+        );
+    }
     #[test]
-    fn retry_limit_is_degraded() { let mut value=request(); value.stages[0].retry_count=3; assert_eq!(operate_local_context_compilation(&value).unwrap().disposition, LocalContextControlDisposition::Degraded); }
+    fn retry_limit_is_degraded() {
+        let mut value = request();
+        value.stages[0].retry_count = 3;
+        assert_eq!(
+            operate_local_context_compilation(&value)
+                .unwrap()
+                .disposition,
+            LocalContextControlDisposition::Degraded
+        );
+    }
     #[test]
-    fn budget_is_denied() { let mut value=request(); value.budget_units=1; assert_eq!(operate_local_context_compilation(&value).unwrap().disposition, LocalContextControlDisposition::Denied); }
+    fn budget_is_denied() {
+        let mut value = request();
+        value.budget_units = 1;
+        assert_eq!(
+            operate_local_context_compilation(&value)
+                .unwrap()
+                .disposition,
+            LocalContextControlDisposition::Denied
+        );
+    }
     #[test]
-    fn policy_is_denied() { let mut value=request(); value.policy_allow=false; assert_eq!(operate_local_context_compilation(&value).unwrap().disposition, LocalContextControlDisposition::Denied); }
+    fn policy_is_denied() {
+        let mut value = request();
+        value.policy_allow = false;
+        assert_eq!(
+            operate_local_context_compilation(&value)
+                .unwrap()
+                .disposition,
+            LocalContextControlDisposition::Denied
+        );
+    }
     #[test]
-    fn digest_is_stable() { let receipt=operate_local_context_compilation(&request()).unwrap(); assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap()); }
+    fn non_local_input_returns_denied_metadata_receipt() {
+        let mut value = request();
+        value.raw_data_local = false;
+        let receipt = operate_local_context_compilation(&value).unwrap();
+        assert_eq!(receipt.disposition, LocalContextControlDisposition::Denied);
+        assert!(receipt.raw_data_local);
+    }
+    #[test]
+    fn digest_is_stable() {
+        let receipt = operate_local_context_compilation(&request()).unwrap();
+        assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
 }

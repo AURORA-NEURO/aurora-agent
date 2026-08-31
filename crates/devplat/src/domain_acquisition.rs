@@ -127,6 +127,7 @@ pub struct DomainTransportRoute {
 pub struct DomainInterpretationRoute {
     /// `native`, `python_delegated`, `mixed`, `domain_tools_only`, or `unmapped`.
     pub status: String,
+    pub adapter_match_truncated: bool,
     pub adapter_ids: Vec<String>,
     pub match_basis: Vec<String>,
     pub declared_conformance: Vec<String>,
@@ -268,7 +269,7 @@ pub fn build_domain_acquisition_catalogue(
     let mut routes = Vec::new();
     let mut truncated_domains = false;
     for group in selected_groups {
-        let domains = group
+        let mut domains = group
             .domains
             .iter()
             .filter(|domain| {
@@ -278,6 +279,11 @@ pub fn build_domain_acquisition_catalogue(
             })
             .cloned()
             .collect::<Vec<_>>();
+        domains.sort_by(|left, right| {
+            normalized(left)
+                .cmp(&normalized(right))
+                .then_with(|| left.cmp(right))
+        });
         let mut selected_domain_count = 0;
         for domain in domains {
             if routes.len() >= query.max_domains {
@@ -314,7 +320,10 @@ pub fn build_domain_acquisition_catalogue(
         }
     }
 
-    let truncated = truncated_groups || truncated_domains;
+    let adapter_matches_truncated = routes
+        .iter()
+        .any(|route| route.interpretation.adapter_match_truncated);
+    let truncated = truncated_groups || truncated_domains || adapter_matches_truncated;
     let mut warnings = Vec::new();
     if groups.is_empty() {
         warnings.push("no capability groups matched the acquisition query".into());
@@ -329,6 +338,11 @@ pub fn build_domain_acquisition_catalogue(
         warnings.push(
             "domain output is bounded; increase max_domains before claiming domain completeness"
                 .into(),
+        );
+    }
+    if adapter_matches_truncated {
+        warnings.push(
+            "adapter matches are bounded per route; increase the route bound before claiming complete interpretation coverage".into(),
         );
     }
     let mut report = DomainAcquisitionCatalogue {
@@ -411,25 +425,37 @@ fn build_route(
         .filter(|tool| group.mcp_tools.iter().any(|candidate| candidate == **tool))
         .map(|tool| (*tool).to_string())
         .collect::<Vec<_>>();
-    let transport = DomainTransportRoute {
-        status: transport_status(&group.mcp_tools),
-        tools,
-        caller_managed_tools: CALLER_MANAGED_EVIDENCE_TOOLS
-            .iter()
-            .filter(|tool| group.mcp_tools.iter().any(|candidate| candidate == **tool))
-            .map(|tool| (*tool).to_string())
-            .collect(),
-        bounded_connector_kinds: vec!["file".into(), "generic_http".into()],
-        caller_managed_connector_kinds: CALLER_MANAGED_CONNECTORS
+    let caller_managed_tools = CALLER_MANAGED_EVIDENCE_TOOLS
+        .iter()
+        .filter(|tool| group.mcp_tools.iter().any(|candidate| candidate == **tool))
+        .map(|tool| (*tool).to_string())
+        .collect::<Vec<_>>();
+    let route_status = transport_status(&group.mcp_tools);
+    let bounded_connector_kinds = if route_status == "bounded_file_http" {
+        vec!["file".into(), "generic_http".into()]
+    } else {
+        Vec::new()
+    };
+    let caller_managed_connector_kinds = if tools.is_empty() {
+        Vec::new()
+    } else {
+        CALLER_MANAGED_CONNECTORS
             .iter()
             .map(|kind| (*kind).to_string())
-            .collect(),
+            .collect()
+    };
+    let transport = DomainTransportRoute {
+        status: route_status,
+        tools,
+        caller_managed_tools,
+        bounded_connector_kinds,
+        caller_managed_connector_kinds,
         limitations: vec![
             "generic_http is plain-HTTP only in the in-process kernel; HTTPS and redirects remain refused".into(),
             "literature, clinical-trial, FHIR, object-store, and provider connectors remain caller-managed".into(),
         ],
     };
-    let matched = adapters
+    let mut matched = adapters
         .descriptors()
         .iter()
         .filter(|adapter| {
@@ -438,6 +464,11 @@ fn build_route(
                 .iter()
                 .any(|dimension| scope_labels_overlap(domain, dimension))
         })
+        .collect::<Vec<_>>();
+    matched.sort_by(|left, right| left.id.cmp(&right.id));
+    let adapter_match_truncated = matched.len() > MAX_DOMAIN_ACQUISITION_ADAPTERS;
+    let matched = matched
+        .into_iter()
         .take(MAX_DOMAIN_ACQUISITION_ADAPTERS)
         .collect::<Vec<_>>();
     let has_native = matched
@@ -466,6 +497,7 @@ fn build_route(
         .collect();
     let interpretation = DomainInterpretationRoute {
         status: interpretation_status.into(),
+        adapter_match_truncated,
         adapter_ids,
         match_basis: matched
             .iter()
@@ -542,10 +574,7 @@ fn validate_filter(
     if value.len() > 512 {
         return Err(DomainAcquisitionError::FilterTooLong { field });
     }
-    if value
-        .chars()
-        .any(|character| character == '\0' || character == '\n' || character == '\r')
-    {
+    if value != value.trim() || value.chars().any(char::is_control) {
         return Err(DomainAcquisitionError::ControlCharacter { field });
     }
     Ok(())
@@ -619,6 +648,20 @@ mod tests {
             .find(|route| route.domain == "specimen lineage")
             .unwrap();
         assert_eq!(specimen.transport.status, "bounded_file_http");
+        assert_eq!(
+            specimen.transport.bounded_connector_kinds,
+            vec!["file", "generic_http"]
+        );
+        assert_eq!(
+            specimen.transport.caller_managed_connector_kinds,
+            vec![
+                "literature",
+                "clinical_trial",
+                "fhir",
+                "object_store",
+                "provider_api"
+            ]
+        );
         assert!(!specimen.interpretation.adapter_ids.is_empty());
         assert!(specimen
             .adapters
@@ -632,6 +675,20 @@ mod tests {
             .find(|route| route.domain == "custom science")
             .unwrap();
         assert_eq!(custom.interpretation.status, "domain_tools_only");
+        assert_eq!(
+            custom.transport.bounded_connector_kinds,
+            vec!["file", "generic_http"]
+        );
+        assert_eq!(
+            custom.transport.caller_managed_connector_kinds,
+            vec![
+                "literature",
+                "clinical_trial",
+                "fhir",
+                "object_store",
+                "provider_api"
+            ]
+        );
     }
 
     #[test]
@@ -652,6 +709,28 @@ mod tests {
     }
 
     #[test]
+    fn partial_transport_seams_do_not_claim_bounded_connectors() {
+        let catalogue = CapabilityCatalogue::from_value(&json!([
+            {
+                "id": "plan_only",
+                "domains": ["planning"],
+                "mcp_tools": ["domain_evidence_source_plan"],
+                "status": "available"
+            }
+        ]))
+        .unwrap();
+        let report = build_domain_acquisition_catalogue(
+            &catalogue,
+            &AdapterRegistry::default(),
+            &DomainAcquisitionQuery::default(),
+        )
+        .unwrap();
+        let route = &report.routes[0];
+        assert_eq!(route.transport.status, "caller_managed_plan");
+        assert!(route.transport.bounded_connector_kinds.is_empty());
+    }
+
+    #[test]
     fn bounds_are_explicit() {
         let error = DomainAcquisitionQuery {
             max_domains: 0,
@@ -660,5 +739,21 @@ mod tests {
         .validate()
         .unwrap_err();
         assert!(error.to_string().contains("max_domains"));
+
+        let error = DomainAcquisitionQuery {
+            group_id: Some(" alp".into()),
+            ..Default::default()
+        }
+        .validate()
+        .unwrap_err();
+        assert!(error.to_string().contains("group_id"));
+
+        let error = DomainAcquisitionQuery {
+            domain: Some("science\t".into()),
+            ..Default::default()
+        }
+        .validate()
+        .unwrap_err();
+        assert!(error.to_string().contains("domain"));
     }
 }

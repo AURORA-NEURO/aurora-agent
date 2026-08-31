@@ -129,6 +129,32 @@ impl MechanismPortfolio {
                 "mechanism portfolio identity, ranking, locality, effects, or boundary is incomplete".into(),
             ));
         }
+        if self.ranked_order.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(MechanismAssuranceError::Contract(
+                "mechanism portfolio ranking contains duplicate candidate identity".into(),
+            ));
+        }
+        let ranked = self.ranked_order.iter().collect::<BTreeSet<_>>();
+        let admitted = self.admitted_order.iter().collect::<BTreeSet<_>>();
+        let blocked = self.blocked_order.iter().collect::<BTreeSet<_>>();
+        let unknown = self.unknown_order.iter().collect::<BTreeSet<_>>();
+        let classified = admitted
+            .union(&blocked)
+            .chain(unknown.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if admitted.intersection(&blocked).next().is_some()
+            || admitted.intersection(&unknown).next().is_some()
+            || blocked.intersection(&unknown).next().is_some()
+            || classified
+                .iter()
+                .any(|id| !ranked.contains(*id) && !id.starts_with("question:"))
+            || ranked.iter().any(|id| !classified.contains(id))
+        {
+            return Err(MechanismAssuranceError::Contract(
+                "mechanism candidate dispositions do not partition the ranking".into(),
+            ));
+        }
         for values in [
             &self.admitted_order,
             &self.blocked_order,
@@ -167,8 +193,66 @@ impl MechanismPortfolio {
                 "mechanism assurance effect is outside the unsafe-release gate".into(),
             ));
         }
+        let expected_effects = if self.disposition == AssuranceDisposition::Qualified {
+            Vec::new()
+        } else {
+            vec!["block:unsafe-release".to_string()]
+        };
+        if self.effect_receipts != expected_effects {
+            return Err(MechanismAssuranceError::Contract(
+                "mechanism assurance effects do not match disposition".into(),
+            ));
+        }
+        if self.artifact.artifact_id != format!("mechanism-portfolio:{}", self.question_id)
+            || self.artifact.content_type != "application/vnd.aurora.mechanism-portfolio+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || self.artifact.provenance.len() != self.evidence_order.len()
+            || self
+                .artifact
+                .provenance
+                .iter()
+                .zip(&self.evidence_order)
+                .any(|(link, digest)| {
+                    link.source_id != digest.to_string()
+                        || link.relation != "mechanism-evidence"
+                        || link.digest != *digest
+                })
+        {
+            return Err(MechanismAssuranceError::Contract(
+                "mechanism portfolio artifact identity or provenance is invalid".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| MechanismAssuranceError::Contract(error.to_string()))?;
+        let payload = json!({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "question_id": self.question_id,
+            "workflow_id": self.workflow_id,
+            "target_schema": self.target_schema,
+            "disposition": self.disposition,
+            "ranked_order": self.ranked_order,
+            "admitted_order": self.admitted_order,
+            "blocked_order": self.blocked_order,
+            "unknown_order": self.unknown_order,
+            "mechanism_order": self.mechanism_order,
+            "study_order": self.study_order,
+            "modality_order": self.modality_order,
+            "artifact_order": self.artifact_order,
+            "evidence_order": self.evidence_order,
+            "provenance_order": self.provenance_order,
+            "omissions": self.omissions,
+            "uncertainty": self.uncertainty,
+            "negative_evidence": self.negative_evidence,
+            "replay_identity": self.replay_identity,
+            "effect_receipts": self.effect_receipts,
+            "raw_data_local": self.raw_data_local,
+            "boundary": self.boundary,
+        });
+        self.artifact
+            .verify_payload(&payload)
             .map_err(|error| MechanismAssuranceError::Contract(error.to_string()))?;
         Ok(())
     }
@@ -236,10 +320,19 @@ pub fn assure(question: &MechanismQuestion) -> Result<MechanismPortfolio, Mechan
     let mut negative = BTreeSet::new();
     let mut spent = 0_u64;
     for candidate in &candidates {
-        let cost = candidate.candidate_id.len() as u64
-            + candidate.mechanism_id.len() as u64
-            + candidate.study_ids.len() as u64;
-        if cost > question.budget.saturating_sub(spent) {
+        let cost = candidate
+            .candidate_id
+            .len()
+            .checked_add(candidate.mechanism_id.len())
+            .and_then(|total| total.checked_add(candidate.study_ids.len()))
+            .and_then(|total| u64::try_from(total).ok())
+            .ok_or_else(|| {
+                MechanismAssuranceError::Invalid(
+                    "mechanism candidate cost exceeds the representable budget range".into(),
+                )
+            })?;
+        let next_spent = spent.checked_add(cost);
+        if !next_spent.is_some_and(|total| total <= question.budget) {
             blocked.insert(candidate.candidate_id.clone());
             omissions.insert(format!(
                 "candidate:{}:budget-ceiling-exceeded",
@@ -324,7 +417,11 @@ pub fn assure(question: &MechanismQuestion) -> Result<MechanismPortfolio, Mechan
         artifacts.insert(artifact_digest);
         evidence.insert(evidence_digest);
         provenance.insert(provenance_digest);
-        spent = spent.saturating_add(cost);
+        spent = next_spent.ok_or_else(|| {
+            MechanismAssuranceError::Invalid(
+                "mechanism budget accounting overflowed before admission".into(),
+            )
+        })?;
         if candidate.negative_result {
             negative.insert(format!(
                 "candidate:{}:negative-result-retained",
@@ -630,5 +727,17 @@ mod tests {
             candidate("candidate:a", CandidateState::Supported, false),
         ]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn tampered_mechanism_artifact_is_rejected() {
+        let mut portfolio = assure(&question(vec![
+            candidate("candidate:a", CandidateState::Supported, false),
+            candidate("candidate:b", CandidateState::Supported, false),
+        ]))
+        .unwrap();
+        portfolio.modality_order.push("modality:tampered".into());
+        portfolio.modality_order.sort();
+        assert!(portfolio.validate().is_err());
     }
 }

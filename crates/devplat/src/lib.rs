@@ -231,6 +231,8 @@ pub mod domain_evidence_provider_handoff;
 pub mod domain_evidence_source;
 pub mod domain_evidence_source_execution;
 pub mod domain_report;
+pub mod multimodal_limitation_closure_assurance;
+pub mod quality_control_federated_control_plane;
 pub mod engineering;
 pub mod engineering_plan;
 pub mod error;
@@ -607,11 +609,11 @@ pub use workflow::{
 };
 pub use workflow_execution_evidence::{
     build_workflow_execution_evidence, validate_workflow_execution_evidence,
-    WorkflowExecutionEvidenceError, WorkflowExecutionEvidenceRegistry,
-    MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES, MAX_WORKFLOW_EXECUTION_EVIDENCE_CAPABILITIES,
-    MAX_WORKFLOW_EXECUTION_EVIDENCE_DOMAINS, MAX_WORKFLOW_EXECUTION_EVIDENCE_PARENTS,
-    MAX_WORKFLOW_EXECUTION_EVIDENCE_QUERY_ITEMS, MAX_WORKFLOW_EXECUTION_EVIDENCE_RECORDS,
-    WORKFLOW_EXECUTION_EVIDENCE_GET_SCHEMA_VERSION,
+    WorkflowExecutionEvidenceError, WorkflowExecutionEvidenceQuery,
+    WorkflowExecutionEvidenceRegistry, MAX_WORKFLOW_EXECUTION_EVIDENCE_BYTES,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_CAPABILITIES, MAX_WORKFLOW_EXECUTION_EVIDENCE_DOMAINS,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_PARENTS, MAX_WORKFLOW_EXECUTION_EVIDENCE_QUERY_ITEMS,
+    MAX_WORKFLOW_EXECUTION_EVIDENCE_RECORDS, WORKFLOW_EXECUTION_EVIDENCE_GET_SCHEMA_VERSION,
     WORKFLOW_EXECUTION_EVIDENCE_IMPORT_SCHEMA_VERSION,
     WORKFLOW_EXECUTION_EVIDENCE_QUERY_SCHEMA_VERSION,
     WORKFLOW_EXECUTION_EVIDENCE_REGISTRY_SCHEMA_VERSION,
@@ -629,4 +631,27 @@ pub use workflow_reconciliation_registry::{
     DOMAIN_WORKFLOW_RECONCILIATION_REGISTRY_SCHEMA_VERSION,
     DOMAIN_WORKFLOW_RECONCILIATION_SUMMARY_SCHEMA_VERSION, MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
     MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES, MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS,
+};
+pub use multimodal_limitation_closure_assurance::{
+    assure_devplat_multimodal_limitation_closure,
+    devplat_multimodal_limitation_closure_manifest,
+    DevplatClosureError, DevplatClosureReceipt7, DevplatLimitationCase2,
+    Limitation6, LimitationClosureDisposition,
+    CONTRACT_VERSION as DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_CONTRACT_VERSION,
+    FEATURE_ID as DEVPLAT_MULTIMODAL_LIMITATION_CLOSURE_FEATURE_ID,
+};
+pub use quality_control_federated_control_plane::{
+    assure_devplat_quality_control_federated_control_plane,
+    devplat_quality_control_federated_control_plane_manifest,
+    QualityAssuranceError as DevplatQualityControlPlaneError,
+    QualityControlRequest5 as DevplatQualityBatchRequest5,
+    QualityVerdict7 as DevplatQualityControlPlaneReceipt7,
+    QualityVerdictDisposition as DevplatQualityDisposition,
+    ResearchObject4 as DevplatQualityObservation4,
+    CONTENT_TYPE as DEVPLAT_QUALITY_CONTROL_PLANE_CONTENT_TYPE,
+    CONTRACT_VERSION as DEVPLAT_QUALITY_CONTROL_PLANE_CONTRACT_VERSION,
+    FEATURE_ID as DEVPLAT_QUALITY_CONTROL_PLANE_FEATURE_ID,
+    INPUT_SCHEMA as DEVPLAT_QUALITY_CONTROL_PLANE_INPUT_SCHEMA,
+    MAX_BATCH_OBJECTS as DEVPLAT_QUALITY_CONTROL_PLANE_MAX_BATCH_OBJECTS,
+    OUTPUT_SCHEMA as DEVPLAT_QUALITY_CONTROL_PLANE_OUTPUT_SCHEMA,
 };

@@ -297,8 +297,20 @@ fn adjacency(
     for (i, left) in agents.iter().enumerate() {
         for right in agents.iter().skip(i + 1) {
             if !separator(graph, partition, left, right)?.is_empty() {
-                edges.get_mut(left).expect("agent present").insert(right.clone());
-                edges.get_mut(right).expect("agent present").insert(left.clone());
+                edges
+                    .get_mut(left)
+                    .ok_or_else(|| EpistemicError::UnknownIdentifier {
+                        collection: "partition agents".into(),
+                        id: left.clone(),
+                    })?
+                    .insert(right.clone());
+                edges
+                    .get_mut(right)
+                    .ok_or_else(|| EpistemicError::UnknownIdentifier {
+                        collection: "partition agents".into(),
+                        id: right.clone(),
+                    })?
+                    .insert(left.clone());
             }
         }
     }
@@ -551,9 +563,7 @@ fn assignments(variables: &[String]) -> Vec<BTreeMap<String, u8>> {
             variables
                 .iter()
                 .enumerate()
-                .map(|(position, name)| {
-                    (name.clone(), ((mask >> position) & 1) as u8)
-                })
+                .map(|(position, name)| (name.clone(), ((mask >> position) & 1) as u8))
                 .collect()
         })
         .collect()
@@ -618,13 +628,7 @@ pub fn local_message(
     }
 
     Ok(LocalOutcome::Message(Box::new(SeparatorMessage::new(
-        from,
-        to,
-        &shared,
-        shared_vec,
-        values,
-        provenance,
-        residual,
+        from, to, &shared, shared_vec, values, provenance, residual,
     )?)))
 }
 
@@ -696,7 +700,10 @@ pub fn collect(
         let incoming = inbox.get(node).cloned().unwrap_or_default();
         match local_message(graph, partition, node, parent, &incoming)? {
             LocalOutcome::Message(message) => {
-                inbox.entry(parent.clone()).or_default().push(*message.clone());
+                inbox
+                    .entry(parent.clone())
+                    .or_default()
+                    .push(*message.clone());
                 messages.push(*message);
             }
             LocalOutcome::Obstruction(obstruction) => obstructions.push(*obstruction),

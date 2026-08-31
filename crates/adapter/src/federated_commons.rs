@@ -14,6 +14,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-adapter-P31-F22";
 pub const CONTRACT_VERSION: &str = "adapter-federated-commons/1.0";
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_ITEMS: usize = 16384;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommonsContribution {
@@ -51,6 +53,8 @@ pub struct FederatedCommonsReceipt {
     pub schema_version: String,
     pub contract_version: String,
     pub feature_id: String,
+    pub input: FederatedCommonsRequest,
+    pub input_digest: ContentHash,
     pub request_id: String,
     pub federation_id: String,
     pub objective_id: String,
@@ -87,31 +91,99 @@ impl FederatedCommonsReceipt {
         {
             return Err(FederatedCommonsError::Invalid("commons identity, institutions, purpose, checks, effects, locality, or boundary are incomplete".into()));
         }
-        for values in [
-            &self.institution_order,
-            &self.admitted_order,
-            &self.denied_order,
-            &self.semantic_profile_order,
-            &self.checks,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
-        ] {
-            if values.windows(2).any(|p| p[0] >= p[1]) {
-                return Err(FederatedCommonsError::Invalid(
-                    "commons ordering is not canonical".into(),
-                ));
-            }
-        }
-        if self.artifact_order.windows(2).any(|p| p[0] >= p[1]) {
+        validate_text("request_id", &self.request_id)?;
+        validate_text("federation_id", &self.federation_id)?;
+        validate_text("objective_id", &self.objective_id)?;
+        validate_text("required_purpose", &self.required_purpose)?;
+        validate_text("boundary", &self.boundary)?;
+        validate_sorted_strings("institution_order", &self.institution_order)?;
+        validate_sorted_strings("admitted_order", &self.admitted_order)?;
+        validate_sorted_strings("denied_order", &self.denied_order)?;
+        validate_sorted_strings("semantic_profile_order", &self.semantic_profile_order)?;
+        validate_sorted_strings("checks", &self.checks)?;
+        validate_sorted_strings("omissions", &self.omissions)?;
+        validate_sorted_strings("uncertainty", &self.uncertainty)?;
+        validate_sorted_strings("negative_evidence", &self.negative_evidence)?;
+        validate_sorted_strings("effect_receipts", &self.effect_receipts)?;
+        let institutions = self.institution_order.iter().collect::<BTreeSet<_>>();
+        let admitted = self.admitted_order.iter().collect::<BTreeSet<_>>();
+        let denied = self.denied_order.iter().collect::<BTreeSet<_>>();
+        let partition = admitted.union(&denied).copied().collect::<BTreeSet<_>>();
+        if admitted.intersection(&denied).next().is_some() || partition != institutions {
             return Err(FederatedCommonsError::Invalid(
-                "commons artifact ordering is not canonical".into(),
+                "commons institution partition is incomplete or overlapping".into(),
+            ));
+        }
+        if self.artifact_order.len() != self.admitted_order.len()
+            || self.artifact_order.windows(2).any(|p| p[0] >= p[1])
+            || self
+                .artifact_order
+                .iter()
+                .any(|digest| *digest == ContentHash::of_bytes(b""))
+        {
+            return Err(FederatedCommonsError::Invalid(
+                "commons artifact ordering or admitted-artifact closure is invalid".into(),
+            ));
+        }
+        let expected_effect = if matches!(
+            self.disposition,
+            CommonsDisposition::Shared | CommonsDisposition::Partial
+        ) {
+            "exchange:permitted-purpose-bound-aggregate-digests-only".to_string()
+        } else {
+            format!("block:federated-commons:{:?}", self.disposition).to_lowercase()
+        };
+        if self.effect_receipts != [expected_effect] {
+            return Err(FederatedCommonsError::Invalid(
+                "commons effect receipt does not match disposition".into(),
+            ));
+        }
+        if self.disposition == CommonsDisposition::Shared
+            && (!self.denied_order.is_empty()
+                || self.semantic_profile_order.len() > 1
+                || self.admitted_order.is_empty())
+        {
+            return Err(FederatedCommonsError::Invalid(
+                "shared commons disposition does not have complete compatible admission".into(),
+            ));
+        }
+        if matches!(
+            self.disposition,
+            CommonsDisposition::Unknown | CommonsDisposition::Blocked
+        ) && (!self.admitted_order.is_empty() || !self.artifact_order.is_empty())
+        {
+            return Err(FederatedCommonsError::Invalid(
+                "unknown or blocked commons cannot carry admitted artifacts".into(),
+            ));
+        }
+        if self.artifact.artifact_id != format!("adapter-federated-commons:{}", self.request_id)
+            || self.artifact.content_type != "application/vnd.aurora.adapter-federated-commons+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(FederatedCommonsError::Artifact(
+                "commons artifact is not bound to the receipt".into(),
             ));
         }
         self.artifact
             .validate_metadata()
-            .map_err(|e| FederatedCommonsError::Artifact(e.to_string()))
+            .map_err(|e| FederatedCommonsError::Artifact(e.to_string()))?;
+        self.artifact
+            .verify_payload(&commons_payload(self))
+            .map_err(|e| FederatedCommonsError::Artifact(e.to_string()))?;
+        if self.input_digest != commons_input_digest(&self.input)? {
+            return Err(FederatedCommonsError::Invalid(
+                "commons retained input digest mismatch".into(),
+            ));
+        }
+        validate_request(&self.input)?;
+        let expected = build_federated_commons_receipt(&self.input)?;
+        if self != &expected {
+            return Err(FederatedCommonsError::Invalid(
+                "commons receipt does not match its retained input".into(),
+            ));
+        }
+        Ok(())
     }
     pub fn digest(&self) -> Result<ContentHash, FederatedCommonsError> {
         self.validate()?;
@@ -120,6 +192,95 @@ impl FederatedCommonsReceipt {
         ContentHash::of_value(&v).map_err(|e| FederatedCommonsError::Serialization(e.to_string()))
     }
 }
+
+fn validate_text(field: &str, value: &str) -> Result<(), FederatedCommonsError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(FederatedCommonsError::Invalid(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(FederatedCommonsError::Invalid(format!(
+            "{field} is outside its bounded text contract"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique_strings(field: &str, values: &[String]) -> Result<(), FederatedCommonsError> {
+    if values.len() > MAX_ITEMS {
+        return Err(FederatedCommonsError::Invalid(format!(
+            "{field} exceeds its item bound"
+        )));
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(FederatedCommonsError::Invalid(format!(
+                "{field} contains duplicate values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_strings(field: &str, values: &[String]) -> Result<(), FederatedCommonsError> {
+    validate_unique_strings(field, values)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedCommonsError::Invalid(format!(
+            "{field} ordering is not canonical"
+        )));
+    }
+    Ok(())
+}
+
+fn commons_payload(receipt: &FederatedCommonsReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "federation_id": receipt.federation_id,
+        "objective_id": receipt.objective_id,
+        "required_purpose": receipt.required_purpose,
+        "disposition": receipt.disposition,
+        "institution_order": receipt.institution_order,
+        "admitted_order": receipt.admitted_order,
+        "denied_order": receipt.denied_order,
+        "semantic_profile_order": receipt.semantic_profile_order,
+        "artifact_order": receipt.artifact_order,
+        "checks": receipt.checks,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
+}
+
+fn commons_input_digest(
+    request: &FederatedCommonsRequest,
+) -> Result<ContentHash, FederatedCommonsError> {
+    let value = serde_json::to_value(&canonical_federated_commons_request(request))
+        .map_err(|e| FederatedCommonsError::Serialization(e.to_string()))?;
+    ContentHash::of_value(&value).map_err(|e| FederatedCommonsError::Serialization(e.to_string()))
+}
+
+fn canonical_federated_commons_request(
+    request: &FederatedCommonsRequest,
+) -> FederatedCommonsRequest {
+    let mut canonical = request.clone();
+    for contribution in &mut canonical.contributions {
+        contribution.allowed_purposes.sort();
+    }
+    canonical
+        .contributions
+        .sort_by(|left, right| left.institution_id.cmp(&right.institution_id));
+    canonical
+}
+
 #[derive(Debug, Error)]
 pub enum FederatedCommonsError {
     #[error("invalid federated commons request: {0}")]
@@ -133,6 +294,14 @@ pub fn admit_federated_commons(
     request: &FederatedCommonsRequest,
 ) -> Result<FederatedCommonsReceipt, FederatedCommonsError> {
     validate_request(request)?;
+    let receipt = build_federated_commons_receipt(request)?;
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+fn build_federated_commons_receipt(
+    request: &FederatedCommonsRequest,
+) -> Result<FederatedCommonsReceipt, FederatedCommonsError> {
     let mut c = request.contributions.clone();
     c.sort_by(|a, b| a.institution_id.cmp(&b.institution_id));
     let institution_order = c
@@ -185,14 +354,21 @@ pub fn admit_federated_commons(
     }
     if !request.protected_closure {
         uncertainty.insert("request:protected-closure-incomplete".into());
+        omissions.insert("request:protected-closure-incomplete".into());
+    }
+    if !request.policy_allow || !request.protected_closure {
+        for institution in &institution_order {
+            denied.insert(institution.clone());
+        }
+        admitted.clear();
+        profiles.clear();
+        artifacts.clear();
     }
     let admitted_order = admitted.into_iter().collect::<Vec<_>>();
     let denied_order = denied.into_iter().collect::<Vec<_>>();
     let disposition = if !request.policy_allow {
         CommonsDisposition::Blocked
-    } else if !request.protected_closure {
-        CommonsDisposition::Unknown
-    } else if admitted_order.is_empty() {
+    } else if !request.protected_closure || admitted_order.is_empty() {
         CommonsDisposition::Unknown
     } else if denied_order.is_empty() && profiles.len() <= 1 {
         CommonsDisposition::Shared
@@ -232,6 +408,8 @@ pub fn admit_federated_commons(
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
+        input: canonical_federated_commons_request(request),
+        input_digest: commons_input_digest(request)?,
         request_id: request.request_id.clone(),
         federation_id: request.federation_id.clone(),
         objective_id: request.objective_id.clone(),
@@ -251,7 +429,6 @@ pub fn admit_federated_commons(
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
-    receipt.validate()?;
     Ok(receipt)
 }
 fn validate_request(request: &FederatedCommonsRequest) -> Result<(), FederatedCommonsError> {
@@ -267,6 +444,16 @@ fn validate_request(request: &FederatedCommonsRequest) -> Result<(), FederatedCo
             "commons identity, purpose, contributions, locality, and boundary are required".into(),
         ));
     }
+    validate_text("request_id", &request.request_id)?;
+    validate_text("federation_id", &request.federation_id)?;
+    validate_text("objective_id", &request.objective_id)?;
+    validate_text("required_purpose", &request.required_purpose)?;
+    validate_text("boundary", &request.boundary)?;
+    if request.contributions.len() > MAX_ITEMS {
+        return Err(FederatedCommonsError::Invalid(
+            "commons contribution count exceeds its bound".into(),
+        ));
+    }
     let mut ids = BTreeSet::new();
     for c in &request.contributions {
         if c.institution_id.trim().is_empty()
@@ -279,6 +466,15 @@ fn validate_request(request: &FederatedCommonsRequest) -> Result<(), FederatedCo
                 "contribution {} is invalid or duplicated",
                 c.institution_id
             )));
+        }
+        validate_text("institution_id", &c.institution_id)?;
+        validate_text("semantic_profile", &c.semantic_profile)?;
+        validate_text("boundary", &c.boundary)?;
+        validate_unique_strings("allowed_purposes", &c.allowed_purposes)?;
+        if c.artifact_digest == ContentHash::of_bytes(b"") {
+            return Err(FederatedCommonsError::Invalid(
+                "contribution artifact digest must be non-empty".into(),
+            ));
         }
     }
     Ok(())
@@ -352,5 +548,43 @@ mod tests {
         q.contributions[0].aggregate_only = false;
         let r = admit_federated_commons(&q).unwrap();
         assert!(r.omissions.iter().any(|v| v.contains("nonaggregate")));
+    }
+
+    #[test]
+    fn global_policy_denial_carries_no_admitted_artifacts() {
+        let mut q = q();
+        q.contributions[1].allowed_purposes = vec!["benchmark".into()];
+        q.policy_allow = false;
+        let receipt = admit_federated_commons(&q).unwrap();
+        assert_eq!(receipt.disposition, CommonsDisposition::Blocked);
+        assert!(receipt.admitted_order.is_empty());
+        assert!(receipt.artifact_order.is_empty());
+    }
+
+    #[test]
+    fn protected_closure_gap_carries_no_admitted_artifacts() {
+        let mut q = q();
+        q.contributions[1].allowed_purposes = vec!["benchmark".into()];
+        q.protected_closure = false;
+        let receipt = admit_federated_commons(&q).unwrap();
+        assert_eq!(receipt.disposition, CommonsDisposition::Unknown);
+        assert!(receipt.admitted_order.is_empty());
+        assert!(receipt.artifact_order.is_empty());
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_artifact_payload_binding() {
+        let mut receipt = admit_federated_commons(&q()).unwrap();
+        receipt.required_purpose = "tampered-purpose".into();
+        let error = receipt.validate().unwrap_err();
+        assert!(error.to_string().contains("digest mismatch"));
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_retained_request() {
+        let mut receipt = admit_federated_commons(&q()).unwrap();
+        receipt.input.required_purpose = "tampered-purpose".into();
+        let error = receipt.validate().unwrap_err();
+        assert!(error.to_string().contains("retained input digest mismatch"));
     }
 }

@@ -41,6 +41,8 @@ impl Ingestion {
         facts: Vec<Value>,
         loss: SemanticLoss,
     ) -> Result<Self, AdapterError> {
+        manifest.validate()?;
+        loss.validate_for_source(&manifest.source_id)?;
         let mut seen: BTreeMap<String, SourceLocation> = BTreeMap::new();
         let mut validated: Vec<(String, Value)> = Vec::with_capacity(facts.len());
 
@@ -247,5 +249,26 @@ mod tests {
         .unwrap();
         assert_eq!(lossless.facts(), unaudited.facts());
         assert_ne!(lossless.digest().unwrap(), unaudited.digest().unwrap());
+    }
+
+    #[test]
+    fn an_invalid_manifest_is_refused_before_facts_are_published() {
+        let mut manifest = manifest();
+        manifest.adapter = "".into();
+        let error = Ingestion::new(manifest, Vec::new(), LossAudit::new().finish()).unwrap_err();
+        assert!(matches!(error, AdapterError::InvalidSource(_)));
+    }
+
+    #[test]
+    fn loss_metadata_from_another_source_is_refused_before_publication() {
+        let mut audit = LossAudit::new();
+        audit.record(
+            crate::loss::LossKind::UnmappedColumn,
+            crate::loss::LossSeverity::Degrading,
+            SourceLocation::column("other", "age"),
+            "wrong source",
+        );
+        let error = Ingestion::new(manifest(), Vec::new(), audit.finish()).unwrap_err();
+        assert!(matches!(error, AdapterError::InvalidLoss(_)));
     }
 }

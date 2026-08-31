@@ -66,6 +66,7 @@ use crate::error::{MetricsError, ScoreIncomparability};
 use crate::grid::CapabilityGrid;
 use crate::weighting::DeclaredWeighting;
 use bioprism_atlas::{CapabilityId, UnmeasuredReason};
+use serde::de::Error as DeError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -197,6 +198,26 @@ pub fn compare_under(
     right: &CapabilityVector,
     policy: &ComparabilityPolicy,
 ) -> Dominance {
+    if let Err(error) = left.grid.validate() {
+        return Dominance::Incomparable {
+            because: Unorderable::ConditionsDiffer {
+                reason: ScoreIncomparability::MalformedGrid {
+                    side: "left".to_string(),
+                    detail: error.to_string(),
+                },
+            },
+        };
+    }
+    if let Err(error) = right.grid.validate() {
+        return Dominance::Incomparable {
+            because: Unorderable::ConditionsDiffer {
+                reason: ScoreIncomparability::MalformedGrid {
+                    side: "right".to_string(),
+                    detail: error.to_string(),
+                },
+            },
+        };
+    }
     if let Err(reason) = grids_comparable(&left.grid, &right.grid, policy) {
         return Dominance::Incomparable {
             because: Unorderable::ConditionsDiffer { reason },
@@ -280,9 +301,102 @@ pub struct PairRelation {
 
 /// A partial order over capability vectors, with its refusals intact.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "PartialRankingFields", into = "PartialRankingFields")]
 pub struct PartialRanking {
     vectors: Vec<CapabilityVector>,
     relations: Vec<PairRelation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct PartialRankingFields {
+    vectors: Vec<CapabilityVector>,
+    relations: Vec<PairRelation>,
+}
+
+impl TryFrom<PartialRankingFields> for PartialRanking {
+    type Error = MetricsError;
+
+    fn try_from(fields: PartialRankingFields) -> Result<Self, Self::Error> {
+        if fields.vectors.len() < 2 {
+            return Err(MetricsError::MalformedRanking {
+                detail: format!(
+                    "a partial ranking needs at least two systems, got {}",
+                    fields.vectors.len()
+                ),
+            });
+        }
+        let mut systems = BTreeSet::new();
+        for vector in &fields.vectors {
+            if !systems.insert(vector.system.clone()) {
+                return Err(MetricsError::DuplicateSystem(vector.system.to_string()));
+            }
+        }
+
+        let expected = fields
+            .vectors
+            .len()
+            .checked_mul(fields.vectors.len().saturating_sub(1))
+            .and_then(|pairs| pairs.checked_div(2))
+            .ok_or_else(|| MetricsError::MalformedRanking {
+                detail: "partial ranking pair count overflows the host size limit".to_string(),
+            })?;
+        if fields.relations.len() != expected {
+            return Err(MetricsError::MalformedRanking {
+                detail: format!(
+                    "partial ranking has {} relations for {} systems; expected {expected}",
+                    fields.relations.len(),
+                    fields.vectors.len()
+                ),
+            });
+        }
+
+        let mut pairs = BTreeSet::new();
+        for relation in &fields.relations {
+            if relation.left == relation.right {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!(
+                        "relation for {} compares a system with itself",
+                        relation.left
+                    ),
+                });
+            }
+            if !systems.contains(&relation.left) || !systems.contains(&relation.right) {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!(
+                        "relation {} versus {} names a system outside the ranking",
+                        relation.left, relation.right
+                    ),
+                });
+            }
+            let pair = if relation.left < relation.right {
+                (relation.left.clone(), relation.right.clone())
+            } else {
+                (relation.right.clone(), relation.left.clone())
+            };
+            if !pairs.insert(pair) {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!(
+                        "partial ranking repeats the pair {} versus {}",
+                        relation.left, relation.right
+                    ),
+                });
+            }
+        }
+
+        Ok(PartialRanking {
+            vectors: fields.vectors,
+            relations: fields.relations,
+        })
+    }
+}
+
+impl From<PartialRanking> for PartialRankingFields {
+    fn from(value: PartialRanking) -> Self {
+        PartialRankingFields {
+            vectors: value.vectors,
+            relations: value.relations,
+        }
+    }
 }
 
 impl PartialRanking {
@@ -305,6 +419,7 @@ impl PartialRanking {
         }
         let mut seen = BTreeSet::new();
         for vector in &vectors {
+            vector.grid.validate()?;
             if !seen.insert(vector.system.clone()) {
                 return Err(MetricsError::DuplicateSystem(vector.system.to_string()));
             }
@@ -462,6 +577,7 @@ pub struct CollapsedIncomparability {
 
 /// A total order, with the arbitrary step attached to it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "TotalRankingFields", into = "TotalRankingFields")]
 pub struct TotalRanking {
     /// The weighting that produced this order. Present in full, not by reference: an order that
     /// cited a weighting nobody could retrieve would be exactly the opaque construction ADR-006
@@ -472,6 +588,173 @@ pub struct TotalRanking {
     /// Pairs that were genuinely incomparable before the weighting was applied. Never elided, for
     /// the same reason `bioprism_atlas::CoverageReport::holes` is never elided.
     pub collapsed: Vec<CollapsedIncomparability>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct TotalRankingFields {
+    weighting: DeclaredWeighting,
+    weighting_digest: String,
+    order: Vec<RankedSystem>,
+    collapsed: Vec<CollapsedIncomparability>,
+}
+
+impl TryFrom<TotalRankingFields> for TotalRanking {
+    type Error = MetricsError;
+
+    fn try_from(fields: TotalRankingFields) -> Result<Self, Self::Error> {
+        let expected_digest = fields.weighting.digest().as_str();
+        if fields.weighting_digest != expected_digest {
+            return Err(MetricsError::MalformedRanking {
+                detail: format!(
+                    "stored weighting digest {} does not match {}",
+                    fields.weighting_digest, expected_digest
+                ),
+            });
+        }
+        if fields.order.len() < 2 {
+            return Err(MetricsError::MalformedRanking {
+                detail: format!(
+                    "a total ranking needs at least two systems, got {}",
+                    fields.order.len()
+                ),
+            });
+        }
+
+        let mut systems = BTreeSet::new();
+        for row in &fields.order {
+            if row.rank == 0 {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!("system {} has rank zero", row.system),
+                });
+            }
+            if !systems.insert(row.system.clone()) {
+                return Err(MetricsError::DuplicateSystem(row.system.to_string()));
+            }
+            if row.aggregate.weighting_digest() != Some(expected_digest) {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!(
+                        "aggregate for system {} does not carry the total ranking weighting digest",
+                        row.system
+                    ),
+                });
+            }
+        }
+
+        let direction = fields
+            .order
+            .first()
+            .map(|row| row.aggregate.conditions().scoring_rule.direction)
+            .ok_or_else(|| MetricsError::MalformedRanking {
+                detail: "total ranking has no order rows".to_string(),
+            })?;
+        let first_rank = fields.order[0].rank;
+        if first_rank != 1 {
+            return Err(MetricsError::MalformedRanking {
+                detail: format!("total ranking starts at rank {first_rank}, not rank 1"),
+            });
+        }
+        for window in fields.order.windows(2) {
+            let previous = &window[0];
+            let current = &window[1];
+            if previous.aggregate.conditions().scoring_rule
+                != current.aggregate.conditions().scoring_rule
+            {
+                return Err(MetricsError::MalformedRanking {
+                    detail: "total ranking rows use different scoring rules".to_string(),
+                });
+            }
+            let previous_value = previous.aggregate.value().get();
+            let current_value = current.aggregate.value().get();
+            let tied = !direction.is_better(previous_value, current_value)
+                && !direction.is_better(current_value, previous_value);
+            if direction.is_better(current_value, previous_value) {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!(
+                        "system {} is ordered after a better-valued system {}",
+                        current.system, previous.system
+                    ),
+                });
+            }
+            let expected_rank = if tied {
+                previous.rank
+            } else {
+                previous
+                    .rank
+                    .checked_add(1)
+                    .ok_or_else(|| MetricsError::MalformedRanking {
+                        detail: "total ranking rank counter overflows the host size limit"
+                            .to_string(),
+                    })?
+            };
+            if current.rank != expected_rank {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!(
+                        "system {} has rank {}, expected {expected_rank}",
+                        current.system, current.rank
+                    ),
+                });
+            }
+        }
+
+        let mut collapsed_pairs = BTreeSet::new();
+        for collapsed in &fields.collapsed {
+            if collapsed.left == collapsed.right {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!(
+                        "collapsed relation for {} compares a system with itself",
+                        collapsed.left
+                    ),
+                });
+            }
+            if !systems.contains(&collapsed.left) || !systems.contains(&collapsed.right) {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!(
+                        "collapsed relation {} versus {} names a system outside the order",
+                        collapsed.left, collapsed.right
+                    ),
+                });
+            }
+            if !collapsed.dominance.is_incomparable() {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!(
+                        "collapsed relation {} versus {} is not incomparable",
+                        collapsed.left, collapsed.right
+                    ),
+                });
+            }
+            let pair = if collapsed.left < collapsed.right {
+                (collapsed.left.clone(), collapsed.right.clone())
+            } else {
+                (collapsed.right.clone(), collapsed.left.clone())
+            };
+            if !collapsed_pairs.insert(pair) {
+                return Err(MetricsError::MalformedRanking {
+                    detail: format!(
+                        "collapsed relation repeats {} versus {}",
+                        collapsed.left, collapsed.right
+                    ),
+                });
+            }
+        }
+
+        Ok(TotalRanking {
+            weighting: fields.weighting,
+            weighting_digest: fields.weighting_digest,
+            order: fields.order,
+            collapsed: fields.collapsed,
+        })
+    }
+}
+
+impl From<TotalRanking> for TotalRankingFields {
+    fn from(value: TotalRanking) -> Self {
+        TotalRankingFields {
+            weighting: value.weighting,
+            weighting_digest: value.weighting_digest,
+            order: value.order,
+            collapsed: value.collapsed,
+        }
+    }
 }
 
 impl TotalRanking {
@@ -527,7 +810,7 @@ impl TotalRanking {
 /// unlike [`crate::aggregate::CoveredAggregate`] — which re-derives its coverage on the way in —
 /// there is no stored number here that could need revalidating, because there is no way to write
 /// one down that disagrees with its own denominator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(tag = "instability", rename_all = "snake_case")]
 pub enum Instability {
     /// The leader moved in `top_changed_in` of the `evaluated` perturbations that produced an
@@ -544,7 +827,90 @@ pub enum Instability {
     NotPerturbable { weighted_capabilities: usize },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(tag = "instability", rename_all = "snake_case")]
+enum InstabilityFields {
+    Measured {
+        top_changed_in: usize,
+        evaluated: usize,
+    },
+    NothingEvaluable {
+        attempted: usize,
+    },
+    NotPerturbable {
+        weighted_capabilities: usize,
+    },
+}
+
+impl<'de> Deserialize<'de> for Instability {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let fields = InstabilityFields::deserialize(deserializer)?;
+        Instability::try_from(fields).map_err(D::Error::custom)
+    }
+}
+
+impl TryFrom<InstabilityFields> for Instability {
+    type Error = MetricsError;
+
+    fn try_from(fields: InstabilityFields) -> Result<Self, Self::Error> {
+        let instability = match fields {
+            InstabilityFields::Measured {
+                top_changed_in,
+                evaluated,
+            } => Instability::Measured {
+                top_changed_in,
+                evaluated,
+            },
+            InstabilityFields::NothingEvaluable { attempted } => {
+                Instability::NothingEvaluable { attempted }
+            }
+            InstabilityFields::NotPerturbable {
+                weighted_capabilities,
+            } => Instability::NotPerturbable {
+                weighted_capabilities,
+            },
+        };
+        instability.validate()?;
+        Ok(instability)
+    }
+}
+
 impl Instability {
+    fn validate(&self) -> Result<(), MetricsError> {
+        match self {
+            Instability::Measured {
+                top_changed_in,
+                evaluated,
+            } => {
+                if *evaluated == 0 || top_changed_in > evaluated {
+                    return Err(MetricsError::MalformedRanking {
+                        detail: format!(
+                            "measured instability needs 0 < evaluated and top_changed_in <= evaluated, got {top_changed_in} of {evaluated}"
+                        ),
+                    });
+                }
+            }
+            Instability::NothingEvaluable { attempted } if *attempted == 0 => {
+                return Err(MetricsError::MalformedRanking {
+                    detail: "nothing_evaluable must record at least one attempt".to_string(),
+                });
+            }
+            Instability::NotPerturbable {
+                weighted_capabilities,
+            } if *weighted_capabilities == 0 => {
+                return Err(MetricsError::MalformedRanking {
+                    detail: "not_perturbable must name at least one weighted capability"
+                        .to_string(),
+                });
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// `top_changed_in / evaluated`, or `None` where there is no denominator.
     ///
     /// The two `None` cases are the ones a bare `f64` reported as `0.0`. A caller that wants a
@@ -554,7 +920,9 @@ impl Instability {
             Instability::Measured {
                 top_changed_in,
                 evaluated,
-            } if *evaluated > 0 => Some(*top_changed_in as f64 / *evaluated as f64),
+            } if *evaluated > 0 && *top_changed_in <= *evaluated => {
+                Some(*top_changed_in as f64 / *evaluated as f64)
+            }
             _ => None,
         }
     }

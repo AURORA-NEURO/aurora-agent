@@ -308,9 +308,7 @@ pub fn evaluate_replication(
     let effect_consistent = request
         .policy
         .max_effect_disagreement
-        .map_or(true, |threshold| {
-            disagreement.map_or(true, |delta| delta <= threshold)
-        });
+        .is_none_or(|threshold| disagreement.is_none_or(|delta| delta <= threshold));
     if !preregistration_ok {
         reasons.push("at least one observation lacks preregistration evidence".into());
     }

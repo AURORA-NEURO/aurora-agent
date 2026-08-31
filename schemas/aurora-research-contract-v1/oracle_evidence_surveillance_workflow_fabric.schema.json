@@ -1,0 +1,23 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://aurora-neuro.org/schemas/aurora-research-contract-v1/oracle-evidence-surveillance-workflow-fabric.schema.json",
+  "title":"AFA Oracle federated continual evidence-surveillance workflow fabric",
+  "type":"object","additionalProperties":false,
+  "required":["schema_version","contract_version","feature_id","request_id","workflow_id","federation_id","disposition","stage_order","candidate_order","qualified_order","unresolved_order","blocked_order","peer_order","qualified_peer_order","missing_peer_order","omission_order","uncertainty_order","negative_evidence_order","checkpoint_digest","workflow_digest","artifact","effect_receipts","raw_data_local","aggregate_only","boundary"],
+  "properties":{
+    "schema_version":{"const":"aurora-research-contract/1.0"},
+    "contract_version":{"const":"oracle-federated-continual-evidence-surveillance-workflow-fabric/1.0"},
+    "feature_id":{"const":"AFA-oracle-P01-F16"},
+    "request_id":{"type":"string","minLength":1},"workflow_id":{"type":"string","minLength":1},"federation_id":{"type":"string","minLength":1},
+    "disposition":{"enum":["qualified","unresolved","blocked"]},
+    "stage_order":{"const":["stage:checkpoint","stage:admit-federation","stage:surveil-evidence","stage:seal-envelope"]},
+    "candidate_order":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},
+    "qualified_order":{"type":"array","items":{"type":"string"}},"unresolved_order":{"type":"array","items":{"type":"string"}},"blocked_order":{"type":"array","items":{"type":"string"}},
+    "peer_order":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},"qualified_peer_order":{"type":"array","items":{"type":"string"}},"missing_peer_order":{"type":"array","items":{"type":"string"}},
+    "omission_order":{"type":"array","items":{"type":"string"}},"uncertainty_order":{"type":"array","items":{"type":"string"}},"negative_evidence_order":{"type":"array","items":{"type":"string"}},
+    "checkpoint_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"workflow_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "artifact":{"type":"object","additionalProperties":false,"required":["schema_version","artifact_id","content_type","content_hash","semantic_loss","provenance","boundary"],"properties":{"schema_version":{"const":"aurora-research-contract/1.0"},"artifact_id":{"type":"string","minLength":1},"content_type":{"const":"application/vnd.aurora.oracle-qualified-evidence-set-4+json"},"content_hash":{"type":"string","pattern":"^[0-9a-f]{64}$"},"semantic_loss":{"type":"array"},"provenance":{"type":"array"},"boundary":{"const":"preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}}},
+    "effect_receipts":{"type":"array","minItems":1,"items":{"type":"string","pattern":"^(block:unsafe-release|execute:evidence-surveillance:[^\\s]+)$"}},
+    "raw_data_local":{"const":true},"aggregate_only":{"const":true},"boundary":{"const":"preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  }
+}

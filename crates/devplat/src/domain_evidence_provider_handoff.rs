@@ -23,6 +23,7 @@ pub const MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_DOMAINS: usize = 64;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_CAPABILITIES: usize = 64;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_PARENTS: usize = 128;
 pub const MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SECRET_REFS: usize = 32;
+pub const MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_NON_CLAIMS: usize = 64;
 
 const CONNECTOR_KINDS: &[&str] = &[
     "literature",
@@ -159,8 +160,14 @@ pub enum DomainEvidenceProviderHandoffError {
     MissingAuthNonClaims,
     #[error("too many secret references")]
     TooManySecretRefs,
+    #[error("too many auth non-claims")]
+    TooManyAuthNonClaims,
+    #[error("auth posture field `{field}` contains duplicate value `{value}`")]
+    DuplicateAuthPostureValue { field: &'static str, value: String },
     #[error("too many parent digests")]
     TooManyParents,
+    #[error("parent digests must be unique")]
+    DuplicateParents,
     #[error(
         "status must be one of: prepared, submitted, observed, partial, refused, error, unknown"
     )]
@@ -184,6 +191,17 @@ fn bounded_text(
         return Err(DomainEvidenceProviderHandoffError::InvalidText { field });
     }
     Ok(value.to_owned())
+}
+
+fn bounded_identifier(
+    field: &'static str,
+    value: &str,
+) -> Result<String, DomainEvidenceProviderHandoffError> {
+    let value = bounded_text(field, value)?;
+    if value != value.trim() {
+        return Err(DomainEvidenceProviderHandoffError::InvalidText { field });
+    }
+    Ok(value)
 }
 
 fn digest(field: &'static str, value: &str) -> Result<String, DomainEvidenceProviderHandoffError> {
@@ -228,8 +246,13 @@ fn bounded_unique_texts(
         return Err(DomainEvidenceProviderHandoffError::InvalidDomains);
     }
     let mut unique = BTreeSet::new();
+    let mut identity_keys = BTreeSet::new();
     for value in values {
-        unique.insert(bounded_text(field, value)?);
+        let value = bounded_identifier(field, value)?;
+        if !identity_keys.insert(value.to_ascii_lowercase()) {
+            return Err(DomainEvidenceProviderHandoffError::InvalidDomains);
+        }
+        unique.insert(value);
     }
     if unique.len() != values.len() {
         return Err(DomainEvidenceProviderHandoffError::InvalidDomains);
@@ -243,27 +266,46 @@ fn validate_auth_posture(
     if !AUTH_STATUSES.contains(&posture.status.as_str()) {
         return Err(DomainEvidenceProviderHandoffError::InvalidAuthStatus);
     }
-    if posture.does_not_claim.is_empty()
-        || posture
-            .does_not_claim
-            .iter()
-            .any(|claim| bounded_text("does_not_claim", claim).is_err())
-    {
+    if posture.does_not_claim.is_empty() {
         return Err(DomainEvidenceProviderHandoffError::MissingAuthNonClaims);
     }
     if posture.secret_refs.len() > MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_SECRET_REFS {
         return Err(DomainEvidenceProviderHandoffError::TooManySecretRefs);
     }
-    let secret_refs = posture
-        .secret_refs
-        .iter()
-        .map(|reference| bounded_text("secret_ref", reference))
-        .collect::<Result<Vec<_>, _>>()?;
-    let does_not_claim = posture
-        .does_not_claim
-        .iter()
-        .map(|claim| bounded_text("does_not_claim", claim))
-        .collect::<Result<Vec<_>, _>>()?;
+    if posture.does_not_claim.len() > MAX_DOMAIN_EVIDENCE_PROVIDER_HANDOFF_NON_CLAIMS {
+        return Err(DomainEvidenceProviderHandoffError::TooManyAuthNonClaims);
+    }
+    let mut secret_refs = Vec::with_capacity(posture.secret_refs.len());
+    let mut secret_ref_keys = BTreeSet::new();
+    for reference in &posture.secret_refs {
+        let reference = bounded_identifier("secret_ref", reference)?;
+        if !secret_ref_keys.insert(reference.to_ascii_lowercase()) {
+            return Err(
+                DomainEvidenceProviderHandoffError::DuplicateAuthPostureValue {
+                    field: "secret_refs",
+                    value: reference,
+                },
+            );
+        }
+        secret_refs.push(reference);
+    }
+    secret_refs.sort();
+    let mut does_not_claim = Vec::with_capacity(posture.does_not_claim.len());
+    let mut non_claim_keys = BTreeSet::new();
+    for claim in &posture.does_not_claim {
+        let claim = bounded_identifier("does_not_claim", claim)
+            .map_err(|_| DomainEvidenceProviderHandoffError::MissingAuthNonClaims)?;
+        if !non_claim_keys.insert(claim.to_ascii_lowercase()) {
+            return Err(
+                DomainEvidenceProviderHandoffError::DuplicateAuthPostureValue {
+                    field: "does_not_claim",
+                    value: claim,
+                },
+            );
+        }
+        does_not_claim.push(claim);
+    }
+    does_not_claim.sort();
     Ok(DomainEvidenceProviderAuthPosture {
         status: posture.status.clone(),
         secret_refs,
@@ -277,10 +319,10 @@ fn validate_manifest(
     if manifest.schema != DOMAIN_EVIDENCE_PROVIDER_MANIFEST_SCHEMA {
         return Err(DomainEvidenceProviderHandoffError::InvalidManifestSchema);
     }
-    let connector_id = bounded_text("connector_id", &manifest.connector_id)?;
-    let version = bounded_text("version", &manifest.version)?;
-    let provider = bounded_text("provider", &manifest.provider)?;
-    let connector_kind = bounded_text("connector_kind", &manifest.connector_kind)?;
+    let connector_id = bounded_identifier("connector_id", &manifest.connector_id)?;
+    let version = bounded_identifier("version", &manifest.version)?;
+    let provider = bounded_identifier("provider", &manifest.provider)?;
+    let connector_kind = bounded_identifier("connector_kind", &manifest.connector_kind)?;
     if !CONNECTOR_KINDS.contains(&connector_kind.as_str()) {
         return Err(DomainEvidenceProviderHandoffError::UnsupportedConnector(
             connector_kind,
@@ -323,11 +365,11 @@ fn validate_manifest(
 pub fn handoff_domain_evidence_provider(
     request: &DomainEvidenceProviderHandoffRequest,
 ) -> Result<DomainEvidenceProviderHandoff, DomainEvidenceProviderHandoffError> {
-    let group_id = bounded_text("group_id", &request.group_id)?;
-    let subject_id = bounded_text("subject_id", &request.subject_id)?;
-    let source_tool = bounded_text("source_tool", &request.source_tool)?;
-    let provider = bounded_text("provider", &request.provider)?;
-    let connector_kind = bounded_text("connector_kind", &request.connector_kind)?;
+    let group_id = bounded_identifier("group_id", &request.group_id)?;
+    let subject_id = bounded_identifier("subject_id", &request.subject_id)?;
+    let source_tool = bounded_identifier("source_tool", &request.source_tool)?;
+    let provider = bounded_identifier("provider", &request.provider)?;
+    let connector_kind = bounded_identifier("connector_kind", &request.connector_kind)?;
     if !CONNECTOR_KINDS.contains(&connector_kind.as_str()) {
         return Err(DomainEvidenceProviderHandoffError::UnsupportedConnector(
             connector_kind,
@@ -377,11 +419,16 @@ pub fn handoff_domain_evidence_provider(
         .map(|value| digest("parent_digest", value))
         .collect::<Result<Vec<_>, _>>()?;
     parent_digests.sort();
-    parent_digests.dedup();
+    if parent_digests
+        .windows(2)
+        .any(|values| values[0] == values[1])
+    {
+        return Err(DomainEvidenceProviderHandoffError::DuplicateParents);
+    }
     let attempt_id = request
         .attempt_id
         .as_deref()
-        .map(|value| bounded_text("attempt_id", value))
+        .map(|value| bounded_identifier("attempt_id", value))
         .transpose()?;
     let manifest_value = serde_json::to_value(&manifest)
         .map_err(|error| DomainEvidenceProviderHandoffError::Canonical(error.to_string()))?;
@@ -519,5 +566,75 @@ mod tests {
         changed.payload_digest = Some("e".repeat(64));
         let second = handoff_domain_evidence_provider(&changed).unwrap();
         assert_ne!(first.handoff_digest, second.handoff_digest);
+    }
+
+    #[test]
+    fn canonicalizes_auth_lists_and_rejects_duplicates() {
+        let first = handoff_domain_evidence_provider(&request()).unwrap();
+        let mut reordered = request();
+        reordered.manifest.auth_posture.secret_refs =
+            vec!["secret://caller/z".into(), "secret://caller/a".into()];
+        reordered.manifest.auth_posture.does_not_claim = vec![
+            "provider authentication".into(),
+            "credential material".into(),
+        ];
+        let reordered_again = {
+            let mut request = reordered.clone();
+            request.manifest.auth_posture.secret_refs.reverse();
+            request.manifest.auth_posture.does_not_claim.reverse();
+            request
+        };
+        let first_reordered = handoff_domain_evidence_provider(&reordered).unwrap();
+        let second_reordered = handoff_domain_evidence_provider(&reordered_again).unwrap();
+        assert_eq!(
+            first_reordered.handoff_digest,
+            second_reordered.handoff_digest
+        );
+        assert_ne!(first.handoff_digest, first_reordered.handoff_digest);
+        assert_eq!(
+            first_reordered.manifest.auth_posture.secret_refs,
+            vec!["secret://caller/a", "secret://caller/z"]
+        );
+
+        let mut duplicate = request();
+        duplicate.manifest.auth_posture.secret_refs = vec![
+            "secret://caller/pubmed".into(),
+            "SECRET://CALLER/PUBMED".into(),
+        ];
+        assert!(matches!(
+            handoff_domain_evidence_provider(&duplicate),
+            Err(
+                DomainEvidenceProviderHandoffError::DuplicateAuthPostureValue {
+                    field: "secret_refs",
+                    ..
+                }
+            )
+        ));
+    }
+
+    #[test]
+    fn rejects_case_colliding_scope_values_duplicate_parents_and_identity_whitespace() {
+        let mut invalid = request();
+        invalid.domains = vec!["Oncology".into(), "oncology".into()];
+        assert_eq!(
+            handoff_domain_evidence_provider(&invalid).unwrap_err(),
+            DomainEvidenceProviderHandoffError::InvalidDomains
+        );
+
+        let mut invalid = request();
+        invalid.parent_digests = vec!["d".repeat(64), "d".repeat(64)];
+        assert_eq!(
+            handoff_domain_evidence_provider(&invalid).unwrap_err(),
+            DomainEvidenceProviderHandoffError::DuplicateParents
+        );
+
+        let mut invalid = request();
+        invalid.subject_id = " subject-1".into();
+        assert_eq!(
+            handoff_domain_evidence_provider(&invalid).unwrap_err(),
+            DomainEvidenceProviderHandoffError::InvalidText {
+                field: "subject_id"
+            }
+        );
     }
 }

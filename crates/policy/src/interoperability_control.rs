@@ -308,20 +308,24 @@ pub fn negotiate_interoperability(
             && complete
             && budget_ok;
         if gate {
+            let (Some(provenance_digest), Some(evidence_digest), Some(migration_digest)) = (
+                offer.provenance_digest.clone(),
+                offer.evidence_digest.clone(),
+                offer.migration_digest.clone(),
+            ) else {
+                return Err(InteroperabilityControlError::Invalid(
+                    "accepted offer is missing a required digest".into(),
+                ));
+            };
             spent = spent.saturating_add(cost);
             accepted.insert(offer.offer_id.clone());
             capabilities.insert(offer.capability_id.clone());
             schemas.insert(offer.schema_version.clone());
             inputs.insert(offer.input_digest.clone());
             outputs.insert(offer.output_digest.clone());
-            provenance.insert(
-                offer
-                    .provenance_digest
-                    .clone()
-                    .expect("complete provenance"),
-            );
-            evidence.insert(offer.evidence_digest.clone().expect("complete evidence"));
-            migration.insert(offer.migration_digest.clone().expect("complete migration"));
+            provenance.insert(provenance_digest);
+            evidence.insert(evidence_digest);
+            migration.insert(migration_digest);
         } else {
             match offer.state {
                 OfferEvidenceState::Unknown | OfferEvidenceState::Unmeasured => {

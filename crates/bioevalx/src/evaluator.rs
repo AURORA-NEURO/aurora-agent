@@ -43,6 +43,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::EvaluatorError;
 use crate::plane::UnscoredReason;
 
+const MAX_EVALUATOR_TEXT_BYTES: usize = 256;
+const MAX_DIAGNOSTIC_ITEMS: usize = 256;
+const MAX_PANEL_RUNS: usize = 4096;
+
 /// Whether the evaluator itself worked.
 ///
 /// Four states, and three of them are ways of being unable to say anything about the task.
@@ -120,6 +124,7 @@ impl Diagnostic {
             && self.exit_state.is_empty()
             && self.diff.is_empty()
             && self.logs.is_empty()
+            && self.hidden_data_access.is_empty()
     }
 }
 
@@ -136,7 +141,7 @@ pub enum TaskOutcome {
 }
 
 /// One evaluator's run: its health, what it concluded, and its evidence.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EvaluatorRun {
     pub evaluator: String,
     pub health: Health,
@@ -146,6 +151,32 @@ pub struct EvaluatorRun {
     pub reached: Option<TaskOutcome>,
     #[serde(default)]
     pub diagnostic: Diagnostic,
+}
+
+#[derive(Deserialize)]
+struct EvaluatorRunWire {
+    evaluator: String,
+    health: Health,
+    reached: Option<TaskOutcome>,
+    #[serde(default)]
+    diagnostic: Diagnostic,
+}
+
+impl<'de> Deserialize<'de> for EvaluatorRun {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = EvaluatorRunWire::deserialize(deserializer)?;
+        let run = EvaluatorRun {
+            evaluator: wire.evaluator,
+            health: wire.health,
+            reached: wire.reached,
+            diagnostic: wire.diagnostic,
+        };
+        run.validate().map_err(serde::de::Error::custom)?;
+        Ok(run)
+    }
 }
 
 impl EvaluatorRun {
@@ -178,16 +209,19 @@ impl EvaluatorRun {
     /// Refuses twice over: once when the evaluator was not healthy, and once when a healthy
     /// evaluator reports a non-pass with no diagnostic to justify it.
     pub fn task_outcome(&self) -> Result<TaskOutcome, EvaluatorError> {
+        self.validate()?;
         if !self.health.is_healthy() {
             return Err(EvaluatorError::NotTaskEvidence {
                 evaluator: self.evaluator.clone(),
                 health: self.health.label().to_string(),
             });
         }
-        let outcome = self.reached.ok_or_else(|| EvaluatorError::NotTaskEvidence {
-            evaluator: self.evaluator.clone(),
-            health: "healthy but reported no outcome".to_string(),
-        })?;
+        let outcome = self
+            .reached
+            .ok_or_else(|| EvaluatorError::NotTaskEvidence {
+                evaluator: self.evaluator.clone(),
+                health: "healthy but reported no outcome".to_string(),
+            })?;
         if outcome == TaskOutcome::NotMet && self.diagnostic.is_empty() {
             return Err(EvaluatorError::NoDiagnostic(self.evaluator.clone()));
         }
@@ -217,10 +251,25 @@ impl EvaluatorRun {
     pub fn hidden_data_touched(&self) -> bool {
         !self.diagnostic.hidden_data_access.is_empty()
     }
+
+    fn validate(&self) -> Result<(), EvaluatorError> {
+        validate_evaluator_text(&self.evaluator, &self.evaluator, "evaluator")?;
+        match &self.health {
+            Health::Healthy => {}
+            Health::TimedOut { after } => {
+                validate_evaluator_text(&self.evaluator, after, "timeout")?;
+            }
+            Health::Errored { detail } | Health::FixtureBroken { detail } => {
+                validate_evaluator_text(&self.evaluator, detail, "health detail")?;
+            }
+        }
+        validate_diagnostic(&self.evaluator, &self.diagnostic)?;
+        Ok(())
+    }
 }
 
 /// A whole panel of evaluator runs for one result.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Panel {
     runs: Vec<EvaluatorRun>,
 }
@@ -232,13 +281,21 @@ impl Panel {
     }
 
     /// Add a run.
-    pub fn record(&mut self, run: EvaluatorRun) {
+    pub fn record(&mut self, run: EvaluatorRun) -> Result<(), EvaluatorError> {
+        run.validate()?;
+        if self.runs.len() >= MAX_PANEL_RUNS {
+            return Err(EvaluatorError::TooManyRuns(MAX_PANEL_RUNS));
+        }
         self.runs.push(run);
+        Ok(())
     }
 
     /// Runs whose evaluator was not healthy.
     pub fn unhealthy(&self) -> Vec<&EvaluatorRun> {
-        self.runs.iter().filter(|r| !r.health.is_healthy()).collect()
+        self.runs
+            .iter()
+            .filter(|r| !r.health.is_healthy())
+            .collect()
     }
 
     /// Outcomes from the healthy runs only.
@@ -262,4 +319,86 @@ impl Panel {
     pub fn runs(&self) -> &[EvaluatorRun] {
         &self.runs
     }
+}
+
+fn validate_evaluator_text(
+    evaluator: &str,
+    value: &str,
+    field: &str,
+) -> Result<(), EvaluatorError> {
+    if value.trim().is_empty() {
+        return Err(EvaluatorError::InvalidRun {
+            evaluator: evaluator.to_string(),
+            detail: format!("{field} must not be empty"),
+        });
+    }
+    if value != value.trim() {
+        return Err(EvaluatorError::InvalidRun {
+            evaluator: evaluator.to_string(),
+            detail: format!("{field} must not have leading or trailing whitespace"),
+        });
+    }
+    if value.len() > MAX_EVALUATOR_TEXT_BYTES {
+        return Err(EvaluatorError::InvalidRun {
+            evaluator: evaluator.to_string(),
+            detail: format!("{field} exceeds {MAX_EVALUATOR_TEXT_BYTES} bytes"),
+        });
+    }
+    if value.chars().any(char::is_control) {
+        return Err(EvaluatorError::InvalidRun {
+            evaluator: evaluator.to_string(),
+            detail: format!("{field} contains a control character"),
+        });
+    }
+    Ok(())
+}
+
+fn validate_optional_diagnostic_text(
+    evaluator: &str,
+    value: &str,
+    field: &str,
+) -> Result<(), EvaluatorError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if value != value.trim()
+        || value.len() > MAX_EVALUATOR_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(EvaluatorError::InvalidRun {
+            evaluator: evaluator.to_string(),
+            detail: format!("{field} must be bounded, trimmed, and control-free"),
+        });
+    }
+    Ok(())
+}
+
+fn validate_diagnostic(
+    evaluator: &str,
+    diagnostic: &Diagnostic,
+) -> Result<(), EvaluatorError> {
+    validate_optional_diagnostic_text(evaluator, &diagnostic.command, "command")?;
+    validate_optional_diagnostic_text(evaluator, &diagnostic.exit_state, "exit_state")?;
+    validate_optional_diagnostic_text(evaluator, &diagnostic.diff, "diff")?;
+    if diagnostic.logs.len() > MAX_DIAGNOSTIC_ITEMS {
+        return Err(EvaluatorError::InvalidRun {
+            evaluator: evaluator.to_string(),
+            detail: format!("logs exceed the {MAX_DIAGNOSTIC_ITEMS}-item limit"),
+        });
+    }
+    if diagnostic.hidden_data_access.len() > MAX_DIAGNOSTIC_ITEMS {
+        return Err(EvaluatorError::InvalidRun {
+            evaluator: evaluator.to_string(),
+            detail: format!(
+                "hidden_data_access exceeds the {MAX_DIAGNOSTIC_ITEMS}-item limit"
+            ),
+        });
+    }
+    for value in &diagnostic.logs {
+        validate_optional_diagnostic_text(evaluator, value, "log")?;
+    }
+    for value in &diagnostic.hidden_data_access {
+        validate_optional_diagnostic_text(evaluator, value, "hidden_data_access")?;
+    }
+    Ok(())
 }

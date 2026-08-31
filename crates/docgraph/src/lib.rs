@@ -111,6 +111,7 @@ pub mod bundle;
 pub mod error;
 pub mod fixture;
 pub mod impact;
+pub mod instrument_action_contract;
 pub mod knowledge_gateway;
 pub mod lint;
 pub mod markdown;
@@ -121,6 +122,37 @@ pub mod scan;
 pub mod tokens;
 pub mod traverse;
 pub mod vocabulary;
+pub mod document_graph_integrity_support;
+pub mod local_document_graph_integrity_inference;
+pub mod multimodal_document_graph_integrity_inference;
+pub mod throughput_document_graph_integrity_inference;
+pub mod federated_continual_document_graph_integrity_inference;
+pub mod local_document_graph_integrity_contract_model;
+pub mod multimodal_document_graph_integrity_contract_model;
+pub mod throughput_document_graph_integrity_contract_model;
+pub mod federated_continual_document_graph_integrity_contract_model;
+pub mod local_document_graph_integrity_research_copilot;
+pub mod multimodal_document_graph_integrity_research_copilot;
+pub mod throughput_document_graph_integrity_research_copilot;
+pub mod federated_continual_document_graph_integrity_research_copilot;
+pub mod local_document_graph_integrity_workflow_fabric;
+pub mod multimodal_document_graph_integrity_workflow_fabric;
+pub mod throughput_document_graph_integrity_workflow_fabric;
+pub mod federated_continual_document_graph_integrity_workflow_fabric;
+
+pub use document_graph_integrity_support::{
+    DocumentGraphIntegrityArtifact4, DocumentGraphIntegrityCard7, DocumentGraphIntegrityError,
+    DocumentGraphIntegrityRequest4, DocumentModule4,
+};
+
+pub use instrument_action_contract::{
+    capability_manifest as instrument_action_contract_manifest, validate_instrument_actions,
+    InstrumentAction4, InstrumentActionContractError, InstrumentActionReceipt2,
+    InstrumentActionRequest4, CONTENT_TYPE as INSTRUMENT_ACTION_CONTENT_TYPE,
+    CONTRACT_VERSION as INSTRUMENT_ACTION_CONTRACT_VERSION,
+    FEATURE_ID as INSTRUMENT_ACTION_FEATURE_ID, INPUT_SCHEMA as INSTRUMENT_ACTION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as INSTRUMENT_ACTION_OUTPUT_SCHEMA,
+};
 
 pub use bundle::{
     compile_bundle, BundleEntry, BundleOmission, ContextBundle, InclusionReason, OmissionReason,

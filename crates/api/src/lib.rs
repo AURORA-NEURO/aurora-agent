@@ -19,6 +19,7 @@
 #![recursion_limit = "512"]
 
 pub mod analysis_assurance;
+pub mod context_compilation_assurance;
 pub mod events;
 pub mod http;
 pub mod multimodal_interpretation_workflow_fabric;
@@ -30,6 +31,12 @@ pub use analysis_assurance::{
     AnalysisAssuranceRequest, AnalysisCandidate, AnalysisDisposition, AnalysisEvidenceState,
     QualifiedAnalysisResult, ANALYSIS_ASSURANCE_CONTRACT_VERSION, ANALYSIS_ASSURANCE_FEATURE_ID,
     ANALYSIS_ASSURANCE_PRECLINICAL_BOUNDARY, ANALYSIS_ASSURANCE_SCHEMA_VERSION,
+};
+pub use context_compilation_assurance::{
+    assure_context_compilation, context_compilation_assurance_manifest, ContextAssuranceArtifact7,
+    ContextAssuranceError, ContextAssuranceReceipt7, ContextCompilationRequest6, ContextFact6,
+    ContextPeer5, CONTRACT_VERSION as CONTEXT_COMPILATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_ASSURANCE_FEATURE_ID,
 };
 pub use multimodal_interpretation_workflow_fabric::{
     capability_manifest as interpretation_workflow_manifest, run as run_interpretation_workflow,

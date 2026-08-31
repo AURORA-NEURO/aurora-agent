@@ -23,11 +23,13 @@
 //! out of tree. The consequence is small and load bearing: [`Evidence::ResolvedInTree`] is a
 //! *true* statement about a file that exists, everywhere it appears.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
 
 use crate::error::ClaimError;
 use crate::surface::{Locale, Surface};
+
+const MAX_CLAIM_TEXT_BYTES: usize = 4_096;
 
 /// A name a document tells a reader to use: `prism.compiler.mine`, `bioprism_devplat::render`.
 ///
@@ -35,8 +37,8 @@ use crate::surface::{Locale, Surface};
 /// the names in scope here are not Rust paths — `POST /v1/runs`, `prism-action@v1`,
 /// `prism.traces.import_path` — and running them through a Rust-identifier validator would reject
 /// the majority of the corpus as malformed when it is merely foreign.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[serde(try_from = "String")]
 pub struct ApiName(String);
 
 impl ApiName {
@@ -45,11 +47,31 @@ impl ApiName {
         if value.trim().is_empty() {
             return Err(ClaimError::UnnamedApi);
         }
+        if !valid_claim_text(&value) {
+            return Err(ClaimError::InvalidApiName);
+        }
         Ok(ApiName(value))
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl TryFrom<String> for ApiName {
+    type Error = ClaimError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(value)
+    }
+}
+
+impl Serialize for ApiName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0)
     }
 }
 
@@ -196,10 +218,23 @@ impl ApiClaimDraft {
         };
         let locale = self.surface.locale();
         match (&evidence, locale) {
-            (Evidence::ResolvedInTree { file }, Locale::InRepository) if file.trim().is_empty() => {
-                Err(ClaimError::ResolvedWithoutFile {
-                    api: self.api.as_str().to_string(),
-                })
+            (Evidence::ResolvedInTree { file }, Locale::InRepository) => {
+                if file.trim().is_empty() {
+                    Err(ClaimError::ResolvedWithoutFile {
+                        api: self.api.as_str().to_string(),
+                    })
+                } else if !valid_claim_text(file) {
+                    Err(ClaimError::InvalidEvidenceMetadata {
+                        api: self.api.as_str().to_string(),
+                        field: "file",
+                    })
+                } else {
+                    Ok(ApiClaim {
+                        api: self.api,
+                        surface: self.surface,
+                        evidence,
+                    })
+                }
             }
             (Evidence::ResolvedInTree { .. }, Locale::OutsideRepository)
             | (Evidence::AbsentFromTree, Locale::OutsideRepository) => {
@@ -215,12 +250,23 @@ impl ApiClaimDraft {
                     artifact: self.surface.artifact().to_string(),
                 })
             }
-            (Evidence::OutsideTree { reason }, Locale::OutsideRepository)
-                if reason.trim().is_empty() =>
-            {
-                Err(ClaimError::UnverifiableWithoutReason {
-                    api: self.api.as_str().to_string(),
-                })
+            (Evidence::OutsideTree { reason }, Locale::OutsideRepository) => {
+                if reason.trim().is_empty() {
+                    Err(ClaimError::UnverifiableWithoutReason {
+                        api: self.api.as_str().to_string(),
+                    })
+                } else if !valid_claim_text(reason) {
+                    Err(ClaimError::InvalidEvidenceMetadata {
+                        api: self.api.as_str().to_string(),
+                        field: "reason",
+                    })
+                } else {
+                    Ok(ApiClaim {
+                        api: self.api,
+                        surface: self.surface,
+                        evidence,
+                    })
+                }
             }
             _ => Ok(ApiClaim {
                 api: self.api,
@@ -229,6 +275,13 @@ impl ApiClaimDraft {
             }),
         }
     }
+}
+
+fn valid_claim_text(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value == value.trim()
+        && value.len() <= MAX_CLAIM_TEXT_BYTES
+        && !value.chars().any(char::is_control)
 }
 
 #[derive(Deserialize)]

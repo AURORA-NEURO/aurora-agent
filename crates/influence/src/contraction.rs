@@ -118,17 +118,24 @@ pub fn detect(region: &QueryRegion) -> Result<ChainStructure, UnknownReason> {
             free.len()
         )));
     }
-    let terminal = free[0].clone();
+    let Some(terminal) = free.first().cloned() else {
+        return Err(outside("the chain has no terminal free variable"));
+    };
 
     let mut priors: Vec<&str> = Vec::new();
     let mut edges: Vec<(&str, [&str; 2])> = Vec::new();
     for factor in region.factors() {
         match factor.scope().len() {
             1 => priors.push(factor.id()),
-            2 => edges.push((
-                factor.id(),
-                [factor.scope()[0].as_str(), factor.scope()[1].as_str()],
-            )),
+            2 => {
+                let [left, right] = factor.scope() else {
+                    return Err(outside(format!(
+                        "factor {:?} reported a two-variable scope that could not be read",
+                        factor.id()
+                    )));
+                };
+                edges.push((factor.id(), [left.as_str(), right.as_str()]));
+            }
             other => {
                 return Err(outside(format!(
                     "factor {:?} has arity {other}; the chain class admits only arity one and two",
@@ -157,13 +164,16 @@ pub fn detect(region: &QueryRegion) -> Result<ChainStructure, UnknownReason> {
         adjacency.entry(right).or_default().push((left, id));
     }
 
-    let start = region
+    let Some(start) = region
         .factors()
         .iter()
         .find(|factor| factor.id() == priors[0])
-        .map(|factor| factor.scope()[0].clone())
-        .expect("the prior was found among the region's factors");
-    if start == terminal && !edges.is_empty() {
+        .and_then(|factor| factor.scope().first())
+        .cloned()
+    else {
+        return Err(outside("the prior factor has no source variable"));
+    };
+    if start.as_str() == terminal.as_str() && !edges.is_empty() {
         return Err(outside(
             "the prior and the free variable are the same variable, but the region has transitions",
         ));
@@ -216,7 +226,7 @@ pub fn detect(region: &QueryRegion) -> Result<ChainStructure, UnknownReason> {
     if variables.last() != Some(&terminal) {
         return Err(outside(format!(
             "the path ends at {:?} but the free variable is {terminal:?}",
-            variables.last().expect("path is non-empty")
+            variables.last()
         )));
     }
 
@@ -226,7 +236,8 @@ pub fn detect(region: &QueryRegion) -> Result<ChainStructure, UnknownReason> {
         transitions,
     };
     for index in 0..chain.transitions.len() {
-        let rows = kernel_rows(region, &chain, index).map_err(|error| outside(error.to_string()))?;
+        let rows =
+            kernel_rows(region, &chain, index).map_err(|error| outside(error.to_string()))?;
         for row in &rows {
             let mass: f64 = row.iter().sum();
             if (mass - 1.0).abs() > STOCHASTIC_TOLERANCE {
@@ -246,7 +257,11 @@ fn kernel_rows(
     chain: &ChainStructure,
     index: usize,
 ) -> Result<Vec<Vec<f64>>, InfluenceError> {
-    let factor_id = &chain.transitions[index];
+    let Some(factor_id) = chain.transitions.get(index) else {
+        return Err(InfluenceError::InvalidChain {
+            detail: format!("transition index {index} is outside the chain"),
+        });
+    };
     let factor = region
         .factors()
         .iter()
@@ -261,16 +276,36 @@ fn kernel_rows(
             factor: factor_id.clone(),
         })?;
 
-    let upstream = &chain.variables[index];
-    let downstream = &chain.variables[index + 1];
-    let up_card = region
-        .cardinality_of(upstream)
-        .expect("chain variables are region variables");
-    let down_card = region
-        .cardinality_of(downstream)
-        .expect("chain variables are region variables");
+    let Some(upstream) = chain.variables.get(index) else {
+        return Err(InfluenceError::InvalidChain {
+            detail: format!("upstream variable for transition index {index} is missing"),
+        });
+    };
+    let Some(downstream) = index
+        .checked_add(1)
+        .and_then(|next| chain.variables.get(next))
+    else {
+        return Err(InfluenceError::InvalidChain {
+            detail: format!("downstream variable for transition index {index} is missing"),
+        });
+    };
+    let Some(up_card) = region.cardinality_of(upstream) else {
+        return Err(InfluenceError::InvalidChain {
+            detail: format!("upstream variable {upstream:?} has no cardinality"),
+        });
+    };
+    let Some(down_card) = region.cardinality_of(downstream) else {
+        return Err(InfluenceError::InvalidChain {
+            detail: format!("downstream variable {downstream:?} has no cardinality"),
+        });
+    };
 
-    let upstream_first = factor.scope()[0] == *upstream;
+    let Some(first_scope_variable) = factor.scope().first() else {
+        return Err(InfluenceError::InvalidChain {
+            detail: format!("transition factor {factor_id:?} has no scope"),
+        });
+    };
+    let upstream_first = first_scope_variable == upstream;
     let mut rows = Vec::with_capacity(up_card);
     for u in 0..up_card {
         let mut row = Vec::with_capacity(down_card);
@@ -280,7 +315,14 @@ fn kernel_rows(
             } else {
                 d * up_card + u
             };
-            row.push(table[offset]);
+            let Some(value) = table.get(offset).copied() else {
+                return Err(InfluenceError::InvalidChain {
+                    detail: format!(
+                        "transition factor {factor_id:?} is shorter than its declared table shape"
+                    ),
+                });
+            };
+            row.push(value);
         }
         rows.push(row);
     }

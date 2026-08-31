@@ -22,11 +22,16 @@ use thiserror::Error;
 /// Failures of golden context fixtures (39.21).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum FixtureError {
-    #[error("fixture `{0}` accepts no projections; a golden with an empty accepted set can never pass")]
+    #[error(
+        "fixture `{0}` accepts no projections; a golden with an empty accepted set can never pass"
+    )]
     NoAcceptedProjections(String),
 
     #[error("fixture `{fixture}` lists expectation `{expectation}` twice")]
-    DuplicateExpectation { fixture: String, expectation: String },
+    DuplicateExpectation {
+        fixture: String,
+        expectation: String,
+    },
 
     #[error(
         "fixture `{fixture}` expects node `{node}`, which the world marks as an evaluator holdout; \
@@ -95,6 +100,9 @@ pub enum StalenessError {
 /// after it has produced a number somebody wants to believe.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum AblationError {
+    #[error("ablation invariant violated: {detail}")]
+    InvariantViolation { detail: String },
+
     #[error("ablation design `{0}` declares fewer than two arms")]
     TooFewArms(String),
 
@@ -113,8 +121,10 @@ pub enum AblationError {
     )]
     NoPreDeclaration { design: String },
 
-    #[error("design `{design}` reports a cost comparison for `{contrast}` with no validity outcome; \
-             39.22 forbids compression ratio as a criterion on its own")]
+    #[error(
+        "design `{design}` reports a cost comparison for `{contrast}` with no validity outcome; \
+             39.22 forbids compression ratio as a criterion on its own"
+    )]
     CostReportedWithoutValidity { design: String, contrast: String },
 
     #[error("contrast `{contrast}` names arm `{arm}`, which the design does not declare")]
@@ -214,10 +224,7 @@ pub enum SummaryError {
         "the obligation `{obligation}` depends on tails or rare states, and summary `{summary}` \
          preserves no distribution shape; a mean would hide the state being decided on"
     )]
-    TailSensitiveWithoutShape {
-        summary: String,
-        obligation: String,
-    },
+    TailSensitiveWithoutShape { summary: String, obligation: String },
 
     #[error("summary `{summary}` of a {modality} artifact preserves no {required}")]
     RequiredAspectMissing {
@@ -316,6 +323,16 @@ pub enum LiteratureError {
 /// Failures of OncoWorld temporal context (39.15).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TemporalError {
+    #[error("timeline event `{event}` belongs to subject `{found}`, but this firewall is scoped to `{expected}`")]
+    SubjectMismatch {
+        event: String,
+        expected: String,
+        found: String,
+    },
+
+    #[error("{field} identity `{value}` is empty or contains a control character")]
+    InvalidIdentity { field: &'static str, value: String },
+
     #[error(
         "event `{event}` occurred at epoch {occurred} which is after the decision epoch {decision}; \
          admitting it would let follow-up decide the decision it followed"
@@ -339,7 +356,9 @@ pub enum TemporalError {
         original: u64,
     },
 
-    #[error("timeline for `{subject}` records two events at epoch {epoch} with the same id `{event}`")]
+    #[error(
+        "timeline for `{subject}` records two events at epoch {epoch} with the same id `{event}`"
+    )]
     DuplicateEvent {
         subject: String,
         epoch: u64,

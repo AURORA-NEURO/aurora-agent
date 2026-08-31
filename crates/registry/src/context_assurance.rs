@@ -110,6 +110,40 @@ pub struct ContextAssuranceReceipt {
     pub boundary: String,
 }
 
+fn context_payload(
+    context_id: &str,
+    disposition: ContextDisposition,
+    fact_order: &[String],
+    selected_order: &[String],
+    blocked_order: &[String],
+    class_order: &[String],
+    semantic_order: &[ContentHash],
+    evidence_order: &[ContentHash],
+    provenance_order: &[ContentHash],
+    omissions: &[String],
+    uncertainty: &[String],
+    negative_evidence: &[String],
+    replay_identity: &ContentHash,
+    boundary: &str,
+) -> serde_json::Value {
+    json!({
+        "context_id": context_id,
+        "disposition": disposition,
+        "fact_order": fact_order,
+        "selected_order": selected_order,
+        "blocked_order": blocked_order,
+        "class_order": class_order,
+        "semantic_order": semantic_order,
+        "evidence_order": evidence_order,
+        "provenance_order": provenance_order,
+        "omissions": omissions,
+        "uncertainty": uncertainty,
+        "negative_evidence": negative_evidence,
+        "replay_identity": replay_identity,
+        "boundary": boundary,
+    })
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ContextAssuranceError {
     #[error("invalid context assurance request: {0}")]
@@ -142,6 +176,28 @@ impl ContextAssuranceReceipt {
                 "context assurance identity, context, checks, effects, locality, or boundary is incomplete".into(),
             ));
         }
+        if self.disposition != self.context.disposition
+            || self.context.context_id != format!("compiled-context:{}", self.request_id)
+            || self.context.omissions != self.omissions
+            || self.context.uncertainty != self.uncertainty
+            || self.context.negative_evidence != self.negative_evidence
+        {
+            return Err(ContextAssuranceError::Invalid(
+                "context assurance receipt does not match its compiled context".into(),
+            ));
+        }
+        let fact_ids = self.context.fact_order.iter().collect::<BTreeSet<_>>();
+        let selected_ids = self.context.selected_order.iter().collect::<BTreeSet<_>>();
+        let blocked_ids = self.context.blocked_order.iter().collect::<BTreeSet<_>>();
+        let classified_ids = selected_ids.union(&blocked_ids).collect::<BTreeSet<_>>();
+        if selected_ids.intersection(&blocked_ids).next().is_some()
+            || classified_ids.iter().any(|id| !fact_ids.contains(*id))
+            || fact_ids.iter().any(|id| !classified_ids.contains(id))
+        {
+            return Err(ContextAssuranceError::Invalid(
+                "context fact, selected, and blocked orders do not form a partition".into(),
+            ));
+        }
         for values in [
             &self.context.fact_order,
             &self.context.selected_order,
@@ -172,6 +228,28 @@ impl ContextAssuranceReceipt {
                     "context assurance digest ordering is not canonical".into(),
                 ));
             }
+        }
+        let expected_digest = ContentHash::of_value(&context_payload(
+            &self.context.context_id,
+            self.context.disposition,
+            &self.context.fact_order,
+            &self.context.selected_order,
+            &self.context.blocked_order,
+            &self.context.class_order,
+            &self.context.semantic_order,
+            &self.context.evidence_order,
+            &self.context.provenance_order,
+            &self.context.omissions,
+            &self.context.uncertainty,
+            &self.context.negative_evidence,
+            &self.context.replay_identity,
+            &self.context.boundary,
+        ))
+        .map_err(|error| ContextAssuranceError::Serialization(error.to_string()))?;
+        if self.context.context_digest != expected_digest {
+            return Err(ContextAssuranceError::Invalid(
+                "compiled context digest does not match its payload".into(),
+            ));
         }
         Ok(())
     }
@@ -209,8 +287,16 @@ pub fn assure_context_compilation(
     let mut spent = 0_u64;
     for fact in &facts {
         fact_order.insert(fact.fact_id.clone());
-        let cost = fact.fact_id.len() as u64 + 1;
-        let budget_ok = cost <= request.budget.saturating_sub(spent);
+        let cost = u64::try_from(fact.fact_id.len())
+            .ok()
+            .and_then(|length| length.checked_add(1))
+            .ok_or_else(|| {
+                ContextAssuranceError::Invalid(
+                    "context fact cost exceeds the representable budget range".into(),
+                )
+            })?;
+        let next_spent = spent.checked_add(cost);
+        let budget_ok = next_spent.is_some_and(|total| total <= request.budget);
         let complete = fact.comparability_digest.is_some()
             && fact.state == FactState::Supported
             && fact.scope == request.scope
@@ -225,7 +311,11 @@ pub fn assure_context_compilation(
             && complete
             && budget_ok;
         if gate {
-            spent = spent.saturating_add(cost);
+            spent = next_spent.ok_or_else(|| {
+                ContextAssuranceError::Invalid(
+                    "context budget accounting overflowed before admission".into(),
+                )
+            })?;
             selected.insert(fact.fact_id.clone());
             classes.insert(fact.fact_class.clone());
             semantics.insert(fact.semantic_digest.clone());
@@ -307,22 +397,22 @@ pub fn assure_context_compilation(
         .map(|fact_id| format!("exchange:signed-context-digest:{fact_id}"))
         .collect::<Vec<_>>();
     let context_id = format!("compiled-context:{}", request.request_id);
-    let context_payload = json!({
-        "context_id": context_id,
-        "disposition": disposition,
-        "fact_order": fact_order,
-        "selected_order": selected_order,
-        "blocked_order": blocked_order,
-        "class_order": class_order,
-        "semantic_order": semantic_order,
-        "evidence_order": evidence_order,
-        "provenance_order": provenance_order,
-        "omissions": omissions,
-        "uncertainty": uncertainty,
-        "negative_evidence": negative_evidence,
-        "replay_identity": request.replay_identity,
-        "boundary": PRECLINICAL_BOUNDARY,
-    });
+    let context_payload = context_payload(
+        &context_id,
+        disposition,
+        &fact_order,
+        &selected_order,
+        &blocked_order,
+        &class_order,
+        &semantic_order,
+        &evidence_order,
+        &provenance_order,
+        &omissions,
+        &uncertainty,
+        &negative_evidence,
+        &request.replay_identity,
+        PRECLINICAL_BOUNDARY,
+    );
     let context_digest = ContentHash::of_value(&context_payload)
         .map_err(|error| ContextAssuranceError::Serialization(error.to_string()))?;
     let context = CompiledContext {
@@ -507,5 +597,30 @@ mod tests {
             fact("fact:a", "scope", FactState::Supported),
         ]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn tampered_compiled_context_payload_is_rejected() {
+        let mut receipt = assure_context_compilation(&request(vec![fact(
+            "fact:a",
+            "mechanism",
+            FactState::Supported,
+        )]))
+        .unwrap();
+        receipt.context.context_digest = hash("tampered-context");
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn selected_and_blocked_facts_must_partition_the_fact_order() {
+        let mut receipt = assure_context_compilation(&request(vec![fact(
+            "fact:a",
+            "mechanism",
+            FactState::Supported,
+        )]))
+        .unwrap();
+        receipt.context.blocked_order.push("fact:a".into());
+        receipt.context.blocked_order.sort();
+        assert!(receipt.validate().is_err());
     }
 }

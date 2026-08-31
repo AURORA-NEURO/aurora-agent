@@ -327,10 +327,11 @@ impl ServiceFault {
     /// retry a request policy will refuse forever. 40.36 lists "cause lost across worker" as a
     /// failure mode; this is the accessor that makes keeping the cause worth the field.
     pub fn root_class(&self) -> ErrorClass {
-        self.chain()
-            .last()
-            .expect("a chain contains at least this fault")
-            .class
+        let mut cursor = self;
+        while let Some(parent) = cursor.caused_by.as_deref() {
+            cursor = parent;
+        }
+        cursor.class
     }
 }
 

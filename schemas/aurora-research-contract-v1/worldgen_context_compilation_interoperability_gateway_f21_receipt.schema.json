@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/context_compilation_interoperability_gateway_receipt.schema.json",
+  "title": "ContextInteroperabilityReceipt1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "contract_version": {
+      "type": "string"
+    },
+    "feature_id": {
+      "type": "string",
+      "pattern": "^AFA-worldgen-P03-F(21|22|23|24)$"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "partner_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "semantic_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "blocked"
+      ]
+    },
+    "requested_export_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "permitted_export_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "exported_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "denied_export_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "context_disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "unknown",
+        "blocked"
+      ]
+    },
+    "context_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "envelope_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "uncertainty": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "negative_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifact": {
+      "type": "object"
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "partner_id",
+    "semantic_profile",
+    "disposition",
+    "requested_export_order",
+    "permitted_export_order",
+    "exported_order",
+    "denied_export_order",
+    "context_disposition",
+    "context_digest",
+    "replay_identity",
+    "envelope_digest",
+    "omissions",
+    "uncertainty",
+    "negative_evidence",
+    "effect_receipts",
+    "artifact",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary"
+  ]
+}

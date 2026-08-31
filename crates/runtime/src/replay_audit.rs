@@ -71,21 +71,58 @@ impl ReplayAuditReceipt {
                 },
             ));
         }
-        if self.feature_id != FEATURE_ID || self.audit_id.trim().is_empty() {
+        let difference_state_is_consistent = match self.status {
+            ReplayAuditStatus::Diverged => self.first_difference.is_some(),
+            ReplayAuditStatus::Equivalent | ReplayAuditStatus::Invalid => {
+                self.first_difference.is_none()
+            }
+        };
+        if self.feature_id != FEATURE_ID
+            || self.audit_id.trim().is_empty()
+            || self.baseline_digest == ContentHash::of_bytes(b"")
+            || self.candidate_digest == ContentHash::of_bytes(b"")
+            || !difference_state_is_consistent
+        {
             return Err(ReplayAuditError::InvalidRequest(
-                "replay-audit identity is incomplete".into(),
+                "replay-audit identity, source digests, or divergence state is incomplete".into(),
             ));
         }
         if self.boundary != PRECLINICAL_BOUNDARY {
-            return Err(ReplayAuditError::Contract(
-                ResearchContractError::BoundaryMismatch {
-                    capability: self.audit_id.clone(),
-                },
+            return Err(ReplayAuditError::InvalidRequest(
+                "replay-audit artifact is not bound to its source bundle digests".into(),
             ));
         }
         if self.reasons.is_empty() {
             return Err(ReplayAuditError::InvalidRequest(
                 "replay-audit reasons are required".into(),
+            ));
+        }
+        if self.artifact.artifact_id != format!("replay-audit:{}", self.audit_id)
+            || self.artifact.content_type != "application/vnd.aurora.replay-audit+json"
+            || self.artifact.semantic_loss
+                != vec![SemanticLoss {
+                    field: "replay_tape_and_raw_effects".into(),
+                    reason: "raw tape and experiment data remain local; audit exports content identities and divergence reasons".into(),
+                    severity: LossSeverity::Bounded,
+                }]
+            || self.artifact.provenance
+                != vec![
+                    ProvenanceLink {
+                        source_id: "baseline-replay-bundle".into(),
+                        relation: "audit-input".into(),
+                        digest: self.baseline_digest.clone(),
+                    },
+                    ProvenanceLink {
+                        source_id: "candidate-replay-bundle".into(),
+                        relation: "audit-input".into(),
+                        digest: self.candidate_digest.clone(),
+                    },
+                ]
+        {
+            return Err(ReplayAuditError::Contract(
+                ResearchContractError::BoundaryMismatch {
+                    capability: self.audit_id.clone(),
+                },
             ));
         }
         self.artifact
@@ -101,6 +138,7 @@ impl ReplayAuditReceipt {
     }
 
     pub fn digest(&self) -> Result<ContentHash, ReplayAuditError> {
+        self.validate()?;
         let value = serde_json::to_value(self)
             .map_err(|error| ReplayAuditError::Serialization(error.to_string()))?;
         ContentHash::of_value(&value)
@@ -143,9 +181,10 @@ pub fn replay_audit_manifest() -> CapabilityManifest {
 }
 
 fn bundle_digest(bundle: &ResearchReplayBundle) -> Result<ContentHash, ReplayAuditError> {
-    bundle
-        .digest()
-        .map_err(|error| ReplayAuditError::Runtime(error.to_string()))
+    let value = serde_json::to_value(bundle)
+        .map_err(|error| ReplayAuditError::Serialization(error.to_string()))?;
+    ContentHash::of_value(&value)
+        .map_err(|error| ReplayAuditError::Serialization(error.to_string()))
 }
 
 fn first_difference(
@@ -153,26 +192,37 @@ fn first_difference(
     candidate: &ResearchReplayBundle,
 ) -> Option<String> {
     let checks = [
+        ("feature_id", baseline.feature_id != candidate.feature_id),
         (
             "manifest.capability_id",
             baseline.manifest.capability_id != candidate.manifest.capability_id,
         ),
+        ("manifest", baseline.manifest != candidate.manifest),
         (
             "workflow.workflow_id",
             baseline.workflow.workflow_id != candidate.workflow.workflow_id,
         ),
+        ("workflow", baseline.workflow != candidate.workflow),
         (
             "workflow.plan_hash",
             baseline.run.plan_hash != candidate.run.plan_hash,
         ),
         ("grant.actor", baseline.grant.actor != candidate.grant.actor),
+        ("grant", baseline.grant != candidate.grant),
         (
             "policy.decision",
             baseline.policy.decision != candidate.policy.decision,
         ),
+        ("policy", baseline.policy != candidate.policy),
         (
             "run.replay_identity",
             baseline.run.replay_identity != candidate.run.replay_identity,
+        ),
+        ("run.run_id", baseline.run.run_id != candidate.run.run_id),
+        ("run.status", baseline.run.status != candidate.run.status),
+        (
+            "run.retry_count",
+            baseline.run.retry_count != candidate.run.retry_count,
         ),
         ("run.events", baseline.run.events != candidate.run.events),
         (
@@ -184,6 +234,7 @@ fn first_difference(
             "result_artifact",
             baseline.result_artifact != candidate.result_artifact,
         ),
+        ("boundary", baseline.boundary != candidate.boundary),
     ];
     checks
         .into_iter()
@@ -368,6 +419,23 @@ mod tests {
     }
 
     #[test]
+    fn changed_authority_metadata_is_reported_as_divergence() {
+        let baseline = bundle("replay-audit-metadata", "same");
+        let mut candidate = baseline.clone();
+        candidate.grant.scope = "study:other-scope".into();
+        candidate.manifest.version = "0.2.0".into();
+        let receipt = audit_replay(&ReplayAuditRequest {
+            audit_id: "audit-metadata-diverged".into(),
+            baseline,
+            candidate,
+        })
+        .unwrap();
+
+        assert_eq!(receipt.status, ReplayAuditStatus::Diverged);
+        assert_eq!(receipt.first_difference.as_deref(), Some("manifest"));
+    }
+
+    #[test]
     fn malformed_tape_is_invalid_not_equivalent() {
         let mut candidate = bundle("replay-audit-3", "same");
         candidate.tape_json.push('x');
@@ -391,5 +459,18 @@ mod tests {
         let left = audit_replay(&request).unwrap();
         let right = audit_replay(&request).unwrap();
         assert_eq!(left.digest().unwrap(), right.digest().unwrap());
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_source_digest_binding() {
+        let baseline = bundle("replay-audit-5", "same");
+        let mut receipt = audit_replay(&ReplayAuditRequest {
+            audit_id: "audit-tamper-binding".into(),
+            baseline: baseline.clone(),
+            candidate: baseline,
+        })
+        .unwrap();
+        receipt.baseline_digest = ContentHash::of_bytes(b"tampered");
+        assert!(receipt.validate().is_err());
     }
 }

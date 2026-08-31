@@ -4,6 +4,7 @@ use bioprism_bioevalx::burden::{Draw, Ledger, Resource, ResourceClass};
 use bioprism_bioevalx::error::{BurdenError, WorldlineError};
 use bioprism_bioevalx::worldline::{Clock, Decision, Observation, Worldline};
 use bioprism_scope::Timestamp;
+use serde_json::json;
 
 fn at(rfc3339: &str) -> Timestamp {
     Timestamp::parse(rfc3339).expect("fixture timestamp parses")
@@ -20,7 +21,12 @@ fn ledger_with_one_biopsy() -> Ledger {
         ))
         .expect("first declaration");
     ledger
-        .declare(Resource::new("gpu", ResourceClass::ComputeAndMoney, 100, "hour"))
+        .declare(Resource::new(
+            "gpu",
+            ResourceClass::ComputeAndMoney,
+            100,
+            "hour",
+        ))
         .expect("first declaration");
     ledger
 }
@@ -34,7 +40,10 @@ fn two_forks_cannot_both_spend_the_last_aliquot() {
         .draw("arm-a", Draw::spent("rnaseq", "biopsy-aliquot", 40, "uL"))
         .expect("within the pool");
     ledger
-        .draw("arm-b", Draw::spent("proteomics", "biopsy-aliquot", 40, "uL"))
+        .draw(
+            "arm-b",
+            Draw::spent("proteomics", "biopsy-aliquot", 40, "uL"),
+        )
         .expect("each branch sees the full pool");
 
     match ledger.joint_feasibility(&["arm-a", "arm-b"]) {
@@ -71,7 +80,9 @@ fn a_branch_inherits_what_its_parent_already_spent() {
     ledger.fork("root", "child").expect("root exists");
 
     assert_eq!(
-        ledger.remaining("child", "biopsy-aliquot").expect("declared"),
+        ledger
+            .remaining("child", "biopsy-aliquot")
+            .expect("declared"),
         10
     );
     match ledger.draw("child", Draw::spent("confirm", "biopsy-aliquot", 20, "uL")) {
@@ -91,7 +102,9 @@ fn material_spent_on_an_action_that_failed_is_still_gone() {
         .expect("within the pool");
 
     assert_eq!(
-        ledger.remaining("root", "biopsy-aliquot").expect("declared"),
+        ledger
+            .remaining("root", "biopsy-aliquot")
+            .expect("declared"),
         15
     );
     let wasted = ledger.wasted_nonrenewable("root").expect("branch exists");
@@ -110,6 +123,77 @@ fn a_draw_quoted_in_a_different_unit_is_refused_rather_than_converted() {
         }
         other => panic!("expected a unit refusal, got {other:?}"),
     }
+}
+
+#[test]
+fn duplicate_branches_are_refused_without_overwriting_existing_spend() {
+    let mut ledger = ledger_with_one_biopsy();
+    ledger.fork("root", "arm").expect("root exists");
+    ledger
+        .draw("arm", Draw::spent("screen", "biopsy-aliquot", 5, "uL"))
+        .expect("within the pool");
+
+    let refusal = ledger
+        .fork("root", "arm")
+        .expect_err("a branch id cannot replace an existing branch");
+
+    assert!(matches!(refusal, BurdenError::DuplicateBranch(id) if id == "arm"));
+    assert_eq!(ledger.branch("arm").expect("branch remains").draws().len(), 1);
+}
+
+#[test]
+fn ancestor_and_child_draws_are_one_continuation_not_a_fork_double_spend() {
+    let mut ledger = ledger_with_one_biopsy();
+    ledger
+        .draw("root", Draw::spent("screen", "biopsy-aliquot", 10, "uL"))
+        .expect("within the pool");
+    ledger.fork("root", "child").expect("root exists");
+    ledger
+        .draw("child", Draw::spent("confirm", "biopsy-aliquot", 10, "uL"))
+        .expect("child inherits the remaining pool");
+
+    ledger
+        .joint_feasibility(&["root", "child"])
+        .expect("an ancestor and its continuation are one world");
+}
+
+#[test]
+fn malformed_resource_and_draw_labels_are_refused_before_spending() {
+    let mut ledger = Ledger::new("root");
+    let resource_refusal = ledger
+        .declare(Resource::new(" ", ResourceClass::TissueAliquot, 1, "uL"))
+        .expect_err("resource identity must be bounded");
+    assert!(matches!(
+        resource_refusal,
+        BurdenError::InvalidResource { .. }
+    ));
+
+    ledger
+        .declare(Resource::new(
+            "biopsy-aliquot",
+            ResourceClass::TissueAliquot,
+            1,
+            "uL",
+        ))
+        .expect("valid resource");
+    let draw_refusal = ledger
+        .draw("root", Draw::spent(" ", "biopsy-aliquot", 1, "uL"))
+        .expect_err("draw action identity must be bounded");
+    assert!(matches!(draw_refusal, BurdenError::InvalidDraw { .. }));
+}
+
+#[test]
+fn a_joint_query_cannot_repeat_the_same_branch_as_two_worlds() {
+    let ledger = ledger_with_one_biopsy();
+
+    let refusal = ledger
+        .joint_feasibility(&["root", "root"])
+        .expect_err("one branch cannot stand in for two independent worlds");
+
+    assert!(matches!(
+        refusal,
+        BurdenError::DuplicateBranchReference(branch) if branch == "root"
+    ));
 }
 
 #[test]
@@ -188,6 +272,74 @@ fn a_record_cannot_precede_the_measurement_it_records() {
 }
 
 #[test]
+fn an_observation_requires_a_bounded_identity() {
+    let outcome = Observation::new(
+        " ",
+        at("2026-03-10T00:00:00Z"),
+        at("2026-03-10T00:00:00Z"),
+        at("2026-03-10T00:00:00Z"),
+        at("2026-03-10T00:00:00Z"),
+    );
+
+    assert!(matches!(
+        outcome,
+        Err(WorldlineError::InvalidObservation { .. })
+    ));
+}
+
+#[test]
+fn duplicate_decisions_and_context_references_are_refused() {
+    let mut worldline = Worldline::new();
+    let decision = Decision {
+        id: "call".into(),
+        at: at("2026-03-12T00:00:00Z"),
+        context: vec!["never-recorded".into(), "never-recorded".into()],
+    };
+    let context_refusal = worldline
+        .decide(decision)
+        .expect_err("one context reference must be listed once");
+    assert!(matches!(
+        context_refusal,
+        WorldlineError::DuplicateContextReference { .. }
+    ));
+
+    worldline
+        .decide(Decision {
+            id: "call".into(),
+            at: at("2026-03-12T00:00:00Z"),
+            context: vec![],
+        })
+        .expect("first decision");
+    let duplicate = worldline
+        .decide(Decision {
+            id: "call".into(),
+            at: at("2026-03-13T00:00:00Z"),
+            context: vec![],
+        })
+        .expect_err("decision identity must be unique");
+    assert!(matches!(duplicate, WorldlineError::DuplicateDecision(id) if id == "call"));
+}
+
+#[test]
+fn persisted_worldlines_revalidate_context_invariants_before_audit() {
+    let mut worldline = Worldline::new();
+    worldline
+        .decide(Decision {
+            id: "call".into(),
+            at: at("2026-03-12T00:00:00Z"),
+            context: vec!["never-recorded".into()],
+        })
+        .expect("valid decision");
+    let mut encoded = serde_json::to_value(&worldline).expect("worldline serialises");
+    encoded["decisions"][0]["context"] = json!(["never-recorded", "never-recorded"]);
+
+    let refusal = serde_json::from_value::<Worldline>(encoded)
+        .expect_err("a persisted worldline must not bypass duplicate-context checks");
+
+    assert!(refusal.to_string().contains("more than once"));
+}
+
+#[test]
 fn evidence_about_an_early_day_that_was_signed_out_late_is_leakage_in_an_early_context() {
     let mut worldline = Worldline::new();
     worldline
@@ -202,16 +354,20 @@ fn evidence_about_an_early_day_that_was_signed_out_late_is_leakage_in_an_early_c
             .expect("clocks are ordered"),
         )
         .expect("first observation");
-    worldline.decide(Decision {
-        id: "day-12-call".into(),
-        at: at("2026-03-12T00:00:00Z"),
-        context: vec!["path-77".into()],
-    });
-    worldline.decide(Decision {
-        id: "day-30-call".into(),
-        at: at("2026-03-30T00:00:00Z"),
-        context: vec!["path-77".into()],
-    });
+    worldline
+        .decide(Decision {
+            id: "day-12-call".into(),
+            at: at("2026-03-12T00:00:00Z"),
+            context: vec!["path-77".into()],
+        })
+        .expect("valid decision");
+    worldline
+        .decide(Decision {
+            id: "day-30-call".into(),
+            at: at("2026-03-30T00:00:00Z"),
+            context: vec!["path-77".into()],
+        })
+        .expect("valid decision");
 
     let leaks = worldline.audit();
 
@@ -224,11 +380,13 @@ fn evidence_about_an_early_day_that_was_signed_out_late_is_leakage_in_an_early_c
 #[test]
 fn a_dangling_context_reference_is_reported_separately_from_leakage() {
     let mut worldline = Worldline::new();
-    worldline.decide(Decision {
-        id: "call".into(),
-        at: at("2026-03-12T00:00:00Z"),
-        context: vec!["never-recorded".into()],
-    });
+    worldline
+        .decide(Decision {
+            id: "call".into(),
+            at: at("2026-03-12T00:00:00Z"),
+            context: vec!["never-recorded".into()],
+        })
+        .expect("valid decision");
 
     assert!(
         worldline.audit().is_empty(),
@@ -240,7 +398,10 @@ fn a_dangling_context_reference_is_reported_separately_from_leakage() {
 #[test]
 fn what_was_admissible_is_reported_alongside_what_was_used() {
     let mut worldline = Worldline::new();
-    for (id, accessible) in [("early", "2026-03-01T00:00:00Z"), ("late", "2026-04-01T00:00:00Z")] {
+    for (id, accessible) in [
+        ("early", "2026-03-01T00:00:00Z"),
+        ("late", "2026-04-01T00:00:00Z"),
+    ] {
         worldline
             .observe(
                 Observation::new(

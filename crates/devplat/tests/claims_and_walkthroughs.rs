@@ -39,6 +39,8 @@ fn only_a_rust_crate_surface_is_in_this_repository() {
 fn a_surface_cannot_be_built_without_naming_its_artifact() {
     assert!(Surface::foreign(SurfaceKind::HttpApi, "   ").is_err());
     assert!(Surface::foreign(SurfaceKind::TypeScriptPackage, "").is_err());
+    assert!(Surface::foreign(SurfaceKind::HttpApi, " api").is_err());
+    assert!(Surface::foreign(SurfaceKind::HttpApi, "api\u{0000}").is_err());
 }
 
 #[test]
@@ -85,6 +87,27 @@ fn a_resolved_claim_must_name_the_file_it_was_resolved_against() {
         .resolved_in("")
         .seal()
         .is_err());
+}
+
+#[test]
+fn claim_names_and_evidence_metadata_are_canonical() {
+    assert!(ApiName::parse(" prism.compiler.mine").is_err());
+    assert!(ApiName::parse("prism.compiler.mine\u{0000}").is_err());
+    assert!(ApiClaim::about(name("bioprism_devplat::render"), devplat())
+        .resolved_in(" crates/devplat/src/lib.rs")
+        .seal()
+        .is_err());
+    assert!(ApiClaim::about(name("prism.compiler.mine"), python())
+        .outside(" outside this repository")
+        .seal()
+        .is_err());
+
+    let forged = serde_json::json!({
+        "api": " prism.compiler.mine",
+        "surface": { "kind": "python_package", "artifact": "prism_sdk" },
+        "evidence": { "evidence": "outside_tree", "reason": "not in this repository" }
+    });
+    assert!(serde_json::from_value::<ApiClaim>(forged).is_err());
 }
 
 #[test]

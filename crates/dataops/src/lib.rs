@@ -263,6 +263,23 @@ pub mod catalog;
 pub mod citations;
 pub mod error;
 pub mod federation;
+pub mod ingestion_integrity_support;
+pub mod local_ingestion_integrity_inference;
+pub mod multimodal_ingestion_integrity_inference;
+pub mod throughput_ingestion_integrity_inference;
+pub mod federated_continual_ingestion_integrity_inference;
+pub mod local_ingestion_integrity_contract_model;
+pub mod multimodal_ingestion_integrity_contract_model;
+pub mod throughput_ingestion_integrity_contract_model;
+pub mod federated_continual_ingestion_integrity_contract_model;
+pub mod local_ingestion_integrity_research_copilot;
+pub mod multimodal_ingestion_integrity_research_copilot;
+pub mod throughput_ingestion_integrity_research_copilot;
+pub mod federated_continual_ingestion_integrity_research_copilot;
+pub mod local_ingestion_integrity_workflow_fabric;
+pub mod multimodal_ingestion_integrity_workflow_fabric;
+pub mod throughput_ingestion_integrity_workflow_fabric;
+pub mod federated_continual_ingestion_integrity_workflow_fabric;
 pub mod local;
 pub mod placement;
 pub mod provider;
@@ -315,6 +332,23 @@ pub use provenance_signing_workflow_fabric::{
     FEATURE_ID as PROVENANCE_SIGNING_WORKFLOW_FABRIC_FEATURE_ID,
     CONTRACT_VERSION as PROVENANCE_SIGNING_WORKFLOW_FABRIC_CONTRACT_VERSION,
 };
+pub use ingestion_integrity_support::*;
+pub use local_ingestion_integrity_inference::*;
+pub use multimodal_ingestion_integrity_inference::*;
+pub use throughput_ingestion_integrity_inference::*;
+pub use federated_continual_ingestion_integrity_inference::*;
+pub use local_ingestion_integrity_contract_model::*;
+pub use multimodal_ingestion_integrity_contract_model::*;
+pub use throughput_ingestion_integrity_contract_model::*;
+pub use federated_continual_ingestion_integrity_contract_model::*;
+pub use local_ingestion_integrity_research_copilot::*;
+pub use multimodal_ingestion_integrity_research_copilot::*;
+pub use throughput_ingestion_integrity_research_copilot::*;
+pub use federated_continual_ingestion_integrity_research_copilot::*;
+pub use local_ingestion_integrity_workflow_fabric::*;
+pub use multimodal_ingestion_integrity_workflow_fabric::*;
+pub use throughput_ingestion_integrity_workflow_fabric::*;
+pub use federated_continual_ingestion_integrity_workflow_fabric::*;
 
 /// The caller-supplied logical clock every lifecycle decision in this crate advances on.
 #[doc(inline)]

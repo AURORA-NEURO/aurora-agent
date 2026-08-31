@@ -277,9 +277,7 @@ pub fn operate_federated_ingestion(
     let disposition =
         if !request.policy_allow || !request.signed_approval || !request.federation_allow {
             IngestionDisposition::Blocked
-        } else if !request.protected_closure {
-            IngestionDisposition::Unknown
-        } else if accepted_order.is_empty() {
+        } else if !request.protected_closure || accepted_order.is_empty() {
             IngestionDisposition::Unknown
         } else if blocked_order.is_empty() && omissions.is_empty() {
             IngestionDisposition::Harmonized

@@ -161,6 +161,68 @@ pub struct AdapterPlan {
     pub limitations: Vec<String>,
 }
 
+impl AdapterPlan {
+    pub fn validate(&self) -> Result<(), RegistryError> {
+        if self.schema != ADAPTER_REGISTRY_SCHEMA_VERSION {
+            return Err(RegistryError::InvalidPlan(
+                "adapter plan schema is not supported".into(),
+            ));
+        }
+        self.request.validate()?;
+        if self.candidates.is_empty() || self.candidates.len() > MAX_CANDIDATES {
+            return Err(RegistryError::InvalidPlan(
+                "adapter plan candidate set is outside its bound".into(),
+            ));
+        }
+        let mut candidate_ids = BTreeSet::new();
+        if self
+            .candidates
+            .iter()
+            .any(|candidate| !candidate_ids.insert(candidate.adapter.id.clone()))
+        {
+            return Err(RegistryError::InvalidPlan(
+                "adapter plan candidates must have unique adapter identities".into(),
+            ));
+        }
+        for pair in self.candidates.windows(2) {
+            if pair[0].status > pair[1].status
+                || (pair[0].status == pair[1].status && pair[0].adapter.id >= pair[1].adapter.id)
+            {
+                return Err(RegistryError::InvalidPlan(
+                    "adapter plan candidates are not canonically ordered".into(),
+                ));
+            }
+        }
+        for candidate in &self.candidates {
+            let expected = plan_candidate(&candidate.adapter, &self.request);
+            if candidate != &expected {
+                return Err(RegistryError::InvalidPlan(format!(
+                    "candidate {} is not derived from the retained planning request",
+                    candidate.adapter.id
+                )));
+            }
+        }
+        let expected_selected = self
+            .candidates
+            .iter()
+            .find(|candidate| candidate.status.is_executable())
+            .map(|candidate| candidate.adapter.clone());
+        if self.selected_adapter.as_ref() != expected_selected.as_ref()
+            || self.executable != expected_selected.is_some()
+        {
+            return Err(RegistryError::InvalidPlan(
+                "adapter plan selection is inconsistent with its candidates".into(),
+            ));
+        }
+        if self.limitations != plan_limitations(self.selected_adapter.as_ref(), self.executable) {
+            return Err(RegistryError::InvalidPlan(
+                "adapter plan limitations are not derived from its selection".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum RegistryError {
     #[error("{field} must not be empty")]
@@ -171,6 +233,8 @@ pub enum RegistryError {
     EmptyFormat,
     #[error("available_dependencies exceeds the {maximum}-entry limit")]
     TooManyDependencies { maximum: usize },
+    #[error("invalid adapter plan: {0}")]
+    InvalidPlan(String),
 }
 
 /// The built-in cross-domain adapter catalogue.
@@ -657,6 +721,7 @@ impl AdapterRegistry {
 
     pub fn plan(&self, request: AdapterPlanRequest) -> Result<AdapterPlan, RegistryError> {
         request.validate()?;
+        let request = canonical_request(request);
         let mut candidates = self
             .descriptors
             .iter()
@@ -673,33 +738,39 @@ impl AdapterRegistry {
             .find(|candidate| candidate.status.is_executable())
             .map(|candidate| candidate.adapter.clone());
         let executable = selected_adapter.is_some();
-        let mut limitations = vec![
-            "format matching is explicit; the planner never sniffs source bytes".to_string(),
-            "planning does not fetch, parse, execute, or grant credentials".to_string(),
-            "semantic-loss declarations describe the adapter surface; source-specific loss is only known after conformance".to_string(),
-        ];
-        if selected_adapter
-            .as_ref()
-            .is_some_and(|adapter| adapter.execution == AdapterExecution::PythonDelegated)
-        {
-            limitations.push(
-                "the selected implementation is delegated to the Python adapter layer and must run its own independent conformance audit".to_string(),
-            );
-        }
-        if !executable {
-            limitations.push(
-                "no executable adapter is available for this request; the caller must change the declared format, source shape, conformance requirement, or dependency inventory".to_string(),
-            );
-        }
-        Ok(AdapterPlan {
+        let limitations = plan_limitations(selected_adapter.as_ref(), executable);
+        let plan = AdapterPlan {
             schema: ADAPTER_REGISTRY_SCHEMA_VERSION.to_string(),
             request,
             selected_adapter,
             executable,
             candidates,
             limitations,
-        })
+        };
+        plan.validate()?;
+        Ok(plan)
     }
+}
+
+fn plan_limitations(selected_adapter: Option<&AdapterDescriptor>, executable: bool) -> Vec<String> {
+    let mut limitations = vec![
+            "format matching is explicit; the planner never sniffs source bytes".to_string(),
+            "planning does not fetch, parse, execute, or grant credentials".to_string(),
+            "semantic-loss declarations describe the adapter surface; source-specific loss is only known after conformance".to_string(),
+        ];
+    if selected_adapter
+        .is_some_and(|adapter| adapter.execution == AdapterExecution::PythonDelegated)
+    {
+        limitations.push(
+            "the selected implementation is delegated to the Python adapter layer and must run its own independent conformance audit".to_string(),
+        );
+    }
+    if !executable {
+        limitations.push(
+            "no executable adapter is available for this request; the caller must change the declared format, source shape, conformance requirement, or dependency inventory".to_string(),
+        );
+    }
+    limitations
 }
 
 // The catalogue rows are deliberately expanded at the call site so every route's format,
@@ -805,6 +876,11 @@ fn plan_candidate(
 
 fn normalize_format(format: &str) -> String {
     format.trim().to_ascii_lowercase()
+}
+
+fn canonical_request(mut request: AdapterPlanRequest) -> AdapterPlanRequest {
+    request.declared_format = request.declared_format.as_deref().map(normalize_format);
+    request
 }
 
 fn validate_text(field: &'static str, value: &str, maximum: usize) -> Result<(), RegistryError> {
@@ -1216,5 +1292,55 @@ mod tests {
                 .map(|adapter| adapter.id.as_str()),
             Some("bioprism.tabular")
         );
+    }
+
+    #[test]
+    fn plan_validation_replays_candidate_status_and_selection() {
+        let registry = AdapterRegistry::default();
+        let mut plan = registry
+            .plan(request(Some("TEXT/CSV"), SourceKind::Bytes))
+            .unwrap();
+        plan.validate().unwrap();
+        plan.candidates[0].status = PlanStatus::UnsupportedFormat;
+        assert!(matches!(
+            plan.validate(),
+            Err(RegistryError::InvalidPlan(_))
+        ));
+    }
+
+    #[test]
+    fn plan_validation_rejects_tampered_selected_adapter() {
+        let registry = AdapterRegistry::default();
+        let mut plan = registry
+            .plan(request(Some("TEXT/CSV"), SourceKind::Bytes))
+            .unwrap();
+        plan.selected_adapter = None;
+        assert!(matches!(
+            plan.validate(),
+            Err(RegistryError::InvalidPlan(_))
+        ));
+    }
+
+    #[test]
+    fn plan_validation_rejects_duplicate_adapter_identities() {
+        let registry = AdapterRegistry::default();
+        let mut plan = registry
+            .plan(request(Some("TEXT/CSV"), SourceKind::Bytes))
+            .unwrap();
+        let mut duplicate = plan.candidates[0].clone();
+        duplicate.adapter.optional_dependency = Some("unavailable-fixture".into());
+        duplicate = plan_candidate(&duplicate.adapter, &plan.request);
+        plan.candidates.push(duplicate);
+        plan.candidates.sort_by(|left, right| {
+            left.status
+                .cmp(&right.status)
+                .then_with(|| left.adapter.id.cmp(&right.adapter.id))
+        });
+
+        assert!(matches!(
+            plan.validate(),
+            Err(RegistryError::InvalidPlan(message))
+                if message == "adapter plan candidates must have unique adapter identities"
+        ));
     }
 }

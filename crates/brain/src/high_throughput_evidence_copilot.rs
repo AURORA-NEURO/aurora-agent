@@ -22,6 +22,8 @@ pub const FEATURE_ID: &str = "AFA-brain-P01-F11";
 pub const CONTRACT_VERSION: &str = "brain-high-throughput-evidence-research-copilot/1.0";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet3@1";
 pub const MAX_ACTIONS: usize = 128;
+const COPILOT_CONTENT_TYPE: &str = "application/vnd.aurora.qualified-evidence-set-3+json";
+const MAX_ITEMS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HighThroughputCopilotRequest {
@@ -104,18 +106,7 @@ impl HighThroughputCopilotReceipt {
                 "throughput copilot identity, batch, bounded plan, tool, locality, budget, or effects are incomplete".into(),
             ));
         }
-        if self
-            .admitted_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
-            return Err(HighThroughputCopilotError::Invalid(
-                "throughput copilot state is not covered by candidate order".into(),
-            ));
-        }
-        for values in [
+        let collections = [
             &self.plan_order,
             &self.action_order,
             &self.tool_order,
@@ -127,41 +118,156 @@ impl HighThroughputCopilotReceipt {
             &self.uncertainty,
             &self.negative_evidence,
             &self.effect_receipts,
-        ] {
+        ];
+        if collections.iter().any(|values| values.len() > MAX_ITEMS) {
+            return Err(HighThroughputCopilotError::Invalid(
+                "throughput copilot collection exceeds the bounded contract limit".into(),
+            ));
+        }
+        if self.plan_order.len() > MAX_ACTIONS
+            || self.action_order.len() > MAX_ACTIONS
+            || self.tool_order.len() != 1
+        {
+            return Err(HighThroughputCopilotError::Invalid(
+                "throughput copilot plan or tool cardinality exceeds the contract".into(),
+            ));
+        }
+        let candidates = self.candidate_order.iter().collect::<BTreeSet<_>>();
+        let admitted = self.admitted_order.iter().collect::<BTreeSet<_>>();
+        let blocked = self.blocked_order.iter().collect::<BTreeSet<_>>();
+        let unknown = self.unknown_order.iter().collect::<BTreeSet<_>>();
+        let mut covered = admitted.clone();
+        covered.extend(blocked.iter());
+        if covered != candidates || !admitted.is_disjoint(&blocked) || !unknown.is_subset(&blocked)
+        {
+            return Err(HighThroughputCopilotError::Invalid(
+                "throughput copilot states must partition candidate order without overlap".into(),
+            ));
+        }
+        for values in collections {
             if values.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(HighThroughputCopilotError::Invalid(
                     "throughput copilot ordering is not canonical".into(),
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("invoke:declared-tool:") && effect != "block:unsafe-release"
-        }) {
-            return Err(HighThroughputCopilotError::Invalid(
-                "throughput copilot effect is outside declared-tool gate".into(),
-            ));
-        }
-        if self.disposition != HighThroughputDisposition::Blocked
-            && !self.admitted_order.is_empty()
-            && !self
-                .effect_receipts
+        if self
+            .plan_order
+            .iter()
+            .zip(self.action_order.iter())
+            .any(|(plan, action)| plan.strip_prefix("plan:") != action.strip_prefix("action:"))
+            || self
+                .plan_order
                 .iter()
-                .any(|effect| effect.starts_with("invoke:declared-tool:"))
+                .any(|item| !item.starts_with("plan:"))
+            || self
+                .action_order
+                .iter()
+                .any(|item| !item.starts_with("action:"))
         {
             return Err(HighThroughputCopilotError::Invalid(
-                "admitted throughput batch requires a declared-tool receipt".into(),
+                "throughput copilot plan and action order are not bound".into(),
             ));
         }
-        if self.disposition != HighThroughputDisposition::Qualified
-            && self.disposition != HighThroughputDisposition::Partial
-            && self.effect_receipts != ["block:unsafe-release"]
+        let gate_blocked = self
+            .omissions
+            .iter()
+            .any(|item| item == "copilot:action-budget-exhausted")
+            || self.negative_evidence.iter().any(|item| {
+                item == "copilot:admit-throughput-batch-not-allowed"
+                    || item == "copilot:checkpoint-throughput-batch-not-allowed"
+                    || item == "request:policy-denied"
+                    || item == "request:raw-data-locality-failed"
+            })
+            || self
+                .uncertainty
+                .iter()
+                .any(|item| item == "request:protected-closure-incomplete");
+        let expected_disposition = if gate_blocked {
+            HighThroughputDisposition::Blocked
+        } else if self.admitted_order.is_empty() {
+            HighThroughputDisposition::Unknown
+        } else if self.blocked_order.is_empty()
+            && self.omissions.is_empty()
+            && self.uncertainty.is_empty()
+            && self.negative_evidence.is_empty()
+        {
+            HighThroughputDisposition::Qualified
+        } else {
+            HighThroughputDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
+            return Err(HighThroughputCopilotError::Invalid(
+                "throughput copilot disposition does not match state or gates".into(),
+            ));
+        }
+        let expected_queue_digest = ContentHash::of_value(&json!({
+            "batch_id": self.batch_id,
+            "partition": self.partition,
+            "candidate_order": self.candidate_order,
+            "checkpoint_seq": self.checkpoint_seq,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| HighThroughputCopilotError::Artifact(error.to_string()))?;
+        if self.queue_digest != expected_queue_digest {
+            return Err(HighThroughputCopilotError::Invalid(
+                "throughput copilot queue digest is not bound to batch state".into(),
+            ));
+        }
+        let expected_plan_digest = ContentHash::of_value(&json!({
+            "request_id": self.request_id,
+            "batch_id": self.batch_id,
+            "plan_order": self.plan_order,
+            "action_order": self.action_order,
+            "tool_order": self.tool_order,
+            "checkpoint_seq": self.checkpoint_seq,
+            "approval_reference": self.approval_reference,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| HighThroughputCopilotError::Artifact(error.to_string()))?;
+        if self.plan_digest != expected_plan_digest {
+            return Err(HighThroughputCopilotError::Invalid(
+                "throughput copilot plan digest is not bound to plan state".into(),
+            ));
+        }
+        let expected_effects = if self.disposition != HighThroughputDisposition::Blocked
+            && !self.admitted_order.is_empty()
+        {
+            vec![format!("invoke:declared-tool:{}", self.tool_order[0])]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effects {
+            return Err(HighThroughputCopilotError::Invalid(
+                "throughput copilot effect does not match disposition".into(),
+            ));
+        }
+        if self.approval_reference.as_str().len() != 64
+            || self.evidence_receipt_digest.as_str().len() != 64
+            || self.queue_digest.as_str().len() != 64
+            || self.plan_digest.as_str().len() != 64
+            || self.replay_identity.as_str().len() != 64
         {
             return Err(HighThroughputCopilotError::Invalid(
-                "non-admitted throughput batch must be explicitly blocked".into(),
+                "throughput copilot digest length is invalid".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-high-throughput-evidence-copilot:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != COPILOT_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(HighThroughputCopilotError::Invalid(
+                "throughput copilot artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| HighThroughputCopilotError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| HighThroughputCopilotError::Artifact(error.to_string()))
     }
 
@@ -239,7 +345,8 @@ pub fn compile_high_throughput_evidence_copilot(
     {
         negative.insert("copilot:checkpoint-throughput-batch-not-allowed".into());
     }
-    if request.budget_units < action_order.len() as u32 {
+    let action_count = u64::try_from(action_order.len()).unwrap_or(u64::MAX);
+    if u64::from(request.budget_units) < action_count {
         omissions.insert("copilot:action-budget-exhausted".into());
     }
     if !request.policy_allow {
@@ -259,7 +366,7 @@ pub fn compile_high_throughput_evidence_copilot(
             .action_allow_list
             .iter()
             .any(|item| item == "checkpoint-throughput-batch")
-        && request.budget_units >= action_order.len() as u32
+        && u64::from(request.budget_units) >= action_count
         && request.policy_allow
         && request.protected_closure
         && request.raw_data_local
@@ -276,13 +383,13 @@ pub fn compile_high_throughput_evidence_copilot(
         .digest()
         .map_err(|error| HighThroughputCopilotError::Engine(error.to_string()))?;
     let plan_digest = ContentHash::of_value(&json!({"request_id": request.request.request_id, "batch_id": request.request.batch_id, "plan_order": plan_vec, "action_order": action_vec, "tool_order": tool_vec, "checkpoint_seq": evidence.checkpoint_seq, "approval_reference": request.approval_reference, "replay_identity": request.replay_identity})).map_err(|error| HighThroughputCopilotError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "operator_id": request.operator_id, "batch_id": request.request.batch_id, "partition": request.request.partition, "checkpoint_seq": evidence.checkpoint_seq, "disposition": disposition, "plan_order": plan_vec, "action_order": action_vec, "tool_order": tool_vec, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "queue_digest": evidence.queue_digest, "evidence_receipt_digest": evidence_digest, "plan_digest": plan_digest, "approval_reference": request.approval_reference, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "operator_id": request.operator_id, "batch_id": request.request.batch_id, "partition": request.request.partition, "checkpoint_seq": evidence.checkpoint_seq, "disposition": disposition, "plan_order": plan_vec, "action_order": action_vec, "tool_order": tool_vec, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "queue_digest": evidence.queue_digest, "evidence_receipt_digest": evidence_digest, "plan_digest": plan_digest, "approval_reference": request.approval_reference, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!(
             "brain-high-throughput-evidence-copilot:{}",
             request.request.request_id
         ),
-        "application/vnd.aurora.qualified-evidence-set-3+json",
+        COPILOT_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -299,14 +406,8 @@ pub fn compile_high_throughput_evidence_copilot(
         partition: request.request.partition.clone(),
         checkpoint_seq: evidence.checkpoint_seq,
         disposition,
-        plan_order: payload
-            .get("plan_order")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default(),
-        action_order: payload
-            .get("action_order")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default(),
+        plan_order: plan_vec.clone(),
+        action_order: action_vec.clone(),
         tool_order: tool_vec,
         candidate_order: evidence.candidate_order.clone(),
         admitted_order: evidence.admitted_order.clone(),
@@ -332,6 +433,38 @@ pub fn compile_high_throughput_evidence_copilot(
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn receipt_payload(receipt: &HighThroughputCopilotReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "operator_id": receipt.operator_id,
+        "batch_id": receipt.batch_id,
+        "partition": receipt.partition,
+        "checkpoint_seq": receipt.checkpoint_seq,
+        "disposition": receipt.disposition,
+        "plan_order": receipt.plan_order,
+        "action_order": receipt.action_order,
+        "tool_order": receipt.tool_order,
+        "candidate_order": receipt.candidate_order,
+        "admitted_order": receipt.admitted_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "queue_digest": receipt.queue_digest,
+        "evidence_receipt_digest": receipt.evidence_receipt_digest,
+        "plan_digest": receipt.plan_digest,
+        "approval_reference": receipt.approval_reference,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 fn validate_request(

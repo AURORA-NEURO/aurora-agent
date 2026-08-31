@@ -126,6 +126,23 @@ pub mod id;
 pub mod predeclaration;
 pub mod release_workbench;
 pub mod review;
+pub mod snapshot_integrity_support;
+pub mod local_snapshot_integrity_inference;
+pub mod multimodal_snapshot_integrity_inference;
+pub mod throughput_snapshot_integrity_inference;
+pub mod federated_continual_snapshot_integrity_inference;
+pub mod local_snapshot_integrity_contract_model;
+pub mod multimodal_snapshot_integrity_contract_model;
+pub mod throughput_snapshot_integrity_contract_model;
+pub mod federated_continual_snapshot_integrity_contract_model;
+pub mod local_snapshot_integrity_research_copilot;
+pub mod multimodal_snapshot_integrity_research_copilot;
+pub mod throughput_snapshot_integrity_research_copilot;
+pub mod federated_continual_snapshot_integrity_research_copilot;
+pub mod local_snapshot_integrity_workflow_fabric;
+pub mod multimodal_snapshot_integrity_workflow_fabric;
+pub mod throughput_snapshot_integrity_workflow_fabric;
+pub mod federated_continual_snapshot_integrity_workflow_fabric;
 
 pub use access::{
     AccessEvent, AccessGrant, AccessLedger, ContractId, DataContract, DerivativeRights, GrantId,
@@ -162,3 +179,20 @@ pub use review::{
     full_corpus, CorpusClass, DimensionScopedApproval, EvaluatorRevision, Finding, ReviewDimension,
     ReviewRecord, TestCorpus,
 };
+pub use snapshot_integrity_support::{qualify as qualify_snapshot_integrity, manifest as snapshot_integrity_manifest, StewardshipItem4, SnapshotIntegrityArtifact4, SnapshotIntegrityCard7, SnapshotIntegrityError, SnapshotIntegrityRequest4, BOUNDARY as SNAPSHOT_INTEGRITY_BOUNDARY, CONTENT_TYPE as SNAPSHOT_INTEGRITY_CONTENT_TYPE};
+pub use local_snapshot_integrity_inference::*;
+pub use multimodal_snapshot_integrity_inference::*;
+pub use throughput_snapshot_integrity_inference::*;
+pub use federated_continual_snapshot_integrity_inference::*;
+pub use local_snapshot_integrity_contract_model::*;
+pub use multimodal_snapshot_integrity_contract_model::*;
+pub use throughput_snapshot_integrity_contract_model::*;
+pub use federated_continual_snapshot_integrity_contract_model::*;
+pub use local_snapshot_integrity_research_copilot::*;
+pub use multimodal_snapshot_integrity_research_copilot::*;
+pub use throughput_snapshot_integrity_research_copilot::*;
+pub use federated_continual_snapshot_integrity_research_copilot::*;
+pub use local_snapshot_integrity_workflow_fabric::*;
+pub use multimodal_snapshot_integrity_workflow_fabric::*;
+pub use throughput_snapshot_integrity_workflow_fabric::*;
+pub use federated_continual_snapshot_integrity_workflow_fabric::*;

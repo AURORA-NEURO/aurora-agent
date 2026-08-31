@@ -2,9 +2,7 @@
 //! integrity (07.09) and release-gate waivers (07.13).
 
 use bioprism_bioevalx::boundary::{Assessment, Channel, Effect, Flow, FlowVerdict, Policy};
-use bioprism_bioevalx::error::{
-    BoundaryError, EvaluatorError, TrajectoryError, WaiverError,
-};
+use bioprism_bioevalx::error::{BoundaryError, EvaluatorError, TrajectoryError, WaiverError};
 use bioprism_bioevalx::evaluator::{Diagnostic, EvaluatorRun, Health, Panel, TaskOutcome};
 use bioprism_bioevalx::plane::UnscoredReason;
 use bioprism_bioevalx::trajectory::{PathProperty, Step, Trajectory};
@@ -34,6 +32,53 @@ fn a_broken_evaluator_produces_no_task_outcome_at_all() {
 }
 
 #[test]
+fn malformed_evaluator_records_are_rejected_before_they_reach_a_panel() {
+    let malformed = serde_json::json!({
+        "evaluator": "grader\n",
+        "health": "healthy",
+        "reached": "met",
+        "diagnostic": {}
+    });
+    let parsed: Result<EvaluatorRun, _> = serde_json::from_value(malformed);
+
+    assert!(parsed.is_err());
+}
+
+#[test]
+fn a_panel_refuses_invalid_local_runs_instead_of_storing_them() {
+    let mut panel = Panel::new();
+    let result = panel.record(EvaluatorRun {
+        evaluator: "grader".into(),
+        health: Health::Errored {
+            detail: " ".into(),
+        },
+        reached: None,
+        diagnostic: Diagnostic::default(),
+    });
+
+    assert!(matches!(
+        result,
+        Err(EvaluatorError::InvalidRun { evaluator, .. }) if evaluator == "grader"
+    ));
+    assert!(panel.runs().is_empty());
+}
+
+#[test]
+fn a_publicly_mutated_run_is_refused_at_task_evidence_boundary() {
+    let run = EvaluatorRun {
+        evaluator: "grader\t".into(),
+        health: Health::Healthy,
+        reached: Some(TaskOutcome::Met),
+        diagnostic: Diagnostic::default(),
+    };
+
+    assert!(matches!(
+        run.task_outcome(),
+        Err(EvaluatorError::InvalidRun { .. })
+    ));
+}
+
+#[test]
 fn an_unhealthy_evaluator_becomes_an_unscored_dimension_and_not_a_zero() {
     let run = EvaluatorRun::unhealthy(
         "schema-grader",
@@ -48,9 +93,11 @@ fn an_unhealthy_evaluator_becomes_an_unscored_dimension_and_not_a_zero() {
             evaluator: "schema-grader".into()
         })
     );
-    assert!(EvaluatorRun::healthy("g", TaskOutcome::Met, Diagnostic::default())
-        .unscored_reason()
-        .is_none());
+    assert!(
+        EvaluatorRun::healthy("g", TaskOutcome::Met, Diagnostic::default())
+            .unscored_reason()
+            .is_none()
+    );
 }
 
 #[test]
@@ -71,11 +118,13 @@ fn a_panel_of_only_broken_evaluators_says_nothing_about_the_task() {
         Health::Errored {
             detail: "panic".into(),
         },
-    ));
+    )).expect("valid evaluator run");
     panel.record(EvaluatorRun::unhealthy(
         "b",
-        Health::TimedOut { after: "60s".into() },
-    ));
+        Health::TimedOut {
+            after: "60s".into(),
+        },
+    )).expect("valid evaluator run");
 
     assert!(!panel.says_anything());
     assert_eq!(panel.unhealthy().len(), 2);
@@ -234,6 +283,45 @@ fn a_suffix_truncated_by_the_end_of_the_run_says_it_is_incomplete() {
 }
 
 #[test]
+fn trajectory_input_rejects_invalid_labels_and_distances() {
+    let malformed = serde_json::from_value::<Trajectory>(serde_json::json!({
+        "steps": [{
+            "act": " inspect",
+            "irreversible": false,
+            "succeeded": true,
+            "progress": 1.0
+        }],
+        "properties": []
+    }));
+    assert!(malformed.is_err());
+
+    let non_finite = Trajectory::of(vec![Step::new("inspect").at_distance(f64::NAN)]);
+    assert!(matches!(
+        non_finite.bounded_suffix(0, 1),
+        Err(TrajectoryError::InvalidStep { .. })
+    ));
+}
+
+#[test]
+fn trajectory_properties_remain_bounded_and_unique() {
+    let mut trajectory = Trajectory::of(vec![Step::new("inspect")]);
+    let invalid = trajectory.require(PathProperty::NoBlindRetry { act: String::new() });
+    assert!(matches!(invalid, Err(TrajectoryError::InvalidProperty(_))));
+
+    let property = PathProperty::FollowedBy {
+        trigger: "call".into(),
+        follow_up: "verify".into(),
+    };
+    trajectory
+        .require(property.clone())
+        .expect("first property");
+    assert!(matches!(
+        trajectory.require(property),
+        Err(TrajectoryError::DuplicateProperty(_))
+    ));
+}
+
+#[test]
 fn a_disclosure_to_the_subject_and_a_disclosure_about_them_are_different_flows() {
     let mut assessment = Assessment::new();
     assessment
@@ -372,7 +460,10 @@ fn high_task_success_cannot_erase_a_privacy_violation_through_a_composite() {
         Err(BoundaryError::CompositeRefused { violations }) => assert_eq!(violations, 1),
         other => panic!("expected a composite refusal, got {other:?}"),
     }
-    assert_eq!(assessment.pareto_point(0.99), (0.99, 1));
+    assert_eq!(
+        assessment.pareto_point(0.99).expect("finite utility"),
+        (0.99, 1)
+    );
 }
 
 #[test]
@@ -395,6 +486,65 @@ fn a_flow_that_names_no_transmission_principle_is_refused_rather_than_denied() {
         Err(BoundaryError::NoTransmissionPrinciple(_))
     ));
     assert!(assessment.verdicts().is_empty());
+}
+
+#[test]
+fn policy_and_flow_tuple_fields_are_validated_before_assessment() {
+    let mut assessment = Assessment::new();
+    assert!(matches!(
+        assessment.allow(Policy::permitting(" ", "study-protocol")),
+        Err(BoundaryError::InvalidPolicy { .. })
+    ));
+
+    let invalid_flow = Flow::new(
+        "f1",
+        "agent\n",
+        "patient-9",
+        "vendor",
+        "pathology-report",
+        "analysis",
+        "study-protocol",
+        Channel::Logs,
+    );
+    assert!(matches!(
+        assessment.assess(&invalid_flow),
+        Err(BoundaryError::InvalidFlow { .. })
+    ));
+}
+
+#[test]
+fn one_flow_id_cannot_accumulate_multiple_verdicts() {
+    let mut assessment = Assessment::new();
+    let flow = Flow::new(
+        "f1",
+        "agent",
+        "patient-9",
+        "vendor",
+        "pathology-report",
+        "analysis",
+        "study-protocol",
+        Channel::Logs,
+    );
+    assessment.assess(&flow).expect("first assessment");
+
+    assert!(matches!(
+        assessment.assess(&flow),
+        Err(BoundaryError::DuplicateFlow(id)) if id == "f1"
+    ));
+    assert_eq!(assessment.verdicts().len(), 1);
+}
+
+#[test]
+fn pareto_and_composite_reports_reject_non_finite_utility() {
+    let assessment = Assessment::new();
+    assert!(matches!(
+        assessment.pareto_point(f64::NAN),
+        Err(BoundaryError::InvalidUtility)
+    ));
+    assert!(matches!(
+        assessment.composite_with_utility(f64::INFINITY),
+        Err(BoundaryError::InvalidUtility)
+    ));
 }
 
 fn complete_waiver(gate: &str, version: &str) -> Waiver {
@@ -423,6 +573,69 @@ fn a_safety_veto_cannot_be_waived_by_anyone() {
         Err(WaiverError::VetoNotWaivable { gate }) => assert_eq!(gate, "no-severe-violation"),
         other => panic!("expected a veto refusal, got {other:?}"),
     }
+}
+
+#[test]
+fn a_waiver_cannot_be_applied_to_a_different_gate() {
+    let waiver = complete_waiver("cost-ceiling", "0.3.0");
+    let other_gate = Gate::new(
+        "confidence-requirement",
+        GateKind::ConfidenceRequirement,
+        GateVerdict::Violated {
+            detail: "interval is too wide".into(),
+        },
+    );
+
+    assert!(matches!(
+        waiver.apply(&other_gate, at("2026-08-01T00:00:00Z")),
+        Err(WaiverError::GateMismatch { waiver, gate })
+            if waiver == "cost-ceiling" && gate == "confidence-requirement"
+    ));
+}
+
+#[test]
+fn a_gate_with_malformed_verdict_evidence_cannot_be_waived() {
+    let waiver = complete_waiver("cost-ceiling", "0.3.0");
+    let malformed_gate = Gate::new(
+        "cost-ceiling",
+        GateKind::CostCeiling,
+        GateVerdict::Violated {
+            detail: " ".into(),
+        },
+    );
+
+    assert!(matches!(
+        waiver.apply(&malformed_gate, at("2026-08-01T00:00:00Z")),
+        Err(WaiverError::InvalidGate { .. })
+    ));
+}
+
+#[test]
+fn one_gate_cannot_receive_two_waivers() {
+    let mut decision = ReleaseDecision::for_version(
+        "0.3.0",
+        vec![Gate::new(
+            "cost-ceiling",
+            GateKind::CostCeiling,
+            GateVerdict::Violated {
+                detail: "12% over".into(),
+            },
+        )],
+    );
+    decision
+        .waive(
+            complete_waiver("cost-ceiling", "0.3.0"),
+            at("2026-08-01T00:00:00Z"),
+        )
+        .expect("first waiver");
+
+    assert!(matches!(
+        decision.waive(
+            complete_waiver("cost-ceiling", "0.3.0"),
+            at("2026-08-01T00:00:00Z")
+        ),
+        Err(WaiverError::DuplicateWaiver { gate }) if gate == "cost-ceiling"
+    ));
 }
 
 #[test]
@@ -477,7 +690,10 @@ fn a_waiver_does_not_rewrite_the_verdict_it_lets_through() {
         )],
     );
     decision
-        .waive(complete_waiver("cost-ceiling", "0.3.0"), at("2026-08-01T00:00:00Z"))
+        .waive(
+            complete_waiver("cost-ceiling", "0.3.0"),
+            at("2026-08-01T00:00:00Z"),
+        )
         .expect("waivable and unexpired");
 
     assert!(decision.releasable());
@@ -485,7 +701,10 @@ fn a_waiver_does_not_rewrite_the_verdict_it_lets_through() {
         decision.waivers()[0].underlying_verdict(),
         GateVerdict::Violated { .. }
     ));
-    assert_eq!(decision.waivers()[0].waiver.follow_up(), "re-run the pack before 0.4.0");
+    assert_eq!(
+        decision.waivers()[0].waiver.follow_up(),
+        "re-run the pack before 0.4.0"
+    );
 }
 
 #[test]
@@ -502,7 +721,10 @@ fn a_waiver_for_another_version_does_not_apply_to_this_release() {
     );
 
     assert!(matches!(
-        decision.waive(complete_waiver("cost-ceiling", "0.9.9"), at("2026-08-01T00:00:00Z")),
+        decision.waive(
+            complete_waiver("cost-ceiling", "0.9.9"),
+            at("2026-08-01T00:00:00Z")
+        ),
         Err(WaiverError::NoAffectedVersion)
     ));
     assert!(!decision.releasable());
@@ -530,11 +752,18 @@ fn a_gate_that_could_not_be_evaluated_still_blocks_and_is_counted_separately() {
 fn waiving_a_gate_that_was_not_blocking_refuses() {
     let mut decision = ReleaseDecision::for_version(
         "0.3.0",
-        vec![Gate::new("cost-ceiling", GateKind::CostCeiling, GateVerdict::Met)],
+        vec![Gate::new(
+            "cost-ceiling",
+            GateKind::CostCeiling,
+            GateVerdict::Met,
+        )],
     );
 
     assert!(matches!(
-        decision.waive(complete_waiver("cost-ceiling", "0.3.0"), at("2026-08-01T00:00:00Z")),
+        decision.waive(
+            complete_waiver("cost-ceiling", "0.3.0"),
+            at("2026-08-01T00:00:00Z")
+        ),
         Err(WaiverError::NotBlocking(_))
     ));
 }

@@ -10,6 +10,7 @@
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::ci_evidence::{
@@ -20,6 +21,7 @@ use crate::workbench::{plan_ci, CiRequest};
 pub const CI_PROVIDER_NORMALIZATION_SCHEMA: &str = "bioprism-devplat-ci-provider-normalization/0.1";
 const MAX_TEXT: usize = 512;
 const MAX_CHECKS: usize = 64;
+const MAX_PAYLOAD_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CiProviderNormalizationRequest {
@@ -65,6 +67,8 @@ pub enum CiProviderNormalizationError {
     InvalidScalar { field: &'static str },
     #[error("{field} must be a valid content digest: {value}")]
     InvalidDigest { field: &'static str, value: String },
+    #[error("CI provider payload is {actual} bytes, above the {maximum}-byte bound")]
+    PayloadTooLarge { actual: usize, maximum: usize },
     #[error("cannot canonicalize CI provider payload: {0}")]
     Canonical(String),
     #[error("cannot generate canonical CI plan: {0}")]
@@ -72,7 +76,11 @@ pub enum CiProviderNormalizationError {
 }
 
 fn bounded_text(field: &'static str, value: &str) -> Result<String, CiProviderNormalizationError> {
-    if value.trim().is_empty() || value.len() > MAX_TEXT || value.chars().any(char::is_control) {
+    if value.trim().is_empty()
+        || value.len() > MAX_TEXT
+        || value.chars().any(char::is_control)
+        || value != value.trim()
+    {
         return Err(CiProviderNormalizationError::InvalidText { field });
     }
     Ok(value.to_owned())
@@ -112,12 +120,18 @@ fn optional_text(
 }
 
 fn parse_digest(field: &'static str, value: &str) -> Result<String, CiProviderNormalizationError> {
-    ContentHash::parse(value.to_owned())
-        .map(|_| value.to_owned())
-        .map_err(|_| CiProviderNormalizationError::InvalidDigest {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || ContentHash::parse(value.to_owned()).is_err()
+    {
+        return Err(CiProviderNormalizationError::InvalidDigest {
             field,
             value: value.to_owned(),
-        })
+        });
+    }
+    Ok(value.to_owned())
 }
 
 fn optional_digest(
@@ -216,6 +230,51 @@ fn check_payload<'a>(
     Ok((run, checks))
 }
 
+fn canonical_check_values(checks: &[Value]) -> Result<Vec<Value>, CiProviderNormalizationError> {
+    let mut keyed = checks
+        .iter()
+        .map(|check| {
+            serde_json::to_string(check)
+                .map(|key| (key, check))
+                .map_err(|error| CiProviderNormalizationError::Canonical(error.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    keyed.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(keyed.into_iter().map(|(_, check)| check.clone()).collect())
+}
+
+fn canonicalize_normalized_checks(
+    checks: Vec<CiCheckEvidence>,
+    request: &CiRequest,
+) -> Result<Vec<CiCheckEvidence>, CiProviderNormalizationError> {
+    let plan_order = request
+        .checks
+        .iter()
+        .enumerate()
+        .map(|(index, check)| (check.name.to_ascii_lowercase(), index))
+        .collect::<BTreeMap<_, _>>();
+    let mut keyed = checks
+        .into_iter()
+        .map(|check| {
+            let name = check.name.to_ascii_lowercase();
+            let plan_index = plan_order
+                .get(&name)
+                .copied()
+                .unwrap_or(request.checks.len());
+            let payload_key = serde_json::to_string(&check)
+                .map_err(|error| CiProviderNormalizationError::Canonical(error.to_string()))?;
+            Ok((plan_index, name, payload_key, check))
+        })
+        .collect::<Result<Vec<_>, CiProviderNormalizationError>>()?;
+    keyed.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+    Ok(keyed.into_iter().map(|(_, _, _, check)| check).collect())
+}
+
 fn normalize_check(
     provider: &str,
     value: &Value,
@@ -275,6 +334,14 @@ pub fn normalize_ci_provider_payload(
         return Err(CiProviderNormalizationError::UnsupportedProvider);
     }
     let payload = object("payload", &request.payload)?;
+    let payload_bytes = serde_json::to_vec(&request.payload)
+        .map_err(|error| CiProviderNormalizationError::Canonical(error.to_string()))?;
+    if payload_bytes.len() > MAX_PAYLOAD_BYTES {
+        return Err(CiProviderNormalizationError::PayloadTooLarge {
+            actual: payload_bytes.len(),
+            maximum: MAX_PAYLOAD_BYTES,
+        });
+    }
     let payload_digest = ContentHash::of_value(&request.payload)
         .map_err(|error| CiProviderNormalizationError::Canonical(error.to_string()))?
         .to_string();
@@ -297,10 +364,12 @@ pub fn normalize_ci_provider_payload(
     if conclusion == CiRunConclusion::Unknown {
         warnings.push("run_conclusion_unknown_or_missing".into());
     }
+    let checks = canonical_check_values(checks)?;
     let checks = checks
         .iter()
         .map(|check| normalize_check(&provider, check, &mut warnings))
         .collect::<Result<Vec<_>, _>>()?;
+    let checks = canonicalize_normalized_checks(checks, &request.ci)?;
     let environment_digest = optional_digest("environment_digest", run.get("environment_digest"))?;
     let run_url = optional_text(
         "run_url",
@@ -407,6 +476,34 @@ mod tests {
     }
 
     #[test]
+    fn provider_check_order_is_canonical_but_raw_payload_digest_remains_bound() {
+        let first = normalize_ci_provider_payload(&request(
+            "github_actions",
+            serde_json::json!({
+                "run": {"id": 43, "conclusion": "success"},
+                "jobs": [
+                    {"name": "unit", "conclusion": "success"},
+                    {"name": "lint", "conclusion": "success"}
+                ]
+            }),
+        ))
+        .unwrap();
+        let second = normalize_ci_provider_payload(&request(
+            "github_actions",
+            serde_json::json!({
+                "run": {"id": 43, "conclusion": "success"},
+                "jobs": [
+                    {"name": "lint", "conclusion": "success"},
+                    {"name": "unit", "conclusion": "success"}
+                ]
+            }),
+        ))
+        .unwrap();
+        assert_eq!(first.evidence, second.evidence);
+        assert_ne!(first.payload_digest, second.payload_digest);
+    }
+
+    #[test]
     fn generic_payload_preserves_unknown_provider_states_and_explicit_digests() {
         let digest = ContentHash::of_bytes(b"provided").to_string();
         let normalized = normalize_ci_provider_payload(&request(
@@ -473,6 +570,51 @@ mod tests {
         assert!(matches!(
             error,
             CiProviderNormalizationError::InvalidDigest { .. }
+        ));
+
+        let error = normalize_ci_provider_payload(&request(
+            "generic",
+            serde_json::json!({
+                "run_id": "generic-3",
+                "conclusion": "success",
+                "checks": [
+                    {"name": "unit", "status": "success", "result_digest": "A".repeat(64)}
+                ]
+            }),
+        ))
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CiProviderNormalizationError::InvalidDigest { .. }
+        ));
+    }
+
+    #[test]
+    fn provider_normalization_rejects_metadata_aliases_and_oversized_payloads() {
+        let error = normalize_ci_provider_payload(&request(
+            "generic",
+            serde_json::json!({
+                "run_id": " generic-run ",
+                "conclusion": "success",
+                "checks": [{"name": "unit", "status": "success"}]
+            }),
+        ))
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CiProviderNormalizationError::InvalidText { field: "run_id" }
+        ));
+
+        let oversized = serde_json::json!({
+            "run_id": "generic-large",
+            "conclusion": "success",
+            "checks": [{"name": "unit", "status": "success"}],
+            "payload": "x".repeat(MAX_PAYLOAD_BYTES + 1)
+        });
+        let error = normalize_ci_provider_payload(&request("generic", oversized)).unwrap_err();
+        assert!(matches!(
+            error,
+            CiProviderNormalizationError::PayloadTooLarge { .. }
         ));
     }
 }

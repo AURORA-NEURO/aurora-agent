@@ -49,6 +49,33 @@ impl QueryBackend for EstimatesWellRunsBadly {
     }
 }
 
+struct ReturnsAnInvalidEstimate;
+
+impl QueryBackend for ReturnsAnInvalidEstimate {
+    fn backend(&self) -> Backend {
+        Backend::TensorNetwork
+    }
+
+    fn method(&self) -> String {
+        "test double: returns a non-finite estimate".to_string()
+    }
+
+    fn estimate(&self, region: &QueryRegion) -> Result<Estimate, Declined> {
+        let mut estimate = DirectMaterialization::new().estimate(region)?;
+        estimate.backend = self.backend();
+        estimate.method = self.method();
+        estimate.predicted_multiply_ops = f64::NAN;
+        Ok(estimate)
+    }
+
+    fn execute(&self, _region: &QueryRegion) -> Result<ComputedRegion, Declined> {
+        Err(Declined::InvalidEstimate {
+            backend: "tensor_network",
+            detail: "test double must never execute".to_string(),
+        })
+    }
+}
+
 /// A region with no exploitable structure: one factor over everything.
 fn dense_region(variables: usize, domain: usize) -> QueryRegion {
     band_region(variables, variables - 1, domain, 0xD1)
@@ -311,6 +338,48 @@ fn charging_memory_more_heavily_abandons_elimination_at_a_lower_width() {
         switched.fallback.as_ref().unwrap().reason,
         FallbackReason::NoPredictedAdvantage
     );
+}
+
+#[test]
+fn invalid_budget_limits_are_refused_even_when_the_query_is_small() {
+    let region = band_region(3, 1, 2, 0xB0);
+    let backend = DirectMaterialization::new()
+        .with_budget(Budget::default().with_max_ops(f64::NAN));
+
+    assert!(matches!(
+        backend.estimate(&region),
+        Err(Declined::InvalidConfiguration { .. })
+    ));
+}
+
+#[test]
+fn invalid_cost_models_cannot_enter_portfolio_comparison() {
+    let region = band_region(3, 1, 2, 0xB1);
+    let error = Portfolio::reference()
+        .with_cost_model(CostModel::default().with_memory_weight(f64::NAN))
+        .select(&region)
+        .unwrap_err();
+
+    assert!(matches!(error, Declined::InvalidConfiguration { .. }));
+}
+
+#[test]
+fn portfolio_records_a_malformed_backend_estimate_as_a_decline() {
+    let region = band_region(3, 1, 2, 0xB2);
+    let mut portfolio = Portfolio::conservative();
+    portfolio.push(Box::new(ReturnsAnInvalidEstimate));
+
+    let selection = portfolio.select(&region).unwrap();
+    let candidate = selection
+        .candidates
+        .iter()
+        .find(|candidate| candidate.backend == Backend::TensorNetwork)
+        .expect("invalid test backend is recorded");
+    assert!(matches!(
+        candidate.outcome,
+        Err(Declined::InvalidEstimate { .. })
+    ));
+    assert!(candidate.cost.is_none());
 }
 
 #[test]

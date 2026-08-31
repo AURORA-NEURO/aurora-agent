@@ -150,6 +150,27 @@ impl ResearchReleaseReceipt {
             .envelope
             .validate()
             .map_err(|error| ResearchReleaseError::Contract(error.to_string()))?;
+        let export = &self.research_object.federation.envelope.export;
+        if export.artifact_id != format!("research-release:{}", self.release_id)
+            || export.content_type != "application/vnd.aurora.signed-research-object+json"
+        {
+            return Err(ResearchReleaseError::Contract(
+                "research-release export identity or content type is inconsistent".into(),
+            ));
+        }
+        export
+            .verify_payload(&self.research_object.federation.payload)
+            .map_err(|error| ResearchReleaseError::Contract(error.to_string()))?;
+        let payload = &self.research_object.federation.payload;
+        if payload.get("release_id").and_then(Value::as_str) != Some(self.release_id.as_str())
+            || payload.get("feature_id").and_then(Value::as_str) != Some(FEATURE_ID)
+            || payload.get("raw_data_local").and_then(Value::as_bool) != Some(true)
+            || payload.get("omissions") != Some(&json!(self.omissions))
+        {
+            return Err(ResearchReleaseError::Contract(
+                "signed research-release payload identity or omissions are inconsistent".into(),
+            ));
+        }
         if !self.research_object.federation.envelope.raw_data_local {
             return Err(ResearchReleaseError::RawDataEgress);
         }
@@ -504,6 +525,18 @@ mod tests {
         assert!(matches!(
             build_research_release(&request, &signer).unwrap_err(),
             ResearchReleaseError::PolicyBlocked(PolicyDecision::LocalOnly)
+        ));
+    }
+
+    #[test]
+    fn receipt_validation_rejects_tampered_signed_payload() {
+        let signer =
+            FederationSigner::new("release-key", SigningKey::from_bytes(&[9u8; 32])).unwrap();
+        let mut receipt = build_research_release(&request(), &signer).unwrap();
+        receipt.research_object.federation.payload["raw_data_local"] = json!(false);
+        assert!(matches!(
+            receipt.validate(),
+            Err(ResearchReleaseError::Contract(_))
         ));
     }
 }

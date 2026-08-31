@@ -100,6 +100,19 @@ impl InventoryProfile {
         self
     }
 
+    pub fn validate(&self) -> Result<(), AdapterError> {
+        validate_text("repository", &self.repository, 512)?;
+        if self.tags.len() > 16_384 {
+            return Err(AdapterError::InvalidSource(
+                "inventory tags exceed their item bound".into(),
+            ));
+        }
+        for tag in &self.tags {
+            validate_text("inventory tag", tag, 512)?;
+        }
+        Ok(())
+    }
+
     pub fn digest(&self) -> Option<ContentHash> {
         ContentHash::of_value(&serde_json::to_value(self).ok()?).ok()
     }
@@ -140,6 +153,7 @@ impl Adapter for InventoryAdapter {
     }
 
     fn ingest(&self, source: &Source) -> Result<Ingestion, AdapterError> {
+        self.profile.validate()?;
         let root = source.as_directory(INVENTORY_ADAPTER)?;
         let entries = walk(root)?;
 
@@ -232,11 +246,12 @@ impl Adapter for InventoryAdapter {
             facts.push(draft.build()?);
         }
 
+        let byte_length = total_byte_length(&entries)?;
         let manifest = SourceManifest {
             source_id: source.id.clone(),
             declared_format: source.declared_format.clone(),
             source_digest: inventory_digest(&source.id, &facts)?,
-            byte_length: Some(entries.iter().filter_map(|entry| entry.length).sum()),
+            byte_length: Some(byte_length),
             adapter: INVENTORY_ADAPTER.to_string(),
             adapter_version: INVENTORY_ADAPTER_VERSION.to_string(),
             profile_digest: self.profile.digest(),
@@ -245,6 +260,17 @@ impl Adapter for InventoryAdapter {
 
         Ingestion::new(manifest, facts, audit.finish())
     }
+}
+
+fn total_byte_length(entries: &[FileEntry]) -> Result<u64, AdapterError> {
+    entries
+        .iter()
+        .filter_map(|entry| entry.length)
+        .try_fold(0u64, |total, length| {
+            total
+                .checked_add(length)
+                .ok_or_else(|| AdapterError::InvalidSource("inventory byte length overflow".into()))
+        })
 }
 
 /// Digest of the inventory itself, standing in for "the digest of a directory".
@@ -283,6 +309,20 @@ fn uninterpreted_detail(entry: &FileEntry) -> String {
     }
 }
 
+fn validate_text(field: &str, value: &str, maximum: usize) -> Result<(), AdapterError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(AdapterError::InvalidSource(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > maximum || value.chars().any(char::is_control) {
+        return Err(AdapterError::InvalidSource(format!(
+            "{field} is outside its bounded text contract"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,6 +352,26 @@ mod tests {
     }
 
     #[test]
+    fn inventory_byte_length_overflow_is_rejected() {
+        let entries = vec![
+            FileEntry {
+                relative: "a".into(),
+                absolute: "a".into(),
+                length: Some(u64::MAX),
+                is_symlink: false,
+            },
+            FileEntry {
+                relative: "b".into(),
+                absolute: "b".into(),
+                length: Some(1),
+                is_symlink: false,
+            },
+        ];
+
+        assert!(total_byte_length(&entries).is_err());
+    }
+
+    #[test]
     fn an_unknown_extension_still_declares_the_content_uninterpreted() {
         let entry = FileEntry {
             relative: "notes.txt".into(),
@@ -320,5 +380,13 @@ mod tests {
             is_symlink: false,
         };
         assert!(uninterpreted_detail(&entry).contains("not interpreted"));
+    }
+
+    #[test]
+    fn an_inventory_profile_rejects_an_unscoped_repository_identity() {
+        assert!(matches!(
+            InventoryProfile::new(" ").validate(),
+            Err(AdapterError::InvalidSource(_))
+        ));
     }
 }

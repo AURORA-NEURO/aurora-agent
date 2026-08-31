@@ -87,7 +87,10 @@ fn a_camouflaged_tag_is_not_itself_a_protected_tag() {
 #[test]
 fn the_protected_and_unprotected_facts_partition_the_world() {
     let measured = measure(&temporal::TemporalFirewallSpec::discriminating());
-    assert_eq!(measured.protected_facts + measured.unprotected_facts, measured.facts);
+    assert_eq!(
+        measured.protected_facts + measured.unprotected_facts,
+        measured.facts
+    );
     assert!(measured.protected_facts > 0);
     assert!(measured.unprotected_facts > 0);
 }
@@ -196,6 +199,18 @@ fn a_factor_referring_to_an_undefined_variable_is_refused_by_the_reference_check
 }
 
 #[test]
+fn a_non_finite_factor_cost_is_refused_before_world_validation() {
+    let mut builder = WorldBuilder::new("broken-cost-v1", "a non-finite factor", "X-001");
+    builder.factor("factor.nan", &[], &[], "rule", &[], f64::NAN);
+
+    let Err(BioWorldError::WorldRejected { message, .. }) = builder.build() else {
+        panic!("non-finite factor costs must be rejected");
+    };
+    assert!(message.contains("factor.nan"), "{message}");
+    assert!(message.contains("non-finite cost"), "{message}");
+}
+
+#[test]
 fn a_document_that_is_not_fiber_world_0_1_is_refused() {
     let refused = BioWorld::from_document(json!({
         "schema_version": "fiber-world/0.2",
@@ -216,7 +231,10 @@ fn the_worlds_are_deterministic_across_rebuilds() {
         let first = temporal::build(&spec).expect("builds");
         let second = temporal::build(&spec).expect("builds");
         assert_eq!(first.document(), second.document());
-        assert_eq!(first.digest().expect("digest"), second.digest().expect("digest"));
+        assert_eq!(
+            first.digest().expect("digest"),
+            second.digest().expect("digest")
+        );
     }
 }
 
@@ -235,7 +253,10 @@ fn a_different_seed_changes_the_distractors_and_leaves_the_decisive_skeleton_alo
             .expect("builds")
             .digest()
             .expect("digest"),
-        temporal::build(&other).expect("builds").digest().expect("digest")
+        temporal::build(&other)
+            .expect("builds")
+            .digest()
+            .expect("digest")
     );
 }
 

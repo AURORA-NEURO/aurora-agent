@@ -66,6 +66,27 @@ pub enum Declined {
         baseline_cost: f64,
         required_speedup: f64,
     },
+
+    /// The supplied schedule did not produce the result shape promised by its contract.
+    #[error("{backend} declined: invalid execution schedule: {detail}")]
+    InvalidSchedule {
+        backend: &'static str,
+        detail: String,
+    },
+
+    /// A budget or ranking model contains a value that cannot safely govern execution.
+    #[error("{backend} declined: invalid configuration: {detail}")]
+    InvalidConfiguration {
+        backend: &'static str,
+        detail: String,
+    },
+
+    /// A backend returned an estimate whose public contract is not trustworthy.
+    #[error("{backend} declined: invalid estimate: {detail}")]
+    InvalidEstimate {
+        backend: &'static str,
+        detail: String,
+    },
 }
 
 impl Declined {
@@ -75,7 +96,10 @@ impl Declined {
             | Declined::PeakMemoryAboveBudget { backend, .. }
             | Declined::WorkAboveBudget { backend, .. }
             | Declined::MissingFactorTable { backend, .. }
-            | Declined::NoPredictedAdvantage { backend, .. } => backend,
+            | Declined::NoPredictedAdvantage { backend, .. }
+            | Declined::InvalidSchedule { backend, .. }
+            | Declined::InvalidConfiguration { backend, .. }
+            | Declined::InvalidEstimate { backend, .. } => backend,
         }
     }
 
@@ -93,9 +117,11 @@ impl Declined {
                 FallbackReason::HighCompiledWidth
             }
             Declined::NoPredictedAdvantage { .. } => FallbackReason::NoPredictedAdvantage,
-            Declined::MissingFactorTable { .. } | Declined::WorkAboveBudget { .. } => {
-                FallbackReason::BackendExecutionFailure
-            }
+            Declined::MissingFactorTable { .. }
+            | Declined::WorkAboveBudget { .. }
+            | Declined::InvalidSchedule { .. }
+            | Declined::InvalidConfiguration { .. }
+            | Declined::InvalidEstimate { .. } => FallbackReason::BackendExecutionFailure,
         }
     }
 }

@@ -8,17 +8,22 @@
 //! denied effects remain explicit and cannot become an interoperability pass.
 
 use bioprism_foundation::{
-    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    LossSeverity, ProvenanceLink, SemanticLoss, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-adapter-P25-F22";
 pub const CONTRACT_VERSION: &str = "adapter-contract-frontier/1.0";
 pub const CURRENT_CONTRACT_VERSION: &str = "2.0.0";
 pub const COMPATIBLE_CONTRACT_VERSION: &str = "1.0.0";
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_VERSIONS: usize = 32;
+const MAX_ITEMS: usize = 8192;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdapterContractInput {
@@ -57,10 +62,15 @@ pub struct AdapterCapabilityManifest {
     pub feature_id: String,
     pub adapter_id: String,
     pub capability_id: String,
+    pub source_contract_version: String,
+    pub supported_contract_versions: Vec<String>,
+    pub policy_allow: bool,
+    pub protected_closure: bool,
     pub negotiated_version: String,
     pub disposition: ManifestDisposition,
     pub input_schema: String,
     pub output_schema: String,
+    pub comparability_profile: String,
     pub modality_order: Vec<String>,
     pub effect_order: Vec<String>,
     pub permission_order: Vec<String>,
@@ -87,42 +97,123 @@ impl AdapterCapabilityManifest {
         }
         if self.boundary != PRECLINICAL_BOUNDARY
             || !self.raw_data_local
-            || self.adapter_id.trim().is_empty()
-            || self.capability_id.trim().is_empty()
-            || self.negotiated_version.trim().is_empty()
-            || self.input_schema.trim().is_empty()
-            || self.output_schema.trim().is_empty()
             || self.modality_order.is_empty()
+            || self.artifact_digest_order.is_empty()
+            || self.supported_contract_versions.is_empty()
             || self.checks.is_empty()
             || self.effect_receipts.is_empty()
         {
-            return Err(ContractFrontierError::InvalidRequest("manifest identity, schemas, modalities, checks, effects, locality, and boundary are required".into()));
+            return Err(ContractFrontierError::InvalidRequest(
+                "manifest identity, schemas, modalities, checks, effects, locality, and boundary are required".into(),
+            ));
         }
-        for values in [
-            &self.modality_order,
-            &self.effect_order,
-            &self.permission_order,
-            &self.semantic_loss,
-            &self.checks,
-            &self.effect_receipts,
+        for (field, value) in [
+            ("adapter_id", self.adapter_id.as_str()),
+            ("capability_id", self.capability_id.as_str()),
+            (
+                "source_contract_version",
+                self.source_contract_version.as_str(),
+            ),
+            ("negotiated_version", self.negotiated_version.as_str()),
+            ("input_schema", self.input_schema.as_str()),
+            ("output_schema", self.output_schema.as_str()),
+            ("comparability_profile", self.comparability_profile.as_str()),
+            ("boundary", self.boundary.as_str()),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(ContractFrontierError::InvalidRequest(
-                    "manifest ordering is not canonical".into(),
-                ));
-            }
+            validate_text(field, value)?;
         }
-        if self
-            .artifact_digest_order
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
+        for (field, values) in [
+            (
+                "supported_contract_versions",
+                &self.supported_contract_versions,
+            ),
+            ("modality_order", &self.modality_order),
+            ("effect_order", &self.effect_order),
+            ("permission_order", &self.permission_order),
+            ("semantic_loss", &self.semantic_loss),
+            ("omissions", &self.omissions),
+            ("uncertainty", &self.uncertainty),
+            ("checks", &self.checks),
+            ("effect_receipts", &self.effect_receipts),
+        ] {
+            validate_sorted_strings(field, values)?;
+        }
+        if self.artifact_digest_order.len() > MAX_ITEMS
+            || self
+                .artifact_digest_order
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
         {
             return Err(ContractFrontierError::InvalidRequest(
                 "manifest artifact ordering is not canonical".into(),
             ));
         }
+        let expected_effect = match self.disposition {
+            ManifestDisposition::Accepted | ManifestDisposition::Migrated => {
+                "exchange:permitted-capability-manifest-and-digests"
+            }
+            ManifestDisposition::ApprovalRequired => "block:manifest-exchange:approval-required",
+            ManifestDisposition::Blocked => "block:manifest-exchange:blocked",
+            ManifestDisposition::Incompatible => "block:incompatible-contract",
+            ManifestDisposition::Unknown => "block:manifest-exchange:unknown",
+        };
+        if self.effect_receipts != vec![expected_effect.to_string()] {
+            return Err(ContractFrontierError::InvalidRequest(
+                "manifest effect does not match its disposition".into(),
+            ));
+        }
+        if matches!(self.disposition, ManifestDisposition::Accepted)
+            && !self.semantic_loss.is_empty()
+        {
+            return Err(ContractFrontierError::InvalidRequest(
+                "accepted manifest cannot contain semantic loss".into(),
+            ));
+        }
+        if matches!(self.disposition, ManifestDisposition::Migrated)
+            && self.semantic_loss != vec!["legacy_fields:unknown".to_string()]
+        {
+            return Err(ContractFrontierError::InvalidRequest(
+                "migrated manifest requires its legacy-field loss receipt".into(),
+            ));
+        }
+        let input = AdapterContractInput {
+            adapter_id: self.adapter_id.clone(),
+            capability_id: self.capability_id.clone(),
+            source_contract_version: self.source_contract_version.clone(),
+            supported_contract_versions: self.supported_contract_versions.clone(),
+            input_schema: self.input_schema.clone(),
+            output_schema: self.output_schema.clone(),
+            effects: self.effect_order.clone(),
+            permissions: self.permission_order.clone(),
+            modality_order: self.modality_order.clone(),
+            artifact_digests: self.artifact_digest_order.clone(),
+            comparability_profile: self.comparability_profile.clone(),
+            policy_allow: self.policy_allow,
+            protected_closure: self.protected_closure,
+            raw_data_local: self.raw_data_local,
+            boundary: self.boundary.clone(),
+        };
+        let expected = compile_adapter_capability_manifest_internal(&input, false)?;
+        if self != &expected {
+            return Err(ContractFrontierError::Contract(
+                "capability manifest is not derived from its retained contract declaration".into(),
+            ));
+        }
+        if self.artifact.artifact_id != format!("adapter-capability-manifest:{}", self.adapter_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.adapter-capability-manifest+json"
+            || self.artifact.semantic_loss != typed_semantic_loss(&self.semantic_loss)
+            || self.artifact.provenance != manifest_provenance(&self.artifact_digest_order)
+        {
+            return Err(ContractFrontierError::Contract(
+                "capability manifest artifact is not bound to the manifest".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| ContractFrontierError::Contract(error.to_string()))?;
+        self.artifact
+            .verify_payload(&manifest_payload(self))
             .map_err(|error| ContractFrontierError::Contract(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, ContractFrontierError> {
@@ -132,6 +223,165 @@ impl AdapterCapabilityManifest {
         ContentHash::of_value(&value)
             .map_err(|error| ContractFrontierError::Serialization(error.to_string()))
     }
+}
+
+fn validate_text(field: &str, value: &str) -> Result<(), ContractFrontierError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(ContractFrontierError::InvalidRequest(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(ContractFrontierError::InvalidRequest(format!(
+            "{field} is outside its bounded text contract"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_input_strings(
+    field: &str,
+    values: &[String],
+    max_items: usize,
+) -> Result<(), ContractFrontierError> {
+    if values.len() > max_items {
+        return Err(ContractFrontierError::InvalidRequest(format!(
+            "{field} exceeds its item bound"
+        )));
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(ContractFrontierError::InvalidRequest(format!(
+                "{field} contains duplicate values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_strings(field: &str, values: &[String]) -> Result<(), ContractFrontierError> {
+    validate_input_strings(field, values, MAX_ITEMS)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(ContractFrontierError::InvalidRequest(format!(
+            "{field} ordering is not canonical"
+        )));
+    }
+    Ok(())
+}
+
+fn typed_semantic_loss(values: &[String]) -> Vec<SemanticLoss> {
+    values
+        .iter()
+        .map(|field| SemanticLoss {
+            field: field.clone(),
+            reason: "contract-frontier migration semantics are not inferred".into(),
+            severity: LossSeverity::Unknown,
+        })
+        .collect()
+}
+
+fn manifest_provenance(digests: &[ContentHash]) -> Vec<ProvenanceLink> {
+    digests
+        .iter()
+        .enumerate()
+        .map(|(index, digest)| ProvenanceLink {
+            source_id: format!("input-artifact:{index}"),
+            relation: "capability-manifest-input-digest".into(),
+            digest: digest.clone(),
+        })
+        .collect()
+}
+
+fn manifest_payload(manifest: &AdapterCapabilityManifest) -> serde_json::Value {
+    manifest_payload_from_parts(
+        &manifest.schema_version,
+        &manifest.contract_version,
+        &manifest.feature_id,
+        &manifest.adapter_id,
+        &manifest.capability_id,
+        &manifest.source_contract_version,
+        &manifest.supported_contract_versions,
+        manifest.policy_allow,
+        manifest.protected_closure,
+        &manifest.negotiated_version,
+        manifest.disposition,
+        &manifest.input_schema,
+        &manifest.output_schema,
+        &manifest.comparability_profile,
+        &manifest.modality_order,
+        &manifest.effect_order,
+        &manifest.permission_order,
+        &manifest.artifact_digest_order,
+        &manifest.omissions,
+        &manifest.uncertainty,
+        &manifest.semantic_loss,
+        &manifest.checks,
+        &manifest.effect_receipts,
+        &manifest.artifact.provenance,
+        manifest.raw_data_local,
+        &manifest.boundary,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn manifest_payload_from_parts(
+    schema_version: &str,
+    contract_version: &str,
+    feature_id: &str,
+    adapter_id: &str,
+    capability_id: &str,
+    source_contract_version: &str,
+    supported_contract_versions: &[String],
+    policy_allow: bool,
+    protected_closure: bool,
+    negotiated_version: &str,
+    disposition: ManifestDisposition,
+    input_schema: &str,
+    output_schema: &str,
+    comparability_profile: &str,
+    modality_order: &[String],
+    effect_order: &[String],
+    permission_order: &[String],
+    artifact_digest_order: &[ContentHash],
+    omissions: &[String],
+    uncertainty: &[String],
+    semantic_loss: &[String],
+    checks: &[String],
+    effect_receipts: &[String],
+    provenance: &[ProvenanceLink],
+    raw_data_local: bool,
+    boundary: &str,
+) -> serde_json::Value {
+    json!({
+        "schema_version": schema_version,
+        "contract_version": contract_version,
+        "feature_id": feature_id,
+        "adapter_id": adapter_id,
+        "capability_id": capability_id,
+        "source_contract_version": source_contract_version,
+        "supported_contract_versions": supported_contract_versions,
+        "policy_allow": policy_allow,
+        "protected_closure": protected_closure,
+        "negotiated_version": negotiated_version,
+        "disposition": disposition,
+        "input_schema": input_schema,
+        "output_schema": output_schema,
+        "comparability_profile": comparability_profile,
+        "modality_order": modality_order,
+        "effect_order": effect_order,
+        "permission_order": permission_order,
+        "artifact_digest_order": artifact_digest_order,
+        "omissions": omissions,
+        "uncertainty": uncertainty,
+        "semantic_loss": semantic_loss,
+        "checks": checks,
+        "effect_receipts": effect_receipts,
+        "provenance": provenance,
+        "raw_data_local": raw_data_local,
+        "boundary": boundary,
+    })
 }
 
 #[derive(Debug, Error)]
@@ -147,7 +397,16 @@ pub enum ContractFrontierError {
 pub fn compile_adapter_capability_manifest(
     input: &AdapterContractInput,
 ) -> Result<AdapterCapabilityManifest, ContractFrontierError> {
+    compile_adapter_capability_manifest_internal(input, true)
+}
+
+fn compile_adapter_capability_manifest_internal(
+    input: &AdapterContractInput,
+    validate_output: bool,
+) -> Result<AdapterCapabilityManifest, ContractFrontierError> {
     validate_input(input)?;
+    let mut supported_versions = input.supported_contract_versions.clone();
+    supported_versions.sort();
     let mut modalities = input.modality_order.clone();
     modalities.sort();
     modalities.dedup();
@@ -160,28 +419,31 @@ pub fn compile_adapter_capability_manifest(
     let mut artifacts = input.artifact_digests.clone();
     artifacts.sort();
     artifacts.dedup();
-    let (negotiated_version, version_disposition) =
-        if input.source_contract_version == CURRENT_CONTRACT_VERSION {
-            (
-                CURRENT_CONTRACT_VERSION.into(),
-                ManifestDisposition::Accepted,
-            )
-        } else if input.source_contract_version == COMPATIBLE_CONTRACT_VERSION
-            && input
-                .supported_contract_versions
-                .iter()
-                .any(|value| value == CURRENT_CONTRACT_VERSION)
-        {
-            (
-                CURRENT_CONTRACT_VERSION.into(),
-                ManifestDisposition::Migrated,
-            )
-        } else {
-            (
-                input.source_contract_version.clone(),
-                ManifestDisposition::Incompatible,
-            )
-        };
+    let advertises_current = input
+        .supported_contract_versions
+        .iter()
+        .any(|value| value == CURRENT_CONTRACT_VERSION);
+    let (negotiated_version, version_disposition) = if !advertises_current {
+        (
+            CURRENT_CONTRACT_VERSION.into(),
+            ManifestDisposition::Incompatible,
+        )
+    } else if input.source_contract_version == CURRENT_CONTRACT_VERSION {
+        (
+            CURRENT_CONTRACT_VERSION.into(),
+            ManifestDisposition::Accepted,
+        )
+    } else if input.source_contract_version == COMPATIBLE_CONTRACT_VERSION {
+        (
+            CURRENT_CONTRACT_VERSION.into(),
+            ManifestDisposition::Migrated,
+        )
+    } else {
+        (
+            input.source_contract_version.clone(),
+            ManifestDisposition::Incompatible,
+        )
+    };
     let mut omissions = Vec::new();
     let mut uncertainty = Vec::new();
     let mut semantic_loss = Vec::new();
@@ -211,26 +473,53 @@ pub fn compile_adapter_capability_manifest(
     } else {
         version_disposition
     };
-    let mut effect_receipts = if matches!(
-        disposition,
-        ManifestDisposition::Accepted | ManifestDisposition::Migrated
-    ) {
-        vec!["exchange:permitted-capability-manifest-and-digests".into()]
-    } else {
-        vec![format!("block:manifest-exchange:{:?}", disposition).to_lowercase()]
-    };
-    effect_receipts.sort();
-    if disposition == ManifestDisposition::Incompatible {
-        effect_receipts.push("block:incompatible-contract".into());
-        effect_receipts.sort();
+    omissions.sort();
+    uncertainty.sort();
+    let effect_receipts = vec![match disposition {
+        ManifestDisposition::Accepted | ManifestDisposition::Migrated => {
+            "exchange:permitted-capability-manifest-and-digests"
+        }
+        ManifestDisposition::ApprovalRequired => "block:manifest-exchange:approval-required",
+        ManifestDisposition::Blocked => "block:manifest-exchange:blocked",
+        ManifestDisposition::Incompatible => "block:incompatible-contract",
+        ManifestDisposition::Unknown => "block:manifest-exchange:unknown",
     }
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "adapter_id": input.adapter_id, "capability_id": input.capability_id, "negotiated_version": negotiated_version, "disposition": disposition, "input_schema": input.input_schema, "output_schema": input.output_schema, "modality_order": modalities, "effect_order": effects, "permission_order": permissions, "artifact_digest_order": artifacts, "omissions": omissions, "uncertainty": uncertainty, "semantic_loss": semantic_loss, "checks": checks, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
+    .into()];
+    let provenance = manifest_provenance(&artifacts);
+    let payload = manifest_payload_from_parts(
+        RESEARCH_CONTRACT_SCHEMA_VERSION,
+        CONTRACT_VERSION,
+        FEATURE_ID,
+        &input.adapter_id,
+        &input.capability_id,
+        &input.source_contract_version,
+        &supported_versions,
+        input.policy_allow,
+        input.protected_closure,
+        &negotiated_version,
+        disposition,
+        &input.input_schema,
+        &input.output_schema,
+        &input.comparability_profile,
+        &modalities,
+        &effects,
+        &permissions,
+        &artifacts,
+        &omissions,
+        &uncertainty,
+        &semantic_loss,
+        &checks,
+        &effect_receipts,
+        &provenance,
+        true,
+        PRECLINICAL_BOUNDARY,
+    );
     let artifact = TypedResearchArtifact::from_payload(
         format!("adapter-capability-manifest:{}", input.adapter_id),
         "application/vnd.aurora.adapter-capability-manifest+json",
         &payload,
-        Vec::new(),
-        Vec::new(),
+        typed_semantic_loss(&semantic_loss),
+        provenance,
     )
     .map_err(|error| ContractFrontierError::Contract(error.to_string()))?;
     let result = AdapterCapabilityManifest {
@@ -239,10 +528,15 @@ pub fn compile_adapter_capability_manifest(
         feature_id: FEATURE_ID.into(),
         adapter_id: input.adapter_id.clone(),
         capability_id: input.capability_id.clone(),
+        source_contract_version: input.source_contract_version.clone(),
+        supported_contract_versions: supported_versions,
+        policy_allow: input.policy_allow,
+        protected_closure: input.protected_closure,
         negotiated_version,
         disposition,
         input_schema: input.input_schema.clone(),
         output_schema: input.output_schema.clone(),
+        comparability_profile: input.comparability_profile.clone(),
         modality_order: modalities,
         effect_order: effects,
         permission_order: permissions,
@@ -256,7 +550,9 @@ pub fn compile_adapter_capability_manifest(
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
-    result.validate()?;
+    if validate_output {
+        result.validate()?;
+    }
     Ok(result)
 }
 
@@ -273,17 +569,64 @@ fn validate_input(input: &AdapterContractInput) -> Result<(), ContractFrontierEr
         || !input.raw_data_local
         || input.boundary != PRECLINICAL_BOUNDARY
     {
-        return Err(ContractFrontierError::InvalidRequest("adapter, capability, versions, schemas, modalities, artifacts, comparability, locality, and boundary are required".into()));
+        return Err(ContractFrontierError::InvalidRequest(
+            "adapter, capability, versions, schemas, modalities, artifacts, comparability, locality, and boundary are required".into(),
+        ));
     }
-    if input
-        .modality_order
+    for (field, value) in [
+        ("adapter_id", input.adapter_id.as_str()),
+        ("capability_id", input.capability_id.as_str()),
+        (
+            "source_contract_version",
+            input.source_contract_version.as_str(),
+        ),
+        ("input_schema", input.input_schema.as_str()),
+        ("output_schema", input.output_schema.as_str()),
+        (
+            "comparability_profile",
+            input.comparability_profile.as_str(),
+        ),
+        ("boundary", input.boundary.as_str()),
+    ] {
+        validate_text(field, value)?;
+    }
+    validate_input_strings(
+        "supported_contract_versions",
+        &input.supported_contract_versions,
+        MAX_VERSIONS,
+    )?;
+    if !input
+        .supported_contract_versions
         .iter()
-        .chain(input.effects.iter())
-        .chain(input.permissions.iter())
-        .any(|value| value.trim().is_empty())
+        .any(|value| value == &input.source_contract_version)
     {
         return Err(ContractFrontierError::InvalidRequest(
-            "contract names cannot be empty".into(),
+            "supported versions must include the source contract version".into(),
+        ));
+    }
+    for (field, values) in [
+        ("modality_order", &input.modality_order),
+        ("effects", &input.effects),
+        ("permissions", &input.permissions),
+    ] {
+        validate_input_strings(field, values, MAX_ITEMS)?;
+    }
+    if input.artifact_digests.len() > MAX_ITEMS
+        || input
+            .artifact_digests
+            .iter()
+            .any(|digest| *digest == ContentHash::of_bytes(b""))
+    {
+        return Err(ContractFrontierError::InvalidRequest(
+            "artifact digests are outside their bounded contract".into(),
+        ));
+    }
+    let mut digests = input.artifact_digests.clone();
+    digests.sort();
+    digests.dedup();
+    if digests.len() != input.artifact_digests.len() {
+        return Err(ContractFrontierError::InvalidRequest(
+            "artifact digests cannot contain duplicates".into(),
         ));
     }
     Ok(())
@@ -325,9 +668,10 @@ mod tests {
     fn legacy_contract_requires_migration_loss() {
         let mut input = input();
         input.source_contract_version = COMPATIBLE_CONTRACT_VERSION.into();
-        input
-            .supported_contract_versions
-            .push(CURRENT_CONTRACT_VERSION.into());
+        input.supported_contract_versions = vec![
+            COMPATIBLE_CONTRACT_VERSION.into(),
+            CURRENT_CONTRACT_VERSION.into(),
+        ];
         let result = compile_adapter_capability_manifest(&input).unwrap();
         assert_eq!(result.disposition, ManifestDisposition::Migrated);
         assert!(!result.semantic_loss.is_empty());
@@ -352,5 +696,73 @@ mod tests {
         input.policy_allow = false;
         let result = compile_adapter_capability_manifest(&input).unwrap();
         assert_eq!(result.disposition, ManifestDisposition::Blocked);
+    }
+
+    #[test]
+    fn unsupported_version_has_one_terminal_block_effect() {
+        let mut value = input();
+        value.source_contract_version = "3.0.0".into();
+        value.supported_contract_versions = vec!["3.0.0".into()];
+        let result = compile_adapter_capability_manifest(&value).unwrap();
+        assert_eq!(result.disposition, ManifestDisposition::Incompatible);
+        assert_eq!(result.effect_receipts, vec!["block:incompatible-contract"]);
+    }
+
+    #[test]
+    fn comparability_profile_is_preserved_in_the_manifest() {
+        let result = compile_adapter_capability_manifest(&input()).unwrap();
+        assert_eq!(result.comparability_profile, "explicit-multimodal-v1");
+    }
+
+    #[test]
+    fn duplicate_contract_declaration_is_rejected() {
+        let mut value = input();
+        value.effects.push(value.effects[0].clone());
+        assert!(compile_adapter_capability_manifest(&value).is_err());
+    }
+
+    #[test]
+    fn empty_artifact_digest_is_rejected() {
+        let mut value = input();
+        value.artifact_digests[0] = ContentHash::of_bytes(b"");
+        assert!(compile_adapter_capability_manifest(&value).is_err());
+    }
+
+    #[test]
+    fn forged_manifest_effect_is_rejected() {
+        let mut manifest = compile_adapter_capability_manifest(&input()).unwrap();
+        manifest.effect_receipts = vec!["block:incompatible-contract".into()];
+        assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn forged_policy_state_is_rejected() {
+        let mut manifest = compile_adapter_capability_manifest(&input()).unwrap();
+        manifest.policy_allow = false;
+        assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn manifest_artifact_provenance_tampering_is_rejected() {
+        let mut manifest = compile_adapter_capability_manifest(&input()).unwrap();
+        manifest.artifact.provenance[0].digest = ContentHash::of_bytes(b"tampered");
+        assert!(manifest.validate().is_err());
+    }
+
+    #[test]
+    fn contract_declaration_order_is_canonicalized() {
+        let mut canonical_input = input();
+        canonical_input.supported_contract_versions = vec![
+            COMPATIBLE_CONTRACT_VERSION.into(),
+            CURRENT_CONTRACT_VERSION.into(),
+        ];
+        let mut reordered = input();
+        reordered.supported_contract_versions = vec![
+            CURRENT_CONTRACT_VERSION.into(),
+            COMPATIBLE_CONTRACT_VERSION.into(),
+        ];
+        let canonical = compile_adapter_capability_manifest(&canonical_input).unwrap();
+        let reordered = compile_adapter_capability_manifest(&reordered).unwrap();
+        assert_eq!(canonical.digest().unwrap(), reordered.digest().unwrap());
     }
 }

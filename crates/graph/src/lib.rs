@@ -71,7 +71,6 @@
 //! - **Deep links, saved views, receipts.** 42.25 and 42.26 are hub surface, not projection data.
 //! - **Amendment and supersession edges.** See [`vocabulary`].
 
-pub mod computational_execution_gateway;
 pub mod error;
 pub mod factors;
 pub mod fidelity;
@@ -79,16 +78,6 @@ pub mod graph;
 pub mod hypergraph;
 pub mod identity;
 pub mod lint;
-
-pub use computational_execution_gateway::{
-    admit as admit_computational_execution,
-    capability_manifest as computational_execution_capability_manifest, ExecutionNode,
-    ExecutionRun, GatewayError, ResearchWorkflowSpec,
-    CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
-    FEATURE_ID as COMPUTATIONAL_EXECUTION_FEATURE_ID,
-    INPUT_SCHEMA as COMPUTATIONAL_EXECUTION_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as COMPUTATIONAL_EXECUTION_OUTPUT_SCHEMA,
-};
 pub mod markers;
 pub mod provenance;
 pub mod roundtrip;
@@ -96,6 +85,23 @@ pub mod table;
 pub mod timeline;
 pub mod view;
 pub mod vocabulary;
+pub mod projection_integrity_support;
+pub mod local_projection_integrity_inference;
+pub mod multimodal_projection_integrity_inference;
+pub mod throughput_projection_integrity_inference;
+pub mod federated_continual_projection_integrity_inference;
+pub mod local_projection_integrity_contract_model;
+pub mod multimodal_projection_integrity_contract_model;
+pub mod throughput_projection_integrity_contract_model;
+pub mod federated_continual_projection_integrity_contract_model;
+pub mod local_projection_integrity_research_copilot;
+pub mod multimodal_projection_integrity_research_copilot;
+pub mod throughput_projection_integrity_research_copilot;
+pub mod federated_continual_projection_integrity_research_copilot;
+pub mod local_projection_integrity_workflow_fabric;
+pub mod multimodal_projection_integrity_workflow_fabric;
+pub mod throughput_projection_integrity_workflow_fabric;
+pub mod federated_continual_projection_integrity_workflow_fabric;
 
 pub use error::ProjectionError;
 pub use factors::{selected_factors, SelectedFactor};
@@ -119,3 +125,20 @@ pub use timeline::{
 };
 pub use view::{ProjectedBody, Projection, ProjectionKind, View};
 pub use vocabulary::{EdgeType, NodeKind, NodeStatus};
+pub use projection_integrity_support::*;
+pub use local_projection_integrity_inference::*;
+pub use multimodal_projection_integrity_inference::*;
+pub use throughput_projection_integrity_inference::*;
+pub use federated_continual_projection_integrity_inference::*;
+pub use local_projection_integrity_contract_model::*;
+pub use multimodal_projection_integrity_contract_model::*;
+pub use throughput_projection_integrity_contract_model::*;
+pub use federated_continual_projection_integrity_contract_model::*;
+pub use local_projection_integrity_research_copilot::*;
+pub use multimodal_projection_integrity_research_copilot::*;
+pub use throughput_projection_integrity_research_copilot::*;
+pub use federated_continual_projection_integrity_research_copilot::*;
+pub use local_projection_integrity_workflow_fabric::*;
+pub use multimodal_projection_integrity_workflow_fabric::*;
+pub use throughput_projection_integrity_workflow_fabric::*;
+pub use federated_continual_projection_integrity_workflow_fabric::*;

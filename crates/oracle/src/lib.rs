@@ -76,6 +76,9 @@ pub mod oracle;
 pub mod oracles;
 pub mod plane;
 pub mod time;
+pub mod evidence_surveillance_workflow_fabric;
+pub mod interoperability_research_workbench;
+pub mod semantic_parity_contract_model;
 
 pub use assurance::{
     operate_oracle_assurance, OracleAssuranceDisposition, OracleAssuranceError,
@@ -132,3 +135,34 @@ pub use oracles::{
 };
 pub use plane::{Determinism, Plane};
 pub use time::{UtcTimestamp, ValidityWindow};
+pub use evidence_surveillance_workflow_fabric::{
+    schedule_evidence_surveillance, evidence_surveillance_workflow_manifest,
+    EvidenceContribution4, EvidenceSurveillanceWorkflowRequest, EvidenceWorkflowError,
+    QualifiedEvidenceSet4,
+    CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use interoperability_research_workbench::{
+    interoperability_research_workbench_manifest, negotiate_integration,
+    negotiate_integration_json, validate_interoperability_workbench_json,
+    ExternalCapability1, ExternalCapabilityRequest1, InteroperabilityWorkbenchError,
+    NegotiatedIntegration5,
+    CONTRACT_VERSION as INTEROPERABILITY_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as INTEROPERABILITY_WORKBENCH_FEATURE_ID,
+    INPUT_SCHEMA as INTEROPERABILITY_WORKBENCH_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as INTEROPERABILITY_WORKBENCH_OUTPUT_SCHEMA,
+};
+pub use semantic_parity_contract_model::{
+    model_oracle_semantic_parity_contract,
+    oracle_semantic_parity_contract_manifest,
+    OracleParityCase,
+    OracleParityContract,
+    OracleParityDisposition,
+    OracleSemanticParityError,
+    OracleSemanticParityReceipt7,
+    CONTENT_TYPE as ORACLE_SEMANTIC_PARITY_CONTENT_TYPE,
+    CONTRACT_VERSION as ORACLE_SEMANTIC_PARITY_CONTRACT_VERSION,
+    FEATURE_ID as ORACLE_SEMANTIC_PARITY_FEATURE_ID,
+    INPUT_SCHEMA as ORACLE_SEMANTIC_PARITY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as ORACLE_SEMANTIC_PARITY_OUTPUT_SCHEMA,
+};

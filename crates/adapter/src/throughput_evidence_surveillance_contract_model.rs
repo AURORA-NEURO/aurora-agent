@@ -19,6 +19,8 @@ pub const FEATURE_ID: &str = "AFA-adapter-P01-F07";
 pub const CONTRACT_VERSION: &str = "adapter-throughput-evidence-surveillance-contract-model/1.0";
 pub const INPUT_SCHEMA: &str = "EvidenceFeed3@1";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet2@1";
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_ITEMS: usize = 16_384;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThroughputContractClaim {
@@ -72,14 +74,22 @@ pub struct ThroughputEvidenceSurveillanceContractReceipt {
     pub schema_version: String,
     pub contract_version: String,
     pub feature_id: String,
+    pub input: ThroughputEvidenceSurveillanceContractRequest,
+    pub input_digest: ContentHash,
     pub request_id: String,
     pub input_schema: String,
     pub output_schema: String,
     pub batch_id: String,
     pub checkpoint_seq: u64,
+    pub previous_checkpoint: Option<ContentHash>,
+    pub max_claims: usize,
+    pub budget_units: usize,
     pub compatibility: ThroughputContractCompatibility,
+    pub policy_allow: bool,
+    pub protected_closure: bool,
     pub disposition: ThroughputContractDisposition,
     pub candidate_order: Vec<String>,
+    pub sequence_order: Vec<String>,
     pub retained_order: Vec<String>,
     pub unknown_order: Vec<String>,
     pub denied_order: Vec<String>,
@@ -105,8 +115,95 @@ pub enum ThroughputEvidenceSurveillanceContractError {
     #[error("throughput contract artifact failed: {0}")]
     Artifact(String),
 }
-fn sorted_unique(values: &[String]) -> bool {
-    values.windows(2).all(|pair| pair[0] < pair[1])
+fn validate_text(
+    field: &str,
+    value: &str,
+) -> Result<(), ThroughputEvidenceSurveillanceContractError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+            format!("{field} must be non-empty and trimmed"),
+        ));
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+            format!("{field} is outside its bounded text contract"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_unique_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), ThroughputEvidenceSurveillanceContractError> {
+    if values.len() > MAX_ITEMS {
+        return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+            format!("{field} exceeds its item bound"),
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                format!("{field} contains duplicate values"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), ThroughputEvidenceSurveillanceContractError> {
+    validate_unique_strings(field, values)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+            format!("{field} ordering is not canonical"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_digest(
+    field: &str,
+    digest: &ContentHash,
+) -> Result<(), ThroughputEvidenceSurveillanceContractError> {
+    if digest.as_str().len() != 64
+        || !digest
+            .as_str()
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+            format!("{field} must be a 64-character hex digest"),
+        ));
+    }
+    Ok(())
+}
+
+fn canonical_throughput_evidence_surveillance_request(
+    request: &ThroughputEvidenceSurveillanceContractRequest,
+) -> ThroughputEvidenceSurveillanceContractRequest {
+    let mut canonical = request.clone();
+    canonical.claims.sort_by(|left, right| {
+        left.sequence
+            .cmp(&right.sequence)
+            .then_with(|| left.claim_id.cmp(&right.claim_id))
+    });
+    canonical
+}
+
+fn contract_input_digest(
+    request: &ThroughputEvidenceSurveillanceContractRequest,
+) -> Result<ContentHash, ThroughputEvidenceSurveillanceContractError> {
+    let canonical = canonical_throughput_evidence_surveillance_request(request);
+    let value = serde_json::to_value(canonical).map_err(|error| {
+        ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string())
+    })?;
+    ContentHash::of_value(&value)
+        .map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))
 }
 
 impl ThroughputEvidenceSurveillanceContractReceipt {
@@ -117,15 +214,21 @@ impl ThroughputEvidenceSurveillanceContractReceipt {
             || self.boundary != PRECLINICAL_BOUNDARY
             || !self.raw_data_local
             || self.request_id.trim().is_empty()
-            || self.input_schema != INPUT_SCHEMA
-            || self.output_schema != OUTPUT_SCHEMA
             || self.batch_id.trim().is_empty()
             || self.checkpoint_seq == 0
+            || self.max_claims == 0
+            || self.budget_units == 0
             || self.candidate_order.is_empty()
+            || self.sequence_order.is_empty()
             || self.effect_receipts.is_empty()
         {
             return Err(ThroughputEvidenceSurveillanceContractError::Invalid("throughput contract identity, schemas, checkpoint, locality, candidates, or effects are incomplete".into()));
         }
+        validate_text("request_id", &self.request_id)?;
+        validate_text("input_schema", &self.input_schema)?;
+        validate_text("output_schema", &self.output_schema)?;
+        validate_text("batch_id", &self.batch_id)?;
+        validate_text("boundary", &self.boundary)?;
         for values in [
             &self.candidate_order,
             &self.retained_order,
@@ -136,11 +239,22 @@ impl ThroughputEvidenceSurveillanceContractReceipt {
             &self.semantic_loss,
             &self.effect_receipts,
         ] {
-            if !sorted_unique(values) {
-                return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
-                    "throughput contract ordering is not canonical".into(),
-                ));
-            }
+            validate_sorted_strings("throughput contract ordering", values)?;
+        }
+        validate_unique_strings("sequence_order", &self.sequence_order)?;
+        if let Some(previous_checkpoint) = &self.previous_checkpoint {
+            validate_digest("previous_checkpoint", previous_checkpoint)?;
+        }
+        let candidate_set = self
+            .candidate_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let sequence_set = self.sequence_order.iter().cloned().collect::<BTreeSet<_>>();
+        if candidate_set != sequence_set {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "throughput sequence and candidate closures differ".into(),
+            ));
         }
         let classified = self
             .retained_order
@@ -150,9 +264,100 @@ impl ThroughputEvidenceSurveillanceContractReceipt {
             .chain(self.overflow_order.iter())
             .cloned()
             .collect::<BTreeSet<_>>();
-        if classified != self.candidate_order.iter().cloned().collect() {
+        let classified_count = self.retained_order.len()
+            + self.unknown_order.len()
+            + self.denied_order.len()
+            + self.overflow_order.len();
+        if classified != candidate_set || classified_count != self.candidate_order.len() {
             return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
                 "throughput contract states do not partition candidates".into(),
+            ));
+        }
+        let admission = self
+            .max_claims
+            .min(self.budget_units)
+            .min(self.sequence_order.len());
+        let admitted_set = self.sequence_order[..admission]
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut expected_overflow = self.sequence_order[admission..].to_vec();
+        expected_overflow.sort();
+        if self.overflow_order != expected_overflow
+            || !self
+                .retained_order
+                .iter()
+                .chain(self.unknown_order.iter())
+                .chain(self.denied_order.iter())
+                .all(|claim_id| admitted_set.contains(claim_id))
+        {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "throughput overflow does not match sequence-ordered admission".into(),
+            ));
+        }
+        let capacity_loss = format!(
+            "queue:capacity-overflow:{}",
+            self.candidate_order.len().saturating_sub(self.max_claims)
+        );
+        if (self.candidate_order.len() > self.max_claims)
+            != self.semantic_loss.contains(&capacity_loss)
+        {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "throughput capacity-loss witness does not match queue size".into(),
+            ));
+        }
+        let budget_loss = format!(
+            "queue:budget-bounded:{}",
+            self.max_claims.saturating_sub(self.budget_units)
+        );
+        if (self.budget_units < self.max_claims) != self.semantic_loss.contains(&budget_loss) {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "throughput budget-loss witness does not match admission budget".into(),
+            ));
+        }
+        for claim_id in self.unknown_order.iter().chain(self.denied_order.iter()) {
+            let state_loss = [
+                format!("claim:{claim_id}:unknown-not-asserted"),
+                format!("claim:{claim_id}:release-gate"),
+                format!("claim:{claim_id}:breaking-schema"),
+                format!("claim:{claim_id}:contradicted-retained"),
+            ];
+            if !state_loss
+                .iter()
+                .any(|loss| self.semantic_loss.contains(loss))
+            {
+                return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                    "throughput state lacks a semantic-loss witness".into(),
+                ));
+            }
+        }
+        let expected_migration =
+            if self.compatibility == ThroughputContractCompatibility::AdditiveMigration {
+                self.retained_order
+                    .iter()
+                    .map(|claim_id| format!("claim:{claim_id}:sequence-preserved"))
+                    .collect::<BTreeSet<_>>()
+            } else {
+                BTreeSet::new()
+            };
+        if self
+            .migration_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            != expected_migration
+        {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "throughput migration witnesses do not match retained sequence claims".into(),
+            ));
+        }
+        let policy_loss = "control:policy-denied".to_string();
+        let closure_loss = "control:protected-closure-incomplete".to_string();
+        if self.policy_allow == self.semantic_loss.contains(&policy_loss)
+            || self.protected_closure == self.semantic_loss.contains(&closure_loss)
+        {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "throughput control semantic-loss witnesses do not match policy closure".into(),
             ));
         }
         for digest in [
@@ -164,28 +369,210 @@ impl ThroughputEvidenceSurveillanceContractReceipt {
             &self.replay_identity,
             &self.artifact.content_hash,
         ] {
-            if digest.as_str().len() != 64 {
-                return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
-                    "throughput contract digest is invalid".into(),
-                ));
-            }
+            validate_digest("throughput contract receipt digest", digest)?;
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("read:local-throughput-contract:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_compatibility =
+            if self.input_schema == INPUT_SCHEMA && self.output_schema == OUTPUT_SCHEMA {
+                ThroughputContractCompatibility::AdditiveMigration
+            } else if self.input_schema == self.output_schema {
+                ThroughputContractCompatibility::Compatible
+            } else {
+                ThroughputContractCompatibility::Breaking
+            };
+        if self.compatibility != expected_compatibility {
             return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
-                "throughput contract effect is outside local-read gate".into(),
+                "throughput contract compatibility does not match its schema pair".into(),
             ));
         }
-        if self.disposition == ThroughputContractDisposition::Blocked
-            && self.effect_receipts != vec!["block:unsafe-release".to_string()]
+        let should_block = !self.policy_allow || !self.protected_closure || !self.raw_data_local;
+        let expected_disposition = if should_block {
+            ThroughputContractDisposition::Blocked
+        } else if self.retained_order.is_empty() {
+            ThroughputContractDisposition::Unknown
+        } else if self.compatibility == ThroughputContractCompatibility::Breaking
+            || !self.unknown_order.is_empty()
+            || !self.denied_order.is_empty()
+            || !self.overflow_order.is_empty()
+        {
+            ThroughputContractDisposition::Partial
+        } else {
+            ThroughputContractDisposition::Compatible
+        };
+        if self.disposition != expected_disposition {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "throughput contract disposition does not match queue and release state".into(),
+            ));
+        }
+        if matches!(
+            self.disposition,
+            ThroughputContractDisposition::Unknown | ThroughputContractDisposition::Blocked
+        ) && !self.retained_order.is_empty()
         {
             return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
-                "blocked throughput contract must be explicitly blocked".into(),
+                "unknown or blocked throughput contract cannot retain claims".into(),
             ));
         }
+        let expected_effect = if should_block {
+            vec!["block:unsafe-release".to_string()]
+        } else {
+            vec![format!(
+                "read:local-throughput-contract:{}",
+                self.request_id
+            )]
+        };
+        if self.effect_receipts != expected_effect {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "throughput contract effect does not match its release state".into(),
+            ));
+        }
+        let expected_queue = ContentHash::of_value(&json!({
+            "batch_id": self.batch_id,
+            "candidate_order": self.candidate_order,
+            "sequence_order": self.sequence_order,
+            "overflow_order": self.overflow_order,
+            "max_claims": self.max_claims,
+            "budget_units": self.budget_units,
+        }))
+        .map_err(|error| {
+            ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string())
+        })?;
+        if self.queue_digest != expected_queue {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "queue digest does not match sequence admission and overflow".into(),
+            ));
+        }
+        let expected_checkpoint = ContentHash::of_value(&json!({
+            "batch_id": self.batch_id,
+            "checkpoint_seq": self.checkpoint_seq,
+            "previous_checkpoint": self.previous_checkpoint,
+            "queue_digest": self.queue_digest,
+        }))
+        .map_err(|error| {
+            ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string())
+        })?;
+        if self.checkpoint_digest != expected_checkpoint {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "checkpoint digest does not match queue lineage".into(),
+            ));
+        }
+        let expected_contract = ContentHash::of_value(&json!({
+            "input_schema": self.input_schema,
+            "output_schema": self.output_schema,
+            "compatibility": self.compatibility,
+            "candidate_order": self.candidate_order,
+            "max_claims": self.max_claims,
+            "budget_units": self.budget_units,
+        }))
+        .map_err(|error| {
+            ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string())
+        })?;
+        if self.contract_digest != expected_contract {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "contract digest does not match schema and queue capacity".into(),
+            ));
+        }
+        let expected_canonical = ContentHash::of_value(&json!({
+            "retained_order": self.retained_order,
+            "unknown_order": self.unknown_order,
+            "denied_order": self.denied_order,
+            "overflow_order": self.overflow_order,
+            "migration_order": self.migration_order,
+            "semantic_loss": self.semantic_loss,
+        }))
+        .map_err(|error| {
+            ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string())
+        })?;
+        if self.canonical_digest != expected_canonical {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "canonical digest does not match queue loss state".into(),
+            ));
+        }
+        let expected_provenance = ContentHash::of_value(&json!({
+            "request_id": self.request_id,
+            "replay_identity": self.replay_identity,
+            "checkpoint_digest": self.checkpoint_digest,
+            "contract_digest": self.contract_digest,
+            "canonical_digest": self.canonical_digest,
+        }))
+        .map_err(|error| {
+            ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string())
+        })?;
+        if self.provenance_digest != expected_provenance {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "provenance digest does not match throughput contract identity".into(),
+            ));
+        }
+        if self.artifact.artifact_id
+            != format!("adapter-throughput-evidence-contract:{}", self.request_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.throughput-evidence-contract+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(ThroughputEvidenceSurveillanceContractError::Artifact(
+                "throughput contract artifact is not bound to the receipt".into(),
+            ));
+        }
+        let payload = json!({
+            "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+            "contract_version": CONTRACT_VERSION,
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "input_schema": self.input_schema,
+            "output_schema": self.output_schema,
+            "batch_id": self.batch_id,
+            "checkpoint_seq": self.checkpoint_seq,
+            "previous_checkpoint": self.previous_checkpoint,
+            "max_claims": self.max_claims,
+            "budget_units": self.budget_units,
+            "compatibility": self.compatibility,
+            "policy_allow": self.policy_allow,
+            "protected_closure": self.protected_closure,
+            "disposition": self.disposition,
+            "candidate_order": self.candidate_order,
+            "sequence_order": self.sequence_order,
+            "retained_order": self.retained_order,
+            "unknown_order": self.unknown_order,
+            "denied_order": self.denied_order,
+            "overflow_order": self.overflow_order,
+            "migration_order": self.migration_order,
+            "semantic_loss": self.semantic_loss,
+            "queue_digest": self.queue_digest,
+            "checkpoint_digest": self.checkpoint_digest,
+            "contract_digest": self.contract_digest,
+            "canonical_digest": self.canonical_digest,
+            "provenance_digest": self.provenance_digest,
+            "replay_identity": self.replay_identity,
+            "effect_receipts": self.effect_receipts,
+            "raw_data_local": self.raw_data_local,
+            "boundary": PRECLINICAL_BOUNDARY,
+        });
+        self.artifact.verify_payload(&payload).map_err(|error| {
+            ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string())
+        })?;
         self.artifact.validate_metadata().map_err(|error| {
+            ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string())
+        })?;
+        if self.input_digest != contract_input_digest(&self.input)? {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "throughput contract retained input digest mismatch".into(),
+            ));
+        }
+        let expected = build_throughput_evidence_surveillance_contract(&self.input)?;
+        if self != &expected {
+            return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+                "throughput contract receipt does not match its retained input".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn digest(&self) -> Result<ContentHash, ThroughputEvidenceSurveillanceContractError> {
+        self.validate()?;
+        let value = serde_json::to_value(self).map_err(|error| {
+            ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string())
+        })?;
+        ContentHash::of_value(&value).map_err(|error| {
             ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string())
         })
     }
@@ -201,6 +588,17 @@ pub fn model_throughput_evidence_surveillance_contract(
     ThroughputEvidenceSurveillanceContractReceipt,
     ThroughputEvidenceSurveillanceContractError,
 > {
+    let receipt = build_throughput_evidence_surveillance_contract(request)?;
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+fn build_throughput_evidence_surveillance_contract(
+    request: &ThroughputEvidenceSurveillanceContractRequest,
+) -> Result<
+    ThroughputEvidenceSurveillanceContractReceipt,
+    ThroughputEvidenceSurveillanceContractError,
+> {
     if request.request_id.trim().is_empty()
         || request.input_schema.trim().is_empty()
         || request.output_schema.trim().is_empty()
@@ -208,12 +606,33 @@ pub fn model_throughput_evidence_surveillance_contract(
         || request.checkpoint_seq == 0
         || request.max_claims == 0
         || request.budget_units == 0
+        || request.max_claims > MAX_ITEMS
+        || request.budget_units > MAX_ITEMS
         || request.claims.is_empty()
         || request.replay_identity.as_str().len() != 64
         || request.boundary != PRECLINICAL_BOUNDARY
         || !request.raw_data_local
     {
         return Err(ThroughputEvidenceSurveillanceContractError::Invalid("throughput contract identity, schemas, batch/checkpoint, capacity, budget, claims, replay, locality, or boundary is invalid".into()));
+    }
+    validate_text("request_id", &request.request_id)?;
+    validate_text("input_schema", &request.input_schema)?;
+    validate_text("output_schema", &request.output_schema)?;
+    validate_text("batch_id", &request.batch_id)?;
+    validate_text("boundary", &request.boundary)?;
+    validate_digest("replay_identity", &request.replay_identity)?;
+    if let Some(previous_checkpoint) = &request.previous_checkpoint {
+        validate_digest("previous_checkpoint", previous_checkpoint)?;
+    }
+    if request.claims.len() > MAX_ITEMS {
+        return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
+            "claims exceeds its item bound".into(),
+        ));
+    }
+    for claim in &request.claims {
+        validate_text("claim.claim_id", &claim.claim_id)?;
+        validate_text("claim.semantic_type", &claim.semantic_type)?;
+        validate_digest("claim.value_digest", &claim.value_digest)?;
     }
     let mut claims = request.claims.clone();
     claims.sort_by(|left, right| {
@@ -226,10 +645,12 @@ pub fn model_throughput_evidence_surveillance_contract(
         .map(|claim| claim.claim_id.clone())
         .collect::<Vec<_>>();
     if claim_ids.windows(2).any(|pair| pair[0] == pair[1])
-        || claim_ids.iter().any(|value| value.trim().is_empty())
+        || claims
+            .windows(2)
+            .any(|pair| pair[0].sequence == pair[1].sequence)
     {
         return Err(ThroughputEvidenceSurveillanceContractError::Invalid(
-            "throughput claim identities must be unique and non-empty".into(),
+            "throughput claim identities and sequence numbers must be unique".into(),
         ));
     }
     let compatibility =
@@ -245,6 +666,7 @@ pub fn model_throughput_evidence_surveillance_contract(
         .min(request.budget_units)
         .min(claims.len());
     let (admitted, overflow) = claims.split_at(admission);
+    let sequence_order = claim_ids.clone();
     let mut candidate_order = claim_ids.clone();
     candidate_order.sort();
     let overflow_order = overflow
@@ -256,6 +678,8 @@ pub fn model_throughput_evidence_surveillance_contract(
     let mut denied = BTreeSet::new();
     let mut migration = BTreeSet::new();
     let mut loss = BTreeSet::new();
+    let global_release_blocked =
+        !request.policy_allow || !request.protected_closure || !request.raw_data_local;
     if claims.len() > request.max_claims {
         loss.insert(format!(
             "queue:capacity-overflow:{}",
@@ -269,7 +693,10 @@ pub fn model_throughput_evidence_surveillance_contract(
         ));
     }
     for claim in admitted {
-        if compatibility == ThroughputContractCompatibility::Breaking {
+        if global_release_blocked {
+            denied.insert(claim.claim_id.clone());
+            loss.insert(format!("claim:{}:release-gate", claim.claim_id));
+        } else if compatibility == ThroughputContractCompatibility::Breaking {
             denied.insert(claim.claim_id.clone());
             loss.insert(format!("claim:{}:breaking-schema", claim.claim_id));
         } else if claim.omitted
@@ -299,48 +726,141 @@ pub fn model_throughput_evidence_surveillance_contract(
     if !request.protected_closure {
         loss.insert("control:protected-closure-incomplete".into());
     }
-    let disposition =
-        if !request.policy_allow || !request.protected_closure || !request.raw_data_local {
-            ThroughputContractDisposition::Blocked
-        } else if retained.is_empty() {
-            ThroughputContractDisposition::Unknown
-        } else if !unknown.is_empty() || !denied.is_empty() || !overflow_order.is_empty() {
-            ThroughputContractDisposition::Partial
-        } else {
-            ThroughputContractDisposition::Compatible
-        };
+    let disposition = if global_release_blocked {
+        ThroughputContractDisposition::Blocked
+    } else if retained.is_empty() {
+        ThroughputContractDisposition::Unknown
+    } else if compatibility == ThroughputContractCompatibility::Breaking
+        || !unknown.is_empty()
+        || !denied.is_empty()
+        || !overflow_order.is_empty()
+    {
+        ThroughputContractDisposition::Partial
+    } else {
+        ThroughputContractDisposition::Compatible
+    };
     let retained_order = retained.iter().cloned().collect::<Vec<_>>();
     let unknown_order = unknown.iter().cloned().collect::<Vec<_>>();
     let denied_order = denied.iter().cloned().collect::<Vec<_>>();
     let overflow_order = overflow_order.into_iter().collect::<Vec<_>>();
     let migration_order = migration.iter().cloned().collect::<Vec<_>>();
     let semantic_loss = loss.iter().cloned().collect::<Vec<_>>();
-    let queue_digest = ContentHash::of_value(&json!({"batch_id": request.batch_id, "candidate_order": candidate_order.clone(), "overflow_order": overflow_order.clone()})).map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
-    let checkpoint_digest = ContentHash::of_value(&json!({"batch_id": request.batch_id, "checkpoint_seq": request.checkpoint_seq, "previous_checkpoint": request.previous_checkpoint, "queue_digest": queue_digest})).map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
-    let contract_digest = ContentHash::of_value(&json!({"input_schema": request.input_schema, "output_schema": request.output_schema, "compatibility": compatibility, "candidate_order": candidate_order.clone()})).map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
-    let canonical_digest = ContentHash::of_value(&json!({"retained_order": retained_order.clone(), "unknown_order": unknown_order.clone(), "denied_order": denied_order.clone(), "overflow_order": overflow_order.clone(), "migration_order": migration_order.clone(), "semantic_loss": semantic_loss.clone()})).map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
-    let provenance_digest = ContentHash::of_value(&json!({"request_id": request.request_id, "replay_identity": request.replay_identity, "checkpoint_digest": checkpoint_digest, "contract_digest": contract_digest})).map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "input_schema": request.input_schema, "output_schema": request.output_schema, "batch_id": request.batch_id, "checkpoint_seq": request.checkpoint_seq, "compatibility": compatibility, "disposition": disposition, "candidate_order": candidate_order, "retained_order": retained_order, "unknown_order": unknown_order, "denied_order": denied_order, "overflow_order": overflow_order, "migration_order": migration_order, "semantic_loss": semantic_loss, "queue_digest": queue_digest, "checkpoint_digest": checkpoint_digest, "contract_digest": contract_digest, "canonical_digest": canonical_digest, "provenance_digest": provenance_digest, "replay_identity": request.replay_identity, "raw_data_local": request.raw_data_local, "boundary": PRECLINICAL_BOUNDARY});
+    let queue_digest = ContentHash::of_value(&json!({
+        "batch_id": request.batch_id,
+        "candidate_order": candidate_order.clone(),
+        "sequence_order": sequence_order.clone(),
+        "overflow_order": overflow_order.clone(),
+        "max_claims": request.max_claims,
+        "budget_units": request.budget_units,
+    }))
+    .map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
+    let checkpoint_digest = ContentHash::of_value(&json!({
+        "batch_id": request.batch_id,
+        "checkpoint_seq": request.checkpoint_seq,
+        "previous_checkpoint": request.previous_checkpoint,
+        "queue_digest": queue_digest,
+    }))
+    .map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
+    let contract_digest = ContentHash::of_value(&json!({
+        "input_schema": request.input_schema,
+        "output_schema": request.output_schema,
+        "compatibility": compatibility,
+        "candidate_order": candidate_order.clone(),
+        "max_claims": request.max_claims,
+        "budget_units": request.budget_units,
+    }))
+    .map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
+    let canonical_digest = ContentHash::of_value(&json!({
+        "retained_order": retained_order.clone(),
+        "unknown_order": unknown_order.clone(),
+        "denied_order": denied_order.clone(),
+        "overflow_order": overflow_order.clone(),
+        "migration_order": migration_order.clone(),
+        "semantic_loss": semantic_loss.clone(),
+    }))
+    .map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
+    let provenance_digest = ContentHash::of_value(&json!({
+        "request_id": request.request_id,
+        "replay_identity": request.replay_identity,
+        "checkpoint_digest": checkpoint_digest,
+        "contract_digest": contract_digest,
+        "canonical_digest": canonical_digest,
+    }))
+    .map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
+    let effect_receipts = if disposition == ThroughputContractDisposition::Blocked {
+        vec!["block:unsafe-release".into()]
+    } else {
+        vec![format!(
+            "read:local-throughput-contract:{}",
+            request.request_id
+        )]
+    };
+    let payload = json!({
+        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "feature_id": FEATURE_ID,
+        "request_id": request.request_id,
+        "input_schema": request.input_schema,
+        "output_schema": request.output_schema,
+        "batch_id": request.batch_id,
+        "checkpoint_seq": request.checkpoint_seq,
+        "previous_checkpoint": request.previous_checkpoint,
+        "max_claims": request.max_claims,
+        "budget_units": request.budget_units,
+        "compatibility": compatibility,
+        "policy_allow": request.policy_allow,
+        "protected_closure": request.protected_closure,
+        "disposition": disposition,
+        "candidate_order": candidate_order,
+        "sequence_order": sequence_order,
+        "retained_order": retained_order,
+        "unknown_order": unknown_order,
+        "denied_order": denied_order,
+        "overflow_order": overflow_order,
+        "migration_order": migration_order,
+        "semantic_loss": semantic_loss,
+        "queue_digest": queue_digest,
+        "checkpoint_digest": checkpoint_digest,
+        "contract_digest": contract_digest,
+        "canonical_digest": canonical_digest,
+        "provenance_digest": provenance_digest,
+        "replay_identity": request.replay_identity,
+        "effect_receipts": effect_receipts,
+        "raw_data_local": request.raw_data_local,
+        "boundary": PRECLINICAL_BOUNDARY,
+    });
     let artifact = TypedResearchArtifact::from_payload(
-        format!("adapter-throughput-contract:{}", request.request_id),
-        "application/vnd.aurora.qualified-throughput-evidence-set+json",
+        format!(
+            "adapter-throughput-evidence-contract:{}",
+            request.request_id
+        ),
+        "application/vnd.aurora.throughput-evidence-contract+json",
         &payload,
         Vec::new(),
         Vec::new(),
     )
     .map_err(|error| ThroughputEvidenceSurveillanceContractError::Artifact(error.to_string()))?;
+    let canonical_request = canonical_throughput_evidence_surveillance_request(request);
     let receipt = ThroughputEvidenceSurveillanceContractReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
+        input: canonical_request,
+        input_digest: contract_input_digest(request)?,
         request_id: request.request_id.clone(),
-        input_schema: INPUT_SCHEMA.into(),
-        output_schema: OUTPUT_SCHEMA.into(),
+        input_schema: request.input_schema.clone(),
+        output_schema: request.output_schema.clone(),
         batch_id: request.batch_id.clone(),
         checkpoint_seq: request.checkpoint_seq,
+        previous_checkpoint: request.previous_checkpoint.clone(),
+        max_claims: request.max_claims,
+        budget_units: request.budget_units,
         compatibility,
+        policy_allow: request.policy_allow,
+        protected_closure: request.protected_closure,
         disposition,
         candidate_order,
+        sequence_order,
         retained_order,
         unknown_order,
         denied_order,
@@ -353,19 +873,11 @@ pub fn model_throughput_evidence_surveillance_contract(
         canonical_digest,
         provenance_digest,
         replay_identity: request.replay_identity.clone(),
-        effect_receipts: if disposition == ThroughputContractDisposition::Blocked {
-            vec!["block:unsafe-release".into()]
-        } else {
-            vec![format!(
-                "read:local-throughput-contract:{}",
-                request.request_id
-            )]
-        },
+        effect_receipts,
         artifact,
         raw_data_local: request.raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
-    receipt.validate()?;
     Ok(receipt)
 }
 
@@ -455,17 +967,72 @@ mod tests {
     fn policy_blocks() {
         let mut value = request();
         value.policy_allow = false;
+        let receipt = model_throughput_evidence_surveillance_contract(&value).unwrap();
+        assert_eq!(receipt.effect_receipts, vec!["block:unsafe-release"]);
+        assert!(receipt.retained_order.is_empty());
+        assert_eq!(receipt.disposition, ThroughputContractDisposition::Blocked);
+    }
+    #[test]
+    fn sequence_order_drives_overflow() {
+        let mut value = request();
+        value.claims[0].sequence = 4;
+        value.claims[1].sequence = 1;
+        value.max_claims = 1;
+        let receipt = model_throughput_evidence_surveillance_contract(&value).unwrap();
+        assert_eq!(receipt.sequence_order, vec!["claim:b", "claim:a"]);
+        assert_eq!(receipt.overflow_order, vec!["claim:a"]);
+    }
+    #[test]
+    fn duplicate_sequence_is_rejected() {
+        let mut value = request();
+        value.claims[1].sequence = value.claims[0].sequence;
+        assert!(model_throughput_evidence_surveillance_contract(&value).is_err());
+    }
+    #[test]
+    fn breaking_schema_preserves_requested_pair() {
+        let mut value = request();
+        value.input_schema = "EvidenceFeed9@1".into();
+        let receipt = model_throughput_evidence_surveillance_contract(&value).unwrap();
+        assert_eq!(receipt.input_schema, "EvidenceFeed9@1");
         assert_eq!(
-            model_throughput_evidence_surveillance_contract(&value)
-                .unwrap()
-                .effect_receipts,
-            vec!["block:unsafe-release"]
+            receipt.compatibility,
+            ThroughputContractCompatibility::Breaking
         );
+    }
+    #[test]
+    fn tampered_queue_digest_is_rejected() {
+        let mut receipt = model_throughput_evidence_surveillance_contract(&request()).unwrap();
+        receipt.queue_digest = hash("tampered-queue");
+        assert!(receipt.validate().is_err());
+    }
+    #[test]
+    fn tampered_artifact_payload_is_rejected() {
+        let mut receipt = model_throughput_evidence_surveillance_contract(&request()).unwrap();
+        receipt.artifact.content_hash = hash("tampered-payload");
+        assert!(receipt.validate().is_err());
     }
     #[test]
     fn checkpoint_is_stable() {
         let first = model_throughput_evidence_surveillance_contract(&request()).unwrap();
         let second = model_throughput_evidence_surveillance_contract(&request()).unwrap();
         assert_eq!(first.checkpoint_digest, second.checkpoint_digest);
+    }
+
+    #[test]
+    fn reordered_arrivals_share_the_same_retained_input_identity() {
+        let mut reordered = request();
+        reordered.claims.reverse();
+        let first = model_throughput_evidence_surveillance_contract(&request()).unwrap();
+        let second = model_throughput_evidence_surveillance_contract(&reordered).unwrap();
+        assert_eq!(first.input_digest, second.input_digest);
+        assert_eq!(first.digest().unwrap(), second.digest().unwrap());
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_retained_claim() {
+        let mut receipt = model_throughput_evidence_surveillance_contract(&request()).unwrap();
+        receipt.input.claims[0].sequence = 99;
+        let error = receipt.validate().unwrap_err();
+        assert!(error.to_string().contains("retained input digest mismatch"));
     }
 }

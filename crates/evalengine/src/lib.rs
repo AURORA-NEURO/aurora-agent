@@ -43,6 +43,8 @@ pub mod cluster;
 pub mod error;
 pub mod evaluation_observability;
 pub mod federated_evaluation;
+pub mod federated_protocol_simulation_copilot;
+pub mod local_mechanism_exploration_assurance;
 pub mod ladder;
 pub mod multimodal_replication;
 pub mod posterior;
@@ -76,6 +78,25 @@ pub use federated_evaluation::{
     FederatedEvaluationSite, FederatedEvaluationSiteDisposition, FederatedEvaluationSiteEntry,
     FEATURE_ID as FEDERATED_EVALUATION_FEATURE_ID,
     FEATURE_VERSION as FEDERATED_EVALUATION_FEATURE_VERSION,
+};
+pub use federated_protocol_simulation_copilot::{
+    assure_evalengine_protocol, assure_evalengine_protocol_json,
+    evalengine_protocol_simulation_copilot_manifest, EvalenginePeerProtocolSummary,
+    EvalengineProtocolDraft, EvalengineProtocolSimulationCopilotError,
+    EvalengineProtocolSimulationReport,
+    CONTRACT_VERSION as EVALENGINE_PROTOCOL_SIMULATION_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as EVALENGINE_PROTOCOL_SIMULATION_COPILOT_FEATURE_ID,
+    INPUT_SCHEMA as EVALENGINE_PROTOCOL_SIMULATION_COPILOT_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EVALENGINE_PROTOCOL_SIMULATION_COPILOT_OUTPUT_SCHEMA,
+};
+pub use local_mechanism_exploration_assurance::{
+    assure_evalengine_local_mechanism_exploration,
+    evalengine_local_mechanism_exploration_assurance_manifest,
+    EvalengineAssuranceDisposition, EvalengineCandidateState,
+    EvalengineMechanismCandidate, EvalengineMechanismExplorationAssuranceError,
+    EvalengineMechanismPortfolio7, EvalengineMechanismQuestion1,
+    CONTRACT_VERSION as EVALENGINE_LOCAL_MECHANISM_EXPLORATION_CONTRACT_VERSION,
+    FEATURE_ID as EVALENGINE_LOCAL_MECHANISM_EXPLORATION_FEATURE_ID,
 };
 pub use ladder::{
     compose, Contribution, Detail, Disagreement, EvidenceRef, ScoreTier, ScoredResult,

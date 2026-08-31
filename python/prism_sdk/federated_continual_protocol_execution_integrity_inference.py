@@ -1,0 +1,6 @@
+"""Choreography P32 federated_continual inference protocol-compilation integrity feature."""
+from .protocol_execution_integrity_support import ProtocolExecutionCard7,ProtocolExecutionRequest4,ProtocolExecutionIntegrityError,manifest,execute
+FEATURE_ID="AFA-choreography-P32-F04";CONTRACT_VERSION="choreography-federated_continual_protocol_execution_integrity_inference/1.0"
+def federated_continual_protocol_execution_integrity_inference_manifest():return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated_continual",mode="inference")
+def execute_federated_continual_protocol_execution_integrity_inference(request:ProtocolExecutionRequest4)->ProtocolExecutionCard7:return execute(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated_continual",mode="inference")
+__all__=["FEATURE_ID","CONTRACT_VERSION","federated_continual_protocol_execution_integrity_inference_manifest","execute_federated_continual_protocol_execution_integrity_inference"]

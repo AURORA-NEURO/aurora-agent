@@ -133,7 +133,13 @@ pub struct UnmetGate {
 
 impl fmt::Display for UnmetGate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} [{}]: {}", self.gate, self.gate.source(), self.because)?;
+        write!(
+            f,
+            "{} [{}]: {}",
+            self.gate,
+            self.gate.source(),
+            self.because
+        )?;
         for item in &self.evidence {
             write!(f, "\n    - {item}")?;
         }

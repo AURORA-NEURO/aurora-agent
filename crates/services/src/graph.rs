@@ -224,6 +224,12 @@ pub struct ServiceNode {
 /// Everything wrong with a graph, as a type.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GraphError {
+    #[error("service id {service:?} is empty or contains a control character")]
+    InvalidServiceId { service: ServiceId },
+
+    #[error("service id {service} appears more than once in the graph")]
+    DuplicateService { service: ServiceId },
+
     #[error("{edge} names {missing}, which is not a service in this graph")]
     UnknownService { edge: String, missing: ServiceId },
 
@@ -306,6 +312,7 @@ impl ServiceGraph {
     /// three separate conversations, and reporting one at a time turns a review into a queue.
     pub fn audit(&self) -> Vec<GraphError> {
         let mut findings = Vec::new();
+        findings.extend(self.audit_nodes());
         findings.extend(self.audit_edges());
         findings.extend(self.cycles());
         findings.extend(self.audit_ownership());
@@ -318,6 +325,25 @@ impl ServiceGraph {
             Some(error) => Err(error),
             None => Ok(()),
         }
+    }
+
+    fn audit_nodes(&self) -> Vec<GraphError> {
+        let mut findings = Vec::new();
+        let mut ids = BTreeSet::new();
+        for node in &self.nodes {
+            if node.id.as_str().trim().is_empty() || node.id.as_str().chars().any(char::is_control)
+            {
+                findings.push(GraphError::InvalidServiceId {
+                    service: node.id.clone(),
+                });
+            }
+            if !ids.insert(node.id.clone()) {
+                findings.push(GraphError::DuplicateService {
+                    service: node.id.clone(),
+                });
+            }
+        }
+        findings
     }
 
     fn audit_edges(&self) -> Vec<GraphError> {
@@ -738,6 +764,28 @@ mod tests {
             graph.audit().as_slice(),
             [GraphError::UnknownService { .. }]
         ));
+    }
+
+    #[test]
+    fn duplicate_and_blank_service_ids_are_rejected_before_edge_analysis() {
+        let graph = ServiceGraph::new(
+            vec![
+                node("duplicate", Domain::Context),
+                node("duplicate", Domain::World),
+                node("\t", Domain::Runtime),
+            ],
+            Vec::new(),
+            table(),
+        );
+        let findings = graph.audit();
+        assert!(findings.iter().any(|finding| matches!(
+            finding,
+            GraphError::DuplicateService { service } if service.as_str() == "duplicate"
+        )));
+        assert!(findings.iter().any(|finding| matches!(
+            finding,
+            GraphError::InvalidServiceId { service } if service.as_str() == "\t"
+        )));
     }
 
     #[test]

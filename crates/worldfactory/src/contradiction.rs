@@ -189,7 +189,10 @@ pub enum ReadingValue {
     /// uncertainty ranges intersect have not contradicted each other, and 27.14's failure
     /// "uncertainty not represented" is exactly the mistake of comparing point estimates and
     /// manufacturing a disagreement out of precision the measurements never had.
-    Interval { low: i64, high: i64 },
+    Interval {
+        low: i64,
+        high: i64,
+    },
 }
 
 impl ReadingValue {
@@ -205,14 +208,8 @@ impl ReadingValue {
         match (self, other) {
             (ReadingValue::Categorical(a), ReadingValue::Categorical(b)) => a == b,
             (
-                ReadingValue::Interval {
-                    low: al,
-                    high: ah,
-                },
-                ReadingValue::Interval {
-                    low: bl,
-                    high: bh,
-                },
+                ReadingValue::Interval { low: al, high: ah },
+                ReadingValue::Interval { low: bl, high: bh },
             ) => al.max(bl) <= ah.min(bh),
             _ => false,
         }
@@ -353,12 +350,22 @@ impl Discordance {
 #[serde(tag = "inadmissible", rename_all = "snake_case")]
 pub enum Inadmissible {
     #[serde(rename = "scopes_agree_on_dimension")]
-    ScopesAgreeOnDimension { dimension: String },
-    NoDeclaredDetectionFloor { modality: ModalityId },
-    FloorBelongsToTheReportingModality { modality: ModalityId },
+    ScopesAgreeOnDimension {
+        dimension: String,
+    },
+    NoDeclaredDetectionFloor {
+        modality: ModalityId,
+    },
+    FloorBelongsToTheReportingModality {
+        modality: ModalityId,
+    },
     NoLensDeclaresSampling,
-    AssayScopesAreIdentical { scope: String },
-    UnknownModality { modality: ModalityId },
+    AssayScopesAreIdentical {
+        scope: String,
+    },
+    UnknownModality {
+        modality: ModalityId,
+    },
 }
 
 /// A candidate account, carrying the identifier the discriminating actions refer to.
@@ -472,7 +479,9 @@ pub enum Obtainability {
     /// It cannot be obtained, and the reason is recorded. This is the honest terminus: some
     /// disagreements are permanent, and a benchmark that pretends otherwise trains agents to
     /// invent a resolution.
-    NotObtainable { because: String },
+    NotObtainable {
+        because: String,
+    },
 }
 
 /// Evidence that would narrow the set and is not in the world.
@@ -539,7 +548,10 @@ impl Contradiction {
     }
 
     fn differ_on(&self, dimension: &str) -> bool {
-        match (self.left.scope.get(dimension), self.right.scope.get(dimension)) {
+        match (
+            self.left.scope.get(dimension),
+            self.right.scope.get(dimension),
+        ) {
             (Some(a), Some(b)) => a != b,
             (None, None) => false,
             _ => true,
@@ -572,21 +584,21 @@ impl Contradiction {
                 }
             }
             Discordance::SensitivityLimit { modality } => {
-                let blind = self
-                    .reading_of(modality)
-                    .ok_or_else(|| Inadmissible::UnknownModality {
-                        modality: modality.clone(),
-                    })?;
+                let blind =
+                    self.reading_of(modality)
+                        .ok_or_else(|| Inadmissible::UnknownModality {
+                            modality: modality.clone(),
+                        })?;
                 if blind.lens.detection_floor.is_none() {
                     return Err(Inadmissible::NoDeclaredDetectionFloor {
                         modality: modality.clone(),
                     });
                 }
-                let seeing = self
-                    .other_than(modality)
-                    .ok_or_else(|| Inadmissible::UnknownModality {
-                        modality: modality.clone(),
-                    })?;
+                let seeing =
+                    self.other_than(modality)
+                        .ok_or_else(|| Inadmissible::UnknownModality {
+                            modality: modality.clone(),
+                        })?;
                 if reports_more_than(blind, seeing) {
                     Err(Inadmissible::FloorBelongsToTheReportingModality {
                         modality: modality.clone(),
@@ -683,8 +695,17 @@ pub fn pose(left: Reading, right: Reading) -> Result<Contradiction, Contradictio
             return Err(ContradictionRefusal::IncomparableScopes { dimension })
         }
     };
-    let (Some(lv), Some(rv)) = (left.value(), right.value()) else {
-        unreachable!("not-examined readings were rejected above")
+    let Some(lv) = left.value() else {
+        return Err(ContradictionRefusal::InvalidReading {
+            modality: left.modality.to_string(),
+            detail: "the reading was not examined after passing the examined-reading gate".into(),
+        });
+    };
+    let Some(rv) = right.value() else {
+        return Err(ContradictionRefusal::InvalidReading {
+            modality: right.modality.to_string(),
+            detail: "the reading was not examined after passing the examined-reading gate".into(),
+        });
     };
     if lv.agrees_with(rv) {
         return Err(ContradictionRefusal::ReadingsAgree {
@@ -1050,10 +1071,7 @@ pub fn next_actions(program: &ContradictionProgram) -> Vec<RankedAction> {
 #[serde(tag = "cue", rename_all = "snake_case")]
 pub enum Cue {
     /// An account's identifier or name appears verbatim in a reading's annotations.
-    AccountNamedInAnnotation {
-        modality: String,
-        account: String,
-    },
+    AccountNamedInAnnotation { modality: String, account: String },
     /// The authored intent leaked into the artifacts.
     IntentNamedInAnnotation { modality: String, intent: String },
     /// Exactly one reading carries annotations at all, so an agent can find "the interesting one"
@@ -1062,10 +1080,7 @@ pub enum Cue {
     SoleAnnotatedReading { modality: String },
     /// Exactly one reading declares a detection floor, and an account implicates that same
     /// modality. The structural asymmetry points at the answer.
-    SoleDeclaredFloorMatchesAccount {
-        modality: String,
-        account: String,
-    },
+    SoleDeclaredFloorMatchesAccount { modality: String, account: String },
 }
 
 /// Scan a program for ways its answer can be guessed from surface structure.
@@ -1075,10 +1090,7 @@ pub enum Cue {
 /// exists. [`validate`] treats any finding as a refusal, because a benchmark that is solvable
 /// without reasoning measures something other than what it claims to.
 pub fn cue_scan(program: &ContradictionProgram) -> Vec<Cue> {
-    let readings = [
-        &program.contradiction.left,
-        &program.contradiction.right,
-    ];
+    let readings = [&program.contradiction.left, &program.contradiction.right];
     let mut cues = Vec::new();
 
     for reading in readings {
@@ -1142,9 +1154,13 @@ pub enum IntentCheck {
     Consistent,
     /// The author said resolvable; examining every action in the world still leaves this many
     /// accounts standing.
-    DeclaredResolvableButCannotNarrow { remaining: usize },
+    DeclaredResolvableButCannotNarrow {
+        remaining: usize,
+    },
     /// The author said irreducible; the evidence already in the world settles it.
-    DeclaredIrreducibleButEvidenceSettlesIt { by: Vec<EvidenceId> },
+    DeclaredIrreducibleButEvidenceSettlesIt {
+        by: Vec<EvidenceId>,
+    },
 }
 
 /// Check the authored intent against the discriminating actions the world actually contains.
@@ -1224,9 +1240,7 @@ impl ValidatedProgram {
 /// floor and an account implicates that modality, because the structural asymmetry points at the
 /// answer. The fix is to declare a floor for both lenses — which a real world would have anyway,
 /// and the absence of which is itself a gap in 27.14's "modality-specific lenses".
-pub fn validate(
-    program: ContradictionProgram,
-) -> Result<ValidatedProgram, ContradictionRefusal> {
+pub fn validate(program: ContradictionProgram) -> Result<ValidatedProgram, ContradictionRefusal> {
     let mut admissible = BTreeMap::new();
     for hypothesis in program.declared.iter() {
         if program

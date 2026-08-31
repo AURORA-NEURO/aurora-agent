@@ -146,5 +146,3 @@ def operate_federated_publication_release_inference(*, request: Mapping[str, Any
 
 
 __all__ = ["FEATURE_ID", "CONTRACT_VERSION", "INPUT_SCHEMA", "OUTPUT_SCHEMA", "FederatedPublicationReleaseInferenceReceipt", "operate_federated_publication_release_inference"]
-
-

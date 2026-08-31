@@ -324,10 +324,7 @@ pub fn confirm(
             EvidenceTier::Statistical,
             Witness::RelationViolated {
                 relation: format!("cross-modal expectation for '{}'", expectation.claim),
-                expected: format!(
-                    "{} in both channels",
-                    expectation.direction.as_str()
-                ),
+                expected: format!("{} in both channels", expectation.direction.as_str()),
                 observed: format!(
                     "{} {} while {} {}, with every candidate explanation ruled out",
                     left.modality.name,
@@ -358,7 +355,8 @@ pub fn confirm(
         )
     });
 
-    Determination::Unresolved(
-        Unresolved::new(missing).expect("the open list was checked non-empty"),
+    Unresolved::new(missing).map_or_else(
+        |_| Determination::not_evaluable("the orthogonal comparison produced no open explanation"),
+        Determination::Unresolved,
     )
 }

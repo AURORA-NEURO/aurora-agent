@@ -8,7 +8,7 @@
 //! to act.
 
 use bioprism_foundation::{
-    TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    ProvenanceLink, TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -70,6 +70,7 @@ pub struct ReliableCapabilityResult {
     pub contract_version: String,
     pub feature_id: String,
     pub workload_id: String,
+    pub workload: CapabilityWorkload,
     pub decision: ReliabilityDecision,
     pub invocation_order: Vec<String>,
     pub retry_order: Vec<String>,
@@ -116,9 +117,30 @@ impl ReliableCapabilityResult {
                 ));
             }
         }
+        let expected_provenance = reliability_provenance(&self.workload);
+        if self.artifact.artifact_id != format!("reliability-copilot:{}", self.workload_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.reliable-capability-result+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || self.artifact.provenance != expected_provenance
+        {
+            return Err(ReliabilityCopilotError::Contract(
+                "reliability artifact is not bound to the retained workload".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
-            .map_err(|error| ReliabilityCopilotError::Contract(error.to_string()))
+            .map_err(|error| ReliabilityCopilotError::Contract(error.to_string()))?;
+        self.artifact
+            .verify_payload(&reliability_payload(self))
+            .map_err(|error| ReliabilityCopilotError::Contract(error.to_string()))?;
+        let expected = plan_reliable_capability_internal(&self.workload, false)?;
+        if self != &expected {
+            return Err(ReliabilityCopilotError::Contract(
+                "reliability result is not derived from its retained workload".into(),
+            ));
+        }
+        Ok(())
     }
     pub fn digest(&self) -> Result<ContentHash, ReliabilityCopilotError> {
         self.validate()?;
@@ -139,17 +161,110 @@ pub enum ReliabilityCopilotError {
     Serialization(String),
 }
 
+fn canonical_workload(workload: &CapabilityWorkload) -> CapabilityWorkload {
+    let mut workload = workload.clone();
+    workload
+        .manifests
+        .sort_by(|left, right| left.tool_id.cmp(&right.tool_id));
+    workload
+        .invocations
+        .sort_by(|left, right| left.invocation_id.cmp(&right.invocation_id));
+    workload
+}
+
+fn reliability_provenance(workload: &CapabilityWorkload) -> Vec<ProvenanceLink> {
+    workload
+        .invocations
+        .iter()
+        .map(|invocation| ProvenanceLink {
+            source_id: invocation.invocation_id.clone(),
+            relation: "reliability-invocation-input".into(),
+            digest: invocation.input_digest.clone(),
+        })
+        .collect()
+}
+
+fn reliability_payload(receipt: &ReliableCapabilityResult) -> serde_json::Value {
+    reliability_payload_from_parts(
+        &receipt.schema_version,
+        &receipt.contract_version,
+        &receipt.feature_id,
+        &receipt.workload,
+        receipt.decision,
+        &receipt.invocation_order,
+        &receipt.retry_order,
+        &receipt.tool_order,
+        receipt.budget_used_units,
+        &receipt.timeout_order,
+        &receipt.omissions,
+        &receipt.uncertainty,
+        &receipt.failure_reasons,
+        &receipt.effect_receipts,
+        &receipt.artifact.provenance,
+        receipt.raw_data_local,
+        &receipt.boundary,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reliability_payload_from_parts(
+    schema_version: &str,
+    contract_version: &str,
+    feature_id: &str,
+    workload: &CapabilityWorkload,
+    decision: ReliabilityDecision,
+    invocation_order: &[String],
+    retry_order: &[String],
+    tool_order: &[String],
+    budget_used_units: u64,
+    timeout_order: &[String],
+    omissions: &[String],
+    uncertainty: &[String],
+    failure_reasons: &[String],
+    effect_receipts: &[String],
+    provenance: &[ProvenanceLink],
+    raw_data_local: bool,
+    boundary: &str,
+) -> serde_json::Value {
+    json!({
+        "schema_version": schema_version,
+        "contract_version": contract_version,
+        "feature_id": feature_id,
+        "workload": workload,
+        "decision": decision,
+        "invocation_order": invocation_order,
+        "retry_order": retry_order,
+        "tool_order": tool_order,
+        "budget_used_units": budget_used_units,
+        "timeout_order": timeout_order,
+        "omissions": omissions,
+        "uncertainty": uncertainty,
+        "failure_reasons": failure_reasons,
+        "effect_receipts": effect_receipts,
+        "provenance": provenance,
+        "raw_data_local": raw_data_local,
+        "boundary": boundary,
+    })
+}
+
 pub fn plan_reliable_capability(
     workload: &CapabilityWorkload,
 ) -> Result<ReliableCapabilityResult, ReliabilityCopilotError> {
+    plan_reliable_capability_internal(workload, true)
+}
+
+fn plan_reliable_capability_internal(
+    workload: &CapabilityWorkload,
+    validate_output: bool,
+) -> Result<ReliableCapabilityResult, ReliabilityCopilotError> {
     validate_workload(workload)?;
+    let workload = canonical_workload(workload);
     let manifests = workload
         .manifests
         .iter()
         .map(|manifest| (manifest.tool_id.clone(), manifest))
         .collect::<BTreeMap<_, _>>();
-    let mut invocations = workload.invocations.clone();
-    invocations.sort_by(|left, right| left.invocation_id.cmp(&right.invocation_id));
+    let invocations = workload.invocations.clone();
     let invocation_order = invocations
         .iter()
         .map(|invocation| invocation.invocation_id.clone())
@@ -174,14 +289,26 @@ pub fn plan_reliable_capability(
         .iter()
         .map(|invocation| invocation.estimated_cost_units)
         .sum::<u64>();
+    let non_deterministic = invocations.iter().try_fold(false, |found, invocation| {
+        let manifest = manifests.get(&invocation.tool_id).ok_or_else(|| {
+            ReliabilityCopilotError::InvalidRequest(format!(
+                "invocation {} references an undeclared tool",
+                invocation.invocation_id
+            ))
+        })?;
+        Ok(found || !manifest.deterministic)
+    })?;
     let mut omissions = Vec::new();
     let mut uncertainty = Vec::new();
     let mut failure_reasons = Vec::new();
     let mut effect_receipts = Vec::new();
     for invocation in &invocations {
-        let manifest = manifests
-            .get(&invocation.tool_id)
-            .expect("validated manifest");
+        let manifest = manifests.get(&invocation.tool_id).ok_or_else(|| {
+            ReliabilityCopilotError::InvalidRequest(format!(
+                "invocation {} references an undeclared tool",
+                invocation.invocation_id
+            ))
+        })?;
         if let Some(failure) = &invocation.simulated_failure {
             failure_reasons.push(format!("{}: {}", invocation.invocation_id, failure));
         }
@@ -201,12 +328,7 @@ pub fn plan_reliable_capability(
         .any(|invocation| invocation.simulated_failure.is_some())
     {
         ReliabilityDecision::Partial
-    } else if invocations.iter().any(|invocation| {
-        !manifests
-            .get(&invocation.tool_id)
-            .expect("validated manifest")
-            .deterministic
-    }) {
+    } else if non_deterministic {
         ReliabilityDecision::Degraded
     } else {
         ReliabilityDecision::Completed
@@ -228,13 +350,38 @@ pub fn plan_reliable_capability(
     if !failure_reasons.is_empty() {
         omissions.push("failed or timed-out invocations remain unresolved".into());
     }
-    let payload = json!({ "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "workload_id": workload.workload_id, "decision": decision, "invocation_order": invocation_order, "retry_order": retry_order, "tool_order": tool_order, "budget_used_units": budget_used_units, "timeout_order": timeout_order, "omissions": omissions, "uncertainty": uncertainty, "failure_reasons": failure_reasons, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY });
+    omissions.sort();
+    omissions.dedup();
+    uncertainty.sort();
+    uncertainty.dedup();
+    failure_reasons.sort();
+    failure_reasons.dedup();
+    let provenance = reliability_provenance(&workload);
+    let payload = reliability_payload_from_parts(
+        RESEARCH_CONTRACT_SCHEMA_VERSION,
+        CONTRACT_VERSION,
+        FEATURE_ID,
+        &workload,
+        decision,
+        &invocation_order,
+        &retry_order,
+        &tool_order,
+        budget_used_units,
+        &timeout_order,
+        &omissions,
+        &uncertainty,
+        &failure_reasons,
+        &effect_receipts,
+        &provenance,
+        true,
+        PRECLINICAL_BOUNDARY,
+    );
     let artifact = TypedResearchArtifact::from_payload(
         format!("reliability-copilot:{}", workload.workload_id),
         "application/vnd.aurora.reliable-capability-result+json",
         &payload,
         Vec::new(),
-        Vec::new(),
+        provenance,
     )
     .map_err(|error| ReliabilityCopilotError::Contract(error.to_string()))?;
     let result = ReliableCapabilityResult {
@@ -242,6 +389,7 @@ pub fn plan_reliable_capability(
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
         workload_id: workload.workload_id.clone(),
+        workload,
         decision,
         invocation_order,
         retry_order,
@@ -256,7 +404,9 @@ pub fn plan_reliable_capability(
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
-    result.validate()?;
+    if validate_output {
+        result.validate()?;
+    }
     Ok(result)
 }
 
@@ -403,5 +553,26 @@ mod tests {
         let mut workload = workload();
         workload.manifests[0].revoked = true;
         assert!(plan_reliable_capability(&workload).is_err());
+    }
+
+    #[test]
+    fn retained_invocation_tampering_is_rejected() {
+        let mut result = plan_reliable_capability(&workload()).unwrap();
+        result.workload.invocations[0].estimated_cost_units = 99;
+        assert!(result.validate().is_err());
+    }
+
+    #[test]
+    fn reliability_provenance_tampering_is_rejected() {
+        let mut result = plan_reliable_capability(&workload()).unwrap();
+        result.artifact.provenance[0].digest = ContentHash::of_bytes(b"tampered");
+        assert!(result.validate().is_err());
+    }
+
+    #[test]
+    fn retained_dry_run_gate_tampering_is_rejected() {
+        let mut result = plan_reliable_capability(&workload()).unwrap();
+        result.workload.dry_run = true;
+        assert!(result.validate().is_err());
     }
 }

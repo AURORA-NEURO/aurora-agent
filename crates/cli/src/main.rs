@@ -18,6 +18,7 @@ mod computational_execution_assurance;
 mod protocol_simulation_assurance;
 mod federated_retrieval_assurance;
 mod quality_control_workflow_fabric;
+mod quality_control_inference_engine;
 mod interpretation_interoperability_gateway;
 mod mechanism_control_plane;
 mod experiment_design_assurance;

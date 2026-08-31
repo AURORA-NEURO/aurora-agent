@@ -22,6 +22,7 @@ pub const FEATURE_ID: &str = "AFA-brain-P01-F09";
 pub const CONTRACT_VERSION: &str = "brain-evidence-research-copilot/1.0";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet3@1";
 pub const MAX_ACTIONS: usize = 64;
+const MAX_ITEMS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceCopilotRequest {
@@ -98,6 +99,47 @@ impl EvidenceCopilotReceipt {
                     .into(),
             ));
         }
+        if [
+            &self.plan_order,
+            &self.action_order,
+            &self.candidate_order,
+            &self.qualified_order,
+            &self.blocked_order,
+            &self.unknown_order,
+            &self.omissions,
+            &self.uncertainty,
+            &self.negative_evidence,
+            &self.effect_receipts,
+        ]
+        .iter()
+        .any(|values| values.len() > MAX_ITEMS)
+        {
+            return Err(EvidenceCopilotError::Invalid(
+                "copilot vectors exceed their bounded size".into(),
+            ));
+        }
+        let candidate_set = self
+            .candidate_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let qualified_set = self
+            .qualified_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let blocked_set = self.blocked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let unknown_set = self.unknown_order.iter().cloned().collect::<BTreeSet<_>>();
+        let mut classified = qualified_set.clone();
+        classified.extend(blocked_set.iter().cloned());
+        if classified != candidate_set
+            || !qualified_set.is_disjoint(&blocked_set)
+            || !unknown_set.is_subset(&blocked_set)
+        {
+            return Err(EvidenceCopilotError::Invalid(
+                "copilot evidence states do not partition candidates".into(),
+            ));
+        }
         if self
             .qualified_order
             .iter()
@@ -135,8 +177,71 @@ impl EvidenceCopilotReceipt {
                 "copilot effect is outside local read/compute gate".into(),
             ));
         }
+        let expected_plan_order = self
+            .action_order
+            .iter()
+            .map(|action| {
+                action
+                    .strip_prefix("action:")
+                    .map(|suffix| format!("plan:{suffix}"))
+            })
+            .collect::<Option<Vec<_>>>();
+        if expected_plan_order.as_ref() != Some(&self.plan_order) {
+            return Err(EvidenceCopilotError::Invalid(
+                "copilot plan and action orders do not correspond".into(),
+            ));
+        }
+        let expected_effects = if self.disposition == EvidenceSurveillanceDisposition::Blocked {
+            vec!["block:unsafe-release".into()]
+        } else if !self.qualified_order.is_empty() {
+            vec![format!("read:local-research-artifacts:{}", self.request_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effects {
+            return Err(EvidenceCopilotError::Invalid(
+                "copilot effect does not match disposition".into(),
+            ));
+        }
+        let expected_plan_digest = ContentHash::of_value(&json!({
+            "request_id": self.request_id,
+            "plan_order": self.plan_order,
+            "action_order": self.action_order,
+            "budget_units": self.budget_units,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| EvidenceCopilotError::Artifact(error.to_string()))?;
+        if self.plan_digest != expected_plan_digest {
+            return Err(EvidenceCopilotError::Invalid(
+                "copilot plan digest is not bound to plan state".into(),
+            ));
+        }
+        for digest in [
+            &self.evidence_receipt_digest,
+            &self.plan_digest,
+            &self.replay_identity,
+        ] {
+            if digest.as_str().len() != 64 {
+                return Err(EvidenceCopilotError::Invalid(
+                    "copilot digest is invalid".into(),
+                ));
+            }
+        }
+        let expected_artifact_id = format!("brain-evidence-copilot:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != "application/vnd.aurora.qualified-evidence-set-3+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(EvidenceCopilotError::Invalid(
+                "copilot artifact identity or provenance is inconsistent".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| EvidenceCopilotError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| EvidenceCopilotError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, EvidenceCopilotError> {
@@ -146,6 +251,34 @@ impl EvidenceCopilotReceipt {
         ContentHash::of_value(&value)
             .map_err(|error| EvidenceCopilotError::Artifact(error.to_string()))
     }
+}
+
+fn receipt_payload(receipt: &EvidenceCopilotReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "operator_id": receipt.operator_id,
+        "study_id": receipt.study_id,
+        "scope": receipt.scope,
+        "disposition": receipt.disposition,
+        "plan_order": receipt.plan_order,
+        "action_order": receipt.action_order,
+        "candidate_order": receipt.candidate_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "evidence_receipt_digest": receipt.evidence_receipt_digest,
+        "plan_digest": receipt.plan_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn evidence_research_copilot_manifest() -> CapabilityManifest {
@@ -186,7 +319,7 @@ pub fn compile_evidence_copilot(
     {
         negative.insert("copilot:inspect-local-evidence-not-allowed".into());
     }
-    if request.budget_units < action_order.len() as u32 {
+    if u64::from(request.budget_units) < u64::try_from(action_order.len()).unwrap_or(u64::MAX) {
         omissions.insert("copilot:action-budget-exhausted".into());
     }
     if !request.policy_allow {
@@ -202,7 +335,7 @@ pub fn compile_evidence_copilot(
         .action_allow_list
         .iter()
         .any(|item| item == "inspect-local-evidence")
-        && request.budget_units >= action_order.len() as u32
+        && u64::from(request.budget_units) >= u64::try_from(action_order.len()).unwrap_or(u64::MAX)
         && request.policy_allow
         && request.protected_closure
         && request.raw_data_local;
@@ -214,7 +347,10 @@ pub fn compile_evidence_copilot(
     let plan_vec = plan_order.into_iter().collect::<Vec<_>>();
     let action_vec = action_order.into_iter().collect::<Vec<_>>();
     let plan_digest = ContentHash::of_value(&json!({"request_id": request.request.request_id, "plan_order": plan_vec, "action_order": action_vec, "budget_units": request.budget_units, "replay_identity": request.replay_identity})).map_err(|error| EvidenceCopilotError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "operator_id": request.operator_id, "study_id": request.request.study_id, "scope": request.request.scope, "disposition": disposition, "plan_order": plan_vec, "action_order": action_vec, "candidate_order": evidence.candidate_order, "qualified_order": evidence.qualified_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "evidence_receipt_digest": evidence.digest().map_err(|error| EvidenceCopilotError::Engine(error.to_string()))?, "plan_digest": plan_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let evidence_digest = evidence
+        .digest()
+        .map_err(|error| EvidenceCopilotError::Engine(error.to_string()))?;
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "operator_id": request.operator_id, "study_id": request.request.study_id, "scope": request.request.scope, "disposition": disposition, "plan_order": plan_vec, "action_order": action_vec, "candidate_order": evidence.candidate_order, "qualified_order": evidence.qualified_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "evidence_receipt_digest": evidence_digest, "plan_digest": plan_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-evidence-copilot:{}", request.request.request_id),
         "application/vnd.aurora.qualified-evidence-set-3+json",
@@ -223,10 +359,9 @@ pub fn compile_evidence_copilot(
         Vec::new(),
     )
     .map_err(|error| EvidenceCopilotError::Artifact(error.to_string()))?;
-    let evidence_digest = evidence
-        .digest()
-        .map_err(|error| EvidenceCopilotError::Engine(error.to_string()))?;
-    let has_effect = actionable && !evidence.qualified_order.is_empty();
+    let has_effect = actionable
+        && disposition != EvidenceSurveillanceDisposition::Blocked
+        && !evidence.qualified_order.is_empty();
     let receipt = EvidenceCopilotReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -236,14 +371,8 @@ pub fn compile_evidence_copilot(
         study_id: request.request.study_id.clone(),
         scope: request.request.scope.clone(),
         disposition,
-        plan_order: payload
-            .get("plan_order")
-            .and_then(|value| serde_json::from_value(value.clone()).ok())
-            .unwrap_or_default(),
-        action_order: payload
-            .get("action_order")
-            .and_then(|value| serde_json::from_value(value.clone()).ok())
-            .unwrap_or_default(),
+        plan_order: plan_vec.clone(),
+        action_order: action_vec.clone(),
         candidate_order: evidence.candidate_order.clone(),
         qualified_order: evidence.qualified_order.clone(),
         blocked_order: evidence.blocked_order.clone(),

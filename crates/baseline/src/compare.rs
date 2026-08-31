@@ -173,7 +173,8 @@ impl StrategyResult {
     /// Three-valued rather than a `bool`, for the reason 43.40 gives: `false` would report that the
     /// oracle had examined this selection and found it wanting, and a refusal is not a refutation.
     pub fn verdict_preserving(&self) -> Option<bool> {
-        self.judgement().map(|judgement| judgement.verdict_preserving)
+        self.judgement()
+            .map(|judgement| judgement.verdict_preserving)
     }
 
     /// Whether the mandatory protected closure was delivered in full.
@@ -344,7 +345,11 @@ impl Comparison {
             let (verdict, sound, admissible) = match &result.verdict {
                 RowVerdict::Judged(judgement) => (
                     judgement.status.as_str().to_string(),
-                    if judgement.verdict_preserving { "yes" } else { "**no**" },
+                    if judgement.verdict_preserving {
+                        "yes"
+                    } else {
+                        "**no**"
+                    },
                     if result.admissible() { "yes" } else { "**no**" },
                 ),
                 RowVerdict::Refused(_) => ("**refused**".to_string(), "—", "—"),
@@ -379,14 +384,14 @@ impl Comparison {
         }
 
         for result in self.refused() {
+            let Some(refusal) = result.refusal() else {
+                continue;
+            };
             let _ = writeln!(
                 text,
                 "\n- `{}` was **not judged**: {}. It is ranked as neither sound nor unsound and \
                  cannot be admissible, because nothing about its verdict was established.",
-                result.name,
-                result
-                    .refusal()
-                    .expect("a refused row carries its refusal")
+                result.name, refusal
             );
         }
 
@@ -402,9 +407,9 @@ impl Comparison {
         }
 
         for result in self.unsound() {
-            let judgement = result
-                .judgement()
-                .expect("an unsound row was judged by definition");
+            let Some(judgement) = result.judgement() else {
+                continue;
+            };
             let _ = writeln!(
                 text,
                 "\n- `{}` is **not sound**: missing {}{}",
@@ -422,10 +427,7 @@ impl Comparison {
             );
         }
 
-        let _ = writeln!(
-            text,
-            "\n## Methods\n"
-        );
+        let _ = writeln!(text, "\n## Methods\n");
         for result in &self.results {
             let _ = writeln!(text, "- **{}** — {}", result.name, result.method);
             for note in &result.notes {

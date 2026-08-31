@@ -50,7 +50,11 @@ impl Budget {
     }
 
     pub fn with(mut self, resource: Resource, amount: u64) -> Self {
-        *self.allowances.entry(resource).or_insert(0) += amount;
+        // A u64 is the complete representable allowance for one resource. Saturating here keeps a
+        // hostile or malformed declaration from wrapping into a small budget (or panicking in a
+        // debug build); the effective ceiling can only become more restrictive.
+        let allowance = self.allowances.entry(resource).or_insert(0);
+        *allowance = allowance.saturating_add(amount);
         self
     }
 
@@ -103,8 +107,9 @@ impl Budget {
     pub fn total_remaining(&self) -> u64 {
         self.allowances
             .keys()
-            .map(|resource| self.remaining(*resource))
-            .sum()
+            .fold(0, |total, resource| {
+                total.saturating_add(self.remaining(*resource))
+            })
     }
 }
 

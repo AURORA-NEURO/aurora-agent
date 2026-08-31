@@ -50,7 +50,8 @@ use crate::name::{PackName, Version};
 use crate::registry::RegistryId;
 use crate::resolve::Resolved;
 use bioprism_registry::{TierAssessment, TrustTier};
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -72,6 +73,15 @@ impl Subject {
             version,
             digest: digest.into(),
         }
+    }
+
+    fn validate(&self) -> Result<(), FederationError> {
+        if self.digest.trim().is_empty() {
+            return Err(FederationError::InvalidState {
+                detail: format!("subject {} has no digest", self.name),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -120,12 +130,39 @@ impl fmt::Display for Basis {
 /// A tier a particular registry holds for a particular artifact.
 ///
 /// The fields are private and there is no constructor taking a tier. See the module docs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TrustStanding {
     registry: RegistryId,
     subject: Subject,
     tier: TrustTier,
     basis: Basis,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrustStandingFields {
+    registry: RegistryId,
+    subject: Subject,
+    tier: TrustTier,
+    basis: Basis,
+}
+
+impl<'de> Deserialize<'de> for TrustStanding {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = TrustStandingFields::deserialize(deserializer)?;
+        let standing = TrustStanding {
+            registry: fields.registry,
+            subject: fields.subject,
+            tier: fields.tier,
+            basis: fields.basis,
+        };
+        standing
+            .validate()
+            .map(|()| standing)
+            .map_err(D::Error::custom)
+    }
 }
 
 impl TrustStanding {
@@ -158,6 +195,23 @@ impl TrustStanding {
 
     pub fn basis(&self) -> &Basis {
         &self.basis
+    }
+
+    fn validate(&self) -> Result<(), FederationError> {
+        self.subject.validate()?;
+        if let Basis::Adopted { from } = &self.basis {
+            if from == &self.registry {
+                return Err(FederationError::InvalidState {
+                    detail: format!("{0} cannot hold an adoption from itself", self.registry),
+                });
+            }
+            if self.tier >= TrustTier::Gold {
+                return Err(FederationError::InvalidState {
+                    detail: "an adopted standing cannot carry the gold tier".into(),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// True when this registry worked the tier out rather than deferring to somebody.
@@ -200,13 +254,46 @@ impl fmt::Display for TrustStanding {
 ///
 /// Note what this is not: it is not a standing, it does not become one by being received, and
 /// nothing about holding one entitles the holder to anything. It is a claim, with a name on it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Attestation {
     pub by: RegistryId,
     pub subject: Subject,
     pub tier: TrustTier,
     /// How the attesting registry came by the tier. This is the field that stops the second hop.
     pub basis: Basis,
+}
+
+#[derive(Debug, Deserialize)]
+struct AttestationFields {
+    by: RegistryId,
+    subject: Subject,
+    tier: TrustTier,
+    basis: Basis,
+}
+
+impl<'de> Deserialize<'de> for Attestation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = AttestationFields::deserialize(deserializer)?;
+        let attestation = Attestation {
+            by: fields.by,
+            subject: fields.subject,
+            tier: fields.tier,
+            basis: fields.basis,
+        };
+        attestation
+            .validate()
+            .map(|()| attestation)
+            .map_err(D::Error::custom)
+    }
+}
+
+impl Attestation {
+    fn validate(&self) -> Result<(), FederationError> {
+        self.subject.validate()
+    }
 }
 
 impl fmt::Display for Attestation {
@@ -227,9 +314,27 @@ impl fmt::Display for Attestation {
 /// Empty by default, which is the whole design: a registry that has said nothing about a peer
 /// grants nothing on that peer's word, and a federation that grows by replication does not
 /// thereby grow anybody's trust.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct AdoptionPolicy {
     ceilings: BTreeMap<RegistryId, TrustTier>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdoptionPolicyFields {
+    ceilings: BTreeMap<RegistryId, TrustTier>,
+}
+
+impl<'de> Deserialize<'de> for AdoptionPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = AdoptionPolicyFields::deserialize(deserializer)?;
+        let policy = AdoptionPolicy {
+            ceilings: fields.ceilings,
+        };
+        policy.validate().map(|()| policy).map_err(D::Error::custom)
+    }
 }
 
 impl AdoptionPolicy {
@@ -263,16 +368,71 @@ impl AdoptionPolicy {
     pub fn recognises(&self, peer: &RegistryId) -> bool {
         self.ceilings.contains_key(peer)
     }
+
+    fn validate(&self) -> Result<(), FederationError> {
+        if let Some((peer, ceiling)) = self
+            .ceilings
+            .iter()
+            .find(|(_, ceiling)| **ceiling >= TrustTier::Gold)
+        {
+            return Err(FederationError::CeilingTooHigh {
+                peer: peer.clone(),
+                ceiling: ceiling.as_str(),
+            });
+        }
+        Ok(())
+    }
 }
 
 /// The record of one registry deciding to defer to another about one artifact.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Adoption {
     pub standing: TrustStanding,
     /// The tier the peer attested, when the local ceiling cut it down. `None` when nothing was
     /// lost. Kept because "we granted reviewed" and "they said gold and we granted reviewed" are
     /// different events and a registry should be able to show which one happened.
     pub capped_from: Option<TrustTier>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdoptionFields {
+    standing: TrustStanding,
+    capped_from: Option<TrustTier>,
+}
+
+impl<'de> Deserialize<'de> for Adoption {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = AdoptionFields::deserialize(deserializer)?;
+        let adoption = Adoption {
+            standing: fields.standing,
+            capped_from: fields.capped_from,
+        };
+        adoption
+            .validate()
+            .map(|()| adoption)
+            .map_err(D::Error::custom)
+    }
+}
+
+impl Adoption {
+    fn validate(&self) -> Result<(), FederationError> {
+        self.standing.validate()?;
+        if !matches!(&self.standing.basis, Basis::Adopted { .. }) {
+            return Err(FederationError::InvalidState {
+                detail: "an adoption must carry an adopted standing".into(),
+            });
+        }
+        match (self.capped_from, self.standing.tier) {
+            (Some(from), granted) if from > granted => Ok(()),
+            (Some(_), _) => Err(FederationError::InvalidState {
+                detail: "a recorded cap must be above the granted tier".into(),
+            }),
+            (None, _) => Ok(()),
+        }
+    }
 }
 
 /// Turns a peer's attestation into a local standing, or refuses to.
@@ -285,6 +445,8 @@ pub fn adopt(
     attestation: &Attestation,
     policy: &AdoptionPolicy,
 ) -> Result<Adoption, FederationError> {
+    attestation.validate()?;
+    policy.validate()?;
     if &attestation.by == into {
         return Err(FederationError::SelfAdoption {
             registry: into.clone(),
@@ -325,6 +487,9 @@ pub fn adopt(
 /// Why a trust claim did not cross a registry boundary.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FederationError {
+    #[error("invalid federation state: {detail}")]
+    InvalidState { detail: String },
+
     #[error(
         "{into} does not recognise {peer} as an assessor, so {peer}'s attestation about {subject} \
          grants nothing here"
@@ -541,5 +706,26 @@ mod tests {
         let back: Attestation = serde_json::from_str(&text).expect("deserialises");
         assert_eq!(back, relayed);
         assert!(adopt(&id("gamma"), &back, &policy("beta", TrustTier::Reviewed)).is_err());
+    }
+
+    #[test]
+    fn policy_deserialization_cannot_restore_a_gold_peer_ceiling() {
+        let policy = policy("alpha", TrustTier::Reviewed);
+        let mut value = serde_json::to_value(&policy).expect("serialises");
+        value["ceilings"]["alpha"] = serde_json::json!("gold");
+        assert!(serde_json::from_value::<AdoptionPolicy>(value).is_err());
+    }
+
+    #[test]
+    fn standing_and_attestation_deserialization_recheck_content_identity() {
+        let standing = earned_in("alpha", TrustTier::Reviewed);
+        let mut value = serde_json::to_value(&standing).expect("serialises");
+        value["subject"]["digest"] = serde_json::json!(" ");
+        assert!(serde_json::from_value::<TrustStanding>(value).is_err());
+
+        let attestation = standing.attest();
+        let mut value = serde_json::to_value(&attestation).expect("serialises");
+        value["subject"]["digest"] = serde_json::json!("");
+        assert!(serde_json::from_value::<Attestation>(value).is_err());
     }
 }

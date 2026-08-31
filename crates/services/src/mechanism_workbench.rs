@@ -189,6 +189,38 @@ impl MechanismWorkbenchReport {
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| MechanismWorkbenchError::Artifact(error.to_string()))?;
+        if self.artifact.artifact_id != format!("mechanism-workbench-report:{}", self.request_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.mechanism-workbench-report+json"
+        {
+            return Err(MechanismWorkbenchError::Artifact(
+                "artifact identity or content type does not match the workbench report".into(),
+            ));
+        }
+        let payload = json!({
+            "schema_version": self.schema_version,
+            "contract_version": self.contract_version,
+            "feature_id": self.feature_id,
+            "request_id": self.request_id,
+            "workflow_id": self.workflow_id,
+            "objective_id": self.objective_id,
+            "target_schema": self.target_schema,
+            "scope": self.scope,
+            "disposition": self.disposition,
+            "ranked_order": self.ranked_order,
+            "admitted_order": self.admitted_order,
+            "blocked_order": self.blocked_order,
+            "unknown_order": self.unknown_order,
+            "score_order": self.score_order,
+            "omissions": self.omissions,
+            "uncertainty": self.uncertainty,
+            "negative_evidence": self.negative_evidence,
+            "replay_identity": self.replay_identity,
+            "boundary": self.boundary,
+        });
+        self.artifact
+            .verify_payload(&payload)
             .map_err(|error| MechanismWorkbenchError::Artifact(error.to_string()))
     }
 
@@ -480,13 +512,25 @@ fn validate_request(request: &MechanismWorkbenchRequest) -> Result<(), Mechanism
     }
     let mut ids = BTreeSet::new();
     for candidate in &request.candidates {
+        let studies_are_unique =
+            candidate.study_ids.len() == candidate.study_ids.iter().collect::<BTreeSet<_>>().len();
+        let modalities_are_unique = candidate.modality_ids.len()
+            == candidate.modality_ids.iter().collect::<BTreeSet<_>>().len();
         if candidate.candidate_id.trim().is_empty()
             || candidate.mechanism_id.trim().is_empty()
             || candidate.scope.trim().is_empty()
             || candidate.study_ids.is_empty()
             || candidate.modality_ids.is_empty()
+            || !studies_are_unique
+            || !modalities_are_unique
+            || candidate
+                .study_ids
+                .iter()
+                .chain(candidate.modality_ids.iter())
+                .any(|value| value.trim().is_empty())
             || candidate.support_milli > 1000
             || candidate.novelty_milli > 1000
+            || candidate.replay_identity != request.replay_identity
             || candidate.boundary != PRECLINICAL_BOUNDARY
             || !ids.insert(candidate.candidate_id.clone())
         {
@@ -529,6 +573,14 @@ mod tests {
     }
 
     fn request(candidates: Vec<MechanismCandidate>) -> MechanismWorkbenchRequest {
+        let replay_identity = hash("replay:batch");
+        let candidates = candidates
+            .into_iter()
+            .map(|mut candidate| {
+                candidate.replay_identity = replay_identity.clone();
+                candidate
+            })
+            .collect();
         MechanismWorkbenchRequest {
             request_id: "request:mechanisms".into(),
             workflow_id: "workflow:mechanism-batch".into(),
@@ -537,7 +589,7 @@ mod tests {
             scope: "organoid:neural".into(),
             max_results: 4,
             candidates,
-            replay_identity: hash("replay:batch"),
+            replay_identity,
             budget: 100,
             policy_allow: true,
             protected_closure: true,
@@ -623,5 +675,44 @@ mod tests {
             candidate("candidate:a", 800, CandidateState::Supported),
         ]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn duplicate_evidence_units_and_mismatched_replay_are_rejected() {
+        let mut duplicate_study = request(vec![candidate(
+            "candidate:a",
+            900,
+            CandidateState::Supported,
+        )]);
+        duplicate_study.candidates[0].replay_identity = duplicate_study.replay_identity.clone();
+        duplicate_study.candidates[0].study_ids =
+            vec!["study:imaging".into(), "study:imaging".into()];
+        assert!(run_mechanism_workbench(&duplicate_study).is_err());
+
+        let mut mismatched_replay = request(vec![candidate(
+            "candidate:b",
+            900,
+            CandidateState::Supported,
+        )]);
+        mismatched_replay.candidates[0].replay_identity = hash("replay:other");
+        assert!(run_mechanism_workbench(&mismatched_replay).is_err());
+        mismatched_replay.candidates[0].replay_identity = mismatched_replay.replay_identity.clone();
+        let report = run_mechanism_workbench(&mismatched_replay).unwrap();
+        assert!(report.validate().is_ok());
+    }
+
+    #[test]
+    fn tampered_artifact_hash_is_rejected_by_report_validation() {
+        let mut report = run_mechanism_workbench(&request(vec![{
+            let mut candidate = candidate("candidate:a", 900, CandidateState::Supported);
+            candidate.replay_identity = hash("replay:batch");
+            candidate
+        }]))
+        .unwrap();
+        report.artifact.content_hash = hash("tampered");
+        assert!(matches!(
+            report.validate(),
+            Err(MechanismWorkbenchError::Artifact(_))
+        ));
     }
 }

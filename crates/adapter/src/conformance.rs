@@ -137,6 +137,46 @@ pub struct ConformanceReport {
 }
 
 impl ConformanceReport {
+    pub fn validate(&self) -> Result<(), AdapterError> {
+        if self.adapter.trim().is_empty()
+            || self.adapter_version.trim().is_empty()
+            || self.source_id.trim().is_empty()
+        {
+            return Err(AdapterError::Conformance(
+                "adapter, version, and source identity are required".into(),
+            ));
+        }
+        let expected_checks = [
+            Check::Determinism,
+            Check::ManifestStability,
+            Check::LossAuditPerformed,
+            Check::LossCompleteness,
+            Check::DeclaredLossKinds,
+            Check::FactIntegrity,
+        ];
+        if self.checks.len() != expected_checks.len() {
+            return Err(AdapterError::Conformance(format!(
+                "expected {} checks, found {}",
+                expected_checks.len(),
+                self.checks.len()
+            )));
+        }
+        for (outcome, expected) in self.checks.iter().zip(expected_checks) {
+            if outcome.check != expected {
+                return Err(AdapterError::Conformance(
+                    "checks are missing, duplicated, or out of canonical order".into(),
+                ));
+            }
+            if outcome.detail.trim().is_empty() || outcome.detail.chars().any(char::is_control) {
+                return Err(AdapterError::Conformance(format!(
+                    "{} check has no bounded detail",
+                    outcome.check
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// True when no check failed. A report of nothing but `NotApplicable` also passes, which is
     /// why [`ConformanceReport::verified`] exists alongside it.
     pub fn passed(&self) -> bool {
@@ -186,6 +226,12 @@ pub fn certify<A: Adapter + ?Sized>(
     source: &Source,
 ) -> Result<(ConformanceReport, Ingestion), AdapterError> {
     let manifest = adapter.manifest();
+    manifest.validate()?;
+    if manifest.name != adapter.name() {
+        return Err(AdapterError::Conformance(
+            "adapter manifest name does not match the adapter identity".into(),
+        ));
+    }
     let first = adapter.ingest(source)?;
     let baseline = first.canonical_bytes()?;
 
@@ -204,6 +250,7 @@ pub fn certify<A: Adapter + ?Sized>(
         source_id: source.id.clone(),
         checks,
     };
+    report.validate()?;
     Ok((report, first))
 }
 
@@ -430,11 +477,57 @@ mod tests {
         };
         assert!(report.passed());
         assert!(!report.verified());
+        assert!(report.validate().is_err());
     }
 
     #[test]
     fn the_first_divergence_offset_points_at_the_differing_byte() {
         assert_eq!(first_divergence(b"abcd", b"abXd"), 2);
         assert_eq!(first_divergence(b"abc", b"abcd"), 3);
+    }
+
+    #[test]
+    fn a_complete_report_requires_canonical_check_order() {
+        let checks = [
+            Check::Determinism,
+            Check::ManifestStability,
+            Check::LossAuditPerformed,
+            Check::LossCompleteness,
+            Check::DeclaredLossKinds,
+            Check::FactIntegrity,
+        ]
+        .into_iter()
+        .map(|check| CheckOutcome::pass(check, "verified"))
+        .collect::<Vec<_>>();
+        let report = ConformanceReport {
+            adapter: "adapter".into(),
+            adapter_version: "0.1.0".into(),
+            source_id: "source".into(),
+            checks,
+        };
+        report.validate().unwrap();
+    }
+
+    #[test]
+    fn a_report_with_a_repeated_check_is_rejected() {
+        let mut checks = [
+            Check::Determinism,
+            Check::ManifestStability,
+            Check::LossAuditPerformed,
+            Check::LossCompleteness,
+            Check::DeclaredLossKinds,
+            Check::FactIntegrity,
+        ]
+        .into_iter()
+        .map(|check| CheckOutcome::pass(check, "verified"))
+        .collect::<Vec<_>>();
+        checks[5].check = Check::Determinism;
+        let report = ConformanceReport {
+            adapter: "adapter".into(),
+            adapter_version: "0.1.0".into(),
+            source_id: "source".into(),
+            checks,
+        };
+        assert!(report.validate().is_err());
     }
 }

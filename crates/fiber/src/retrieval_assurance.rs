@@ -8,6 +8,7 @@ use bioprism_foundation::{
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-fiber-P02-F28";
@@ -66,8 +67,48 @@ impl FederatedRetrievalAssuranceReceipt {
                 "retrieval identity, boundary, or checks are incomplete".into(),
             ));
         }
+        if self
+            .returned_source_ids
+            .iter()
+            .any(|id| id.trim().is_empty())
+            || self
+                .returned_source_ids
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(RetrievalAssuranceError::InvalidField(
+                "returned source identities are not canonical".into(),
+            ));
+        }
+        if self.artifact.artifact_id != format!("federated-retrieval-assurance:{}", self.request_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.federated-retrieval-assurance+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(RetrievalAssuranceError::Artifact(
+                "retrieval artifact identity or provenance is invalid".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| RetrievalAssuranceError::Artifact(error.to_string()))?;
+        let payload = json!({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "request_id": self.request_id,
+            "federation_id": self.federation_id,
+            "query_id": self.query_id,
+            "returned_source_ids": self.returned_source_ids,
+            "disposition": self.disposition,
+            "evidence_receipt_digest": self.evidence_receipt_digest,
+            "checks": self.checks,
+            "omissions": self.omissions,
+            "boundary": self.boundary,
+        });
+        self.artifact
+            .verify_payload(&payload)
             .map_err(|error| RetrievalAssuranceError::Artifact(error.to_string()))
     }
 
@@ -182,6 +223,26 @@ fn validate_request(
             "retrieval identity, requested sources, and boundary are required".into(),
         ));
     }
+    let mut requested = BTreeSet::new();
+    if request
+        .requested_source_ids
+        .iter()
+        .any(|id| id.trim().is_empty() || !requested.insert(id))
+    {
+        return Err(RetrievalAssuranceError::InvalidField(
+            "requested source identities must be non-empty and unique".into(),
+        ));
+    }
+    let mut returned = BTreeSet::new();
+    if request
+        .returned_source_ids
+        .iter()
+        .any(|id| id.trim().is_empty() || !requested.contains(id) || !returned.insert(id))
+    {
+        return Err(RetrievalAssuranceError::InvalidField(
+            "returned sources must be requested, non-empty, and unique".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -208,5 +269,23 @@ mod tests {
         let receipt = assure_federated_retrieval(&request()).unwrap();
         assert_eq!(receipt.disposition, RetrievalAssuranceDisposition::Unknown);
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+
+    #[test]
+    fn unrequested_or_duplicate_sources_are_rejected() {
+        let mut input = request();
+        input.returned_source_ids = vec!["source:a".into(), "source:external".into()];
+        assert!(assure_federated_retrieval(&input).is_err());
+
+        input.returned_source_ids = vec!["source:a".into(), "source:a".into()];
+        assert!(assure_federated_retrieval(&input).is_err());
+    }
+
+    #[test]
+    fn tampered_retrieval_artifact_is_rejected() {
+        let mut receipt = assure_federated_retrieval(&request()).unwrap();
+        receipt.returned_source_ids.push("source:b".into());
+        receipt.returned_source_ids.sort();
+        assert!(receipt.validate().is_err());
     }
 }

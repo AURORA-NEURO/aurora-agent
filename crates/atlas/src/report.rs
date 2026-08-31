@@ -26,7 +26,8 @@ use crate::evidence::{MeasurementDepth, UnmeasuredReason};
 use crate::failure::FailureStage;
 use crate::ontology::{CapabilityFamily, CapabilityId};
 use bioprism_section::{OmissionGroup, OmissionManifest};
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 
 /// One measured capability, as a reader needs to see it: the score never travels without the
@@ -270,7 +271,10 @@ impl CoverageReport {
     pub fn omission_manifest(&self) -> OmissionManifest {
         let mut grouped: BTreeMap<UnmeasuredReason, Vec<&CapabilityId>> = BTreeMap::new();
         for hole in self.holes.iter().filter(|h| !h.aggregate) {
-            grouped.entry(hole.reason).or_default().push(&hole.capability);
+            grouped
+                .entry(hole.reason)
+                .or_default()
+                .push(&hole.capability);
         }
         let mut manifest = OmissionManifest::default();
         for (reason, capabilities) in grouped {
@@ -279,11 +283,7 @@ impl CoverageReport {
                 influence: reason.influence_class(),
                 count: capabilities.len(),
                 bound: None,
-                examples: capabilities
-                    .iter()
-                    .take(5)
-                    .map(|c| c.to_string())
-                    .collect(),
+                examples: capabilities.iter().take(5).map(|c| c.to_string()).collect(),
             });
         }
         manifest
@@ -300,10 +300,30 @@ impl CoverageReport {
 
 /// A predeclared weighting, as 33.01 requires: "Predeclare composite weights and run sensitivity
 /// analyses." Weights declared after seeing the scores are not a policy, they are a result.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WeightingPolicy {
     pub intended_use: String,
     weights: BTreeMap<CapabilityId, f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WeightingPolicyFields {
+    intended_use: String,
+    weights: BTreeMap<CapabilityId, f64>,
+}
+
+impl<'de> Deserialize<'de> for WeightingPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = WeightingPolicyFields::deserialize(deserializer)?;
+        let policy = WeightingPolicy {
+            intended_use: fields.intended_use,
+            weights: fields.weights,
+        };
+        policy.validate().map(|()| policy).map_err(D::Error::custom)
+    }
 }
 
 impl WeightingPolicy {
@@ -324,10 +344,28 @@ impl WeightingPolicy {
                 });
             }
         }
-        Ok(WeightingPolicy {
+        let policy = WeightingPolicy {
             intended_use: intended_use.into(),
             weights,
-        })
+        };
+        policy.validate()?;
+        Ok(policy)
+    }
+
+    pub fn validate(&self) -> Result<(), AtlasError> {
+        if self.weights.is_empty() {
+            return Err(AtlasError::MalformedWeightingPolicy {
+                detail: "no capability is weighted".to_string(),
+            });
+        }
+        for (capability, weight) in &self.weights {
+            if !weight.is_finite() || *weight <= 0.0 {
+                return Err(AtlasError::MalformedWeightingPolicy {
+                    detail: format!("weight {weight} for {capability} is not positive and finite"),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn weights(&self) -> impl Iterator<Item = (&CapabilityId, f64)> {
@@ -360,6 +398,7 @@ pub struct Composite {
 /// There is no code path that treats an unmeasured capability as a zero. That is the entire
 /// reason this function returns `Result` rather than an `f64`.
 pub fn composite(atlas: &Atlas, policy: &WeightingPolicy) -> Result<Composite, AtlasError> {
+    policy.validate()?;
     let ontology = atlas.ontology();
     let weighted: Vec<&CapabilityId> = policy.capabilities().collect();
 
@@ -390,9 +429,11 @@ pub fn composite(atlas: &Atlas, policy: &WeightingPolicy) -> Result<Composite, A
                 ontology_version: ontology.version().to_string(),
             })?;
         let Some(score) = cell.score() else {
-            let reason = cell
-                .unmeasured_reason()
-                .expect("a cell is either measured or unmeasured");
+            let Some(reason) = cell.unmeasured_reason() else {
+                return Err(AtlasError::CompositeIneligible {
+                    reason: format!("{capability} is missing its unmeasured reason"),
+                });
+            };
             return Err(AtlasError::CompositeIneligible {
                 reason: format!("{capability} is unmeasured ({reason})"),
             });
@@ -414,4 +455,21 @@ pub fn composite(atlas: &Atlas, policy: &WeightingPolicy) -> Result<Composite, A
         weighted_capabilities: weighted.len(),
         tier,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn weighting_policy_deserialization_rejects_non_positive_weights() {
+        let capability = CapabilityId::parse("capability").expect("parses");
+        let policy = WeightingPolicy::declare("triage", [(capability, 1.0)]).expect("declares");
+        let mut value = serde_json::to_value(&policy).expect("serialises");
+        value["weights"]["capability"] = serde_json::json!(0.0);
+        assert!(serde_json::from_value::<WeightingPolicy>(value).is_err());
+
+        let value = serde_json::json!({"intended_use": "triage", "weights": {}});
+        assert!(serde_json::from_value::<WeightingPolicy>(value).is_err());
+    }
 }

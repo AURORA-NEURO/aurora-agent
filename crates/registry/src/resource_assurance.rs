@@ -106,6 +106,7 @@ pub struct ResourceDiscoveryAssuranceReceipt {
     pub disposition: ResourceAssuranceDisposition,
     pub candidate_order: Vec<String>,
     pub selected_order: Vec<String>,
+    pub selected_resources: Vec<QualifiedFederatedResource>,
     pub omitted_order: Vec<String>,
     pub semantic_order: Vec<ContentHash>,
     pub artifact_order: Vec<ContentHash>,
@@ -119,6 +120,51 @@ pub struct ResourceDiscoveryAssuranceReceipt {
     pub federation_manifest: TypedResearchArtifact,
     pub raw_data_local: bool,
     pub boundary: String,
+}
+
+fn federation_manifest_payload(
+    request_id: &str,
+    federation_id: &str,
+    requester: &str,
+    scope: &str,
+    disposition: ResourceAssuranceDisposition,
+    candidate_order: &[String],
+    selected_order: &[String],
+    omitted_order: &[String],
+    selected_resources: &[QualifiedFederatedResource],
+    semantic_order: &[ContentHash],
+    artifact_order: &[ContentHash],
+    provenance_order: &[ContentHash],
+    checks: &[String],
+    omissions: &[String],
+    uncertainty: &[String],
+    negative_evidence: &[String],
+    replay_identity: &ContentHash,
+) -> serde_json::Value {
+    json!({
+        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "feature_id": FEATURE_ID,
+        "request_id": request_id,
+        "federation_id": federation_id,
+        "requester": requester,
+        "scope": scope,
+        "disposition": disposition,
+        "candidate_order": candidate_order,
+        "selected_order": selected_order,
+        "omitted_order": omitted_order,
+        "resources": selected_resources,
+        "semantic_order": semantic_order,
+        "artifact_order": artifact_order,
+        "provenance_order": provenance_order,
+        "checks": checks,
+        "omissions": omissions,
+        "uncertainty": uncertainty,
+        "negative_evidence": negative_evidence,
+        "replay_identity": replay_identity,
+        "raw_data_local": true,
+        "boundary": PRECLINICAL_BOUNDARY,
+    })
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -144,26 +190,91 @@ impl ResourceDiscoveryAssuranceReceipt {
             || self.scope.trim().is_empty()
             || self.candidate_order.is_empty()
             || self.checks.is_empty()
+            || self.effect_receipts.is_empty()
         {
             return Err(ResourceDiscoveryAssuranceError::Invalid(
                 "identity, candidate order, locality, checks, or boundary is incomplete".into(),
             ));
         }
         for values in [
-            &self.candidate_order,
-            &self.selected_order,
             &self.omitted_order,
             &self.checks,
             &self.omissions,
             &self.uncertainty,
             &self.negative_evidence,
-            &self.effect_receipts,
         ] {
             if values.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(ResourceDiscoveryAssuranceError::Invalid(
                     "resource discovery ordering is not canonical".into(),
                 ));
             }
+        }
+        if self.candidate_order.iter().any(|id| id.trim().is_empty())
+            || self
+                .candidate_order
+                .windows(2)
+                .any(|pair| pair[0] == pair[1])
+            || self
+                .selected_order
+                .windows(2)
+                .any(|pair| pair[0] == pair[1])
+        {
+            return Err(ResourceDiscoveryAssuranceError::Invalid(
+                "resource discovery candidate identities are not unique".into(),
+            ));
+        }
+        let candidate_ids = self.candidate_order.iter().collect::<BTreeSet<_>>();
+        let selected_ids = self.selected_order.iter().collect::<BTreeSet<_>>();
+        let omitted_ids = self.omitted_order.iter().collect::<BTreeSet<_>>();
+        let classified_ids = selected_ids.union(&omitted_ids).collect::<BTreeSet<_>>();
+        if selected_ids.intersection(&omitted_ids).next().is_some()
+            || classified_ids.iter().any(|id| !candidate_ids.contains(*id))
+            || candidate_ids.iter().any(|id| !classified_ids.contains(id))
+        {
+            return Err(ResourceDiscoveryAssuranceError::Invalid(
+                "resource discovery candidates are not partitioned by selection and omission"
+                    .into(),
+            ));
+        }
+        if self.selected_resources.len() != self.selected_order.len()
+            || self
+                .selected_resources
+                .iter()
+                .zip(&self.selected_order)
+                .enumerate()
+                .any(|(index, (resource, id))| {
+                    resource.resource_id != *id
+                        || resource.rank != index + 1
+                        || resource.institution_id.trim().is_empty()
+                        || resource.reason.trim().is_empty()
+                        || resource.capability_order.is_empty()
+                        || resource.modality_order.is_empty()
+                        || resource
+                            .capability_order
+                            .windows(2)
+                            .any(|pair| pair[0] >= pair[1])
+                        || resource
+                            .modality_order
+                            .windows(2)
+                            .any(|pair| pair[0] >= pair[1])
+                })
+        {
+            return Err(ResourceDiscoveryAssuranceError::Invalid(
+                "resource discovery selected resource details do not match selection order".into(),
+            ));
+        }
+        let expected_effects = if self.selected_order.is_empty() {
+            vec!["block:federated-resource-discovery".to_string()]
+        } else {
+            self.selected_order
+                .iter()
+                .map(|id| format!("exchange:signed-resource-manifest:{id}"))
+                .collect::<Vec<_>>()
+        };
+        if self.effect_receipts != expected_effects {
+            return Err(ResourceDiscoveryAssuranceError::Invalid(
+                "resource discovery effects do not match the selected resources".into(),
+            ));
         }
         for values in [
             &self.semantic_order,
@@ -183,8 +294,41 @@ impl ResourceDiscoveryAssuranceReceipt {
                 "qualified discovery requires a selected resource".into(),
             ));
         }
+        if self.federation_manifest.artifact_id
+            != format!("federated-resource-manifest:{}", self.request_id)
+            || self.federation_manifest.content_type
+                != "application/vnd.aurora.federated-resource-manifest+json"
+            || !self.federation_manifest.semantic_loss.is_empty()
+            || !self.federation_manifest.provenance.is_empty()
+        {
+            return Err(ResourceDiscoveryAssuranceError::Artifact(
+                "resource discovery manifest identity or provenance is invalid".into(),
+            ));
+        }
         self.federation_manifest
             .validate_metadata()
+            .map_err(|error| ResourceDiscoveryAssuranceError::Artifact(error.to_string()))?;
+        let payload = federation_manifest_payload(
+            &self.request_id,
+            &self.federation_id,
+            &self.requester,
+            &self.scope,
+            self.disposition,
+            &self.candidate_order,
+            &self.selected_order,
+            &self.omitted_order,
+            &self.selected_resources,
+            &self.semantic_order,
+            &self.artifact_order,
+            &self.provenance_order,
+            &self.checks,
+            &self.omissions,
+            &self.uncertainty,
+            &self.negative_evidence,
+            &self.replay_identity,
+        );
+        self.federation_manifest
+            .verify_payload(&payload)
             .map_err(|error| ResourceDiscoveryAssuranceError::Artifact(error.to_string()))
     }
 
@@ -296,11 +440,20 @@ pub fn assure_resource_discovery(
     let mut negative = BTreeSet::new();
     let mut spent = 0_u64;
     for resource in &resources {
-        let cost = (resource.resource_id.len()
-            + resource.capabilities.len()
-            + resource.modalities.len()) as u64
-            + 1;
-        let budget_ok = cost <= request.budget.saturating_sub(spent);
+        let cost = resource
+            .resource_id
+            .len()
+            .checked_add(resource.capabilities.len())
+            .and_then(|total| total.checked_add(resource.modalities.len()))
+            .and_then(|total| u64::try_from(total).ok())
+            .and_then(|total| total.checked_add(1))
+            .ok_or_else(|| {
+                ResourceDiscoveryAssuranceError::Invalid(
+                    "resource cost exceeds the representable budget range".into(),
+                )
+            })?;
+        let next_spent = spent.checked_add(cost);
+        let budget_ok = next_spent.is_some_and(|total| total <= request.budget);
         let state_ok = resource.state == ResourceState::Available;
         let scope_ok = resource.scope == request.scope;
         let capability_ok = required_capabilities
@@ -326,7 +479,11 @@ pub fn assure_resource_discovery(
             && complete
             && selected.len() < request.max_results;
         if admitted {
-            spent = spent.saturating_add(cost);
+            spent = next_spent.ok_or_else(|| {
+                ResourceDiscoveryAssuranceError::Invalid(
+                    "resource budget accounting overflowed before admission".into(),
+                )
+            })?;
             let mut capabilities = resource.capabilities.clone();
             capabilities.sort();
             capabilities.dedup();
@@ -448,30 +605,26 @@ pub fn assure_resource_discovery(
         .iter()
         .map(|resource| resource.resource_id.clone())
         .collect::<Vec<_>>();
-    let payload = json!({
-        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
-        "contract_version": CONTRACT_VERSION,
-        "feature_id": FEATURE_ID,
-        "request_id": request.request_id,
-        "federation_id": request.federation_id,
-        "requester": request.requester,
-        "scope": request.scope,
-        "disposition": disposition,
-        "candidate_order": candidate_order,
-        "selected_order": selected_order,
-        "omitted_order": omitted,
-        "resources": selected,
-        "semantic_order": semantics,
-        "artifact_order": artifacts,
-        "provenance_order": provenance,
-        "checks": checks,
-        "omissions": omissions,
-        "uncertainty": uncertainty,
-        "negative_evidence": negative,
-        "replay_identity": request.replay_identity,
-        "raw_data_local": true,
-        "boundary": PRECLINICAL_BOUNDARY,
-    });
+    let omitted_order = omitted.into_iter().collect::<Vec<_>>();
+    let payload = federation_manifest_payload(
+        &request.request_id,
+        &request.federation_id,
+        &request.requester,
+        &request.scope,
+        disposition,
+        &candidate_order,
+        &selected_order,
+        &omitted_order,
+        &selected,
+        &semantics.iter().cloned().collect::<Vec<_>>(),
+        &artifacts.iter().cloned().collect::<Vec<_>>(),
+        &provenance.iter().cloned().collect::<Vec<_>>(),
+        &checks,
+        &omissions.iter().cloned().collect::<Vec<_>>(),
+        &uncertainty.iter().cloned().collect::<Vec<_>>(),
+        &negative.iter().cloned().collect::<Vec<_>>(),
+        &request.replay_identity,
+    );
     let federation_manifest = TypedResearchArtifact::from_payload(
         format!("federated-resource-manifest:{}", request.request_id),
         "application/vnd.aurora.federated-resource-manifest+json",
@@ -499,7 +652,8 @@ pub fn assure_resource_discovery(
         disposition,
         candidate_order,
         selected_order,
-        omitted_order: omitted.into_iter().collect(),
+        selected_resources: selected,
+        omitted_order,
         semantic_order: semantics.into_iter().collect(),
         artifact_order: artifacts.into_iter().collect(),
         provenance_order: provenance.into_iter().collect(),
@@ -636,6 +790,29 @@ mod tests {
         assert_eq!(receipt.disposition, ResourceAssuranceDisposition::Qualified);
         assert_eq!(receipt.selected_order, vec!["resource:a", "resource:b"]);
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+
+    #[test]
+    fn a_higher_trust_resource_may_precede_lexically_smaller_identity() {
+        let receipt = assure_resource_discovery(&request(vec![
+            resource("resource:a", 700, ResourceState::Available),
+            resource("resource:b", 900, ResourceState::Available),
+        ]))
+        .unwrap();
+        assert_eq!(receipt.candidate_order, vec!["resource:b", "resource:a"]);
+        assert_eq!(receipt.selected_order, vec!["resource:b", "resource:a"]);
+    }
+
+    #[test]
+    fn tampered_resource_manifest_payload_is_rejected() {
+        let mut receipt = assure_resource_discovery(&request(vec![resource(
+            "resource:a",
+            900,
+            ResourceState::Available,
+        )]))
+        .unwrap();
+        receipt.selected_resources[0].institution_id = "institution:tampered".into();
+        assert!(receipt.validate().is_err());
     }
 
     #[test]

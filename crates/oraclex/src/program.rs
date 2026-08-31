@@ -48,7 +48,9 @@ use crate::error::OracleXError;
 use crate::verdict::{Determination, Missing, Witness};
 
 /// The four state planes §32's section index tables, minus the fifth, which is the conclusion.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 pub struct StatePlanes {
     /// Layout, identifier, format, ordering, wording. Semantics fixed.
     pub representation: bool,
@@ -416,7 +418,9 @@ impl Gate {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "disposition", rename_all = "snake_case")]
 pub enum Disposition {
-    Released { signature: String },
+    Released {
+        signature: String,
+    },
     /// Not rejected. §32 keeps the artifact as an experimental generator, so the unmet gates travel
     /// with it and a later run can clear them.
     Quarantined {
@@ -537,7 +541,10 @@ pub fn validate(
         ));
     }
 
-    let relation_is_open = declaration.expected_relation.as_mutation_relation().is_none();
+    let relation_is_open = declaration
+        .expected_relation
+        .as_mutation_relation()
+        .is_none();
     match (relation_is_open, declaration.blinded_review) {
         (true, None) => {
             unmet.insert(Gate::BlindedReviewOfOpenRelation);
@@ -576,7 +583,8 @@ pub fn validate(
         ));
     }
 
-    if declaration.seed_pool == SeedPool::Public && declaration.descendant_policy != AccessPolicy::Public
+    if declaration.seed_pool == SeedPool::Public
+        && declaration.descendant_policy != AccessPolicy::Public
     {
         unmet.insert(Gate::SeedPoolSeparation);
         missing.push(Missing::new(

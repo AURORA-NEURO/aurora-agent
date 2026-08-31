@@ -5,6 +5,7 @@ edition = "2021"
 description = "Documentation graph: module registry, edge vocabulary, context cards, task routes, bundle compiler, change impact"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 serde = { workspace = true }

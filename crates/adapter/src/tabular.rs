@@ -33,7 +33,7 @@ use crate::ingestion::Ingestion;
 use crate::location::SourceLocation;
 use crate::loss::{LossAudit, LossKind, LossSeverity};
 use crate::source::{Source, SourceManifest};
-use bioprism_ids::{python_repr_f64, ContentHash};
+use bioprism_ids::{python_repr_f64, ContentHash, VariableName};
 use bioprism_scope::ScopeKey;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -173,6 +173,27 @@ impl VariableMapping {
         self.tags.extend(tags.into_iter().map(Into::into));
         self
     }
+
+    fn validate(&self) -> Result<(), AdapterError> {
+        VariableName::parse(self.variable.clone()).map_err(|error| {
+            AdapterError::InvalidSource(format!(
+                "variable mapping {:?} is not a valid variable: {error}",
+                self.variable
+            ))
+        })?;
+        if self.tags.len() > 16_384 {
+            return Err(AdapterError::InvalidSource(
+                "variable mapping tags exceed their item bound".into(),
+            ));
+        }
+        for tag in &self.tags {
+            validate_text("variable tag", tag, 512)?;
+        }
+        validate_unit(&self.unit)?;
+        validate_frame(&self.frame)?;
+        validate_ontology(&self.ontology)?;
+        Ok(())
+    }
 }
 
 /// What a column is for.
@@ -290,6 +311,48 @@ impl TabularProfile {
         }
         dimensions
     }
+
+    pub fn validate(&self) -> Result<(), AdapterError> {
+        validate_text("dataset", &self.dataset, 512)?;
+        if self.columns.len() > 16_384 {
+            return Err(AdapterError::InvalidSource(
+                "tabular mapping exceeds its column bound".into(),
+            ));
+        }
+        if self.tags.len() > 16_384 {
+            return Err(AdapterError::InvalidSource(
+                "tabular profile tags exceed their item bound".into(),
+            ));
+        }
+        for tag in &self.tags {
+            validate_text("tabular profile tag", tag, 512)?;
+        }
+        if self.delimiter == 0 || matches!(self.delimiter, b'"' | b'\r' | b'\n') {
+            return Err(AdapterError::InvalidSource(
+                "tabular delimiter conflicts with CSV syntax".into(),
+            ));
+        }
+        let mut scope_dimensions = BTreeSet::new();
+        for (column, role) in &self.columns {
+            validate_text("mapping column", column, 512)?;
+            match role {
+                ColumnRole::ScopeDimension { dimension } => {
+                    validate_text("scope dimension", dimension, 512)?;
+                    if !scope_dimensions.insert(dimension) {
+                        return Err(AdapterError::InvalidSource(format!(
+                            "scope dimension {dimension:?} is mapped by more than one column"
+                        )));
+                    }
+                }
+                ColumnRole::Variable(mapping) => mapping.validate()?,
+                ColumnRole::Provenance => {}
+                ColumnRole::Ignored { reason, .. } => {
+                    validate_text("ignored-column reason", reason, 1024)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Normalizes a delimited table into facts under a [`TabularProfile`].
@@ -333,6 +396,7 @@ impl Adapter for TabularAdapter {
     }
 
     fn ingest(&self, source: &Source) -> Result<Ingestion, AdapterError> {
+        self.profile.validate()?;
         source.require_format(TABULAR_ADAPTER, &crate::probe::CSV_FORMATS)?;
         let bytes = source.as_bytes(TABULAR_ADAPTER)?;
         let table = Table::parse_with(&source.id, bytes, self.profile.delimiter)?;
@@ -480,6 +544,53 @@ impl Adapter for TabularAdapter {
 
         Ingestion::new(manifest, facts, audit.finish())
     }
+}
+
+fn validate_unit(unit: &UnitPolicy) -> Result<(), AdapterError> {
+    match unit {
+        UnitPolicy::Dimensionless => Ok(()),
+        UnitPolicy::Carried(value) => validate_text("unit", value, 256),
+        UnitPolicy::Dropped { unit, reason } => {
+            validate_text("dropped unit", unit, 256)?;
+            validate_text("dropped unit reason", reason, 1024)
+        }
+    }
+}
+
+fn validate_frame(frame: &FramePolicy) -> Result<(), AdapterError> {
+    match frame {
+        FramePolicy::NotPositional => Ok(()),
+        FramePolicy::Carried(value) => validate_text("frame", value, 256),
+        FramePolicy::Dropped { frame, reason } => {
+            validate_text("dropped frame", frame, 256)?;
+            validate_text("dropped frame reason", reason, 1024)
+        }
+    }
+}
+
+fn validate_ontology(ontology: &OntologyPolicy) -> Result<(), AdapterError> {
+    match ontology {
+        OntologyPolicy::NotOntological => Ok(()),
+        OntologyPolicy::Mapped { ontology, version } => {
+            validate_text("ontology", ontology, 256)?;
+            validate_text("ontology version", version, 256)
+        }
+        OntologyPolicy::Unmapped { ontology } => validate_text("unmapped ontology", ontology, 256),
+    }
+}
+
+fn validate_text(field: &str, value: &str, maximum: usize) -> Result<(), AdapterError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(AdapterError::InvalidSource(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > maximum || value.chars().any(char::is_control) {
+        return Err(AdapterError::InvalidSource(format!(
+            "{field} is outside its bounded text contract"
+        )));
+    }
+    Ok(())
 }
 
 /// Records the losses implied by a variable's qualifier policies, once per column.
@@ -701,5 +812,28 @@ mod tests {
         let literal = "0.12345678901234567890123";
         let parsed: f64 = literal.parse().unwrap();
         assert!(!round_trips(literal, parsed));
+    }
+
+    #[test]
+    fn a_profile_rejects_duplicate_scope_dimensions() {
+        let profile = TabularProfile::new("dataset")
+            .scope("subject_a", "subject")
+            .scope("subject_b", "subject");
+        assert!(matches!(
+            profile.validate(),
+            Err(AdapterError::InvalidSource(_))
+        ));
+    }
+
+    #[test]
+    fn a_profile_rejects_an_empty_carried_unit() {
+        let profile = TabularProfile::new("dataset").variable(
+            "dose",
+            VariableMapping::new("dose").unit(UnitPolicy::Carried("".into())),
+        );
+        assert!(matches!(
+            profile.validate(),
+            Err(AdapterError::InvalidSource(_))
+        ));
     }
 }

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/worldgen/federated-continual-retrieval-synthesis-contract/1.0",
+  "title": "Worldgen federated-continual retrieval synthesis contract receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "request_id", "consumer", "scope", "semantic_profile", "input_schema", "output_schema", "compatibility", "disposition", "candidate_order", "compatible_order", "unresolved_order", "blocked_order", "omitted_order", "negative_evidence_order", "migration_order", "semantic_loss_order", "replay_identity", "contract_digest", "artifact", "effect_receipts", "raw_data_local", "aggregate_only", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"}, "contract_version": {"const": "worldgen-federated-continual-retrieval-synthesis-contract/1.0"}, "feature_id": {"const": "AFA-worldgen-P02-F08"},
+    "request_id": {"type": "string", "minLength": 1}, "consumer": {"type": "string", "minLength": 1}, "scope": {"type": "string", "minLength": 1}, "semantic_profile": {"type": "string", "minLength": 1}, "input_schema": {"const": "ScopedRetrievalQuery4@1"}, "output_schema": {"const": "EvidenceSynthesis2@1"},
+    "compatibility": {"enum": ["compatible", "additive_migration", "breaking", "unknown"]}, "disposition": {"enum": ["compatible", "partial", "unknown", "blocked"]},
+    "candidate_order": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "compatible_order": {"type": "array", "items": {"type": "string"}}, "unresolved_order": {"type": "array", "items": {"type": "string"}}, "blocked_order": {"type": "array", "items": {"type": "string"}}, "omitted_order": {"type": "array", "items": {"type": "string"}}, "negative_evidence_order": {"type": "array", "items": {"type": "string"}}, "migration_order": {"type": "array", "items": {"type": "string"}}, "semantic_loss_order": {"type": "array", "items": {"type": "string"}},
+    "replay_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "contract_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["artifact_id", "content_type", "content_hash", "semantic_loss", "boundary"], "properties": {"artifact_id": {"type": "string", "minLength": 1}, "content_type": {"const": "application/vnd.aurora.worldgen.retrieval-contract-receipt+json"}, "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "semantic_loss": {"type": "array", "items": {"type": "string"}}, "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}}},
+    "effect_receipts": {"const": ["none:contract-validation"]}, "raw_data_local": {"const": true}, "aggregate_only": {"const": true}, "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  }
+}
+

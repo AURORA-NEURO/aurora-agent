@@ -22,6 +22,9 @@ pub const FEATURE_ID: &str = "AFA-bioevalx-P16-F24";
 pub const CONTRACT_VERSION: &str = "bioevalx-federated-release-gateway/1.0";
 pub const MAX_RUNS: usize = 4096;
 pub const MAX_PROTOCOLS: usize = 32;
+pub const MAX_ENDPOINTS: usize = 64;
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_LIST_ITEMS: usize = 8192;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,7 +88,7 @@ pub struct FederationGatewayRequest {
     pub boundary: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SignedResearchObject {
     pub run_id: String,
     pub release_id: String,
@@ -103,7 +106,7 @@ pub struct SignedResearchObject {
     pub boundary: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FederationGatewayReceipt {
     pub schema_version: String,
     pub contract_version: String,
@@ -146,6 +149,65 @@ pub enum FederationGatewayError {
     Serialization(String),
 }
 
+fn validate_text(field: &str, value: &str) -> Result<(), FederationGatewayError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(FederationGatewayError::Invalid(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > MAX_TEXT_BYTES {
+        return Err(FederationGatewayError::Invalid(format!(
+            "{field} exceeds the {MAX_TEXT_BYTES}-byte bound"
+        )));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(FederationGatewayError::Invalid(format!(
+            "{field} must not contain control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_string_order(
+    values: &[String],
+    field: &str,
+    allow_empty: bool,
+) -> Result<(), FederationGatewayError> {
+    if !allow_empty && values.is_empty() {
+        return Err(FederationGatewayError::Invalid(format!(
+            "{field} must not be empty"
+        )));
+    }
+    if values.len() > MAX_LIST_ITEMS {
+        return Err(FederationGatewayError::Invalid(format!(
+            "{field} exceeds the {MAX_LIST_ITEMS}-item bound"
+        )));
+    }
+    for value in values {
+        validate_text(field, value)?;
+    }
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederationGatewayError::Invalid(format!(
+            "{field} must be strictly sorted and unique"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_hash_order(values: &[ContentHash], field: &str) -> Result<(), FederationGatewayError> {
+    if values.len() > MAX_LIST_ITEMS {
+        return Err(FederationGatewayError::Invalid(format!(
+            "{field} exceeds the {MAX_LIST_ITEMS}-item bound"
+        )));
+    }
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederationGatewayError::Invalid(format!(
+            "{field} must be strictly sorted and unique"
+        )));
+    }
+    Ok(())
+}
+
 impl FederationGatewayReceipt {
     pub fn validate(&self) -> Result<(), FederationGatewayError> {
         if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
@@ -163,52 +225,60 @@ impl FederationGatewayReceipt {
         {
             return Err(FederationGatewayError::Invalid("federation identity, candidates, endpoint, protocol, locality, effects, or boundary is incomplete".into()));
         }
-        if self
-            .admitted_order
-            .iter()
-            .any(|id| !self.candidate_order.contains(id))
+        for (field, value) in [
+            ("request_id", &self.request_id),
+            ("workflow_id", &self.workflow_id),
+            ("federation_id", &self.federation_id),
+            ("endpoint", &self.endpoint),
+            ("protocol", &self.protocol),
+        ] {
+            validate_text(field, value)?;
+        }
+        for (values, field, allow_empty) in [
+            (&self.candidate_order, "candidate_order", false),
+            (&self.admitted_order, "admitted_order", true),
+            (&self.blocked_order, "blocked_order", true),
+            (&self.unknown_order, "unknown_order", true),
+            (&self.release_order, "release_order", true),
+            (&self.artifact_order, "artifact_order", true),
+            (&self.evidence_order, "evidence_order", true),
+            (&self.omissions, "omissions", true),
+            (&self.uncertainty, "uncertainty", true),
+            (&self.negative_evidence, "negative_evidence", true),
+            (&self.effect_receipts, "effect_receipts", false),
+        ] {
+            validate_string_order(values, field, allow_empty)?;
+        }
+        for (values, field) in [
+            (&self.provenance_order, "provenance_order"),
+            (&self.replay_order, "replay_order"),
+            (&self.benchmark_order, "benchmark_order"),
+        ] {
+            validate_hash_order(values, field)?;
+        }
+        if self.release_order != self.admitted_order
+            || self
+                .admitted_order
+                .iter()
+                .any(|id| !self.candidate_order.contains(id) || self.blocked_order.contains(id))
             || self
                 .blocked_order
                 .iter()
-                .any(|id| !self.candidate_order.contains(id))
+                .any(|id| !self.candidate_order.contains(id) || self.admitted_order.contains(id))
             || self
                 .unknown_order
                 .iter()
-                .any(|id| !self.candidate_order.contains(id))
+                .any(|id| !self.blocked_order.contains(id))
+            || self
+                .candidate_order
+                .iter()
+                .any(|id| !self.admitted_order.contains(id) && !self.blocked_order.contains(id))
+            || self.objects.len() != self.admitted_order.len()
         {
             return Err(FederationGatewayError::Invalid(
-                "candidate state is not covered by candidate order".into(),
+                "candidate state, release order, and signed-object coverage are inconsistent"
+                    .into(),
             ));
-        }
-        for values in [
-            &self.candidate_order,
-            &self.admitted_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.release_order,
-            &self.artifact_order,
-            &self.evidence_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(FederationGatewayError::Invalid(
-                    "federation gateway ordering is not canonical".into(),
-                ));
-            }
-        }
-        for values in [
-            &self.provenance_order,
-            &self.replay_order,
-            &self.benchmark_order,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(FederationGatewayError::Invalid(
-                    "federation gateway digest ordering is not canonical".into(),
-                ));
-            }
         }
         if self.effect_receipts.iter().any(|effect| {
             effect != "block:federation-release"
@@ -218,6 +288,7 @@ impl FederationGatewayReceipt {
                 "effect is outside permitted-artifacts exchange gate".into(),
             ));
         }
+        let mut object_releases = Vec::with_capacity(self.objects.len());
         for object in &self.objects {
             if !object.raw_data_local
                 || object.boundary != PRECLINICAL_BOUNDARY
@@ -225,11 +296,40 @@ impl FederationGatewayReceipt {
                 || object.protocol != self.protocol
                 || object.artifact_ids.is_empty()
                 || object.evidence_receipt_ids.is_empty()
+                || !self.admitted_order.contains(&object.release_id)
+                || self
+                    .benchmark_digest
+                    .as_ref()
+                    .is_none_or(|digest| digest != &object.benchmark_digest)
             {
                 return Err(FederationGatewayError::Invalid(
                     "federation object is incomplete or inconsistent".into(),
                 ));
             }
+            validate_text("object.run_id", &object.run_id)?;
+            validate_text("object.release_id", &object.release_id)?;
+            validate_text("object.origin", &object.origin)?;
+            validate_text("object.purpose", &object.purpose)?;
+            validate_string_order(&object.artifact_ids, "object.artifact_ids", false)?;
+            validate_string_order(
+                &object.evidence_receipt_ids,
+                "object.evidence_receipt_ids",
+                false,
+            )?;
+            if object_releases
+                .iter()
+                .any(|release_id| release_id == &object.release_id)
+            {
+                return Err(FederationGatewayError::Invalid(
+                    "signed object release identities must be unique".into(),
+                ));
+            }
+            object_releases.push(object.release_id.clone());
+        }
+        if object_releases != self.admitted_order {
+            return Err(FederationGatewayError::Invalid(
+                "signed object release order does not match admitted order".into(),
+            ));
         }
         self.federation_artifact
             .validate_metadata()
@@ -296,17 +396,26 @@ pub fn prepare_federation_release(
             && run.raw_data_local
             && run.state == RunState::Supported
             && run.scope == request.scope
+            && run.origin == request.origin
+            && run.purpose == request.purpose
             && !run.artifact_ids.is_empty()
             && !run.evidence_receipt_ids.is_empty()
             && run.benchmark_digest.is_some()
             && request.benchmark_digest.is_some()
+            && run.benchmark_digest == request.benchmark_digest
             && run.replay_identity == request.replay_identity
+            && run.release_digest != ContentHash::of_bytes(b"")
             && run.provenance_digest != ContentHash::of_bytes(b"")
             && run.omissions.is_empty()
             && run.uncertainty.is_empty()
             && run.negative_evidence.is_empty()
             && budget_ok;
         if complete {
+            let benchmark_digest = run.benchmark_digest.clone().ok_or_else(|| {
+                FederationGatewayError::Invalid(
+                    "admitted federation run is missing its benchmark digest".into(),
+                )
+            })?;
             spent = spent.saturating_add(cost);
             admitted.push(run.release_id.clone());
             releases.insert(run.release_id.clone());
@@ -314,9 +423,7 @@ pub fn prepare_federation_release(
             evidence.extend(run.evidence_receipt_ids.iter().cloned());
             provenance.insert(run.provenance_digest.clone());
             replay.insert(run.replay_identity.clone());
-            if let Some(digest) = &run.benchmark_digest {
-                benchmarks.insert(digest.clone());
-            }
+            benchmarks.insert(benchmark_digest.clone());
             objects.push(SignedResearchObject {
                 run_id: run.run_id.clone(),
                 release_id: run.release_id.clone(),
@@ -327,7 +434,7 @@ pub fn prepare_federation_release(
                 release_digest: run.release_digest.clone(),
                 provenance_digest: run.provenance_digest.clone(),
                 replay_identity: run.replay_identity.clone(),
-                benchmark_digest: run.benchmark_digest.clone().expect("checked above"),
+                benchmark_digest,
                 endpoint: request.endpoint.clone(),
                 protocol: request.protocol.clone(),
                 raw_data_local: true,
@@ -380,6 +487,15 @@ pub fn prepare_federation_release(
             }
             if run.benchmark_digest.is_none() || request.benchmark_digest.is_none() {
                 omissions.insert(format!("release:{}:benchmark-missing", run.release_id));
+            }
+            if run.benchmark_digest != request.benchmark_digest {
+                uncertainty.insert(format!("release:{}:benchmark-mismatch", run.release_id));
+            }
+            if run.origin != request.origin || run.purpose != request.purpose {
+                negative.insert(format!(
+                    "release:{}:scope-or-purpose-mismatch",
+                    run.release_id
+                ));
             }
             if run.replay_identity != request.replay_identity {
                 uncertainty.insert(format!("release:{}:replay-mismatch", run.release_id));
@@ -488,6 +604,7 @@ fn validate_request(request: &FederationGatewayRequest) -> Result<(), Federation
         || request.endpoint.trim().is_empty()
         || request.protocol.trim().is_empty()
         || request.approved_endpoints.is_empty()
+        || request.approved_endpoints.len() > MAX_ENDPOINTS
         || request.pinned_protocols.is_empty()
         || request.pinned_protocols.len() > MAX_PROTOCOLS
         || request.runs.is_empty()
@@ -497,17 +614,75 @@ fn validate_request(request: &FederationGatewayRequest) -> Result<(), Federation
     {
         return Err(FederationGatewayError::Invalid("federation request identity, endpoint/protocol allow-list, runs, budget, or boundary is incomplete".into()));
     }
-    let mut ids = BTreeSet::new();
+    for (field, value) in [
+        ("request_id", &request.request_id),
+        ("workflow_id", &request.workflow_id),
+        ("federation_id", &request.federation_id),
+        ("scope", &request.scope),
+        ("origin", &request.origin),
+        ("purpose", &request.purpose),
+        ("endpoint", &request.endpoint),
+        ("protocol", &request.protocol),
+    ] {
+        validate_text(field, value)?;
+    }
+    validate_string_order(&request.approved_endpoints, "approved_endpoints", false)?;
+    validate_string_order(&request.pinned_protocols, "pinned_protocols", false)?;
+    let empty_hash = ContentHash::of_bytes(b"");
+    if request.replay_identity == empty_hash
+        || request
+            .benchmark_digest
+            .as_ref()
+            .is_some_and(|digest| digest == &empty_hash)
+    {
+        return Err(FederationGatewayError::Invalid(
+            "request content identity must not be empty".into(),
+        ));
+    }
+    let mut release_ids = BTreeSet::new();
+    let mut run_ids = BTreeSet::new();
     for run in &request.runs {
         if run.run_id.trim().is_empty()
             || run.release_id.trim().is_empty()
             || run.origin.trim().is_empty()
             || run.purpose.trim().is_empty()
             || run.boundary != PRECLINICAL_BOUNDARY
-            || !ids.insert(run.release_id.clone())
+            || !run_ids.insert(run.run_id.clone())
+            || !release_ids.insert(run.release_id.clone())
         {
             return Err(FederationGatewayError::Invalid(format!(
                 "release {} is invalid or duplicated",
+                run.release_id
+            )));
+        }
+        for (field, value) in [
+            ("run_id", &run.run_id),
+            ("release_id", &run.release_id),
+            ("run.scope", &run.scope),
+            ("run.origin", &run.origin),
+            ("run.purpose", &run.purpose),
+        ] {
+            validate_text(field, value)?;
+        }
+        validate_string_order(&run.artifact_ids, "run.artifact_ids", true)?;
+        validate_string_order(&run.evidence_receipt_ids, "run.evidence_receipt_ids", true)?;
+        for (field, values) in [
+            ("run.omissions", &run.omissions),
+            ("run.uncertainty", &run.uncertainty),
+            ("run.negative_evidence", &run.negative_evidence),
+        ] {
+            validate_string_order(values, field, true)?;
+        }
+        if run.release_digest == empty_hash
+            || run.provenance_digest == empty_hash
+            || run.replay_identity == empty_hash
+            || run
+                .benchmark_digest
+                .as_ref()
+                .is_some_and(|digest| digest == &empty_hash)
+        {
+            return Err(FederationGatewayError::Invalid(format!(
+                "release {} has an empty content identity",
                 run.release_id
             )));
         }
@@ -625,5 +800,37 @@ mod tests {
             duplicate
         ]))
         .is_err());
+    }
+
+    #[test]
+    fn duplicate_run_identity_is_rejected_even_for_distinct_releases() {
+        let mut duplicate = run("b", RunState::Supported);
+        duplicate.run_id = "run:a".into();
+        assert!(prepare_federation_release(&request(vec![
+            run("a", RunState::Supported),
+            duplicate,
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn benchmark_identity_mismatch_blocks_admission() {
+        let mut input = request(vec![run("a", RunState::Supported)]);
+        input.runs[0].benchmark_digest = Some(hash("different-benchmark"));
+        let receipt = prepare_federation_release(&input).unwrap();
+        assert_ne!(receipt.disposition, GatewayDisposition::Qualified);
+        assert!(receipt
+            .uncertainty
+            .iter()
+            .any(|item| item.contains("benchmark-mismatch")));
+    }
+
+    #[test]
+    fn changing_an_admitted_object_endpoint_invalidates_the_receipt() {
+        let receipt =
+            prepare_federation_release(&request(vec![run("a", RunState::Supported)])).unwrap();
+        let mut tampered = receipt;
+        tampered.objects[0].endpoint = "https://other.example/research".into();
+        assert!(tampered.validate().is_err());
     }
 }

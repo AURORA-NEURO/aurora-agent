@@ -25,6 +25,9 @@ pub const VIEW_ORDER: [&str; 3] = [
     "view:capacity-frontier",
     "view:checkpoint-replay",
 ];
+const WORKBENCH_CONTENT_TYPE: &str =
+    "application/vnd.aurora.throughput-retrieval-workbench-receipt+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThroughputRetrievalWorkbenchRequest {
@@ -90,7 +93,6 @@ impl ThroughputRetrievalWorkbenchReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.workspace_id.trim().is_empty()
             || self.batch_id.trim().is_empty()
@@ -105,37 +107,76 @@ impl ThroughputRetrievalWorkbenchReceipt {
         {
             return Err(ThroughputRetrievalWorkbenchError::Invalid("throughput workbench identity, queue, checkpoint, views, panels, budget, locality, or effects are incomplete".into()));
         }
-        if self
-            .ranked_order
-            .iter()
-            .chain(self.qualified_order.iter())
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.workspace_id, "workspace_id"),
+            (&self.batch_id, "batch_id"),
+            (&self.partition, "partition"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        if self.view_order != VIEW_ORDER {
             return Err(ThroughputRetrievalWorkbenchError::Invalid(
-                "throughput workbench state is not covered by candidates".into(),
+                "throughput workbench views are not in canonical order".into(),
             ));
         }
-        for values in [
-            &self.view_order,
-            &self.panel_order,
-            &self.action_receipts,
-            &self.candidate_order,
-            &self.ranked_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        validate_unique(&self.panel_order, "panel_order")?;
+        for (values, field) in [
+            (&self.action_receipts, "action_receipts"),
+            (&self.candidate_order, "candidate_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(ThroughputRetrievalWorkbenchError::Invalid(
-                    "throughput workbench ordering is not canonical".into(),
-                ));
-            }
+            validate_sorted_unique(values, field)?;
+        }
+        for (values, field) in [
+            (&self.ranked_order, "ranked_order"),
+            (&self.qualified_order, "qualified_order"),
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
+        ] {
+            validate_unique(values, field)?;
+        }
+        let candidate_keys = identity_keys(&self.candidate_order);
+        if identity_keys(&self.ranked_order) != candidate_keys {
+            return Err(ThroughputRetrievalWorkbenchError::Invalid(
+                "throughput workbench ranked order must contain every candidate exactly once"
+                    .into(),
+            ));
+        }
+        let qualified_keys = identity_keys(&self.qualified_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        if !qualified_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+            || self
+                .ranked_order
+                .iter()
+                .any(|candidate| !self.candidate_order.contains(candidate))
+            || self
+                .qualified_order
+                .iter()
+                .any(|candidate| !self.candidate_order.contains(candidate))
+            || self
+                .blocked_order
+                .iter()
+                .any(|candidate| !self.candidate_order.contains(candidate))
+            || self
+                .unknown_order
+                .iter()
+                .any(|candidate| !self.blocked_order.contains(candidate))
+            || qualified_keys
+                .union(&blocked_keys)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_keys
+        {
+            return Err(ThroughputRetrievalWorkbenchError::Invalid(
+                "throughput workbench candidate states must partition candidates".into(),
+            ));
         }
         for digest in [
             &self.queue_digest,
@@ -149,16 +190,71 @@ impl ThroughputRetrievalWorkbenchReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("view:local-throughput-retrieval-artifacts:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_effect_receipts = if self.disposition != SynthesisDisposition::Blocked {
+            vec![format!(
+                "view:local-throughput-retrieval-artifacts:{}",
+                self.workspace_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
             return Err(ThroughputRetrievalWorkbenchError::Invalid(
-                "throughput workbench effect is not read-only".into(),
+                "throughput workbench effects do not match disposition".into(),
+            ));
+        }
+        if !self.raw_data_local
+            && (self.disposition != SynthesisDisposition::Blocked
+                || !self
+                    .omissions
+                    .iter()
+                    .any(|item| item == "workbench:raw-data-locality-failed"))
+        {
+            return Err(ThroughputRetrievalWorkbenchError::Invalid(
+                "non-local throughput workbenches must be blocked and retain locality evidence"
+                    .into(),
+            ));
+        }
+        let expected_workbench_digest = ContentHash::of_value(&json!({
+            "workspace_id": self.workspace_id,
+            "disposition": self.disposition,
+            "view_order": self.view_order,
+            "panel_order": self.panel_order,
+            "action_receipts": self.action_receipts,
+            "candidate_order": self.candidate_order,
+            "ranked_order": self.ranked_order,
+            "qualified_order": self.qualified_order,
+            "blocked_order": self.blocked_order,
+            "unknown_order": self.unknown_order,
+            "queue_digest": self.queue_digest,
+            "synthesis_digest": self.synthesis_digest,
+            "checkpoint_seq": self.checkpoint_seq,
+            "replay_identity": self.replay_identity,
+            "budget_units": self.budget_units,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| ThroughputRetrievalWorkbenchError::Artifact(error.to_string()))?;
+        if self.workbench_digest != expected_workbench_digest {
+            return Err(ThroughputRetrievalWorkbenchError::Invalid(
+                "throughput workbench digest is not bound to rendered state".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-throughput-retrieval-workbench:{}", self.workspace_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != WORKBENCH_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(ThroughputRetrievalWorkbenchError::Invalid(
+                "throughput workbench artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| ThroughputRetrievalWorkbenchError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| ThroughputRetrievalWorkbenchError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, ThroughputRetrievalWorkbenchError> {
@@ -190,6 +286,8 @@ pub fn compile_throughput_retrieval_workbench(
     .into_iter()
     .map(String::from)
     .collect::<Vec<_>>();
+    let mut action_receipts = action_receipts;
+    action_receipts.sort();
     let mut omissions = synthesis.omissions.iter().cloned().collect::<BTreeSet<_>>();
     let uncertainty = synthesis
         .uncertainty
@@ -204,9 +302,10 @@ pub fn compile_throughput_retrieval_workbench(
     let actionable = request.policy_allow
         && request.protected_closure
         && request.raw_data_local
-        && request.budget_units >= action_receipts.len() as u32
+        && u64::from(request.budget_units)
+            >= u64::try_from(action_receipts.len()).unwrap_or(u64::MAX)
         && synthesis.disposition != SynthesisDisposition::Blocked;
-    if request.budget_units < action_receipts.len() as u32 {
+    if u64::from(request.budget_units) < u64::try_from(action_receipts.len()).unwrap_or(u64::MAX) {
         omissions.insert("workbench:budget-exhausted".into());
     }
     if !request.policy_allow {
@@ -226,14 +325,22 @@ pub fn compile_throughput_retrieval_workbench(
     let synthesis_digest = synthesis
         .digest()
         .map_err(|error| ThroughputRetrievalWorkbenchError::Engine(error.to_string()))?;
-    let workbench_digest = ContentHash::of_value(&json!({"workspace_id": request.workspace_id, "view_order": view_order, "panel_order": panel_order, "action_receipts": action_receipts, "queue_digest": synthesis.queue_digest, "synthesis_digest": synthesis_digest, "checkpoint_seq": request.checkpoint_seq, "replay_identity": request.replay_identity, "budget_units": request.budget_units})).map_err(|error| ThroughputRetrievalWorkbenchError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "workspace_id": request.workspace_id, "batch_id": request.request.batch_id, "partition": request.request.partition, "disposition": disposition, "view_order": view_order, "panel_order": panel_order, "action_receipts": action_receipts, "candidate_order": synthesis.candidate_order, "ranked_order": synthesis.ranked_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "checkpoint_seq": request.checkpoint_seq, "queue_digest": synthesis.queue_digest, "synthesis_digest": synthesis_digest, "workbench_digest": workbench_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let workbench_digest = ContentHash::of_value(&json!({"workspace_id": request.workspace_id, "disposition": disposition, "view_order": view_order, "panel_order": panel_order, "action_receipts": action_receipts, "candidate_order": synthesis.candidate_order, "ranked_order": synthesis.ranked_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "queue_digest": synthesis.queue_digest, "synthesis_digest": synthesis_digest, "checkpoint_seq": request.checkpoint_seq, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "raw_data_local": true})).map_err(|error| ThroughputRetrievalWorkbenchError::Artifact(error.to_string()))?;
+    let effect_receipts = if actionable {
+        vec![format!(
+            "view:local-throughput-retrieval-artifacts:{}",
+            request.workspace_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "workspace_id": request.workspace_id, "batch_id": request.request.batch_id, "partition": request.request.partition, "disposition": disposition, "view_order": view_order, "panel_order": panel_order, "action_receipts": action_receipts, "candidate_order": synthesis.candidate_order, "ranked_order": synthesis.ranked_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "checkpoint_seq": request.checkpoint_seq, "queue_digest": synthesis.queue_digest, "synthesis_digest": synthesis_digest, "workbench_digest": workbench_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!(
             "brain-throughput-retrieval-workbench:{}",
             request.workspace_id
         ),
-        "application/vnd.aurora.throughput-retrieval-workbench-receipt+json",
+        WORKBENCH_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -265,14 +372,7 @@ pub fn compile_throughput_retrieval_workbench(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if actionable {
-            vec![format!(
-                "view:local-throughput-retrieval-artifacts:{}",
-                request.workspace_id
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -288,8 +388,14 @@ fn validate_request(
         .iter()
         .map(|value| (*value).to_string())
         .collect::<Vec<_>>();
-    if request.workspace_id.trim().is_empty()
-        || request.requested_view_order != expected
+    for (value, field) in [
+        (&request.workspace_id, "workspace_id"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    if request.requested_view_order != expected
+        || request.workspace_id.trim().is_empty()
         || request.requested_panel_order.is_empty()
         || request.checkpoint_seq == 0
         || request.budget_units == 0
@@ -299,7 +405,95 @@ fn validate_request(
     {
         return Err(ThroughputRetrievalWorkbenchError::Invalid("throughput workbench identity, canonical views, panels, checkpoint, budget, replay, or boundary is incomplete".into()));
     }
+    validate_unique(&request.requested_panel_order, "requested_panel_order")?;
+    if request.replay_identity.as_str().len() != 64 {
+        return Err(ThroughputRetrievalWorkbenchError::Invalid(
+            "throughput workbench replay identity digest is invalid".into(),
+        ));
+    }
     Ok(())
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), ThroughputRetrievalWorkbenchError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(ThroughputRetrievalWorkbenchError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), ThroughputRetrievalWorkbenchError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(ThroughputRetrievalWorkbenchError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), ThroughputRetrievalWorkbenchError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(ThroughputRetrievalWorkbenchError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &ThroughputRetrievalWorkbenchReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "workspace_id": receipt.workspace_id,
+        "batch_id": receipt.batch_id,
+        "partition": receipt.partition,
+        "disposition": receipt.disposition,
+        "view_order": receipt.view_order,
+        "panel_order": receipt.panel_order,
+        "action_receipts": receipt.action_receipts,
+        "candidate_order": receipt.candidate_order,
+        "ranked_order": receipt.ranked_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "checkpoint_seq": receipt.checkpoint_seq,
+        "queue_digest": receipt.queue_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "workbench_digest": receipt.workbench_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -382,6 +576,37 @@ mod tests {
         let receipt = compile_throughput_retrieval_workbench(&input).unwrap();
         assert_eq!(receipt.disposition, SynthesisDisposition::Blocked);
     }
+
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut input = request(EvidenceState::Supported);
+        input.raw_data_local = false;
+        let receipt = compile_throughput_retrieval_workbench(&input).unwrap();
+        assert_eq!(receipt.disposition, SynthesisDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|value| value == "workbench:raw-data-locality-failed"));
+        assert!(receipt.validate().is_ok());
+    }
+
+    #[test]
+    fn workbench_artifact_payload_is_bound() {
+        let mut receipt =
+            compile_throughput_retrieval_workbench(&request(EvidenceState::Supported)).unwrap();
+        receipt.workspace_id = "workspace:tampered".into();
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn case_mismatched_ranked_identity_is_rejected() {
+        let mut receipt =
+            compile_throughput_retrieval_workbench(&request(EvidenceState::Supported)).unwrap();
+        receipt.ranked_order[0] = receipt.ranked_order[0].to_ascii_uppercase();
+        assert!(receipt.validate().is_err());
+    }
+
     #[test]
     fn view_protocol_is_required() {
         let mut input = request(EvidenceState::Supported);

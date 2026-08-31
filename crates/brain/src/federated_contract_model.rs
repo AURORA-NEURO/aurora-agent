@@ -20,6 +20,8 @@ pub const CONTRACT_VERSION: &str = "brain-federated-evidence-contract/1.0";
 pub const INPUT_SCHEMA: &str = "EvidenceFeed4@1";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet2@1";
 pub const PERMITTED_ARTIFACT: &str = "qualified-evidence-summary";
+const CONTRACT_CONTENT_TYPE: &str = "application/vnd.aurora.federated-evidence-contract+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedContractModelRequest {
@@ -105,33 +107,24 @@ impl FederatedContractModelReceipt {
             || self.input_schema != INPUT_SCHEMA
             || self.output_schema != OUTPUT_SCHEMA
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
-            || self.request_id.trim().is_empty()
-            || self.federation_id.trim().is_empty()
-            || self.institution_id.trim().is_empty()
-            || self.purpose.trim().is_empty()
-            || self.endpoint.trim().is_empty()
-            || self.semantic_profile.trim().is_empty()
             || self.required_order.is_empty()
             || self.provided_order.is_empty()
             || self.allowed_artifact_order.is_empty()
-            || self.export_scope.trim().is_empty()
-            || self.effect_receipts.is_empty()
+            || self.effect_receipts.len() != 1
         {
             return Err(FederatedContractModelError::Invalid("federation identity, schemas, fields, artifact policy, export scope, locality, or effects are incomplete".into()));
         }
-        if self
-            .missing_order
-            .iter()
-            .any(|field| !self.required_order.contains(field))
-            || self
-                .semantic_loss_order
-                .iter()
-                .any(|field| !self.provided_order.contains(field))
-        {
-            return Err(FederatedContractModelError::Invalid(
-                "federated loss state is outside declared fields".into(),
-            ));
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.federation_id, "federation_id"),
+            (&self.institution_id, "institution_id"),
+            (&self.purpose, "purpose"),
+            (&self.endpoint, "endpoint"),
+            (&self.semantic_profile, "semantic_profile"),
+            (&self.export_scope, "export_scope"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
         }
         for values in [
             &self.required_order,
@@ -144,21 +137,136 @@ impl FederatedContractModelReceipt {
             &self.negative_evidence,
             &self.effect_receipts,
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+            validate_sorted_unique(values, "federated contract collection")?;
+        }
+        let required = self.required_order.iter().cloned().collect::<BTreeSet<_>>();
+        let provided = self.provided_order.iter().cloned().collect::<BTreeSet<_>>();
+        let expected_missing = required.difference(&provided).cloned().collect::<Vec<_>>();
+        let expected_semantic_loss = provided.difference(&required).cloned().collect::<Vec<_>>();
+        if self.missing_order != expected_missing
+            || self.semantic_loss_order != expected_semantic_loss
+        {
+            return Err(FederatedContractModelError::Invalid(
+                "federated contract loss state is not bound to declared fields".into(),
+            ));
+        }
+        let gate_blocked = self.negative_evidence.iter().any(|item| {
+            matches!(
+                item.as_str(),
+                "request:signer-invalid"
+                    | "request:policy-denied"
+                    | "request:raw-data-locality-failed"
+            )
+        }) || self
+            .uncertainty
+            .iter()
+            .any(|item| item == "request:protected-closure-incomplete")
+            || self
+                .omissions
+                .iter()
+                .any(|item| item == "federation:permitted-artifact-missing");
+        let expected_disposition = if gate_blocked {
+            FederatedContractDisposition::Blocked
+        } else if self.provided_order.is_empty() {
+            FederatedContractDisposition::Unknown
+        } else if self.missing_order.is_empty()
+            && self.semantic_loss_order.is_empty()
+            && self.compatibility == ContractCompatibility::Additive
+        {
+            FederatedContractDisposition::Qualified
+        } else {
+            FederatedContractDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
+            return Err(FederatedContractModelError::Invalid(
+                "federated contract disposition does not match retained gate evidence".into(),
+            ));
+        }
+        if self.export_scope
+            != format!(
+                "{}:{}:{}",
+                self.federation_id, self.institution_id, self.purpose
+            )
+        {
+            return Err(FederatedContractModelError::Invalid(
+                "federated export scope is not bound to identity".into(),
+            ));
+        }
+        if !self.raw_data_local {
+            return Err(FederatedContractModelError::Invalid(
+                "federated contract receipts must declare local emitted data".into(),
+            ));
+        }
+        let expected_effect = if self.disposition == FederatedContractDisposition::Qualified {
+            format!("exchange:permitted-artifacts:{}", self.request_id)
+        } else {
+            "block:unsafe-release".into()
+        };
+        if self.effect_receipts != [expected_effect] {
+            return Err(FederatedContractModelError::Invalid(
+                "federated contract effect does not match disposition".into(),
+            ));
+        }
+        for digest in [
+            &self.semantic_digest,
+            &self.provenance_digest,
+            &self.contract_digest,
+            &self.envelope_digest,
+            &self.replay_identity,
+        ] {
+            if digest.as_str().len() != 64 {
                 return Err(FederatedContractModelError::Invalid(
-                    "federated contract ordering is not canonical".into(),
+                    "federated contract digest is invalid".into(),
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("exchange:permitted-artifacts:") && effect != "block:unsafe-release"
-        }) {
+        let expected_contract_digest = ContentHash::of_value(&json!({
+            "federation_id": self.federation_id,
+            "institution_id": self.institution_id,
+            "purpose": self.purpose,
+            "semantic_profile": self.semantic_profile,
+            "input_schema": self.input_schema,
+            "output_schema": self.output_schema,
+            "compatibility": self.compatibility,
+            "required_order": self.required_order,
+            "provided_order": self.provided_order,
+            "allowed_artifact_order": self.allowed_artifact_order,
+        }))
+        .map_err(|error| FederatedContractModelError::Artifact(error.to_string()))?;
+        if self.contract_digest != expected_contract_digest {
             return Err(FederatedContractModelError::Invalid(
-                "effect is outside federated contract gate".into(),
+                "federated contract digest is not bound to contract state".into(),
+            ));
+        }
+        let expected_envelope_digest = ContentHash::of_value(&json!({
+            "export_scope": self.export_scope,
+            "semantic_digest": self.semantic_digest,
+            "provenance_digest": self.provenance_digest,
+            "contract_digest": self.contract_digest,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| FederatedContractModelError::Artifact(error.to_string()))?;
+        if self.envelope_digest != expected_envelope_digest {
+            return Err(FederatedContractModelError::Invalid(
+                "federated envelope digest is not bound to contract state".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-federated-contract:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != CONTRACT_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(FederatedContractModelError::Invalid(
+                "federated contract artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedContractModelError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedContractModelError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, FederatedContractModelError> {
@@ -168,6 +276,80 @@ impl FederatedContractModelReceipt {
         ContentHash::of_value(&value)
             .map_err(|error| FederatedContractModelError::Artifact(error.to_string()))
     }
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedContractModelError> {
+    if value.trim() != value
+        || value.is_empty()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedContractModelError::Invalid(format!(
+            "{field} is empty, padded, oversized, or contains control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), FederatedContractModelError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedContractModelError::Invalid(format!(
+                "{field} contains a duplicate or case-colliding identity"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), FederatedContractModelError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedContractModelError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &FederatedContractModelReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "federation_id": receipt.federation_id,
+        "institution_id": receipt.institution_id,
+        "purpose": receipt.purpose,
+        "endpoint": receipt.endpoint,
+        "semantic_profile": receipt.semantic_profile,
+        "disposition": receipt.disposition,
+        "compatibility": receipt.compatibility,
+        "input_schema": receipt.input_schema,
+        "output_schema": receipt.output_schema,
+        "required_order": receipt.required_order,
+        "provided_order": receipt.provided_order,
+        "missing_order": receipt.missing_order,
+        "semantic_loss_order": receipt.semantic_loss_order,
+        "allowed_artifact_order": receipt.allowed_artifact_order,
+        "export_scope": receipt.export_scope,
+        "semantic_digest": receipt.semantic_digest,
+        "provenance_digest": receipt.provenance_digest,
+        "contract_digest": receipt.contract_digest,
+        "envelope_digest": receipt.envelope_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn federated_contract_model_manifest() -> CapabilityManifest {
@@ -256,17 +438,25 @@ pub fn model_federated_contract(
         request.federation_id, request.institution_id, request.purpose
     );
     let contract_digest = ContentHash::of_value(&json!({"federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "input_schema": request.input_schema, "output_schema": request.output_schema, "compatibility": request.compatibility, "required_order": required, "provided_order": provided, "allowed_artifact_order": allowed_artifacts})).map_err(|error| FederatedContractModelError::Artifact(error.to_string()))?;
-    let envelope_digest = ContentHash::of_value(&json!({"export_scope": export_scope, "semantic_digest": request.semantic_digest, "provenance_digest": request.provenance_digest, "contract_digest": contract_digest, "replay_identity": request.replay_identity})).map_err(|error| FederatedContractModelError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "endpoint": request.endpoint, "semantic_profile": request.semantic_profile, "disposition": disposition, "compatibility": request.compatibility, "input_schema": INPUT_SCHEMA, "output_schema": OUTPUT_SCHEMA, "required_order": required, "provided_order": provided, "missing_order": missing, "semantic_loss_order": semantic_loss, "allowed_artifact_order": allowed_artifacts, "export_scope": export_scope, "semantic_digest": request.semantic_digest, "provenance_digest": request.provenance_digest, "contract_digest": contract_digest, "envelope_digest": envelope_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let raw_data_local = true;
+    let envelope_digest = ContentHash::of_value(&json!({"export_scope": export_scope, "semantic_digest": request.semantic_digest, "provenance_digest": request.provenance_digest, "contract_digest": contract_digest, "replay_identity": request.replay_identity, "raw_data_local": raw_data_local})).map_err(|error| FederatedContractModelError::Artifact(error.to_string()))?;
+    let effect_receipts = if disposition == FederatedContractDisposition::Qualified {
+        vec![format!(
+            "exchange:permitted-artifacts:{}",
+            request.request_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "endpoint": request.endpoint, "semantic_profile": request.semantic_profile, "disposition": disposition, "compatibility": request.compatibility, "input_schema": INPUT_SCHEMA, "output_schema": OUTPUT_SCHEMA, "required_order": required, "provided_order": provided, "missing_order": missing, "semantic_loss_order": semantic_loss, "allowed_artifact_order": allowed_artifacts, "export_scope": export_scope, "semantic_digest": request.semantic_digest, "provenance_digest": request.provenance_digest, "contract_digest": contract_digest, "envelope_digest": envelope_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": raw_data_local, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-federated-contract:{}", request.request_id),
-        "application/vnd.aurora.federated-evidence-contract+json",
+        CONTRACT_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
     )
     .map_err(|error| FederatedContractModelError::Artifact(error.to_string()))?;
-    let has_qualified = disposition == FederatedContractDisposition::Qualified;
     let receipt = FederatedContractModelReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -295,16 +485,9 @@ pub fn model_federated_contract(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if has_qualified {
-            vec![format!(
-                "exchange:permitted-artifacts:{}",
-                request.request_id
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
-        raw_data_local: true,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
@@ -329,22 +512,32 @@ fn validate_request(
     {
         return Err(FederatedContractModelError::Invalid("federation identity, purpose, endpoint, schemas, fields, artifact policy, or boundary is incomplete".into()));
     }
-    if request
-        .required_fields
-        .windows(2)
-        .any(|pair| pair[0] >= pair[1])
-        || request
-            .provided_fields
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
-        || request
-            .allowed_artifacts
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
-    {
-        return Err(FederatedContractModelError::Invalid(
-            "federated contract fields and artifact policy must be unique and canonical".into(),
-        ));
+    for (value, field) in [
+        (&request.request_id, "request_id"),
+        (&request.federation_id, "federation_id"),
+        (&request.institution_id, "institution_id"),
+        (&request.purpose, "purpose"),
+        (&request.endpoint, "endpoint"),
+        (&request.semantic_profile, "semantic_profile"),
+        (&request.input_schema, "input_schema"),
+        (&request.output_schema, "output_schema"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_sorted_unique(&request.required_fields, "required_fields")?;
+    validate_sorted_unique(&request.provided_fields, "provided_fields")?;
+    validate_sorted_unique(&request.allowed_artifacts, "allowed_artifacts")?;
+    for digest in [
+        &request.semantic_digest,
+        &request.provenance_digest,
+        &request.replay_identity,
+    ] {
+        if digest.as_str().len() != 64 {
+            return Err(FederatedContractModelError::Invalid(
+                "federated contract digest is invalid".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -440,6 +633,36 @@ mod tests {
             .uncertainty
             .iter()
             .any(|item| item.contains("migration_required")));
+    }
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut input = request();
+        input.raw_data_local = false;
+        let receipt = model_federated_contract(&input).unwrap();
+        assert_eq!(receipt.disposition, FederatedContractDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .negative_evidence
+            .iter()
+            .any(|item| item == "request:raw-data-locality-failed"));
+        receipt.validate().unwrap();
+    }
+    #[test]
+    fn contract_and_payload_drift_are_rejected() {
+        let receipt = model_federated_contract(&request()).unwrap();
+        let mut digest_drift = receipt.clone();
+        digest_drift.compatibility = ContractCompatibility::MigrationRequired;
+        assert!(digest_drift.validate().is_err());
+
+        let mut payload_drift = receipt;
+        payload_drift.endpoint = "https://other.example/research".into();
+        assert!(payload_drift.validate().is_err());
+    }
+    #[test]
+    fn padded_contract_identity_is_rejected() {
+        let mut input = request();
+        input.request_id = " request:federated-contract".into();
+        assert!(model_federated_contract(&input).is_err());
     }
     #[test]
     fn duplicate_artifact_policy_is_rejected() {

@@ -7,8 +7,8 @@ use crate::federated_retrieval_synthesis::{
     synthesize_federated_retrieval, FederatedRetrievalDisposition, FederatedRetrievalQuery,
 };
 use bioprism_foundation::{
-    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference, EvidenceState,
-    ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
+    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
+    EvidenceState, ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
     RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
@@ -33,6 +33,9 @@ pub const CAPABILITY_ORDER: [&str; 5] = [
     "capability:omission-receipt-v1",
     "capability:replay-v1",
 ];
+const PROTOCOL_CONTENT_TYPE: &str =
+    "application/vnd.aurora.federated-retrieval-protocol-receipt+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedRetrievalProtocolRequest {
@@ -111,14 +114,6 @@ impl FederatedRetrievalProtocolReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
-            || self.request_id.trim().is_empty()
-            || self.protocol_id.trim().is_empty()
-            || self.session_id.trim().is_empty()
-            || self.federation_id.trim().is_empty()
-            || self.institution_id.trim().is_empty()
-            || self.purpose.trim().is_empty()
-            || self.endpoint.trim().is_empty()
             || self.study_order.len() < 2
             || self.modality_order.len() < 2
             || self.offered_capability_order.is_empty()
@@ -127,78 +122,109 @@ impl FederatedRetrievalProtocolReceipt {
             || self.completed_stage_order.is_empty()
             || self.action_receipts.is_empty()
             || self.candidate_order.is_empty()
-            || self.effect_receipts.is_empty()
-            || self.budget_units < STAGE_ORDER.len() as u32
+            || self.budget_units == 0
         {
             return Err(FederatedRetrievalProtocolError::Invalid(
                 "federated protocol identity, coverage, negotiation, stages, locality, budget, or effects are incomplete".into(),
             ));
         }
-        for values in [
-            &self.study_order,
-            &self.modality_order,
-            &self.offered_capability_order,
-            &self.required_capability_order,
-            &self.negotiated_capability_order,
-            &self.action_receipts,
-            &self.candidate_order,
-            &self.ranked_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        for (values, field) in [
+            (&self.study_order, "study_order"),
+            (&self.modality_order, "modality_order"),
+            (&self.offered_capability_order, "offered_capability_order"),
+            (&self.required_capability_order, "required_capability_order"),
+            (
+                &self.negotiated_capability_order,
+                "negotiated_capability_order",
+            ),
+            (&self.action_receipts, "action_receipts"),
+            (&self.candidate_order, "candidate_order"),
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
         ] {
-            if !is_sorted_unique(values) {
-                return Err(FederatedRetrievalProtocolError::Invalid(
-                    "federated protocol vectors are not canonical".into(),
-                ));
-            }
+            validate_sorted_unique(values, field)?;
         }
+        validate_unique(&self.ranked_order, "ranked_order")?;
+        validate_unique(&self.qualified_order, "qualified_order")?;
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.protocol_id, "protocol_id"),
+            (&self.session_id, "session_id"),
+            (&self.federation_id, "federation_id"),
+            (&self.institution_id, "institution_id"),
+            (&self.purpose, "purpose"),
+            (&self.endpoint, "endpoint"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        validate_digest_order(&self.aggregate_order)?;
         if self
-            .aggregate_order
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
-        {
-            return Err(FederatedRetrievalProtocolError::Invalid(
-                "federated aggregate order is not canonical".into(),
-            ));
-        }
-        if (self.disposition != FederatedRetrievalDisposition::Blocked
-            && self
-                .required_capability_order
-                .iter()
-                .any(|capability| !self.offered_capability_order.contains(capability)))
-            || self
-                .negotiated_capability_order
-                .iter()
-                .any(|capability| !self.required_capability_order.contains(capability))
-            || self
-                .ranked_order
-                .iter()
-                .chain(self.qualified_order.iter())
-                .chain(self.blocked_order.iter())
-                .chain(self.unknown_order.iter())
-                .any(|id| !self.candidate_order.contains(id))
-        {
-            return Err(FederatedRetrievalProtocolError::Invalid(
-                "federated negotiation or synthesis state is not covered by its declaration".into(),
-            ));
-        }
-        if self
-            .completed_stage_order
+            .offered_capability_order
             .iter()
-            .chain(self.blocked_stage_order.iter())
-            .any(|stage| !self.stage_order.iter().any(|expected| expected == stage))
-            || self
-                .completed_stage_order
-                .iter()
-                .any(|stage| self.blocked_stage_order.contains(stage))
+            .chain(self.required_capability_order.iter())
+            .chain(self.negotiated_capability_order.iter())
+            .any(|capability| !CAPABILITY_ORDER.contains(&capability.as_str()))
         {
             return Err(FederatedRetrievalProtocolError::Invalid(
-                "federated protocol stage transcript is invalid".into(),
+                "federated protocol capability is outside the declared capability vocabulary"
+                    .into(),
+            ));
+        }
+        let expected_negotiated = self
+            .required_capability_order
+            .iter()
+            .filter(|capability| self.offered_capability_order.contains(capability))
+            .cloned()
+            .collect::<Vec<_>>();
+        if self.negotiated_capability_order != expected_negotiated {
+            return Err(FederatedRetrievalProtocolError::Invalid(
+                "federated negotiated capabilities do not equal the declared intersection".into(),
+            ));
+        }
+        let candidate_keys = identity_keys(&self.candidate_order);
+        let ranked_keys = identity_keys(&self.ranked_order);
+        let qualified_keys = identity_keys(&self.qualified_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        if ranked_keys != candidate_keys
+            || qualified_keys
+                .union(&blocked_keys)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_keys
+            || !qualified_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+            || self.aggregate_order.len() != self.qualified_order.len()
+        {
+            return Err(FederatedRetrievalProtocolError::Invalid(
+                "federated protocol synthesis state does not partition candidates".into(),
+            ));
+        }
+        if self.completed_stage_order.len() > STAGE_ORDER.len()
+            || self.completed_stage_order.len() + self.blocked_stage_order.len()
+                != STAGE_ORDER.len()
+        {
+            return Err(FederatedRetrievalProtocolError::Invalid(
+                "federated protocol stage transcript does not cover the protocol".into(),
+            ));
+        }
+        let expected_completed = STAGE_ORDER[..self.completed_stage_order.len()]
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect::<Vec<_>>();
+        let expected_blocked = STAGE_ORDER[self.completed_stage_order.len()..]
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect::<Vec<_>>();
+        if self.completed_stage_order != expected_completed
+            || self.blocked_stage_order != expected_blocked
+        {
+            return Err(FederatedRetrievalProtocolError::Invalid(
+                "federated protocol stage transcript is not a canonical prefix and suffix".into(),
             ));
         }
         for digest in [
@@ -216,16 +242,76 @@ impl FederatedRetrievalProtocolReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("read:local-federated-protocol:")
-                && effect != "block:unsafe-release"
-        }) {
+        if !self.raw_data_local && self.disposition != FederatedRetrievalDisposition::Blocked {
             return Err(FederatedRetrievalProtocolError::Invalid(
-                "federated protocol effect is not read-only".into(),
+                "non-local federated protocol receipts must be blocked".into(),
+            ));
+        }
+        if !self.raw_data_local
+            && !self
+                .omissions
+                .iter()
+                .any(|omission| omission == "protocol:raw-data-locality-failed")
+        {
+            return Err(FederatedRetrievalProtocolError::Invalid(
+                "non-local federated protocol receipts must retain a locality omission".into(),
+            ));
+        }
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            FederatedRetrievalDisposition::Qualified | FederatedRetrievalDisposition::Partial
+        ) {
+            vec![format!("read:local-federated-protocol:{}", self.session_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(FederatedRetrievalProtocolError::Invalid(
+                "federated protocol effect does not match disposition".into(),
+            ));
+        }
+        let expected_negotiation_digest = ContentHash::of_value(&json!({
+            "protocol_id": self.protocol_id,
+            "offered": self.offered_capability_order,
+            "required": self.required_capability_order,
+            "negotiated": self.negotiated_capability_order,
+        }))
+        .map_err(|error| FederatedRetrievalProtocolError::Artifact(error.to_string()))?;
+        if self.negotiation_digest != expected_negotiation_digest {
+            return Err(FederatedRetrievalProtocolError::Invalid(
+                "federated negotiation digest is not bound to capabilities".into(),
+            ));
+        }
+        let expected_transcript_digest = ContentHash::of_value(&json!({
+            "session_id": self.session_id,
+            "stage_order": self.stage_order,
+            "completed": self.completed_stage_order,
+            "blocked": self.blocked_stage_order,
+            "negotiation_digest": self.negotiation_digest,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| FederatedRetrievalProtocolError::Artifact(error.to_string()))?;
+        if self.transcript_digest != expected_transcript_digest {
+            return Err(FederatedRetrievalProtocolError::Invalid(
+                "federated protocol transcript digest is not bound to stages".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-federated-retrieval-protocol:{}", self.session_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != PROTOCOL_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(FederatedRetrievalProtocolError::Invalid(
+                "federated protocol artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedRetrievalProtocolError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedRetrievalProtocolError::Artifact(error.to_string()))
     }
 
@@ -236,6 +322,105 @@ impl FederatedRetrievalProtocolReceipt {
         ContentHash::of_value(&value)
             .map_err(|error| FederatedRetrievalProtocolError::Artifact(error.to_string()))
     }
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedRetrievalProtocolError> {
+    if value.trim() != value
+        || value.is_empty()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedRetrievalProtocolError::Invalid(format!(
+            "{field} is empty, padded, oversized, or contains control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), FederatedRetrievalProtocolError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedRetrievalProtocolError::Invalid(format!(
+                "{field} contains a duplicate or case-colliding identity"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), FederatedRetrievalProtocolError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedRetrievalProtocolError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values.iter().cloned().collect()
+}
+
+fn validate_digest_order(values: &[ContentHash]) -> Result<(), FederatedRetrievalProtocolError> {
+    if values.windows(2).any(|pair| pair[0] >= pair[1])
+        || values.iter().any(|value| value.as_str().len() != 64)
+    {
+        return Err(FederatedRetrievalProtocolError::Invalid(
+            "federated aggregate ordering or digest is invalid".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &FederatedRetrievalProtocolReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "protocol_id": receipt.protocol_id,
+        "session_id": receipt.session_id,
+        "federation_id": receipt.federation_id,
+        "institution_id": receipt.institution_id,
+        "purpose": receipt.purpose,
+        "endpoint": receipt.endpoint,
+        "study_order": receipt.study_order,
+        "modality_order": receipt.modality_order,
+        "disposition": receipt.disposition,
+        "offered_capability_order": receipt.offered_capability_order,
+        "required_capability_order": receipt.required_capability_order,
+        "negotiated_capability_order": receipt.negotiated_capability_order,
+        "stage_order": receipt.stage_order,
+        "completed_stage_order": receipt.completed_stage_order,
+        "blocked_stage_order": receipt.blocked_stage_order,
+        "action_receipts": receipt.action_receipts,
+        "candidate_order": receipt.candidate_order,
+        "ranked_order": receipt.ranked_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "aggregate_order": receipt.aggregate_order,
+        "comparability_digest": receipt.comparability_digest,
+        "envelope_digest": receipt.envelope_digest,
+        "negotiation_digest": receipt.negotiation_digest,
+        "transcript_digest": receipt.transcript_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "protocol_digest": receipt.protocol_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn federated_retrieval_protocol_gateway_manifest() -> CapabilityManifest {
@@ -253,7 +438,10 @@ pub fn federated_retrieval_protocol_gateway_manifest() -> CapabilityManifest {
         permissions: ["read:local-research-artifacts".into()].into(),
         determinism: Determinism::ByteStable,
         evidence: vec![EvidenceReference { source_id: "ga4gh-drs".into(), state: EvidenceState::Supported, locator: Some("https://ga4gh.github.io/data-repository-service-schemas/preview/release/drs-1.3.0/docs/".into()) }],
-        authority_requirements: Vec::new(),
+        authority_requirements: vec![AuthorityRequirement {
+            role: "federated retrieval protocol approver".into(),
+            reason: "authorize capability negotiation and aggregate-only retrieval stages before A2 federation effects".into(),
+        }],
         autonomy_tier: AutonomyTier::A2,
         surfaces: [ResearchSurface::Ui, ResearchSurface::Api, ResearchSurface::Sdk, ResearchSurface::Cli, ResearchSurface::McpTool, ResearchSurface::Operator].into(),
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -283,7 +471,7 @@ pub fn compile_federated_retrieval_protocol(
         && request.raw_data_local
         && request.request.signer_valid
         && request.request.approval_valid
-        && request.budget_units >= STAGE_ORDER.len() as u32
+        && u64::from(request.budget_units) >= u64::try_from(STAGE_ORDER.len()).unwrap_or(u64::MAX)
         && missing.is_empty();
     let disposition = if gate {
         synthesis.disposition
@@ -338,7 +526,7 @@ pub fn compile_federated_retrieval_protocol(
     if !request.request.approval_valid {
         omissions.insert("protocol:approval-invalid".into());
     }
-    if request.budget_units < STAGE_ORDER.len() as u32 {
+    if u64::from(request.budget_units) < u64::try_from(STAGE_ORDER.len()).unwrap_or(u64::MAX) {
         omissions.insert("protocol:budget-exhausted".into());
     }
     if disposition == FederatedRetrievalDisposition::Blocked {
@@ -351,15 +539,6 @@ pub fn compile_federated_retrieval_protocol(
     let negotiation_digest = ContentHash::of_value(&json!({"protocol_id": request.protocol_id, "offered": request.offered_capability_order, "required": request.required_capability_order, "negotiated": negotiated})).map_err(|error| FederatedRetrievalProtocolError::Artifact(error.to_string()))?;
     let transcript_digest = ContentHash::of_value(&json!({"session_id": request.session_id, "stage_order": STAGE_ORDER, "completed": completed, "blocked": blocked_stages, "negotiation_digest": negotiation_digest, "replay_identity": request.replay_identity})).map_err(|error| FederatedRetrievalProtocolError::Artifact(error.to_string()))?;
     let protocol_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request.request_id, "protocol_id": request.protocol_id, "session_id": request.session_id, "federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "purpose": request.request.purpose, "disposition": disposition, "comparability_digest": synthesis.comparability_digest, "envelope_digest": synthesis.envelope_digest, "negotiation_digest": negotiation_digest, "transcript_digest": transcript_digest, "synthesis_digest": synthesis.synthesis_digest, "replay_identity": request.replay_identity})).map_err(|error| FederatedRetrievalProtocolError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "protocol_id": request.protocol_id, "session_id": request.session_id, "federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "purpose": request.request.purpose, "endpoint": request.request.endpoint, "study_order": request.request.study_ids, "modality_order": request.request.required_modalities, "disposition": disposition, "stage_order": STAGE_ORDER, "completed_stage_order": completed, "blocked_stage_order": blocked_stages, "comparability_digest": synthesis.comparability_digest, "envelope_digest": synthesis.envelope_digest, "negotiation_digest": negotiation_digest, "transcript_digest": transcript_digest, "synthesis_digest": synthesis.synthesis_digest, "protocol_digest": protocol_digest, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
-    let artifact = TypedResearchArtifact::from_payload(
-        format!("brain-federated-retrieval-protocol:{}", request.session_id),
-        "application/vnd.aurora.federated-retrieval-protocol-receipt+json",
-        &payload,
-        Vec::new(),
-        Vec::new(),
-    )
-    .map_err(|error| FederatedRetrievalProtocolError::Artifact(error.to_string()))?;
     let effect_receipts = if matches!(
         disposition,
         FederatedRetrievalDisposition::Qualified | FederatedRetrievalDisposition::Partial
@@ -371,6 +550,15 @@ pub fn compile_federated_retrieval_protocol(
     } else {
         vec!["block:unsafe-release".into()]
     };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "protocol_id": request.protocol_id, "session_id": request.session_id, "federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "purpose": request.request.purpose, "endpoint": request.request.endpoint, "study_order": request.request.study_ids, "modality_order": request.request.required_modalities, "disposition": disposition, "offered_capability_order": request.offered_capability_order, "required_capability_order": request.required_capability_order, "negotiated_capability_order": negotiated, "stage_order": STAGE_ORDER, "completed_stage_order": completed, "blocked_stage_order": blocked_stages, "action_receipts": action_receipts, "candidate_order": synthesis.candidate_order, "ranked_order": synthesis.ranked_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "aggregate_order": synthesis.aggregate_order, "comparability_digest": synthesis.comparability_digest, "envelope_digest": synthesis.envelope_digest, "negotiation_digest": negotiation_digest, "transcript_digest": transcript_digest, "synthesis_digest": synthesis.synthesis_digest, "protocol_digest": protocol_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
+    let artifact = TypedResearchArtifact::from_payload(
+        format!("brain-federated-retrieval-protocol:{}", request.session_id),
+        PROTOCOL_CONTENT_TYPE,
+        &payload,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|error| FederatedRetrievalProtocolError::Artifact(error.to_string()))?;
     let receipt = FederatedRetrievalProtocolReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -421,38 +609,58 @@ pub fn compile_federated_retrieval_protocol(
 fn validate_request(
     request: &FederatedRetrievalProtocolRequest,
 ) -> Result<(), FederatedRetrievalProtocolError> {
-    if request.protocol_id.trim().is_empty()
-        || request.session_id.trim().is_empty()
-        || request.boundary != PRECLINICAL_BOUNDARY
+    if request.boundary != PRECLINICAL_BOUNDARY
         || request.request.boundary != PRECLINICAL_BOUNDARY
-        || request.request.federation_id.trim().is_empty()
-        || request.request.institution_id.trim().is_empty()
-        || request.request.purpose.trim().is_empty()
-        || request.request.endpoint.trim().is_empty()
         || request.offered_capability_order.is_empty()
         || request.required_capability_order.is_empty()
         || request.requested_stage_order != STAGE_ORDER
         || request.budget_units == 0
-        || !is_sorted_unique(&request.offered_capability_order)
-        || !is_sorted_unique(&request.required_capability_order)
-        || request
-            .offered_capability_order
-            .iter()
-            .any(|value| !CAPABILITY_ORDER.contains(&value.as_str()))
-        || request
-            .required_capability_order
-            .iter()
-            .any(|value| !CAPABILITY_ORDER.contains(&value.as_str()))
     {
         return Err(FederatedRetrievalProtocolError::Invalid(
             "federated protocol identity, capabilities, stages, budget, or boundary are invalid"
                 .into(),
         ));
     }
+    for (value, field) in [
+        (&request.protocol_id, "protocol_id"),
+        (&request.session_id, "session_id"),
+        (&request.boundary, "boundary"),
+        (&request.request.boundary, "request.boundary"),
+        (&request.request.federation_id, "federation_id"),
+        (&request.request.institution_id, "institution_id"),
+        (&request.request.purpose, "purpose"),
+        (&request.request.endpoint, "endpoint"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_sorted_unique(
+        &request.offered_capability_order,
+        "offered_capability_order",
+    )?;
+    validate_sorted_unique(
+        &request.required_capability_order,
+        "required_capability_order",
+    )?;
+    for capability in request
+        .offered_capability_order
+        .iter()
+        .chain(request.required_capability_order.iter())
+    {
+        if !CAPABILITY_ORDER.contains(&capability.as_str()) {
+            return Err(FederatedRetrievalProtocolError::Invalid(
+                "federated protocol capability is outside the declared vocabulary".into(),
+            ));
+        }
+    }
+    if request.replay_identity.as_str().len() != 64
+        || request.request.replay_identity.as_str().len() != 64
+        || request.replay_identity != request.request.replay_identity
+    {
+        return Err(FederatedRetrievalProtocolError::Invalid(
+            "federated protocol replay identity is invalid or mismatched".into(),
+        ));
+    }
     Ok(())
-}
-fn is_sorted_unique(values: &[String]) -> bool {
-    values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
 #[cfg(test)]
@@ -552,5 +760,47 @@ mod tests {
     fn digest_is_stable() {
         let receipt = compile_federated_retrieval_protocol(&request()).unwrap();
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+    #[test]
+    fn low_budget_and_locality_failures_are_retained() {
+        let mut low_budget = request();
+        low_budget.budget_units = 1;
+        let receipt = compile_federated_retrieval_protocol(&low_budget).unwrap();
+        assert_eq!(receipt.disposition, FederatedRetrievalDisposition::Blocked);
+        assert_eq!(receipt.completed_stage_order.len(), 2);
+        receipt.validate().unwrap();
+
+        let mut locality = request();
+        locality.raw_data_local = false;
+        let receipt = compile_federated_retrieval_protocol(&locality).unwrap();
+        assert!(receipt.raw_data_local);
+
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|value| value == "protocol:raw-data-locality-failed"));
+        receipt.validate().unwrap();
+    }
+    #[test]
+    fn protocol_transcript_and_artifact_payload_are_bound() {
+        let mut transcript_drift = compile_federated_retrieval_protocol(&request()).unwrap();
+        transcript_drift.completed_stage_order.pop();
+        assert!(transcript_drift.validate().is_err());
+
+        let mut payload_drift = compile_federated_retrieval_protocol(&request()).unwrap();
+        payload_drift.protocol_id = "protocol:other".into();
+        assert!(payload_drift.validate().is_err());
+    }
+    #[test]
+    fn capability_aliases_are_rejected() {
+        let mut input = request();
+        input.offered_capability_order[0] = "CAPABILITY:aggregate-envelope-v1".into();
+        assert!(compile_federated_retrieval_protocol(&input).is_err());
+    }
+    #[test]
+    fn case_mismatched_ranked_identity_is_rejected() {
+        let mut receipt = compile_federated_retrieval_protocol(&request()).unwrap();
+        receipt.ranked_order[0] = receipt.ranked_order[0].to_ascii_uppercase();
+        assert!(receipt.validate().is_err());
     }
 }

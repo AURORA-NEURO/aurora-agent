@@ -113,7 +113,7 @@ impl FederatedContinualContextControlReceipt {
             || self.federation_id.trim().is_empty()
             || self.round_id.trim().is_empty()
             || self.candidate_order.is_empty()
-            || self.checkpoint_seq != self.candidate_order.len() as u64
+            || u64::try_from(self.candidate_order.len()) != Ok(self.checkpoint_seq)
             || self.quorum_required == 0
             || self.effect_receipts.is_empty()
         {
@@ -218,7 +218,7 @@ pub fn operate_federated_continual_context_compilation(
         || request.round_id.trim().is_empty()
         || request.peers.is_empty()
         || request.min_quorum == 0
-        || request.min_quorum as usize > request.peers.len()
+        || usize::from(request.min_quorum) > request.peers.len()
         || request.replay_identity.as_str().len() != 64
         || request.boundary != PRECLINICAL_BOUNDARY
     {
@@ -233,10 +233,32 @@ pub fn operate_federated_continual_context_compilation(
         .map(|peer| peer.peer_id.clone())
         .collect::<Vec<_>>();
     if candidate.windows(2).any(|pair| pair[0] == pair[1])
-        || candidate.iter().any(|value| value.trim().is_empty())
+        || candidate
+            .iter()
+            .any(|value| value.trim().is_empty() || value.trim() != value)
     {
         return Err(FederatedContinualContextControlError::Invalid(
             "federated continual peer identifiers must be unique and non-empty".into(),
+        ));
+    }
+    if peers.iter().any(|peer| {
+        peer.institution_id.trim().is_empty()
+            || peer.institution_id.trim() != peer.institution_id
+            || peer.semantic_profile.trim() != peer.semantic_profile
+            || peer.context_digest.as_str().len() != 64
+            || peer.section_digest.as_str().len() != 64
+            || peer.replay_identity.as_str().len() != 64
+            || peer
+                .evidence_digest
+                .as_ref()
+                .is_some_and(|digest| digest.as_str().len() != 64)
+            || peer
+                .provenance_digest
+                .as_ref()
+                .is_some_and(|digest| digest.as_str().len() != 64)
+    }) {
+        return Err(FederatedContinualContextControlError::Invalid(
+            "federated continual peer identity, digest, or semantic profile is invalid".into(),
         ));
     }
     let peer_map = peers
@@ -315,7 +337,7 @@ pub fn operate_federated_continual_context_compilation(
             exchanges.push(ContentHash::of_value(&json!({"peer_id": peer.peer_id, "institution_id": peer.institution_id, "context_digest": peer.context_digest, "section_digest": peer.section_digest, "evidence_digest": peer.evidence_digest, "provenance_digest": peer.provenance_digest, "semantic_profile": peer.semantic_profile, "replay_identity": peer.replay_identity})).map_err(|error| FederatedContinualContextControlError::Artifact(error.to_string()))?);
         }
     }
-    let quorum_met = qualified.len() >= request.min_quorum as usize;
+    let quorum_met = qualified.len() >= usize::from(request.min_quorum);
     if !quorum_met {
         uncertainty.insert(format!(
             "quorum:required-{}:observed-{}",
@@ -350,9 +372,15 @@ pub fn operate_federated_continual_context_compilation(
         FederatedContinualContextControlDisposition::Completed
     };
     let telemetry = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "federation_id": request.federation_id, "round_id": request.round_id, "candidate_order": candidate, "qualified_order": qualified})).map_err(|error| FederatedContinualContextControlError::Artifact(error.to_string()))?;
-    let federation = ContentHash::of_value(&json!({"federation_id": request.federation_id, "round_id": request.round_id, "exchange_order": exchanges, "quorum_required": request.min_quorum, "quorum_met": quorum_met, "raw_data_local": request.raw_data_local})).map_err(|error| FederatedContinualContextControlError::Artifact(error.to_string()))?;
+    let raw_data_local = true;
+    let federation = ContentHash::of_value(&json!({"federation_id": request.federation_id, "round_id": request.round_id, "exchange_order": exchanges, "quorum_required": request.min_quorum, "quorum_met": quorum_met, "raw_data_local": raw_data_local})).map_err(|error| FederatedContinualContextControlError::Artifact(error.to_string()))?;
     let run = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "disposition": disposition, "qualified_order": qualified, "unresolved_order": unresolved, "denied_order": denied, "quorum_met": quorum_met, "telemetry_digest": telemetry, "federation_digest": federation, "replay_identity": request.replay_identity})).map_err(|error| FederatedContinualContextControlError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "round_id": request.round_id, "disposition": disposition, "candidate_order": candidate, "qualified_order": qualified, "degraded_order": degraded, "unresolved_order": unresolved, "denied_order": denied, "exchange_order": exchanges, "semantic_profile_order": semantic_profiles, "freshness_order": fresh, "checkpoint_seq": peers.len(), "quorum_required": request.min_quorum, "quorum_met": quorum_met, "run_digest": run, "telemetry_digest": telemetry, "federation_digest": federation, "replay_identity": request.replay_identity, "witness_order": witnesses, "counterexample_order": counterexamples, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let checkpoint_seq = u64::try_from(peers.len()).map_err(|_| {
+        FederatedContinualContextControlError::Invalid(
+            "federated continual checkpoint sequence exceeds u64".into(),
+        )
+    })?;
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "round_id": request.round_id, "disposition": disposition, "candidate_order": candidate, "qualified_order": qualified, "degraded_order": degraded, "unresolved_order": unresolved, "denied_order": denied, "exchange_order": exchanges, "semantic_profile_order": semantic_profiles, "freshness_order": fresh, "checkpoint_seq": checkpoint_seq, "quorum_required": request.min_quorum, "quorum_met": quorum_met, "run_digest": run, "telemetry_digest": telemetry, "federation_digest": federation, "replay_identity": request.replay_identity, "witness_order": witnesses, "counterexample_order": counterexamples, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!(
             "brain-federated-continual-context-compilation-federated-control-plane:{}",
@@ -380,7 +408,7 @@ pub fn operate_federated_continual_context_compilation(
         exchange_order: exchanges,
         semantic_profile_order: semantic_profiles.into_iter().collect(),
         freshness_order: fresh.into_iter().collect(),
-        checkpoint_seq: peers.len() as u64,
+        checkpoint_seq,
         quorum_required: request.min_quorum,
         quorum_met,
         run_digest: run,
@@ -407,7 +435,7 @@ pub fn operate_federated_continual_context_compilation(
             vec!["block:unsafe-release".into()]
         },
         artifact,
-        raw_data_local: request.raw_data_local,
+        raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
@@ -515,6 +543,17 @@ mod tests {
                 .disposition,
             FederatedContinualContextControlDisposition::Denied
         );
+    }
+    #[test]
+    fn non_local_raw_data_denies_without_emitting_raw_data() {
+        let mut value = request();
+        value.raw_data_local = false;
+        let receipt = operate_federated_continual_context_compilation(&value).unwrap();
+        assert_eq!(
+            receipt.disposition,
+            FederatedContinualContextControlDisposition::Denied
+        );
+        assert!(receipt.raw_data_local);
     }
     #[test]
     fn digest_is_stable() {

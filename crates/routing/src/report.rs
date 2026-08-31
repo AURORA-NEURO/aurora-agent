@@ -23,12 +23,13 @@ use crate::architecture::Architecture;
 use crate::calibration::CalibrationCurve;
 use crate::comparator::Comparator;
 use crate::error::RoutingError;
-use crate::evidence::Observation;
+use crate::evidence::{validate_task_id, Observation, INADMISSIBLE_UTILITY};
 use crate::fingerprint::Regime;
 use crate::policy::DecisionReason;
 use crate::regret::{ComparatorOutcome, RegretAccount, RoutingVerdict, GAIN_EPSILON};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 
 /// What one comparator did on one task.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -110,6 +111,15 @@ impl RoutingReport {
     ) -> Result<Self, RoutingError> {
         if tasks.is_empty() {
             return Err(RoutingError::NoTasks);
+        }
+        let mut task_ids = BTreeSet::new();
+        for row in &tasks {
+            validate_task_row(row)?;
+            if !task_ids.insert(row.task_id.to_ascii_lowercase()) {
+                return Err(RoutingError::InvalidReport {
+                    detail: "task_ids must be unique without case collisions".into(),
+                });
+            }
         }
 
         let oracle_utilities: Vec<f64> = tasks.iter().map(|row| row.oracle.utility).collect();
@@ -448,6 +458,71 @@ fn architecture_label(outcome: &ComparatorOutcome) -> String {
         .unwrap_or_else(|| "per-task".to_string())
 }
 
+fn validate_task_row(row: &TaskRow) -> Result<(), RoutingError> {
+    validate_task_id(&row.task_id)?;
+    if !row.confidence.is_finite() || !(0.0..=1.0).contains(&row.confidence) {
+        return Err(RoutingError::InvalidReport {
+            detail: format!("task `{}` has invalid confidence", row.task_id),
+        });
+    }
+    if row.abstained != row.reason.is_abstention() {
+        return Err(RoutingError::InvalidReport {
+            detail: format!("task `{}` has inconsistent abstention state", row.task_id),
+        });
+    }
+    if row.abstained && row.confidence != 0.0 {
+        return Err(RoutingError::InvalidReport {
+            detail: format!("abstained task `{}` must have zero confidence", row.task_id),
+        });
+    }
+
+    for (name, pick) in [
+        ("fixed_default", &row.fixed_default),
+        ("most_expensive_default", &row.most_expensive_default),
+        ("router", &row.router),
+        ("oracle", &row.oracle),
+    ] {
+        pick.architecture.verify_label()?;
+        if !pick.cost_fraction.is_finite()
+            || !(0.0..=1.0).contains(&pick.cost_fraction)
+            || !pick.utility.is_finite()
+        {
+            return Err(RoutingError::InvalidReport {
+                detail: format!(
+                    "task `{}` has invalid {name} comparator metrics",
+                    row.task_id
+                ),
+            });
+        }
+        let expected_utility = if pick.admissible {
+            1.0 - pick.cost_fraction
+        } else {
+            INADMISSIBLE_UTILITY
+        };
+        if (pick.utility - expected_utility).abs() > GAIN_EPSILON {
+            return Err(RoutingError::InvalidReport {
+                detail: format!("task `{}` has unbound {name} utility", row.task_id),
+            });
+        }
+    }
+    let best_comparator_utility = [
+        row.fixed_default.utility,
+        row.most_expensive_default.utility,
+        row.router.utility,
+    ]
+    .into_iter()
+    .fold(f64::NEG_INFINITY, f64::max);
+    if row.oracle.utility + GAIN_EPSILON < best_comparator_utility {
+        return Err(RoutingError::InvalidReport {
+            detail: format!(
+                "task `{}` oracle is below a comparator outcome",
+                row.task_id
+            ),
+        });
+    }
+    Ok(())
+}
+
 fn outcome<'a>(
     comparator: Comparator,
     picks: impl Iterator<Item = &'a ComparatorPick>,
@@ -585,5 +660,47 @@ mod tests {
             serde_json::from_str::<RoutingReport>(&text).unwrap(),
             report
         );
+    }
+
+    #[test]
+    fn report_assembly_rejects_identity_confidence_and_metric_drift() {
+        let mut padded = task_row("t1", 0.5, 0.0, 0.9, 0.9);
+        padded.task_id = " t1".into();
+        assert!(matches!(
+            RoutingReport::assemble(
+                vec![padded],
+                Architecture::FiberCompiled,
+                Architecture::FullContext,
+                5
+            )
+            .unwrap_err(),
+            RoutingError::InvalidTaskId { .. }
+        ));
+
+        let mut invalid_confidence = task_row("t1", 0.5, 0.0, 0.9, 0.9);
+        invalid_confidence.confidence = f64::NAN;
+        assert!(matches!(
+            RoutingReport::assemble(
+                vec![invalid_confidence],
+                Architecture::FiberCompiled,
+                Architecture::FullContext,
+                5
+            )
+            .unwrap_err(),
+            RoutingError::InvalidReport { .. }
+        ));
+
+        let mut drifted_utility = task_row("t1", 0.5, 0.0, 0.9, 0.9);
+        drifted_utility.router.utility = 0.1;
+        assert!(matches!(
+            RoutingReport::assemble(
+                vec![drifted_utility],
+                Architecture::FiberCompiled,
+                Architecture::FullContext,
+                5
+            )
+            .unwrap_err(),
+            RoutingError::InvalidReport { .. }
+        ));
     }
 }

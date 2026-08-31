@@ -202,6 +202,8 @@ pub enum RefusalReason {
     ComponentSetsDiffer { only_on_one_side: Vec<String> },
     /// Neither arm declared any component at all.
     NoComponentsDeclared,
+    /// A public fork reached an internally inconsistent state while being attributed.
+    InvariantViolation { detail: String },
 }
 
 impl RefusalReason {
@@ -238,6 +240,9 @@ impl RefusalReason {
                 "neither arm declared any architecture component; a fork with no declared factors \
                  is an end-to-end comparison"
                     .to_string()
+            }
+            RefusalReason::InvariantViolation { detail } => {
+                format!("the matched fork is internally inconsistent: {detail}")
             }
         }
     }
@@ -363,9 +368,28 @@ pub fn attribute(fork: &MatchedFork) -> Attribution {
             },
         },
         1 => {
-            let component = varied.into_iter().next().expect("exactly one");
-            let from = fork.baseline.components[&component].clone();
-            let to = fork.variant.components[&component].clone();
+            let Some(component) = varied.into_iter().next() else {
+                return Attribution::Refused {
+                    reason: RefusalReason::InvariantViolation {
+                        detail: "varied component count was one but no component was available"
+                            .to_string(),
+                    },
+                };
+            };
+            let Some(from) = fork.baseline.components.get(&component).cloned() else {
+                return Attribution::Refused {
+                    reason: RefusalReason::InvariantViolation {
+                        detail: format!("varied component `{component}` is absent from baseline"),
+                    },
+                };
+            };
+            let Some(to) = fork.variant.components.get(&component).cloned() else {
+                return Attribution::Refused {
+                    reason: RefusalReason::InvariantViolation {
+                        detail: format!("varied component `{component}` is absent from variant"),
+                    },
+                };
+            };
             Attribution::Attributed {
                 component,
                 from,
@@ -519,10 +543,12 @@ impl AttributionReport {
     }
 
     pub fn refusals(&self) -> impl Iterator<Item = (&str, &RefusalReason)> {
-        self.forks.iter().filter_map(|(id, attribution)| match attribution {
-            Attribution::Refused { reason } => Some((id.as_str(), reason)),
-            Attribution::Attributed { .. } => None,
-        })
+        self.forks
+            .iter()
+            .filter_map(|(id, attribution)| match attribution {
+                Attribution::Refused { reason } => Some((id.as_str(), reason)),
+                Attribution::Attributed { .. } => None,
+            })
     }
 
     /// Components whose forks disagreed in sign.
@@ -670,9 +696,10 @@ mod tests {
         );
         match attribute(&fork) {
             Attribution::Refused {
-                reason: RefusalReason::NothingVaried {
-                    conclusions_differed,
-                },
+                reason:
+                    RefusalReason::NothingVaried {
+                        conclusions_differed,
+                    },
             } => assert!(conclusions_differed),
             other => panic!("expected a nothing-varied refusal, got {other:?}"),
         }

@@ -267,6 +267,10 @@ pub fn compile<S: WorldSource + ?Sized>(
     source: &S,
     query: &Query,
 ) -> Result<CompileOutput, FiberError> {
+    // Policy is the admission gate for the query/world pair. Resolve it before any
+    // analytical pass so a conflicting query cannot trigger decision, rate-distortion,
+    // or adaptive-acquisition work before it is refused.
+    let envelope = PolicyEnvelope::resolve(source, query)?;
     let mut passes = Vec::new();
 
     let decision_quotient = query
@@ -354,8 +358,6 @@ pub fn compile<S: WorldSource + ?Sized>(
             ),
         });
     }
-
-    let envelope = PolicyEnvelope::resolve(source, query)?;
 
     let protected = protected_closure(source, &query.protected_tags);
     passes.push(PassReceipt {
@@ -462,17 +464,17 @@ pub fn compile<S: WorldSource + ?Sized>(
 
     // Obligations and refinements are listed in pass order, so a reader walking the section meets
     // the exclusions in the order the compiler decided them.
-    let mut unresolved: Vec<UnresolvedObligation> = withheld_by_policy
-        .iter()
-        .map(|id| UnresolvedObligation::PolicyBlocked {
-            detail: PolicyScreen::obligation_detail(
-                id,
-                screen
-                    .missing_for(id)
-                    .expect("withheld ids carry their clauses"),
-            ),
-        })
-        .collect();
+    let mut unresolved: Vec<UnresolvedObligation> = Vec::with_capacity(withheld_by_policy.len());
+    for id in &withheld_by_policy {
+        let Some(missing) = screen.missing_for(id) else {
+            return Err(FiberError::InvariantViolation(format!(
+                "policy screen withheld `{id}` without recording its missing clauses"
+            )));
+        };
+        unresolved.push(UnresolvedObligation::PolicyBlocked {
+            detail: PolicyScreen::obligation_detail(id, missing),
+        });
+    }
     unresolved.extend(
         inaccessible
             .iter()
@@ -509,14 +511,26 @@ pub fn compile<S: WorldSource + ?Sized>(
 
     // Counted, never enumerated: the omitted set is the corpus minus the selection, and
     // materialising it would reintroduce the very whole-world traversal the design rejects.
-    let omitted_total = source.total_facts().saturating_sub(selected_facts.len());
+    let omitted_total = source
+        .total_facts()
+        .checked_sub(selected_facts.len())
+        .ok_or_else(|| {
+            FiberError::InvariantViolation(
+                "selected facts exceed the source fact population".into(),
+            )
+        })?;
     let selected_exploratory = ordered_facts
         .iter()
         .filter(|fact| fact.has_tag("exploratory"))
         .count();
     let omitted_exploratory = source
         .count_with_tag("exploratory")
-        .saturating_sub(selected_exploratory);
+        .checked_sub(selected_exploratory)
+        .ok_or_else(|| {
+            FiberError::InvariantViolation(
+                "selected exploratory facts exceed the source exploratory population".into(),
+            )
+        })?;
 
     let region = plan::compile_region(
         source,
@@ -544,7 +558,7 @@ pub fn compile<S: WorldSource + ?Sized>(
         &withheld_influence,
         &withheld_by_policy,
         omitted_exploratory,
-    );
+    )?;
     let bounded = summarise(manifest.groups.iter());
     passes.push(PassReceipt {
         name: "influence_bounds",
@@ -577,12 +591,12 @@ pub fn compile<S: WorldSource + ?Sized>(
         source_hashes: SourceHashes {
             world_sha256: source.world_digest().as_str().to_string(),
             query_sha256: ContentHash::of_value(query.raw())
-                .expect("query parsed from finite JSON")
+                .map_err(|error| FiberError::InvariantViolation(error.to_string()))?
                 .as_str()
                 .to_string(),
             decision_section_sha256: section
                 .content_hash()
-                .expect("section built from finite JSON")
+                .map_err(|error| FiberError::InvariantViolation(error.to_string()))?
                 .as_str()
                 .to_string(),
         },
@@ -635,12 +649,37 @@ fn build_manifest(
     withheld: &WithheldSplit,
     withheld_by_policy: &[String],
     exploratory: usize,
-) -> OmissionManifest {
+) -> Result<OmissionManifest, FiberError> {
+    let mut classified = BTreeSet::new();
+    for fact_id in withheld
+        .bounded
+        .iter()
+        .chain(withheld.deferred.iter())
+        .chain(withheld_by_policy.iter())
+    {
+        if !classified.insert(fact_id) {
+            return Err(FiberError::InvariantViolation(format!(
+                "omission fact `{fact_id}` was classified more than once"
+            )));
+        }
+    }
+    let classified_total = withheld
+        .bounded
+        .len()
+        .checked_add(withheld.deferred.len())
+        .and_then(|total| total.checked_add(withheld_by_policy.len()))
+        .ok_or_else(|| {
+            FiberError::InvariantViolation("omission classification count overflowed".into())
+        })?;
+    if classified_total > omitted_total {
+        return Err(FiberError::InvariantViolation(format!(
+            "omission classifications ({classified_total}) exceed omitted population ({omitted_total})"
+        )));
+    }
     let mut manifest = OmissionManifest::default();
-    let unreachable = omitted_total
-        .saturating_sub(withheld.bounded.len())
-        .saturating_sub(withheld.deferred.len())
-        .saturating_sub(withheld_by_policy.len());
+    let unreachable = omitted_total.checked_sub(classified_total).ok_or_else(|| {
+        FiberError::InvariantViolation("omission classification exceeds omitted population".into())
+    })?;
 
     if unreachable > 0 {
         manifest.push(OmissionGroup {
@@ -675,7 +714,7 @@ fn build_manifest(
         });
     }
     let _ = exploratory;
-    manifest
+    Ok(manifest)
 }
 
 /// Passes the wire formats cannot support, each with the field that is missing.

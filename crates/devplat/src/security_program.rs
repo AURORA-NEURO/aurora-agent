@@ -909,26 +909,64 @@ impl SecurityProgramManifest {
 
         for campaign in &self.campaigns {
             for finding_id in &campaign.finding_ids {
-                if !findings.contains_key(finding_id) {
-                    blocking(
+                match findings.get(finding_id) {
+                    None => blocking(
                         &mut issues,
                         "campaign_finding_unknown",
                         &campaign.id,
                         format!("campaign references unknown finding {finding_id}"),
                         "bind campaign outputs only to declared findings",
-                    );
+                    ),
+                    Some(finding) if finding.campaign != campaign.id => blocking(
+                        &mut issues,
+                        "campaign_finding_backlink_mismatch",
+                        &campaign.id,
+                        format!(
+                            "campaign lists finding {finding_id}, but the finding names campaign {}",
+                            finding.campaign
+                        ),
+                        "make campaign.finding_ids and finding.campaign agree",
+                    ),
+                    Some(_) => {}
                 }
             }
         }
         for finding in &self.findings {
             for remediation_id in &finding.remediation_ids {
-                if !remediations.contains_key(remediation_id) {
-                    blocking(
+                match remediations.get(remediation_id) {
+                    None => blocking(
                         &mut issues,
                         "finding_remediation_unknown",
                         &finding.id,
                         format!("finding references unknown remediation {remediation_id}"),
                         "bind finding closure to a declared remediation row",
+                    ),
+                    Some(remediation) if remediation.finding != finding.id => blocking(
+                        &mut issues,
+                        "finding_remediation_backlink_mismatch",
+                        &finding.id,
+                        format!(
+                            "finding lists remediation {remediation_id}, but the remediation names finding {}",
+                            remediation.finding
+                        ),
+                        "make finding.remediation_ids and remediation.finding agree",
+                    ),
+                    Some(_) => {}
+                }
+            }
+        }
+        for finding in &self.findings {
+            if let Some(campaign) = campaigns.get(&finding.campaign) {
+                if !campaign.finding_ids.iter().any(|id| id == &finding.id) {
+                    blocking(
+                        &mut issues,
+                        "finding_campaign_backlink_missing",
+                        &finding.id,
+                        format!(
+                            "finding names campaign {}, but the campaign does not list the finding",
+                            finding.campaign
+                        ),
+                        "make campaign.finding_ids and finding.campaign agree",
                     );
                 }
             }
@@ -1190,7 +1228,12 @@ impl SecurityProgramManifest {
             .remediations
             .iter()
             .map(|remediation| {
-                let finding_valid = findings.contains_key(&remediation.finding);
+                let finding_valid = findings.get(&remediation.finding).is_some_and(|finding| {
+                    finding
+                        .remediation_ids
+                        .iter()
+                        .any(|id| id == &remediation.id)
+                });
                 let owner_valid = !remediation.owner.trim().is_empty()
                     && !remediation.action.trim().is_empty()
                     && !remediation.due_at.trim().is_empty();
@@ -1220,7 +1263,9 @@ impl SecurityProgramManifest {
             .findings
             .iter()
             .map(|finding| {
-                let campaign_valid = campaigns.contains_key(&finding.campaign);
+                let campaign_valid = campaigns.get(&finding.campaign).is_some_and(|campaign| {
+                    campaign.finding_ids.iter().any(|id| id == &finding.id)
+                });
                 let evidence_valid = finding
                     .evidence_digest
                     .as_deref()
@@ -1232,11 +1277,12 @@ impl SecurityProgramManifest {
                     .map(valid_digest)
                     .unwrap_or(false);
                 let severity_requires_action = finding.severity.high_or_worse();
-                let remediation_valid = finding
-                    .remediation_ids
-                    .iter()
-                    .all(|id| remediations.contains_key(id))
-                    && (!severity_requires_action || !finding.remediation_ids.is_empty());
+                let remediation_valid = finding.remediation_ids.iter().all(|id| {
+                    remediations
+                        .get(id)
+                        .is_some_and(|remediation| remediation.finding == finding.id)
+                }) && (!severity_requires_action
+                    || !finding.remediation_ids.is_empty());
                 let incident_required =
                     self.policies.require_incident_for_high && severity_requires_action;
                 let incident_valid = finding
@@ -1456,7 +1502,11 @@ fn timeline_valid(
 
 fn bounded_string(value: &str) -> bool {
     let trimmed = value.trim();
-    !trimmed.is_empty() && trimmed.len() <= 512 && !trimmed.contains('*') && !trimmed.contains("..")
+    !trimmed.is_empty()
+        && trimmed.len() <= 512
+        && !trimmed.chars().any(char::is_control)
+        && !trimmed.contains('*')
+        && !trimmed.contains("..")
 }
 
 fn bounded_strings(values: &[String], field: &str, issues: &mut Vec<SecurityProgramIssue>) -> bool {
@@ -1467,7 +1517,11 @@ fn bounded_strings(values: &[String], field: &str, issues: &mut Vec<SecurityProg
 }
 
 fn valid_digest(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
 }
 
 fn insert_unique<T>(
@@ -1714,5 +1768,44 @@ mod tests {
                 "missing {code}"
             );
         }
+    }
+
+    #[test]
+    fn security_program_rejects_control_text_and_uppercase_digests() {
+        assert!(!bounded_string("allowed\nmethod"));
+        assert!(!valid_digest(&"A".repeat(64)));
+
+        let mut value = manifest();
+        value.scopes[0].allowed_methods = vec!["fuzz\tunsafe".into()];
+        let report = value.audit().expect("audit");
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "scope_methods_missing"));
+    }
+
+    #[test]
+    fn cross_domain_links_must_be_bidirectional_before_readiness() {
+        let mut campaign_mismatch = manifest();
+        campaign_mismatch.campaigns[0].finding_ids.clear();
+        let report = campaign_mismatch.audit().expect("audit");
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "finding_campaign_backlink_missing"));
+        assert!(!report.finding_audits[0].campaign_valid);
+
+        let mut remediation_mismatch = manifest();
+        remediation_mismatch.remediations[0].finding = "another-finding".into();
+        let report = remediation_mismatch.audit().expect("audit");
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "finding_remediation_backlink_mismatch"));
+        assert!(!report.remediation_audits[0].finding_valid);
+        assert!(!report.finding_audits[0].remediation_valid);
     }
 }

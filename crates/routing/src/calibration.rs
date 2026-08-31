@@ -20,6 +20,8 @@
 use crate::error::RoutingError;
 use serde::{Deserialize, Serialize};
 
+const MAX_CALIBRATION_BINS: usize = 4096;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalibrationBin {
     pub lower: f64,
@@ -48,6 +50,20 @@ impl CalibrationCurve {
     pub fn build(points: &[(f64, bool)], bin_count: usize) -> Result<Self, RoutingError> {
         if bin_count == 0 {
             return Err(RoutingError::NoCalibrationBins);
+        }
+        if bin_count > MAX_CALIBRATION_BINS {
+            return Err(RoutingError::InvalidParameter {
+                field: "calibration_bins",
+                value: bin_count as f64,
+            });
+        }
+        for (confidence, _) in points {
+            if !confidence.is_finite() || !(0.0..=1.0).contains(confidence) {
+                return Err(RoutingError::InvalidParameter {
+                    field: "confidence",
+                    value: *confidence,
+                });
+            }
         }
 
         let width = 1.0 / bin_count as f64;
@@ -157,6 +173,32 @@ mod tests {
     fn a_curve_with_no_decisions_reports_no_calibration_error_rather_than_zero() {
         let curve = CalibrationCurve::build(&[], 5).unwrap();
         assert_eq!(curve.expected_calibration_error(), None);
+    }
+
+    #[test]
+    fn invalid_confidence_and_unbounded_bin_counts_are_refused() {
+        assert!(matches!(
+            CalibrationCurve::build(&[(1.1, true)], 5).unwrap_err(),
+            RoutingError::InvalidParameter {
+                field: "confidence",
+                value: 1.1
+            }
+        ));
+        let error = CalibrationCurve::build(&[(f64::NAN, true)], 5).unwrap_err();
+        assert!(matches!(
+            error,
+            RoutingError::InvalidParameter {
+                field: "confidence",
+                value
+            } if value.is_nan()
+        ));
+        assert!(matches!(
+            CalibrationCurve::build(&[], MAX_CALIBRATION_BINS + 1).unwrap_err(),
+            RoutingError::InvalidParameter {
+                field: "calibration_bins",
+                ..
+            }
+        ));
     }
 
     #[test]

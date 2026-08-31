@@ -3,7 +3,6 @@
 //! Atlas feature: `AFA-brain-P01-F24`. The adapter produces a canonical aggregate-only
 //! response for a governed transport; it never opens a socket or exports raw observations.
 
-use crate::evidence_surveillance::EvidenceObservation;
 use crate::federated_evidence_surveillance::{
     admit_federated_evidence, FederatedEvidenceDisposition, FederatedEvidenceFeedRequest,
 };
@@ -24,6 +23,8 @@ pub const PROTOCOL_VERSION: &str = "aurora-research-federated/1.0";
 pub const ROUTE: &str = "/v1/research/evidence/federated/admit";
 pub const METHOD: &str = "POST";
 pub const RESPONSE_SCHEMA: &str = "FederatedEvidenceProtocolResponse1@1";
+const PROTOCOL_CONTENT_TYPE: &str = "application/vnd.aurora.federated-protocol-response+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedProtocolRequest {
@@ -99,32 +100,26 @@ impl FederatedProtocolReceipt {
             || self.route != ROUTE
             || self.response_schema != RESPONSE_SCHEMA
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
-            || self.request_id.trim().is_empty()
             || self.content_type != "application/json"
-            || self.idempotency_key.trim().is_empty()
-            || self.federation_id.trim().is_empty()
-            || self.institution_id.trim().is_empty()
-            || self.purpose.trim().is_empty()
-            || self.semantic_profile.trim().is_empty()
-            || self.endpoint.trim().is_empty()
             || self.candidate_order.is_empty()
-            || self.effect_receipts.is_empty()
+            || self.effect_receipts.len() != 1
+            || !self.raw_data_local
         {
             return Err(FederatedProtocolError::Invalid(
                 "federated protocol identity, envelope, locality, or effects are incomplete".into(),
             ));
         }
-        if self
-            .admitted_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
-            return Err(FederatedProtocolError::Invalid(
-                "federated protocol state is not covered by candidates".into(),
-            ));
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.idempotency_key, "idempotency_key"),
+            (&self.federation_id, "federation_id"),
+            (&self.institution_id, "institution_id"),
+            (&self.purpose, "purpose"),
+            (&self.semantic_profile, "semantic_profile"),
+            (&self.endpoint, "endpoint"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
         }
         for values in [
             &self.candidate_order,
@@ -136,35 +131,139 @@ impl FederatedProtocolReceipt {
             &self.negative_evidence,
             &self.effect_receipts,
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(FederatedProtocolError::Invalid(
-                    "federated protocol ordering is not canonical".into(),
-                ));
-            }
+            validate_sorted_unique(values, "federated protocol collection")?;
+        }
+        let candidate_keys = identity_keys(&self.candidate_order);
+        let admitted_keys = identity_keys(&self.admitted_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        if admitted_keys
+            .union(&blocked_keys)
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            != candidate_keys
+            || !admitted_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+            || self.aggregate_order.len() != self.admitted_order.len()
+        {
+            return Err(FederatedProtocolError::Invalid(
+                "federated protocol state is not a disjoint candidate partition".into(),
+            ));
         }
         if self
             .aggregate_order
             .windows(2)
             .any(|pair| pair[0] >= pair[1])
+            || self
+                .aggregate_order
+                .iter()
+                .any(|value| value.as_str().len() != 64)
         {
             return Err(FederatedProtocolError::Invalid(
-                "federated aggregate ordering is not canonical".into(),
+                "federated aggregate ordering or digest is invalid".into(),
             ));
         }
-        if !matches!(self.status_code, 200 | 202 | 206 | 403 | 422) {
+        let expected_status = match self.disposition {
+            FederatedEvidenceDisposition::Qualified => 200,
+            FederatedEvidenceDisposition::Partial => 206,
+            FederatedEvidenceDisposition::Unknown => 202,
+            FederatedEvidenceDisposition::Blocked => {
+                if self.status_code == 403 {
+                    403
+                } else {
+                    422
+                }
+            }
+        };
+        if self.status_code != expected_status {
             return Err(FederatedProtocolError::Invalid(
-                "federated protocol status code is invalid".into(),
+                "federated protocol status does not match disposition".into(),
             ));
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("protocol:federated-response:") && effect != "block:unsafe-release"
-        }) {
+        if self
+            .omissions
+            .iter()
+            .any(|item| item == "protocol:raw-data-locality-failed")
+            && self.disposition != FederatedEvidenceDisposition::Blocked
+        {
             return Err(FederatedProtocolError::Invalid(
-                "federated protocol effect is outside the governed response gate".into(),
+                "non-local federated responses must be blocked and retain locality evidence".into(),
+            ));
+        }
+        let expected_effect = if self.disposition != FederatedEvidenceDisposition::Blocked
+            && !self.admitted_order.is_empty()
+        {
+            format!("protocol:federated-response:{}", self.idempotency_key)
+        } else {
+            "block:unsafe-release".into()
+        };
+        if self.effect_receipts != [expected_effect] {
+            return Err(FederatedProtocolError::Invalid(
+                "federated protocol effect does not match disposition and admission".into(),
+            ));
+        }
+        for digest in [
+            &self.envelope_digest,
+            &self.request_digest,
+            &self.response_digest,
+            &self.replay_identity,
+        ] {
+            if digest.as_str().len() != 64 {
+                return Err(FederatedProtocolError::Invalid(
+                    "federated protocol digest is invalid".into(),
+                ));
+            }
+        }
+        let expected_envelope_digest = ContentHash::of_value(&json!({
+            "federation_id": self.federation_id,
+            "institution_id": self.institution_id,
+            "purpose": self.purpose,
+            "semantic_profile": self.semantic_profile,
+            "candidate_order": self.candidate_order,
+            "aggregate_order": self.aggregate_order,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| FederatedProtocolError::Artifact(error.to_string()))?;
+        if self.envelope_digest != expected_envelope_digest {
+            return Err(FederatedProtocolError::Invalid(
+                "federated protocol envelope digest is not bound to response state".into(),
+            ));
+        }
+        let expected_response_digest = ContentHash::of_value(&json!({
+            "protocol_version": PROTOCOL_VERSION,
+            "route": ROUTE,
+            "request_id": self.request_id,
+            "idempotency_key": self.idempotency_key,
+            "status_code": self.status_code,
+            "disposition": self.disposition,
+            "federation_id": self.federation_id,
+            "institution_id": self.institution_id,
+            "aggregate_order": self.aggregate_order,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| FederatedProtocolError::Artifact(error.to_string()))?;
+        if self.response_digest != expected_response_digest {
+            return Err(FederatedProtocolError::Invalid(
+                "federated protocol response digest is not bound to response state".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-federated-protocol:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != PROTOCOL_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(FederatedProtocolError::Invalid(
+                "federated protocol artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedProtocolError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedProtocolError::Artifact(error.to_string()))
     }
 
@@ -175,6 +274,86 @@ impl FederatedProtocolReceipt {
         ContentHash::of_value(&value)
             .map_err(|error| FederatedProtocolError::Artifact(error.to_string()))
     }
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedProtocolError> {
+    if value.trim() != value
+        || value.is_empty()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedProtocolError::Invalid(format!(
+            "{field} is empty, padded, oversized, or contains control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), FederatedProtocolError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedProtocolError::Invalid(format!(
+                "{field} contains a duplicate or case-colliding identity"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(values: &[String], field: &str) -> Result<(), FederatedProtocolError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedProtocolError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn receipt_payload(receipt: &FederatedProtocolReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "protocol_version": receipt.protocol_version,
+        "method": receipt.method,
+        "route": receipt.route,
+        "content_type": receipt.content_type,
+        "idempotency_key": receipt.idempotency_key,
+        "response_schema": receipt.response_schema,
+        "status_code": receipt.status_code,
+        "disposition": receipt.disposition,
+        "federation_id": receipt.federation_id,
+        "institution_id": receipt.institution_id,
+        "purpose": receipt.purpose,
+        "semantic_profile": receipt.semantic_profile,
+        "endpoint": receipt.endpoint,
+        "candidate_order": receipt.candidate_order,
+        "admitted_order": receipt.admitted_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "aggregate_order": receipt.aggregate_order,
+        "envelope_digest": receipt.envelope_digest,
+        "request_digest": receipt.request_digest,
+        "response_digest": receipt.response_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn federated_protocol_adapter_manifest() -> CapabilityManifest {
@@ -229,24 +408,34 @@ pub fn serve_federated_protocol(
             FederatedEvidenceDisposition::Blocked => 422,
         }
     };
+    let effect_receipts = if disposition != FederatedEvidenceDisposition::Blocked
+        && !evidence.admitted_order.is_empty()
+    {
+        vec![format!(
+            "protocol:federated-response:{}",
+            request.idempotency_key
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
     let request_value = serde_json::to_value(request)
         .map_err(|error| FederatedProtocolError::Artifact(error.to_string()))?;
     let request_digest = ContentHash::of_value(&request_value)
         .map_err(|error| FederatedProtocolError::Artifact(error.to_string()))?;
-    let envelope_digest = ContentHash::of_value(&json!({"federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "purpose": request.request.purpose, "semantic_profile": request.request.semantic_profile, "candidate_order": evidence.candidate_order, "aggregate_order": evidence.aggregate_order, "replay_identity": request.replay_identity}))
+    let raw_data_local = true;
+    let envelope_digest = ContentHash::of_value(&json!({"federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "purpose": request.request.purpose, "semantic_profile": request.request.semantic_profile, "candidate_order": evidence.candidate_order, "aggregate_order": evidence.aggregate_order, "replay_identity": request.replay_identity, "raw_data_local": raw_data_local}))
         .map_err(|error| FederatedProtocolError::Artifact(error.to_string()))?;
-    let response_digest = ContentHash::of_value(&json!({"protocol_version": PROTOCOL_VERSION, "route": ROUTE, "request_id": request.request.request_id, "idempotency_key": request.idempotency_key, "status_code": status_code, "disposition": disposition, "federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "aggregate_order": evidence.aggregate_order, "replay_identity": request.replay_identity}))
+    let response_digest = ContentHash::of_value(&json!({"protocol_version": PROTOCOL_VERSION, "route": ROUTE, "request_id": request.request.request_id, "idempotency_key": request.idempotency_key, "status_code": status_code, "disposition": disposition, "federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "aggregate_order": evidence.aggregate_order, "replay_identity": request.replay_identity, "raw_data_local": raw_data_local}))
         .map_err(|error| FederatedProtocolError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "protocol_version": PROTOCOL_VERSION, "method": METHOD, "route": ROUTE, "content_type": "application/json", "idempotency_key": request.idempotency_key, "response_schema": RESPONSE_SCHEMA, "status_code": status_code, "disposition": disposition, "federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "purpose": request.request.purpose, "semantic_profile": request.request.semantic_profile, "endpoint": request.request.endpoint, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "aggregate_order": evidence.aggregate_order, "envelope_digest": envelope_digest, "request_digest": request_digest, "response_digest": response_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "protocol_version": PROTOCOL_VERSION, "method": METHOD, "route": ROUTE, "content_type": "application/json", "idempotency_key": request.idempotency_key, "response_schema": RESPONSE_SCHEMA, "status_code": status_code, "disposition": disposition, "federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "purpose": request.request.purpose, "semantic_profile": request.request.semantic_profile, "endpoint": request.request.endpoint, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "aggregate_order": evidence.aggregate_order, "envelope_digest": envelope_digest, "request_digest": request_digest, "response_digest": response_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": raw_data_local, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-federated-protocol:{}", request.request.request_id),
-        "application/vnd.aurora.federated-protocol-response+json",
+        PROTOCOL_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
     )
     .map_err(|error| FederatedProtocolError::Artifact(error.to_string()))?;
-    let has_admitted = outer_allowed && !evidence.admitted_order.is_empty();
     let receipt = FederatedProtocolReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -277,16 +466,9 @@ pub fn serve_federated_protocol(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if has_admitted {
-            vec![format!(
-                "protocol:federated-response:{}",
-                request.idempotency_key
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
-        raw_data_local: true,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
@@ -310,12 +492,36 @@ fn validate_request(request: &FederatedProtocolRequest) -> Result<(), FederatedP
     {
         return Err(FederatedProtocolError::Invalid("federated protocol version, route, idempotency, replay, authority, locality, or boundary is incomplete".into()));
     }
+    for (value, field) in [
+        (&request.request.request_id, "request_id"),
+        (&request.idempotency_key, "idempotency_key"),
+        (&request.request.federation_id, "federation_id"),
+        (&request.request.institution_id, "institution_id"),
+        (&request.request.purpose, "purpose"),
+        (&request.request.semantic_profile, "semantic_profile"),
+        (&request.request.endpoint, "endpoint"),
+        (&request.protocol_version, "protocol_version"),
+        (&request.method, "method"),
+        (&request.route, "route"),
+        (&request.content_type, "content_type"),
+        (&request.response_schema, "response_schema"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_unique(&request.request.allowed_artifacts, "allowed_artifacts")?;
+    if request.replay_identity.as_str().len() != 64 {
+        return Err(FederatedProtocolError::Invalid(
+            "federated protocol replay digest is invalid".into(),
+        ));
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::evidence_surveillance::EvidenceObservation;
 
     fn hash(value: &str) -> ContentHash {
         ContentHash::of_bytes(value.as_bytes())
@@ -406,6 +612,50 @@ mod tests {
         let receipt = serve_federated_protocol(&input).unwrap();
         assert_eq!(receipt.status_code, 403);
         assert_eq!(receipt.effect_receipts, vec!["block:unsafe-release"]);
+    }
+
+    #[test]
+    fn state_lists_reject_cross_state_overlap() {
+        let mut receipt = serve_federated_protocol(&request(EvidenceState::Supported)).unwrap();
+        receipt.blocked_order = receipt.admitted_order.clone();
+        let error = receipt
+            .validate()
+            .expect_err("a candidate cannot be both admitted and blocked");
+        assert!(error.to_string().contains("state"));
+    }
+
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut input = request(EvidenceState::Supported);
+        input.raw_data_local = false;
+        input.request.raw_data_local = false;
+        let receipt = serve_federated_protocol(&input).unwrap();
+        assert_eq!(receipt.disposition, FederatedEvidenceDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "protocol:raw-data-locality-failed"));
+        receipt.validate().unwrap();
+    }
+
+    #[test]
+    fn response_and_payload_drift_are_rejected() {
+        let receipt = serve_federated_protocol(&request(EvidenceState::Supported)).unwrap();
+        let mut response_drift = receipt.clone();
+        response_drift.status_code = 206;
+        assert!(response_drift.validate().is_err());
+
+        let mut payload_drift = receipt;
+        payload_drift.endpoint = "https://other.example/research".into();
+        assert!(payload_drift.validate().is_err());
+    }
+
+    #[test]
+    fn padded_idempotency_identity_is_rejected() {
+        let mut input = request(EvidenceState::Supported);
+        input.idempotency_key = " idem:federated".into();
+        assert!(serve_federated_protocol(&input).is_err());
     }
 
     #[test]

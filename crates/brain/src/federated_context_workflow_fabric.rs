@@ -5,9 +5,9 @@
 //! only when a fresh peer quorum covers every required workflow stage.
 
 use bioprism_foundation::{
-    AutonomyTier, AuthorityRequirement, CapabilityManifest, Determinism, Effect,
-    EvidenceReference, EvidenceState, ResearchSurface, TypedPort, TypedResearchArtifact,
-    PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
+    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
+    EvidenceState, ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-brain-P03-F16";
 pub const CONTRACT_VERSION: &str = "brain-federated-context-workflow-fabric/1.0";
+const WORKFLOW_CONTENT_TYPE: &str = "application/vnd.aurora.federated-context-workflow+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedContextWorkflowPeer {
@@ -111,8 +113,6 @@ impl FederatedContextWorkflowReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
-            || !self.aggregate_only
             || self.request_id.trim().is_empty()
             || self.federation_id.trim().is_empty()
             || self.workflow_id.trim().is_empty()
@@ -122,10 +122,10 @@ impl FederatedContextWorkflowReceipt {
             || self.institution_order.len() < 2
             || self.required_stage_order.is_empty()
             || self.scheduled_stage_order.is_empty()
-            || self.aggregate_order.is_empty()
             || self.minimum_quorum == 0
-            || self.quorum != self.qualified_institution_order.len() as u16
-            || self.quorum > self.institution_order.len() as u16
+            || self.institution_order.len() > usize::from(u16::MAX)
+            || usize::from(self.quorum) != self.qualified_institution_order.len()
+            || usize::from(self.quorum) > self.institution_order.len()
             || self.budget_units == 0
             || self.consumed_budget_units > self.budget_units
             || self.effect_receipts.is_empty()
@@ -134,25 +134,41 @@ impl FederatedContextWorkflowReceipt {
                 "federated workflow identity, stage closure, quorum, budget, locality, or effects are incomplete".into(),
             ));
         }
-        for values in [
-            &self.institution_order,
-            &self.qualified_institution_order,
-            &self.stale_institution_order,
-            &self.blocked_institution_order,
-            &self.unknown_institution_order,
-            &self.required_stage_order,
-            &self.scheduled_stage_order,
-            &self.aggregate_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        if self.disposition == "admitted" && self.aggregate_order.is_empty() {
+            return Err(FederatedContextWorkflowError::Invalid(
+                "admitted federated workflow must retain aggregate attestations".into(),
+            ));
+        }
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.federation_id, "federation_id"),
+            (&self.workflow_id, "workflow_id"),
+            (&self.query_id, "query_id"),
+            (&self.goal, "goal"),
+            (&self.semantic_profile, "semantic_profile"),
+            (&self.disposition, "disposition"),
+            (&self.boundary, "boundary"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(FederatedContextWorkflowError::Invalid(
-                    "federated workflow vectors are not canonical".into(),
-                ));
-            }
+            validate_text(value, field)?;
+        }
+        for (values, field) in [
+            (&self.institution_order, "institution_order"),
+            (
+                &self.qualified_institution_order,
+                "qualified_institution_order",
+            ),
+            (&self.stale_institution_order, "stale_institution_order"),
+            (&self.blocked_institution_order, "blocked_institution_order"),
+            (&self.unknown_institution_order, "unknown_institution_order"),
+            (&self.required_stage_order, "required_stage_order"),
+            (&self.scheduled_stage_order, "scheduled_stage_order"),
+            (&self.aggregate_order, "aggregate_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
         }
         if !self
             .scheduled_stage_order
@@ -163,12 +179,33 @@ impl FederatedContextWorkflowReceipt {
                 "scheduled stages must be required stages".into(),
             ));
         }
-        let institutions = self.institution_order.iter().cloned().collect::<BTreeSet<_>>();
-        let mut classified = self.qualified_institution_order.iter().cloned().collect::<BTreeSet<_>>();
+        let institutions = self
+            .institution_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut classified = self
+            .qualified_institution_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         classified.extend(self.stale_institution_order.iter().cloned());
         classified.extend(self.blocked_institution_order.iter().cloned());
         classified.extend(self.unknown_institution_order.iter().cloned());
-        if classified != institutions {
+        if classified != institutions
+            || !identity_keys(&self.qualified_institution_order)
+                .is_disjoint(&identity_keys(&self.stale_institution_order))
+            || !identity_keys(&self.qualified_institution_order)
+                .is_disjoint(&identity_keys(&self.blocked_institution_order))
+            || !identity_keys(&self.qualified_institution_order)
+                .is_disjoint(&identity_keys(&self.unknown_institution_order))
+            || !identity_keys(&self.stale_institution_order)
+                .is_disjoint(&identity_keys(&self.blocked_institution_order))
+            || !identity_keys(&self.stale_institution_order)
+                .is_disjoint(&identity_keys(&self.unknown_institution_order))
+            || !identity_keys(&self.blocked_institution_order)
+                .is_disjoint(&identity_keys(&self.unknown_institution_order))
+        {
             return Err(FederatedContextWorkflowError::Invalid(
                 "federated peer states do not partition institutions".into(),
             ));
@@ -198,8 +235,115 @@ impl FederatedContextWorkflowReceipt {
                 "federated workflow effect is outside schedule gate".into(),
             ));
         }
+        let expected_effect_receipts = if self.disposition == "admitted" {
+            vec![format!(
+                "schedule:federated-context-workflow:{}",
+                self.workflow_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(FederatedContextWorkflowError::Invalid(
+                "federated workflow effect does not match disposition".into(),
+            ));
+        }
+        if !self.raw_data_local {
+            return Err(FederatedContextWorkflowError::Invalid(
+                "federated context workflow receipts must declare local emitted data".into(),
+            ));
+        }
+        if !self.aggregate_only
+            && (self.disposition != "blocked"
+                || !self
+                    .omissions
+                    .iter()
+                    .any(|item| item == "workflow:aggregate-only-required"))
+        {
+            return Err(FederatedContextWorkflowError::Invalid(
+                "non-aggregate federated workflow must be blocked and retain release evidence"
+                    .into(),
+            ));
+        }
+        let expected_checkpoint_digest = ContentHash::of_value(&json!({
+            "workflow_id": self.workflow_id,
+            "institution_order": self.institution_order,
+            "qualified_institution_order": self.qualified_institution_order,
+            "stale_institution_order": self.stale_institution_order,
+            "blocked_institution_order": self.blocked_institution_order,
+            "unknown_institution_order": self.unknown_institution_order,
+            "required_stage_order": self.required_stage_order,
+            "scheduled_stage_order": self.scheduled_stage_order,
+            "disposition": self.disposition,
+            "quorum": self.quorum,
+            "minimum_quorum": self.minimum_quorum,
+            "current_epoch": self.current_epoch,
+            "budget_units": self.budget_units,
+            "consumed_budget_units": self.consumed_budget_units,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+            "aggregate_only": self.aggregate_only,
+        }))
+        .map_err(|error| FederatedContextWorkflowError::Artifact(error.to_string()))?;
+        if self.checkpoint_digest != expected_checkpoint_digest {
+            return Err(FederatedContextWorkflowError::Invalid(
+                "federated workflow checkpoint is not bound to peer and stage outcomes".into(),
+            ));
+        }
+        let expected_workflow_digest = ContentHash::of_value(&json!({
+            "workflow_id": self.workflow_id,
+            "required_stage_order": self.required_stage_order,
+            "scheduled_stage_order": self.scheduled_stage_order,
+            "quorum": self.quorum,
+            "minimum_quorum": self.minimum_quorum,
+            "budget_units": self.budget_units,
+            "consumed_budget_units": self.consumed_budget_units,
+            "disposition": self.disposition,
+            "checkpoint_digest": self.checkpoint_digest,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+            "aggregate_only": self.aggregate_only,
+        }))
+        .map_err(|error| FederatedContextWorkflowError::Artifact(error.to_string()))?;
+        if self.workflow_digest != expected_workflow_digest {
+            return Err(FederatedContextWorkflowError::Invalid(
+                "federated workflow digest is not bound to scheduling state".into(),
+            ));
+        }
+        let expected_federation_envelope_digest = ContentHash::of_value(&json!({
+            "federation_id": self.federation_id,
+            "workflow_id": self.workflow_id,
+            "query_id": self.query_id,
+            "goal": self.goal,
+            "semantic_profile": self.semantic_profile,
+            "aggregate_order": self.aggregate_order,
+            "workflow_digest": self.workflow_digest,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+            "aggregate_only": self.aggregate_only,
+            "boundary": self.boundary,
+        }))
+        .map_err(|error| FederatedContextWorkflowError::Artifact(error.to_string()))?;
+        if self.federation_envelope_digest != expected_federation_envelope_digest {
+            return Err(FederatedContextWorkflowError::Invalid(
+                "federated workflow envelope is not bound to release metadata".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-federated-context-workflow:{}", self.workflow_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != WORKFLOW_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(FederatedContextWorkflowError::Invalid(
+                "federated workflow artifact identity or provenance is inconsistent".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedContextWorkflowError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedContextWorkflowError::Artifact(error.to_string()))
     }
 
@@ -246,7 +390,8 @@ pub fn compile_federated_context_workflow(
         || request.required_institution_ids.len() < 2
         || request.required_stage_ids.is_empty()
         || request.minimum_quorum == 0
-        || request.minimum_quorum as usize > request.required_institution_ids.len()
+        || request.required_institution_ids.len() > usize::from(u16::MAX)
+        || usize::from(request.minimum_quorum) > request.required_institution_ids.len()
         || request.budget_units == 0
         || request.replay_identity.as_str().len() != 64
         || request.boundary != PRECLINICAL_BOUNDARY
@@ -255,19 +400,65 @@ pub fn compile_federated_context_workflow(
             "federated workflow identity, stage closure, quorum, budget, replay, or boundary is invalid".into(),
         ));
     }
-    let institutions = request.required_institution_ids.iter().cloned().collect::<BTreeSet<_>>();
-    let stages = request.required_stage_ids.iter().cloned().collect::<BTreeSet<_>>();
+    for (value, field) in [
+        (&request.request_id, "request_id"),
+        (&request.federation_id, "federation_id"),
+        (&request.workflow_id, "workflow_id"),
+        (&request.query_id, "query_id"),
+        (&request.goal, "goal"),
+        (&request.semantic_profile, "semantic_profile"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_unique(
+        &request.required_institution_ids,
+        "required_institution_ids",
+    )?;
+    validate_unique(&request.required_stage_ids, "required_stage_ids")?;
+    let institutions = request
+        .required_institution_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let stages = request
+        .required_stage_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
     if institutions.len() != request.required_institution_ids.len()
         || stages.len() != request.required_stage_ids.len()
-        || institutions.iter().any(|value| value.trim().is_empty())
-        || stages.iter().any(|value| value.trim().is_empty())
     {
         return Err(FederatedContextWorkflowError::Invalid(
             "federated institution and stage identifiers must be unique and non-empty".into(),
         ));
     }
     let mut peer_map = BTreeMap::new();
+    let mut peer_keys = BTreeSet::new();
     for peer in &request.peers {
+        for (value, field) in [
+            (&peer.institution_id, "peer.institution_id"),
+            (&peer.boundary, "peer.boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        validate_unique(&peer.stage_order, "peer.stage_order")?;
+        for (digest, field) in [
+            (&peer.context_digest, "peer.context_digest"),
+            (&peer.section_digest, "peer.section_digest"),
+            (&peer.replay_identity, "peer.replay_identity"),
+        ] {
+            if digest.as_str().len() != 64 {
+                return Err(FederatedContextWorkflowError::Invalid(format!(
+                    "{field} must be a 64-character content hash"
+                )));
+            }
+        }
+        if !peer_keys.insert(peer.institution_id.to_ascii_lowercase()) {
+            return Err(FederatedContextWorkflowError::Invalid(
+                "federated peer attestations must be unique and case-distinct".into(),
+            ));
+        }
         if peer_map.insert(peer.institution_id.clone(), peer).is_some() {
             return Err(FederatedContextWorkflowError::Invalid(
                 "federated peer attestations must be unique".into(),
@@ -300,14 +491,20 @@ pub fn compile_federated_context_workflow(
             || peer.boundary != PRECLINICAL_BOUNDARY
         {
             blocked.insert(institution.clone());
-            omissions.insert(format!("institution:{}:federation-gate-blocked", institution));
+            omissions.insert(format!(
+                "institution:{}:federation-gate-blocked",
+                institution
+            ));
             continue;
         }
         let peer_stages = peer.stage_order.iter().cloned().collect::<BTreeSet<_>>();
         if !stages.is_subset(&peer_stages) {
             blocked.insert(institution.clone());
             for stage in stages.difference(&peer_stages) {
-                omissions.insert(format!("institution:{}:missing-stage:{}", institution, stage));
+                omissions.insert(format!(
+                    "institution:{}:missing-stage:{}",
+                    institution, stage
+                ));
             }
             continue;
         }
@@ -347,13 +544,46 @@ pub fn compile_federated_context_workflow(
             }
         }
     }
-    let quorum = qualified.len() as u16;
-    let required_budget = (stages.len() as u32).saturating_mul(request.minimum_quorum as u32);
+    let quorum = u16::try_from(qualified.len()).map_err(|_| {
+        FederatedContextWorkflowError::Invalid(
+            "federated qualified institution count exceeds the receipt quorum width".into(),
+        )
+    })?;
+    let stage_count = u32::try_from(stages.len()).map_err(|_| {
+        FederatedContextWorkflowError::Invalid(
+            "federated stage count exceeds workflow budget width".into(),
+        )
+    })?;
+    let required_budget = stage_count
+        .checked_mul(u32::from(request.minimum_quorum))
+        .ok_or_else(|| {
+            FederatedContextWorkflowError::Invalid(
+                "federated workflow budget exceeds representable range".into(),
+            )
+        })?;
+    let locality_failure = !request.raw_data_local
+        || institutions
+            .iter()
+            .filter_map(|institution| peer_map.get(institution))
+            .any(|peer| !peer.raw_data_local);
+    let aggregate_only_failure = !request.aggregate_only
+        || institutions
+            .iter()
+            .filter_map(|institution| peer_map.get(institution))
+            .any(|peer| !peer.aggregate_only);
+    if locality_failure {
+        omissions.insert("workflow:raw-data-locality-failed".into());
+    }
+    if aggregate_only_failure {
+        omissions.insert("workflow:aggregate-only-required".into());
+    }
+    let locality_gate = !locality_failure;
+    let aggregate_only = !aggregate_only_failure;
     let gates_open = request.policy_allow
         && request.protected_closure
         && request.signed_approval
-        && request.raw_data_local
-        && request.aggregate_only;
+        && locality_gate
+        && aggregate_only;
     let disposition = if !gates_open {
         "blocked"
     } else if quorum >= request.minimum_quorum && request.budget_units >= required_budget {
@@ -364,42 +594,82 @@ pub fn compile_federated_context_workflow(
     if request.budget_units < required_budget {
         omissions.insert("workflow:budget-exhausted".into());
     }
-    if !request.policy_allow { omissions.insert("workflow:policy-denied".into()); }
-    if !request.protected_closure { omissions.insert("workflow:protected-closure-incomplete".into()); }
-    if !request.signed_approval { omissions.insert("workflow:signed-approval-missing".into()); }
-    if !request.raw_data_local { omissions.insert("workflow:raw-data-locality-failed".into()); }
-    if !request.aggregate_only { omissions.insert("workflow:aggregate-only-required".into()); }
+    if !request.policy_allow {
+        omissions.insert("workflow:policy-denied".into());
+    }
+    if !request.protected_closure {
+        omissions.insert("workflow:protected-closure-incomplete".into());
+    }
+    if !request.signed_approval {
+        omissions.insert("workflow:signed-approval-missing".into());
+    }
     let consumed = request.budget_units.min(required_budget);
+    let institution_order = institutions.into_iter().collect::<Vec<_>>();
+    let qualified_institution_order = qualified.into_iter().collect::<Vec<_>>();
+    let stale_institution_order = stale.into_iter().collect::<Vec<_>>();
+    let blocked_institution_order = blocked.into_iter().collect::<Vec<_>>();
+    let unknown_institution_order = unknown.into_iter().collect::<Vec<_>>();
+    let required_stage_order = stages.into_iter().collect::<Vec<_>>();
+    let scheduled_stage_order = required_stage_order.clone();
+    let aggregate_order = aggregate.into_iter().collect::<Vec<_>>();
+    let omissions = omissions.into_iter().collect::<Vec<_>>();
+    let uncertainty = uncertainty.into_iter().collect::<Vec<_>>();
+    let negative_evidence = negative.into_iter().collect::<Vec<_>>();
+    let raw_data_local = true;
     let checkpoint_digest = ContentHash::of_value(&json!({
         "workflow_id": request.workflow_id,
-        "institution_order": institutions,
-        "qualified_order": qualified,
-        "stage_order": stages,
+        "institution_order": institution_order,
+        "qualified_institution_order": qualified_institution_order,
+        "stale_institution_order": stale_institution_order,
+        "blocked_institution_order": blocked_institution_order,
+        "unknown_institution_order": unknown_institution_order,
+        "required_stage_order": required_stage_order,
+        "scheduled_stage_order": scheduled_stage_order,
+        "disposition": disposition,
+        "quorum": quorum,
+        "minimum_quorum": request.minimum_quorum,
+        "current_epoch": request.current_epoch,
+        "budget_units": request.budget_units,
+        "consumed_budget_units": consumed,
         "replay_identity": request.replay_identity,
+        "raw_data_local": raw_data_local,
+        "aggregate_only": aggregate_only,
     }))
     .map_err(|error| FederatedContextWorkflowError::Artifact(error.to_string()))?;
     let workflow_digest = ContentHash::of_value(&json!({
         "workflow_id": request.workflow_id,
-        "stage_order": stages,
+        "required_stage_order": required_stage_order,
+        "scheduled_stage_order": scheduled_stage_order,
         "quorum": quorum,
         "minimum_quorum": request.minimum_quorum,
         "budget_units": request.budget_units,
         "consumed_budget_units": consumed,
+        "disposition": disposition,
         "checkpoint_digest": checkpoint_digest,
         "replay_identity": request.replay_identity,
+        "raw_data_local": raw_data_local,
+        "aggregate_only": aggregate_only,
     }))
     .map_err(|error| FederatedContextWorkflowError::Artifact(error.to_string()))?;
     let federation_envelope_digest = ContentHash::of_value(&json!({
         "federation_id": request.federation_id,
         "workflow_id": request.workflow_id,
-        "aggregate_order": aggregate,
+        "query_id": request.query_id,
+        "goal": request.goal,
+        "semantic_profile": request.semantic_profile,
+        "aggregate_order": aggregate_order,
         "workflow_digest": workflow_digest,
-        "raw_data_local": true,
-        "aggregate_only": true,
+        "replay_identity": request.replay_identity,
+        "raw_data_local": raw_data_local,
+        "aggregate_only": aggregate_only,
+        "boundary": PRECLINICAL_BOUNDARY,
     }))
     .map_err(|error| FederatedContextWorkflowError::Artifact(error.to_string()))?;
-    let effects = if disposition == "admitted" {
-        vec![format!("schedule:federated-context-workflow:{}", request.workflow_id)]
+    let effect_receipts = if disposition == "admitted" {
+        vec![format!(
+            "schedule:federated-context-workflow:{}",
+            request.workflow_id
+        )]
     } else {
         vec!["block:unsafe-release".into()]
     };
@@ -414,14 +684,14 @@ pub fn compile_federated_context_workflow(
         "goal": request.goal,
         "semantic_profile": request.semantic_profile,
         "disposition": disposition,
-        "institution_order": institutions,
-        "qualified_institution_order": qualified,
-        "stale_institution_order": stale,
-        "blocked_institution_order": blocked,
-        "unknown_institution_order": unknown,
-        "required_stage_order": stages,
-        "scheduled_stage_order": stages,
-        "aggregate_order": aggregate,
+        "institution_order": institution_order,
+        "qualified_institution_order": qualified_institution_order,
+        "stale_institution_order": stale_institution_order,
+        "blocked_institution_order": blocked_institution_order,
+        "unknown_institution_order": unknown_institution_order,
+        "required_stage_order": required_stage_order,
+        "scheduled_stage_order": scheduled_stage_order,
+        "aggregate_order": aggregate_order,
         "quorum": quorum,
         "minimum_quorum": request.minimum_quorum,
         "current_epoch": request.current_epoch,
@@ -433,12 +703,15 @@ pub fn compile_federated_context_workflow(
         "replay_identity": request.replay_identity,
         "omissions": omissions,
         "uncertainty": uncertainty,
-        "negative_evidence": negative,
+        "negative_evidence": negative_evidence,
+        "effect_receipts": effect_receipts,
+        "raw_data_local": raw_data_local,
+        "aggregate_only": aggregate_only,
         "boundary": PRECLINICAL_BOUNDARY,
     });
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-federated-context-workflow:{}", request.workflow_id),
-        "application/vnd.aurora.federated-context-workflow+json",
+        WORKFLOW_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -455,14 +728,14 @@ pub fn compile_federated_context_workflow(
         goal: request.goal.clone(),
         semantic_profile: request.semantic_profile.clone(),
         disposition: disposition.into(),
-        institution_order: institutions.into_iter().collect(),
-        qualified_institution_order: qualified.into_iter().collect(),
-        stale_institution_order: stale.into_iter().collect(),
-        blocked_institution_order: blocked.into_iter().collect(),
-        unknown_institution_order: unknown.into_iter().collect(),
-        required_stage_order: stages.clone().into_iter().collect(),
-        scheduled_stage_order: stages.into_iter().collect(),
-        aggregate_order: aggregate.into_iter().collect(),
+        institution_order,
+        qualified_institution_order,
+        stale_institution_order,
+        blocked_institution_order,
+        unknown_institution_order,
+        required_stage_order,
+        scheduled_stage_order,
+        aggregate_order,
         quorum,
         minimum_quorum: request.minimum_quorum,
         current_epoch: request.current_epoch,
@@ -472,35 +745,252 @@ pub fn compile_federated_context_workflow(
         workflow_digest,
         federation_envelope_digest,
         replay_identity: request.replay_identity.clone(),
-        omissions: omissions.into_iter().collect(),
-        uncertainty: uncertainty.into_iter().collect(),
-        negative_evidence: negative.into_iter().collect(),
-        effect_receipts: effects,
+        omissions,
+        uncertainty,
+        negative_evidence,
+        effect_receipts,
         artifact,
-        raw_data_local: true,
-        aggregate_only: true,
+        raw_data_local,
+        aggregate_only,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
     Ok(receipt)
 }
 
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedContextWorkflowError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedContextWorkflowError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), FederatedContextWorkflowError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedContextWorkflowError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), FederatedContextWorkflowError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedContextWorkflowError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &FederatedContextWorkflowReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "federation_id": receipt.federation_id,
+        "workflow_id": receipt.workflow_id,
+        "query_id": receipt.query_id,
+        "goal": receipt.goal,
+        "semantic_profile": receipt.semantic_profile,
+        "disposition": receipt.disposition,
+        "institution_order": receipt.institution_order,
+        "qualified_institution_order": receipt.qualified_institution_order,
+        "stale_institution_order": receipt.stale_institution_order,
+        "blocked_institution_order": receipt.blocked_institution_order,
+        "unknown_institution_order": receipt.unknown_institution_order,
+        "required_stage_order": receipt.required_stage_order,
+        "scheduled_stage_order": receipt.scheduled_stage_order,
+        "aggregate_order": receipt.aggregate_order,
+        "quorum": receipt.quorum,
+        "minimum_quorum": receipt.minimum_quorum,
+        "current_epoch": receipt.current_epoch,
+        "budget_units": receipt.budget_units,
+        "consumed_budget_units": receipt.consumed_budget_units,
+        "checkpoint_digest": receipt.checkpoint_digest,
+        "workflow_digest": receipt.workflow_digest,
+        "federation_envelope_digest": receipt.federation_envelope_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "aggregate_only": receipt.aggregate_only,
+        "boundary": receipt.boundary,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn hash(value: &str) -> ContentHash { ContentHash::of_bytes(value.as_bytes()) }
+    fn hash(value: &str) -> ContentHash {
+        ContentHash::of_bytes(value.as_bytes())
+    }
     fn request() -> FederatedContextWorkflowRequest {
         let replay = hash("replay");
         let stages = vec!["stage:compile".into(), "stage:project".into()];
         FederatedContextWorkflowRequest {
-            request_id: "request:federated-context-workflow".into(), federation_id: "federation:one".into(), workflow_id: "workflow:federated".into(), query_id: "query:one".into(), goal: "compile a federated decision context".into(), semantic_profile: "aurora:decision:v1".into(), required_institution_ids: vec!["institution:a".into(), "institution:b".into()], required_stage_ids: stages.clone(), peers: vec![peer("institution:a", &stages, &replay), peer("institution:b", &stages, &replay)], minimum_quorum: 2, current_epoch: 10, max_epoch_lag: 1, budget_units: 4, replay_identity: replay, policy_allow: true, protected_closure: true, signed_approval: true, raw_data_local: true, aggregate_only: true, boundary: PRECLINICAL_BOUNDARY.into()
+            request_id: "request:federated-context-workflow".into(),
+            federation_id: "federation:one".into(),
+            workflow_id: "workflow:federated".into(),
+            query_id: "query:one".into(),
+            goal: "compile a federated decision context".into(),
+            semantic_profile: "aurora:decision:v1".into(),
+            required_institution_ids: vec!["institution:a".into(), "institution:b".into()],
+            required_stage_ids: stages.clone(),
+            peers: vec![
+                peer("institution:a", &stages, &replay),
+                peer("institution:b", &stages, &replay),
+            ],
+            minimum_quorum: 2,
+            current_epoch: 10,
+            max_epoch_lag: 1,
+            budget_units: 4,
+            replay_identity: replay,
+            policy_allow: true,
+            protected_closure: true,
+            signed_approval: true,
+            raw_data_local: true,
+            aggregate_only: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
         }
     }
-    fn peer(institution: &str, stages: &[String], replay: &ContentHash) -> FederatedContextWorkflowPeer { FederatedContextWorkflowPeer { institution_id: institution.into(), epoch: 10, stage_order: stages.to_vec(), context_digest: replay.clone(), section_digest: replay.clone(), replay_identity: replay.clone(), evidence_state: EvidenceState::Supported, policy_allow: true, protected_closure: true, raw_data_local: true, aggregate_only: true, boundary: PRECLINICAL_BOUNDARY.into() } }
-    #[test] fn manifest_is_a2_and_authorized() { assert_eq!(federated_context_workflow_fabric_manifest().autonomy_tier, AutonomyTier::A2); assert_eq!(federated_context_workflow_fabric_manifest().authority_requirements.len(), 1); }
-    #[test] fn fresh_stage_quorum_admits() { let receipt = compile_federated_context_workflow(&request()).unwrap(); assert_eq!(receipt.disposition, "admitted"); assert_eq!(receipt.quorum, 2); }
-    #[test] fn missing_stage_blocks_peer() { let mut value = request(); value.peers[1].stage_order.pop(); let receipt = compile_federated_context_workflow(&value).unwrap(); assert_eq!(receipt.disposition, "refinement_required"); assert!(receipt.omissions.iter().any(|item| item.contains("missing-stage"))); }
-    #[test] fn stale_peer_is_explicit() { let mut value = request(); value.peers[1].epoch = 1; let receipt = compile_federated_context_workflow(&value).unwrap(); assert!(receipt.stale_institution_order.contains(&"institution:b".into())); }
-    #[test] fn policy_denial_blocks_without_schedule() { let mut value = request(); value.policy_allow = false; let receipt = compile_federated_context_workflow(&value).unwrap(); assert_eq!(receipt.disposition, "blocked"); assert_eq!(receipt.effect_receipts, vec!["block:unsafe-release"]); }
-    #[test] fn digest_is_stable() { let receipt = compile_federated_context_workflow(&request()).unwrap(); assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap()); }
+    fn peer(
+        institution: &str,
+        stages: &[String],
+        replay: &ContentHash,
+    ) -> FederatedContextWorkflowPeer {
+        FederatedContextWorkflowPeer {
+            institution_id: institution.into(),
+            epoch: 10,
+            stage_order: stages.to_vec(),
+            context_digest: replay.clone(),
+            section_digest: replay.clone(),
+            replay_identity: replay.clone(),
+            evidence_state: EvidenceState::Supported,
+            policy_allow: true,
+            protected_closure: true,
+            raw_data_local: true,
+            aggregate_only: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn manifest_is_a2_and_authorized() {
+        assert_eq!(
+            federated_context_workflow_fabric_manifest().autonomy_tier,
+            AutonomyTier::A2
+        );
+        assert_eq!(
+            federated_context_workflow_fabric_manifest()
+                .authority_requirements
+                .len(),
+            1
+        );
+    }
+    #[test]
+    fn fresh_stage_quorum_admits() {
+        let receipt = compile_federated_context_workflow(&request()).unwrap();
+        assert_eq!(receipt.disposition, "admitted");
+        assert_eq!(receipt.quorum, 2);
+    }
+    #[test]
+    fn missing_stage_blocks_peer() {
+        let mut value = request();
+        value.peers[1].stage_order.pop();
+        let receipt = compile_federated_context_workflow(&value).unwrap();
+        assert_eq!(receipt.disposition, "refinement_required");
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item.contains("missing-stage")));
+    }
+    #[test]
+    fn stale_peer_is_explicit() {
+        let mut value = request();
+        value.peers[1].epoch = 1;
+        let receipt = compile_federated_context_workflow(&value).unwrap();
+        assert!(receipt
+            .stale_institution_order
+            .contains(&"institution:b".into()));
+    }
+    #[test]
+    fn policy_denial_blocks_without_schedule() {
+        let mut value = request();
+        value.policy_allow = false;
+        let receipt = compile_federated_context_workflow(&value).unwrap();
+        assert_eq!(receipt.disposition, "blocked");
+        assert_eq!(receipt.effect_receipts, vec!["block:unsafe-release"]);
+    }
+    #[test]
+    fn digest_is_stable() {
+        let receipt = compile_federated_context_workflow(&request()).unwrap();
+        assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+    #[test]
+    fn institution_count_cannot_overflow_receipt_quorum() {
+        let mut value = request();
+        value.required_institution_ids = (0..=usize::from(u16::MAX))
+            .map(|index| format!("institution:{index}"))
+            .collect();
+        assert!(matches!(
+            compile_federated_context_workflow(&value),
+            Err(FederatedContextWorkflowError::Invalid(_))
+        ));
+    }
+    #[test]
+    fn peer_locality_failure_is_blocked_and_retained() {
+        let mut value = request();
+        value.peers[0].raw_data_local = false;
+        let receipt = compile_federated_context_workflow(&value).unwrap();
+        assert_eq!(receipt.disposition, "blocked");
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "workflow:raw-data-locality-failed"));
+        assert!(receipt.validate().is_ok());
+    }
+    #[test]
+    fn non_aggregate_peer_is_blocked_and_retained() {
+        let mut value = request();
+        value.peers[0].aggregate_only = false;
+        let receipt = compile_federated_context_workflow(&value).unwrap();
+        assert_eq!(receipt.disposition, "blocked");
+        assert!(!receipt.aggregate_only);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "workflow:aggregate-only-required"));
+        assert!(receipt.validate().is_ok());
+    }
+    #[test]
+    fn workflow_artifact_payload_is_bound() {
+        let mut receipt = compile_federated_context_workflow(&request()).unwrap();
+        receipt.goal = "tampered workflow goal".into();
+        assert!(receipt.validate().is_err());
+    }
 }

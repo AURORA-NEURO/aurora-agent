@@ -539,14 +539,21 @@ impl AblationDesign {
 
         match varied.len() {
             0 => Ok(refused(ConfoundReason::NothingVaried)),
-            1 => Ok(ContrastVerdict::Attributable {
-                component: varied.into_iter().next().expect("exactly one"),
-                claim: if contrast.controlled {
-                    AttributionClaim::Causal
-                } else {
-                    AttributionClaim::Descriptive
-                },
-            }),
+            1 => {
+                let Some(component) = varied.into_iter().next() else {
+                    return Err(AblationError::InvariantViolation {
+                        detail: "one varied component was counted but none was retained".into(),
+                    });
+                };
+                Ok(ContrastVerdict::Attributable {
+                    component,
+                    claim: if contrast.controlled {
+                        AttributionClaim::Causal
+                    } else {
+                        AttributionClaim::Descriptive
+                    },
+                })
+            }
             _ => Ok(refused(ConfoundReason::MoreThanOneComponentVaried {
                 varied,
             })),
@@ -756,7 +763,8 @@ mod tests {
     }
 
     #[test]
-    fn a_declared_control_that_actually_moved_breaks_the_match_before_the_varied_count_is_reached() {
+    fn a_declared_control_that_actually_moved_breaks_the_match_before_the_varied_count_is_reached()
+    {
         let contrast = Contrast::new("c/closure", "baseline", "no-closure")
             .holding_fixed(["mandatory_closure"]);
         let verdict = design().judge(&contrast).expect("judges");
@@ -791,12 +799,11 @@ mod tests {
 
     #[test]
     fn a_learned_selector_with_no_hidden_holdout_is_refused() {
-        let learned = design().with_arm(base_arm("learned").with_learned_selector(
-            LearnedSelector {
+        let learned =
+            design().with_arm(base_arm("learned").with_learned_selector(LearnedSelector {
                 selector_id: "ranker/v2".to_string(),
                 hidden_holdout: None,
-            },
-        ));
+            }));
         let verdict = learned
             .judge(&Contrast::new("c/learned", "baseline", "learned"))
             .expect("judges");
@@ -886,8 +893,11 @@ mod tests {
         let mut outcomes = BTreeMap::new();
         outcomes.insert(
             "baseline".to_string(),
-            ArmOutcome::new("baseline", est(1200))
-                .scored(ValidityOutcome::new(48, 50, "oracle/deterministic")),
+            ArmOutcome::new("baseline", est(1200)).scored(ValidityOutcome::new(
+                48,
+                50,
+                "oracle/deterministic",
+            )),
         );
         outcomes.insert(
             "no-closure".to_string(),
@@ -921,7 +931,11 @@ mod tests {
         let contrast = &report.contrasts[0];
         assert_eq!(contrast.token_difference(), Some(-800));
         assert_eq!(
-            contrast.variant.as_ref().and_then(|arm| arm.validity.as_ref()).map(|v| v.valid),
+            contrast
+                .variant
+                .as_ref()
+                .and_then(|arm| arm.validity.as_ref())
+                .map(|v| v.valid),
             Some(31)
         );
     }

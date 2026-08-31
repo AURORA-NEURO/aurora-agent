@@ -17,6 +17,9 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-brain-P02-F03";
 pub const CONTRACT_VERSION: &str = "brain-throughput-retrieval-synthesis/1.0";
+const SYNTHESIS_CONTENT_TYPE: &str = "application/vnd.aurora.throughput-evidence-synthesis+json";
+const MAX_CANDIDATES: usize = 4096;
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThroughputRetrievalQuery {
@@ -89,33 +92,50 @@ impl ThroughputEvidenceSynthesis {
                     .into(),
             ));
         }
-        if self
-            .ranked_order
+        let candidate_values = self
+            .candidate_order
             .iter()
-            .chain(self.qualified_order.iter())
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let ranked_values = self.ranked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let qualified_values = self
+            .qualified_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let blocked_values = self.blocked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let unknown_values = self.unknown_order.iter().cloned().collect::<BTreeSet<_>>();
+        if ranked_values != candidate_values
+            || !qualified_values.is_subset(&candidate_values)
+            || !blocked_values.is_subset(&candidate_values)
+            || !unknown_values.is_subset(&blocked_values)
+            || !qualified_values.is_disjoint(&blocked_values)
+            || qualified_values
+                .union(&blocked_values)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_values
         {
             return Err(ThroughputRetrievalError::Invalid(
-                "throughput synthesis state is not covered".into(),
+                "throughput synthesis candidate states do not form an exact partition".into(),
             ));
         }
-        for values in [
-            &self.candidate_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        validate_sorted_unique(&self.candidate_order, "candidate_order")?;
+        for (values, field) in [
+            (&self.ranked_order, "ranked_order"),
+            (&self.qualified_order, "qualified_order"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(ThroughputRetrievalError::Invalid(
-                    "throughput synthesis ordering is not canonical".into(),
-                ));
-            }
+            validate_unique(values, field)?;
+        }
+        for (values, field) in [
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
         }
         for digest in [
             &self.queue_digest,
@@ -128,6 +148,44 @@ impl ThroughputEvidenceSynthesis {
                 ));
             }
         }
+        let expected_disposition = if self.omissions.iter().any(|value| {
+            value == "request:policy-denied"
+                || value == "request:protected-closure-incomplete"
+                || value == "request:raw-data-locality-failed"
+        }) {
+            SynthesisDisposition::Blocked
+        } else if self.qualified_order.is_empty() {
+            SynthesisDisposition::Unknown
+        } else if blocked_values.is_empty()
+            && self.omissions.is_empty()
+            && self.uncertainty.is_empty()
+            && self.negative_evidence.is_empty()
+        {
+            SynthesisDisposition::Qualified
+        } else {
+            SynthesisDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
+            return Err(ThroughputRetrievalError::Invalid(
+                "throughput synthesis disposition does not match retained state".into(),
+            ));
+        }
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            SynthesisDisposition::Qualified | SynthesisDisposition::Partial
+        ) {
+            vec![format!(
+                "read:local-throughput-artifacts:{}",
+                self.request_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(ThroughputRetrievalError::Invalid(
+                "throughput synthesis effects do not match disposition".into(),
+            ));
+        }
         if self.effect_receipts.iter().any(|effect| {
             !effect.starts_with("read:local-throughput-artifacts:")
                 && effect != "block:unsafe-release"
@@ -136,10 +194,61 @@ impl ThroughputEvidenceSynthesis {
                 "throughput synthesis effect is outside the local gate".into(),
             ));
         }
+        let qualified_exact = self.qualified_order.iter().collect::<BTreeSet<_>>();
+        let expected_qualified = self
+            .ranked_order
+            .iter()
+            .filter(|candidate| qualified_exact.contains(candidate))
+            .cloned()
+            .collect::<Vec<_>>();
+        if self.qualified_order != expected_qualified {
+            return Err(ThroughputRetrievalError::Invalid(
+                "throughput synthesis qualified order must retain ranked order".into(),
+            ));
+        }
+        let expected_checkpoint_seq = if self.candidate_order.is_empty() {
+            0
+        } else {
+            1
+        };
+        if self.checkpoint_seq != expected_checkpoint_seq {
+            return Err(ThroughputRetrievalError::Invalid(
+                "throughput synthesis checkpoint is not bound to candidate coverage".into(),
+            ));
+        }
+        let expected_synthesis_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "ranked_order": self.ranked_order,
+            "qualified_order": self.qualified_order,
+            "support_order": self.support_order,
+            "queue_digest": self.queue_digest,
+            "disposition": self.disposition,
+        }))
+        .map_err(|error| ThroughputRetrievalError::Artifact(error.to_string()))?;
+        if self.synthesis_digest != expected_synthesis_digest {
+            return Err(ThroughputRetrievalError::Invalid(
+                "throughput synthesis digest is not bound to ranked evidence".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-throughput-retrieval:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != SYNTHESIS_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(ThroughputRetrievalError::Invalid(
+                "throughput synthesis artifact identity or provenance is inconsistent".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| ThroughputRetrievalError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| ThroughputRetrievalError::Artifact(error.to_string()))
     }
+
     pub fn digest(&self) -> Result<ContentHash, ThroughputRetrievalError> {
         self.validate()?;
         let value = serde_json::to_value(self)
@@ -157,8 +266,14 @@ pub fn synthesize_throughput_retrieval(
     request: &ThroughputRetrievalQuery,
 ) -> Result<ThroughputEvidenceSynthesis, ThroughputRetrievalError> {
     validate_request(request)?;
+    let submitted_candidate_count = request.candidates.len();
     let mut candidates = request.candidates.clone();
     candidates.sort_by(|left, right| left.evidence_id.cmp(&right.evidence_id));
+    let duplicate_candidate_count = candidates
+        .windows(2)
+        .filter(|pair| pair[0].evidence_id == pair[1].evidence_id)
+        .count();
+    candidates.dedup_by(|left, right| left.evidence_id == right.evidence_id);
     let candidate_order = candidates
         .iter()
         .map(|item| item.evidence_id.clone())
@@ -184,8 +299,11 @@ pub fn synthesize_throughput_retrieval(
     let mut omissions = BTreeSet::new();
     let mut uncertainty = BTreeSet::new();
     let mut negative = BTreeSet::new();
-    if request.candidates.len() > request.max_items {
+    if submitted_candidate_count > request.max_items {
         omissions.insert("batch:capacity-overflow".into());
+    }
+    if duplicate_candidate_count > 0 {
+        omissions.insert("batch:duplicate-candidate-retained".into());
     }
     for candidate in &ranked {
         let capacity_ok = qualified.len() < request.max_items;
@@ -259,11 +377,11 @@ pub fn synthesize_throughput_retrieval(
         };
     let checkpoint_seq = if candidate_order.is_empty() { 0 } else { 1 };
     let queue_digest = ContentHash::of_value(&json!({"batch_id": request.batch_id, "partition": request.partition, "candidate_order": candidate_order, "max_items": request.max_items, "checkpoint_seq": checkpoint_seq})).map_err(|error| ThroughputRetrievalError::Artifact(error.to_string()))?;
-    let synthesis_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "ranked_order": ranked_order, "qualified_order": qualified, "queue_digest": queue_digest, "disposition": disposition})).map_err(|error| ThroughputRetrievalError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "disposition": disposition, "candidate_order": candidate_order, "ranked_order": ranked_order, "qualified_order": qualified, "blocked_order": blocked, "unknown_order": unknown, "support_order": support_order, "checkpoint_seq": checkpoint_seq, "queue_digest": queue_digest, "synthesis_digest": synthesis_digest, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
+    let synthesis_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "ranked_order": ranked_order, "qualified_order": qualified, "support_order": support_order, "queue_digest": queue_digest, "disposition": disposition})).map_err(|error| ThroughputRetrievalError::Artifact(error.to_string()))?;
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "disposition": disposition, "candidate_order": candidate_order, "ranked_order": ranked_order, "qualified_order": qualified, "blocked_order": blocked, "unknown_order": unknown, "support_order": support_order, "checkpoint_seq": checkpoint_seq, "queue_digest": queue_digest, "synthesis_digest": synthesis_digest, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "replay_identity": request.replay_identity, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-throughput-retrieval:{}", request.request_id),
-        "application/vnd.aurora.throughput-evidence-synthesis+json",
+        SYNTHESIS_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -316,11 +434,117 @@ fn validate_request(request: &ThroughputRetrievalQuery) -> Result<(), Throughput
         || request.max_items == 0
         || request.minimum_support_milli > 1000
         || request.candidates.is_empty()
+        || request.candidates.len() > MAX_CANDIDATES
         || request.boundary != PRECLINICAL_BOUNDARY
     {
         return Err(ThroughputRetrievalError::Invalid("throughput retrieval identity, capacity, threshold, candidates, or boundary is incomplete".into()));
     }
+    for (value, field) in [
+        (&request.request_id, "request_id"),
+        (&request.batch_id, "batch_id"),
+        (&request.partition, "partition"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    if request.replay_identity.as_str().len() != 64 {
+        return Err(ThroughputRetrievalError::Invalid(
+            "throughput retrieval replay identity is invalid".into(),
+        ));
+    }
+    let mut exact_ids = BTreeSet::new();
+    let mut identity_keys = BTreeSet::new();
+    for candidate in &request.candidates {
+        for (value, field) in [
+            (&candidate.evidence_id, "candidate.evidence_id"),
+            (&candidate.source_id, "candidate.source_id"),
+            (&candidate.study_id, "candidate.study_id"),
+            (&candidate.scope, "candidate.scope"),
+            (&candidate.modality, "candidate.modality"),
+            (&candidate.boundary, "candidate.boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        let exact_duplicate = !exact_ids.insert(candidate.evidence_id.clone());
+        let case_collision = !identity_keys.insert(candidate.evidence_id.to_ascii_lowercase());
+        if candidate.support_milli > 1000
+            || candidate.boundary != PRECLINICAL_BOUNDARY
+            || (case_collision && !exact_duplicate)
+            || candidate.semantic_digest.as_str().len() != 64
+            || candidate.artifact_digest.as_str().len() != 64
+            || candidate.provenance_digest.as_str().len() != 64
+            || candidate.replay_identity.as_str().len() != 64
+        {
+            return Err(ThroughputRetrievalError::Invalid(
+                "throughput candidate identity, digest, support, boundary, or uniqueness is invalid"
+                    .into(),
+            ));
+        }
+    }
     Ok(())
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), ThroughputRetrievalError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(ThroughputRetrievalError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), ThroughputRetrievalError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(ThroughputRetrievalError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(values: &[String], field: &str) -> Result<(), ThroughputRetrievalError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(ThroughputRetrievalError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &ThroughputEvidenceSynthesis) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "batch_id": receipt.batch_id,
+        "partition": receipt.partition,
+        "disposition": receipt.disposition,
+        "candidate_order": receipt.candidate_order,
+        "ranked_order": receipt.ranked_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "support_order": receipt.support_order,
+        "checkpoint_seq": receipt.checkpoint_seq,
+        "queue_digest": receipt.queue_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "replay_identity": receipt.replay_identity,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -412,5 +636,37 @@ mod tests {
         )]))
         .unwrap();
         assert_eq!(r.digest().unwrap(), r.digest().unwrap());
+    }
+
+    #[test]
+    fn ranking_order_can_differ_from_canonical_candidate_order() {
+        let mut lower_ranked = candidate("a", EvidenceState::Supported);
+        lower_ranked.support_milli = 700;
+        let higher_ranked = candidate("b", EvidenceState::Supported);
+        let receipt =
+            synthesize_throughput_retrieval(&request(vec![lower_ranked, higher_ranked])).unwrap();
+        assert_eq!(receipt.candidate_order, vec!["evidence:a", "evidence:b"]);
+        assert_eq!(receipt.ranked_order, vec!["evidence:b", "evidence:a"]);
+        assert_eq!(receipt.qualified_order, receipt.ranked_order);
+        receipt.validate().unwrap();
+    }
+
+    #[test]
+    fn support_order_and_artifact_payload_are_bound() {
+        let mut receipt = synthesize_throughput_retrieval(&request(vec![candidate(
+            "a",
+            EvidenceState::Supported,
+        )]))
+        .unwrap();
+        receipt.support_order[0] = 1;
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn case_colliding_candidate_ids_are_rejected() {
+        let mut upper = candidate("A", EvidenceState::Supported);
+        upper.evidence_id = "evidence:A".into();
+        let lower = candidate("a", EvidenceState::Supported);
+        assert!(synthesize_throughput_retrieval(&request(vec![upper, lower])).is_err());
     }
 }

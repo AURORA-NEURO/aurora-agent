@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-policy-autonomy-p19-f02.json",
+  "title": "AFA-worldgen-P19-F02 policy receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "consumer",
+    "purpose",
+    "required_scope",
+    "policy_epoch",
+    "disposition",
+    "action_order",
+    "allowed_order",
+    "approval_required_order",
+    "local_only_order",
+    "denied_order",
+    "unresolved_order",
+    "omission_order",
+    "uncertainty_order",
+    "negative_evidence_order",
+    "replay_identity",
+    "receipt_digest",
+    "artifact",
+    "raw_data_local",
+    "boundary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "aurora-research-contract/1.0"
+    },
+    "contract_version": {
+      "const": "worldgen-multimodal-policy-autonomy/1.0"
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P19-F02"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "consumer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "required_scope": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy_epoch": {
+      "type": "string",
+      "minLength": 1
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "blocked"
+      ]
+    },
+    "action_order": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "allowed_order": {
+      "type": "array"
+    },
+    "approval_required_order": {
+      "type": "array"
+    },
+    "local_only_order": {
+      "type": "array"
+    },
+    "denied_order": {
+      "type": "array"
+    },
+    "unresolved_order": {
+      "type": "array"
+    },
+    "omission_order": {
+      "type": "array"
+    },
+    "uncertainty_order": {
+      "type": "array"
+    },
+    "negative_evidence_order": {
+      "type": "array"
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "receipt_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "content_type",
+        "content_hash",
+        "semantic_loss",
+        "provenance_digests",
+        "boundary"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.policy-autonomy-receipt-1+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "semantic_loss": {
+          "type": "array"
+        },
+        "provenance_digests": {
+          "type": "array"
+        },
+        "boundary": {
+          "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"
+        }
+      }
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "boundary": {
+      "const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"
+    }
+  }
+}

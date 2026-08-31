@@ -6,6 +6,7 @@
 //! that can be called by the CLI, SDK, MCP adapter, or an institution-local instrument gateway
 //! without each surface inventing its own authorization and replay rules.
 
+use crate::tape::MAX_TAPE_CHECKPOINTS;
 use crate::{Effect, RuntimeError, WorldTape};
 use bioprism_foundation::{
     AutonomyGrant, CapabilityManifest, Effect as ResearchEffect, ExecutionEvent, ExecutionRun,
@@ -15,6 +16,7 @@ use bioprism_foundation::{
 use bioprism_ids::{ContentHash, RunId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 /// Atlas feature implemented by this module.
@@ -41,6 +43,8 @@ pub enum ResearchRuntimeError {
     PolicyBlocked(PolicyDecision),
     #[error("instrument execution needs a signed or content-addressed evidence payload")]
     MissingInstrumentEvidence,
+    #[error("checkpoint {0} is already present in the execution session")]
+    DuplicateCheckpoint(String),
     #[error("session is already closed")]
     Closed,
     #[error("cannot serialize replay bundle: {0}")]
@@ -64,6 +68,7 @@ pub struct ResearchReplayBundle {
 
 impl ResearchReplayBundle {
     pub fn digest(&self) -> Result<ContentHash, ResearchRuntimeError> {
+        self.verify()?;
         let value = serde_json::to_value(self)
             .map_err(|error| ResearchRuntimeError::Serialization(error.to_string()))?;
         ContentHash::of_value(&value)
@@ -72,10 +77,40 @@ impl ResearchReplayBundle {
 
     /// Reloads and verifies the hash-chained tape before exposing a bundle to a consumer.
     pub fn verify(&self) -> Result<(), ResearchRuntimeError> {
+        if self.feature_id != FEATURE_ID
+            || self.boundary != bioprism_foundation::PRECLINICAL_BOUNDARY
+        {
+            return Err(ResearchRuntimeError::Serialization(
+                "replay bundle feature or boundary identity mismatch".into(),
+            ));
+        }
         self.manifest.validate()?;
         self.workflow.validate()?;
         self.grant.validate()?;
         self.policy.validate()?;
+        self.run.validate()?;
+        if self.run.schema_version != bioprism_foundation::RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.run.workflow_id != self.workflow.workflow_id
+            || self.run.boundary != bioprism_foundation::PRECLINICAL_BOUNDARY
+        {
+            return Err(ResearchRuntimeError::Serialization(
+                "replay bundle run metadata does not match its workflow".into(),
+            ));
+        }
+        let workflow_value = serde_json::to_value(&self.workflow)
+            .map_err(|error| ResearchRuntimeError::Serialization(error.to_string()))?;
+        let expected_plan_hash = ContentHash::of_value(&workflow_value)
+            .map_err(|error| ResearchRuntimeError::Serialization(error.to_string()))?;
+        if self.run.plan_hash != expected_plan_hash
+            || self.run.replay_identity
+                != ContentHash::of_bytes(
+                    format!("{}:{}", self.run.workflow_id, self.run.plan_hash).as_bytes(),
+                )
+        {
+            return Err(ResearchRuntimeError::Serialization(
+                "replay bundle plan or replay identity is not workflow-bound".into(),
+            ));
+        }
         let tape = WorldTape::from_json(&self.tape_json)?;
         if tape.run() != &self.run.run_id {
             return Err(ResearchRuntimeError::Serialization(
@@ -86,6 +121,51 @@ impl ResearchReplayBundle {
             return Err(ResearchRuntimeError::Serialization(
                 "tape/event length mismatch".into(),
             ));
+        }
+        for (sequence, event) in self.run.events.iter().enumerate() {
+            if event.sequence != sequence as u64 || event.effect.is_none() {
+                return Err(ResearchRuntimeError::Serialization(
+                    "execution event sequence or effect identity is invalid".into(),
+                ));
+            }
+        }
+        if tape.checkpoints().len() != self.run.checkpoints.len() {
+            return Err(ResearchRuntimeError::Serialization(
+                "tape/run checkpoint count mismatch".into(),
+            ));
+        }
+        let mut checkpoint_ids = BTreeSet::new();
+        for checkpoint in &self.run.checkpoints {
+            if checkpoint.checkpoint_id.trim().is_empty()
+                || !checkpoint_ids.insert(checkpoint.checkpoint_id.clone())
+                || checkpoint.event_sequence > self.run.events.len() as u64
+            {
+                return Err(ResearchRuntimeError::Serialization(
+                    "execution checkpoint identity or sequence is invalid".into(),
+                ));
+            }
+        }
+        for (run_checkpoint, tape_checkpoint) in self.run.checkpoints.iter().zip(tape.checkpoints())
+        {
+            if run_checkpoint.event_sequence != tape_checkpoint.step {
+                return Err(ResearchRuntimeError::Serialization(
+                    "tape/run checkpoint sequence mismatch".into(),
+                ));
+            }
+            let end = usize::try_from(run_checkpoint.event_sequence).map_err(|_| {
+                ResearchRuntimeError::Serialization(
+                    "replay checkpoint sequence exceeds addressable memory".into(),
+                )
+            })?;
+            let event_value = serde_json::to_value(&self.run.events[..end])
+                .map_err(|error| ResearchRuntimeError::Serialization(error.to_string()))?;
+            let expected_replay_hash = ContentHash::of_value(&event_value)
+                .map_err(|error| ResearchRuntimeError::Serialization(error.to_string()))?;
+            if run_checkpoint.replay_hash != expected_replay_hash {
+                return Err(ResearchRuntimeError::Serialization(
+                    "execution checkpoint replay hash mismatch".into(),
+                ));
+            }
         }
         Ok(())
     }
@@ -193,6 +273,14 @@ impl ResearchExecutionSession {
         if research_effect == ResearchEffect::InstrumentExecution && evidence_payload.is_none() {
             return Err(ResearchRuntimeError::MissingInstrumentEvidence);
         }
+        let event_type = event_type.into();
+        if event_type.trim().is_empty() {
+            return Err(ResearchRuntimeError::Contract(
+                ResearchContractError::MissingField {
+                    field: "event_type",
+                },
+            ));
+        }
         let payload_hash = evidence_payload
             .map(|payload| {
                 ContentHash::of_value(payload)
@@ -205,7 +293,7 @@ impl ResearchExecutionSession {
         self.tape.append(effect)?;
         self.run.append_event(ExecutionEvent {
             sequence,
-            event_type: event_type.into(),
+            event_type,
             effect: Some(research_effect),
             payload_hash,
         })?;
@@ -225,11 +313,45 @@ impl ResearchExecutionSession {
         &mut self,
         checkpoint_id: impl Into<String>,
     ) -> Result<(), ResearchRuntimeError> {
+        if matches!(
+            self.run.status,
+            ExecutionStatus::Succeeded | ExecutionStatus::Failed | ExecutionStatus::Cancelled
+        ) {
+            return Err(ResearchRuntimeError::Closed);
+        }
+        let checkpoint_id = checkpoint_id.into();
+        if checkpoint_id.trim().is_empty() {
+            return Err(ResearchRuntimeError::Serialization(
+                "checkpoint identity must be non-empty".into(),
+            ));
+        }
+        if self
+            .run
+            .checkpoints
+            .iter()
+            .any(|checkpoint| checkpoint.checkpoint_id == checkpoint_id)
+        {
+            return Err(ResearchRuntimeError::DuplicateCheckpoint(checkpoint_id));
+        }
+        if self.run.checkpoints.len() != self.tape.checkpoints().len() {
+            return Err(ResearchRuntimeError::Serialization(
+                "execution and tape checkpoint ledgers are already out of sync".into(),
+            ));
+        }
+        if self.tape.checkpoints().len() >= MAX_TAPE_CHECKPOINTS {
+            return Err(ResearchRuntimeError::Runtime(
+                RuntimeError::TapeLimitExceeded {
+                    kind: "checkpoints",
+                    actual: self.tape.checkpoints().len().saturating_add(1),
+                    maximum: MAX_TAPE_CHECKPOINTS,
+                },
+            ));
+        }
         self.run.checkpoint(checkpoint_id)?;
         self.tape.checkpoint(
             "aurora-research-runtime",
             crate::RestorationDeclaration::portable(),
-        );
+        )?;
         Ok(())
     }
 
@@ -446,5 +568,32 @@ mod tests {
         let right = b.bundle().unwrap();
         assert_eq!(left.digest().unwrap(), right.digest().unwrap());
         left.verify().unwrap();
+
+        let mut tampered = left.clone();
+        tampered.run.events[0].sequence = 9;
+        assert!(tampered.verify().is_err());
+    }
+
+    #[test]
+    fn checkpoints_are_unique_and_cannot_be_added_after_finish() {
+        let (manifest, workflow, grant, policy) = fixture();
+        let mut session = ResearchExecutionSession::new(
+            manifest,
+            workflow,
+            grant,
+            policy,
+            RunId::parse("runtime-session-checkpoint-boundary").unwrap(),
+        )
+        .unwrap();
+        session.checkpoint("admission").unwrap();
+        assert!(matches!(
+            session.checkpoint("admission").unwrap_err(),
+            ResearchRuntimeError::DuplicateCheckpoint(_)
+        ));
+        session.finish(ExecutionStatus::Failed).unwrap();
+        assert!(matches!(
+            session.checkpoint("after-finish").unwrap_err(),
+            ResearchRuntimeError::Closed
+        ));
     }
 }

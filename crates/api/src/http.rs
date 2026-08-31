@@ -158,27 +158,43 @@ pub fn read_request<R: BufRead>(
             "method must use uppercase token bytes".into(),
         ));
     }
-    if target.is_empty() || !target.starts_with('/') {
+    if target.is_empty()
+        || !target.starts_with('/')
+        || target.bytes().any(|byte| byte < 0x20 || byte == 0x7f)
+    {
         return Err(HttpError::Invalid(
-            "request target must be an origin-form path".into(),
+            "request target must be an origin-form path without control characters".into(),
         ));
     }
+    percent_decode(target).map_err(|error| {
+        HttpError::Invalid(format!(
+            "request target contains an invalid escape: {error}"
+        ))
+    })?;
 
     let mut headers = BTreeMap::new();
     for raw_line in lines.iter().skip(1) {
         let text = std::str::from_utf8(raw_line)
-            .map_err(|_| HttpError::Invalid("header is not UTF-8".into()))?
-            .trim();
+            .map_err(|_| HttpError::Invalid("header is not UTF-8".into()))?;
+        let text = text.strip_suffix('\n').unwrap_or(text);
+        let text = text.strip_suffix('\r').unwrap_or(text);
+        if text.starts_with(' ') || text.starts_with('\t') {
+            return Err(HttpError::Invalid(
+                "header line cannot start with whitespace".into(),
+            ));
+        }
         let (raw_name, raw_value) = text
             .split_once(':')
             .ok_or_else(|| HttpError::Invalid("header has no colon".into()))?;
-        let name = raw_name.trim().to_ascii_lowercase();
-        let value = raw_value.trim();
+        let name = raw_name.to_ascii_lowercase();
+        let value = raw_value.trim_matches([' ', '\t']);
         if name.is_empty()
             || name
                 .bytes()
                 .any(|byte| !(byte.is_ascii_alphanumeric() || byte == b'-'))
-            || value.bytes().any(|byte| byte == b'\r' || byte == b'\n')
+            || value
+                .bytes()
+                .any(|byte| byte < 0x20 && byte != b'\t' || byte == 0x7f)
         {
             return Err(HttpError::Invalid(format!("invalid header {raw_name:?}")));
         }
@@ -261,9 +277,28 @@ impl HttpResponse {
     }
 
     pub fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        if !(100..=599).contains(&self.status) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "HTTP response status must be between 100 and 599",
+            ));
+        }
         let reason = reason_phrase(self.status);
         write!(writer, "HTTP/1.1 {} {}\r\n", self.status, reason)?;
         for (name, value) in &self.headers {
+            if name.is_empty()
+                || name
+                    .bytes()
+                    .any(|byte| !(byte.is_ascii_alphanumeric() || byte == b'-'))
+                || value
+                    .bytes()
+                    .any(|byte| byte < 0x20 && byte != b'\t' || byte == 0x7f)
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "HTTP response contains an invalid header",
+                ));
+            }
             write!(writer, "{}: {}\r\n", canonical_header_name(name), value)?;
         }
         write!(writer, "Content-Length: {}\r\n", self.body.len())?;
@@ -325,8 +360,14 @@ fn percent_decode(value: &str) -> Result<String, HttpError> {
             index += 1;
         }
     }
-    String::from_utf8(output)
-        .map_err(|_| HttpError::Invalid("percent-decoded text is not UTF-8".into()))
+    let decoded = String::from_utf8(output)
+        .map_err(|_| HttpError::Invalid("percent-decoded text is not UTF-8".into()))?;
+    if decoded.chars().any(char::is_control) {
+        return Err(HttpError::Invalid(
+            "percent-decoded text contains a control character".into(),
+        ));
+    }
+    Ok(decoded)
 }
 
 fn hex(value: u8) -> Result<u8, HttpError> {
@@ -373,5 +414,32 @@ mod tests {
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("Content-Length: 11\r\n"));
         assert!(text.contains("Connection: close\r\n"));
+    }
+
+    #[test]
+    fn parser_rejects_control_characters_and_header_whitespace() {
+        let target = b"GET /bad\0path HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert!(read_request(&mut Cursor::new(target), 1024, 32).is_err());
+
+        let encoded = b"GET /bad%00path HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert!(read_request(&mut Cursor::new(encoded), 1024, 32).is_err());
+
+        let leading_space = b"GET / HTTP/1.1\r\n Host: localhost\r\n\r\n";
+        assert!(read_request(&mut Cursor::new(leading_space), 1024, 32).is_err());
+
+        let control_value = b"GET / HTTP/1.1\r\nHost: local\0host\r\n\r\n";
+        assert!(read_request(&mut Cursor::new(control_value), 1024, 32).is_err());
+    }
+
+    #[test]
+    fn response_refuses_invalid_status_and_header_injection() {
+        let invalid_status = HttpResponse::empty(700);
+        assert!(invalid_status.write_to(&mut Vec::new()).is_err());
+
+        let mut injected = HttpResponse::empty(200);
+        injected
+            .headers
+            .insert("x-test".into(), "safe\r\nX-Injected: yes".into());
+        assert!(injected.write_to(&mut Vec::new()).is_err());
     }
 }

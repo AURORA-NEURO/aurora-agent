@@ -70,9 +70,28 @@ pub mod estimate;
 pub mod id;
 pub mod ledger;
 pub mod panel;
+pub mod posterior_integrity_support;
+pub mod local_posterior_integrity_inference;
+pub mod multimodal_posterior_integrity_inference;
+pub mod throughput_posterior_integrity_inference;
+pub mod federated_continual_posterior_integrity_inference;
+pub mod local_posterior_integrity_contract_model;
+pub mod multimodal_posterior_integrity_contract_model;
+pub mod throughput_posterior_integrity_contract_model;
+pub mod federated_continual_posterior_integrity_contract_model;
+pub mod local_posterior_integrity_research_copilot;
+pub mod multimodal_posterior_integrity_research_copilot;
+pub mod throughput_posterior_integrity_research_copilot;
+pub mod federated_continual_posterior_integrity_research_copilot;
+pub mod local_posterior_integrity_workflow_fabric;
+pub mod multimodal_posterior_integrity_workflow_fabric;
+pub mod throughput_posterior_integrity_workflow_fabric;
+pub mod federated_continual_posterior_integrity_workflow_fabric;
 pub mod rng;
 pub mod select;
 pub mod stopping;
+pub mod mechanism_exploration_assurance;
+pub mod experiment_design_assurance;
 
 pub use beta::{
     ln_beta, ln_gamma, probability_first_exceeds_second, regularized_incomplete_beta, BetaPosterior,
@@ -90,10 +109,42 @@ pub use estimate::{
 pub use id::{CapabilityId, InstanceId, ParentId};
 pub use ledger::{Outcome, Trial, TrialLedger};
 pub use panel::{AdaptivePanel, CapabilityAudit, Comparison, PanelAudit, PanelConfig};
+pub use posterior_integrity_support::{qualify as qualify_posterior_integrity, manifest as posterior_integrity_manifest, PanelObservation4, PosteriorIntegrityArtifact4, PosteriorIntegrityCard7, PosteriorIntegrityError, PosteriorIntegrityRequest4, BOUNDARY as POSTERIOR_INTEGRITY_BOUNDARY, CONTENT_TYPE as POSTERIOR_INTEGRITY_CONTENT_TYPE};
+pub use local_posterior_integrity_inference::*;
+pub use multimodal_posterior_integrity_inference::*;
+pub use throughput_posterior_integrity_inference::*;
+pub use federated_continual_posterior_integrity_inference::*;
+pub use local_posterior_integrity_contract_model::*;
+pub use multimodal_posterior_integrity_contract_model::*;
+pub use throughput_posterior_integrity_contract_model::*;
+pub use federated_continual_posterior_integrity_contract_model::*;
+pub use local_posterior_integrity_research_copilot::*;
+pub use multimodal_posterior_integrity_research_copilot::*;
+pub use throughput_posterior_integrity_research_copilot::*;
+pub use federated_continual_posterior_integrity_research_copilot::*;
+pub use local_posterior_integrity_workflow_fabric::*;
+pub use multimodal_posterior_integrity_workflow_fabric::*;
+pub use throughput_posterior_integrity_workflow_fabric::*;
+pub use federated_continual_posterior_integrity_workflow_fabric::*;
 pub use select::{
     select_batch, select_next, Candidate, CoverageGate, IccSource, ScoredCandidate,
     SelectionConfig, SelectionRecord,
 };
 pub use stopping::{
     best_case_effective_trials, Question, StopReason, StoppingRule, StoppingVerdict,
+};
+pub use mechanism_exploration_assurance::{
+    assure_mechanisms, mechanism_exploration_assurance_manifest,
+    MechanismAssuranceArtifact8, MechanismAssuranceError, MechanismAssuranceReceipt8,
+    MechanismCandidate6, MechanismPeer5, MechanismQuestion6,
+    CONTRACT_VERSION as MECHANISM_EXPLORATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
+};
+pub use experiment_design_assurance::{
+    assure_experiment_design, experiment_design_assurance_manifest,
+    ExperimentDesignArtifact9, ExperimentDesignAssuranceError,
+    ExperimentDesignAssuranceReceipt9, ExperimentDesignCandidate7, ExperimentDesignPeer6,
+    ExperimentDesignRequest7,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
 };

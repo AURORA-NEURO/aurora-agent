@@ -139,17 +139,34 @@
 //!   checks structural fields; that ceiling is why its prose rules are warnings and not errors.
 
 pub mod catalogue;
+pub mod context_compilation_contract;
 pub mod analysis_control;
 pub mod debugger;
 pub mod devloop;
 pub mod diagnostic;
 pub mod error;
 pub mod exitaudit;
+pub mod local_evidence_surveillance_control_plane;
 pub mod introspect;
 pub mod lint;
 pub mod taxonomy;
 
+pub use local_evidence_surveillance_control_plane::{
+    control_devx_evidence_surveillance, devx_evidence_surveillance_control_manifest,
+    DevxEvidenceArtifact8, DevxEvidenceControlReceipt8, DevxEvidenceDisposition,
+    DevxEvidenceError, DevxEvidenceFeed5, DevxEvidenceObservation5,
+    CONTRACT_VERSION as DEVX_EVIDENCE_SURVEILLANCE_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as DEVX_EVIDENCE_SURVEILLANCE_CONTROL_FEATURE_ID,
+};
+
 pub use catalogue::{catalogue, from_manifest_error, from_negotiation_error, lookup};
+pub use context_compilation_contract::{
+    compile_context_contract, CompiledResearchContext6, ContextCompilationContractRequest3,
+    ContextContractDisposition, ContextContractError, ContextEvidenceState,
+    ContractArtifact, CONTENT_TYPE as CONTEXT_COMPILATION_CONTRACT_CONTENT_TYPE,
+    CONTRACT_VERSION as CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as CONTEXT_COMPILATION_CONTRACT_FEATURE_ID,
+};
 pub use analysis_control::{
     operate_analysis_control, AnalysisCandidate, AnalysisControlError, AnalysisControlReceipt,
     AnalysisDisposition, AnalysisPortfolio, AnalysisRequest, AnalysisState,

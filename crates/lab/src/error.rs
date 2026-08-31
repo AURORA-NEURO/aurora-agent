@@ -17,6 +17,9 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq, Error, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "error")]
 pub enum SpaceError {
+    #[error("architecture search-space invariant violated: {0}")]
+    InvariantViolation(String),
+
     #[error("configuration `{0}` is already registered; bundles are immutable versions")]
     DuplicateConfiguration(String),
 

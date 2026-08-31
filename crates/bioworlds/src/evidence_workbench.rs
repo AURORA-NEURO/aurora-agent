@@ -301,9 +301,7 @@ pub fn operate_evidence_workbench(
     let blocked_order = blocked.into_iter().collect::<Vec<_>>();
     let disposition = if !feed.policy_allow {
         EvidenceDisposition::Blocked
-    } else if !feed.protected_closure {
-        EvidenceDisposition::Unknown
-    } else if qualified_order.is_empty() {
+    } else if !feed.protected_closure || qualified_order.is_empty() {
         EvidenceDisposition::Unknown
     } else if blocked_order.is_empty() && omissions.is_empty() {
         EvidenceDisposition::Qualified

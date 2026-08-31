@@ -26,7 +26,7 @@
 
 use crate::architecture::{ApprovedSet, Architecture};
 use crate::error::RoutingError;
-use crate::evidence::{EvidenceLedger, Observation};
+use crate::evidence::{validate_task_id, EvidenceLedger, Observation};
 use crate::fingerprint::{Fingerprint, Regime};
 use crate::policy::RoutingPolicy;
 use crate::report::{ComparatorPick, RoutingReport, TaskRow};
@@ -54,9 +54,7 @@ impl Task {
         query: Query,
     ) -> Result<Self, RoutingError> {
         let task_id = task_id.into();
-        if task_id.is_empty() {
-            return Err(RoutingError::EmptyTaskId);
-        }
+        validate_task_id(&task_id)?;
         Ok(Task {
             task_id,
             world,
@@ -148,9 +146,7 @@ pub fn observe(tasks: &[Task], approved: &ApprovedSet) -> Result<EvidenceLedger,
 
     let mut observations: Vec<Observation> = Vec::new();
     for task in tasks {
-        if task.task_id.is_empty() {
-            return Err(RoutingError::EmptyTaskId);
-        }
+        validate_task_id(&task.task_id)?;
         let fingerprint = task.fingerprint();
         let owned: Vec<Box<dyn ContextStrategy>> =
             approved.iter().map(Architecture::strategy).collect();
@@ -171,13 +167,17 @@ pub fn observe(tasks: &[Task], approved: &ApprovedSet) -> Result<EvidenceLedger,
                 });
             }
             let Some(judgement) = result.judgement() else {
+                let Some(refusal) = result.refusal() else {
+                    return Err(RoutingError::UnjudgedObservation {
+                        task: task.task_id.clone(),
+                        architecture: architecture.label(),
+                        detail: "comparison row had neither a judgement nor a refusal".into(),
+                    });
+                };
                 return Err(RoutingError::UnjudgedObservation {
                     task: task.task_id.clone(),
                     architecture: architecture.label(),
-                    detail: result
-                        .refusal()
-                        .expect("a row with no judgement carries its refusal")
-                        .to_string(),
+                    detail: refusal.to_string(),
                 });
             };
             observations.push(Observation {
@@ -213,7 +213,8 @@ pub fn run(tasks: &[Task], settings: &LabSettings) -> Result<RoutingReport, Rout
         let visible = match settings.holdout {
             Holdout::Task => ledger.excluding_task(&task.task_id),
             Holdout::Regime => ledger.filtered(|observation| {
-                observation.task_id != task.task_id && observation.fingerprint.regime() != regime
+                !observation.task_id.eq_ignore_ascii_case(&task.task_id)
+                    && observation.fingerprint.regime() != regime
             }),
         };
 
@@ -375,5 +376,14 @@ mod tests {
             Task::new("", task.world.clone(), task.query.clone()).unwrap_err(),
             RoutingError::EmptyTaskId
         );
+
+        assert!(matches!(
+            Task::new(" named", task.world.clone(), task.query.clone()).unwrap_err(),
+            RoutingError::InvalidTaskId { .. }
+        ));
+        assert!(matches!(
+            Task::new("bad\nname", task.world, task.query).unwrap_err(),
+            RoutingError::InvalidTaskId { .. }
+        ));
     }
 }

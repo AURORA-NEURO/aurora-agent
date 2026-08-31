@@ -22,6 +22,7 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-adapter-P06-F01";
 pub const FEATURE_VERSION: &str = "0.1.0";
+const ARTIFACT_CONTENT_TYPE: &str = "application/vnd.aurora.ingestion+json";
 
 #[derive(Debug, Error)]
 pub enum ResearchIngestionError {
@@ -61,7 +62,11 @@ impl ResearchIngestionBundle {
                 found: self.schema_version.clone(),
             });
         }
-        if self.feature_id != FEATURE_ID || self.source_id.trim().is_empty() {
+        if self.feature_id != FEATURE_ID
+            || self.source_id.trim().is_empty()
+            || self.adapter.trim().is_empty()
+            || self.adapter_version.trim().is_empty()
+        {
             return Err(ResearchContractError::MissingField { field: "source_id" });
         }
         if self.boundary != PRECLINICAL_BOUNDARY {
@@ -79,6 +84,24 @@ impl ResearchIngestionBundle {
                 capability: self.source_id.clone(),
             });
         }
+        if self.conformance.adapter != self.adapter
+            || self.conformance.adapter_version != self.adapter_version
+            || self.conformance.source_id != self.source_id
+        {
+            return Err(ResearchContractError::MissingField {
+                field: "conformance identity",
+            });
+        }
+        if self.artifact.artifact_id != format!("ingestion:{}", self.source_id)
+            || self.artifact.content_type != ARTIFACT_CONTENT_TYPE
+            || self.artifact.content_hash != self.ingestion_digest
+            || self.artifact.provenance
+                != vec![source_provenance(&self.source_id, &self.source_digest)]
+        {
+            return Err(ResearchContractError::MissingField {
+                field: "ingestion artifact binding",
+            });
+        }
         self.artifact.validate_metadata()
     }
 
@@ -89,6 +112,12 @@ impl ResearchIngestionBundle {
             return Err(ResearchIngestionError::ConformanceFailed {
                 source_id: self.source_id.clone(),
                 failures: vec!["source id differs from bundle".into()],
+            });
+        }
+        if ingestion.manifest().source_digest != self.source_digest {
+            return Err(ResearchIngestionError::ConformanceFailed {
+                source_id: self.source_id.clone(),
+                failures: vec!["source digest differs from bundle".into()],
             });
         }
         let payload = ingestion.to_value()?;
@@ -140,14 +169,13 @@ pub fn certify_research_ingest<A: Adapter + ?Sized>(
     let payload = ingestion.to_value()?;
     let ingestion_digest = ingestion.digest()?;
     let semantic_loss = contract_losses(ingestion.loss());
-    let provenance = vec![ProvenanceLink {
-        source_id: source.id.clone(),
-        relation: "derived_from_source_bytes".into(),
-        digest: ingestion.manifest().source_digest.clone(),
-    }];
+    let provenance = vec![source_provenance(
+        &source.id,
+        &ingestion.manifest().source_digest,
+    )];
     let artifact = TypedResearchArtifact::from_payload(
         format!("ingestion:{}", source.id),
-        "application/vnd.aurora.ingestion+json",
+        ARTIFACT_CONTENT_TYPE,
         &payload,
         semantic_loss,
         provenance,
@@ -168,6 +196,14 @@ pub fn certify_research_ingest<A: Adapter + ?Sized>(
     bundle.validate()?;
     bundle.verify_ingestion(&ingestion)?;
     Ok(bundle)
+}
+
+fn source_provenance(source_id: &str, source_digest: &ContentHash) -> ProvenanceLink {
+    ProvenanceLink {
+        source_id: source_id.into(),
+        relation: "derived_from_source_bytes".into(),
+        digest: source_digest.clone(),
+    }
 }
 
 fn contract_losses(loss: &SemanticLoss) -> Vec<ContractSemanticLoss> {
@@ -235,5 +271,29 @@ mod tests {
         let left = certify_research_ingest(&adapter(), &source()).unwrap();
         let right = certify_research_ingest(&adapter(), &source()).unwrap();
         assert_eq!(left.digest().unwrap(), right.digest().unwrap());
+    }
+
+    #[test]
+    fn bundle_rejects_artifact_metadata_rebinding() {
+        let mut bundle = certify_research_ingest(&adapter(), &source()).unwrap();
+        bundle.artifact.artifact_id = "ingestion:other-source".into();
+        assert_eq!(
+            bundle.validate().unwrap_err(),
+            ResearchContractError::MissingField {
+                field: "ingestion artifact binding"
+            }
+        );
+    }
+
+    #[test]
+    fn bundle_rejects_conformance_for_a_different_source() {
+        let mut bundle = certify_research_ingest(&adapter(), &source()).unwrap();
+        bundle.conformance.source_id = "study-other".into();
+        assert_eq!(
+            bundle.validate().unwrap_err(),
+            ResearchContractError::MissingField {
+                field: "conformance identity"
+            }
+        );
     }
 }

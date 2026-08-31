@@ -19,8 +19,8 @@ use crate::budget::BudgetPlan;
 use crate::effect::{EffectPolicy, EffectRequest};
 use crate::error::RuntimeError;
 use crate::host::RecordingHost;
-use crate::sandbox::InProcessWorld;
 use crate::orchestrator::{AttemptId, TrialId};
+use crate::sandbox::InProcessWorld;
 use crate::tape::{Checkpoint, RestorationDeclaration, TapeEntry, WorldTape};
 use bioprism_ids::{ContentHash, RunId};
 use serde::{Deserialize, Serialize};
@@ -101,6 +101,7 @@ impl ExecutionPlan {
 
     /// The plan's immutable digest, used as the identity of the frozen manifest.
     pub fn digest(&self) -> Result<String, RuntimeError> {
+        self.budget.validate()?;
         let value = serde_json::to_value(self)
             .map_err(|error| RuntimeError::Uncanonical(error.to_string()))?;
         ContentHash::of_value(&value)
@@ -168,6 +169,7 @@ struct InProcessTrial {
     plan: ExecutionPlan,
     tape: WorldTape,
     started: bool,
+    cancelled: bool,
 }
 
 /// The reference provider: everything happens in this process, against `InProcessWorld`.
@@ -182,21 +184,26 @@ impl InProcessProvider {
     }
 
     fn trial(&self, handle: &StateHandle) -> Result<&InProcessTrial, RuntimeError> {
-        self.trials
-            .get(handle.trial.as_str())
-            .ok_or_else(|| RuntimeError::UnknownHandle {
-                provider: IN_PROCESS.to_string(),
-                trial: handle.trial.as_str().to_string(),
-            })
+        let trial =
+            self.trials
+                .get(handle.trial.as_str())
+                .ok_or_else(|| RuntimeError::UnknownHandle {
+                    provider: IN_PROCESS.to_string(),
+                    trial: handle.trial.as_str().to_string(),
+                })?;
+        validate_handle(handle, trial)?;
+        Ok(trial)
     }
 
     fn trial_mut(&mut self, handle: &StateHandle) -> Result<&mut InProcessTrial, RuntimeError> {
-        self.trials
-            .get_mut(handle.trial.as_str())
-            .ok_or_else(|| RuntimeError::UnknownHandle {
+        let trial = self.trials.get_mut(handle.trial.as_str()).ok_or_else(|| {
+            RuntimeError::UnknownHandle {
                 provider: IN_PROCESS.to_string(),
                 trial: handle.trial.as_str().to_string(),
-            })
+            }
+        })?;
+        validate_handle(handle, trial)?;
+        Ok(trial)
     }
 
     fn handle_for(&self, trial: &InProcessTrial) -> StateHandle {
@@ -222,10 +229,10 @@ impl InProcessProvider {
         world: InProcessWorld,
     ) -> Result<RecordingHost<InProcessWorld>, RuntimeError> {
         let trial = self.trial(handle)?;
-        if !trial.started {
+        if !trial.started || trial.cancelled {
             return Err(RuntimeError::UnknownHandle {
                 provider: IN_PROCESS.to_string(),
-                trial: format!("{} (prepared but not started)", handle.trial.as_str()),
+                trial: format!("{} (not active)", handle.trial.as_str()),
             });
         }
         let policy = trial.plan.policy.clone();
@@ -236,6 +243,35 @@ impl InProcessProvider {
     /// Returns a tape to the trial it belongs to.
     pub fn commit(&mut self, handle: &StateHandle, tape: WorldTape) -> Result<(), RuntimeError> {
         let trial = self.trial_mut(handle)?;
+        if !trial.started {
+            return Err(RuntimeError::UnknownHandle {
+                provider: IN_PROCESS.to_string(),
+                trial: format!("{} (prepared but not started)", handle.trial.as_str()),
+            });
+        }
+        if tape.run() != &trial.plan.run {
+            return Err(RuntimeError::InvariantViolation {
+                detail: format!(
+                    "cannot commit tape for run {} to trial run {}",
+                    tape.run().as_str(),
+                    trial.plan.run.as_str()
+                ),
+            });
+        }
+        if tape.len() < trial.tape.len()
+            || tape.entries().get(..trial.tape.entries().len()) != Some(trial.tape.entries())
+        {
+            return Err(RuntimeError::InvariantViolation {
+                detail: format!(
+                    "cannot commit a tape that does not preserve the provider-owned prefix of {} steps",
+                    trial.tape.len()
+                ),
+            });
+        }
+        tape.verify_chain()?;
+        for checkpoint in tape.checkpoints() {
+            tape.verify_checkpoint(checkpoint)?;
+        }
         trial.tape = tape;
         Ok(())
     }
@@ -267,6 +303,12 @@ impl ExecutorProvider for InProcessProvider {
     }
 
     fn prepare(&mut self, plan: &ExecutionPlan) -> Result<StateHandle, RuntimeError> {
+        plan.budget.validate()?;
+        if self.trials.contains_key(plan.trial.as_str()) {
+            return Err(RuntimeError::InvariantViolation {
+                detail: format!("trial {} is already prepared", plan.trial.as_str()),
+            });
+        }
         let available = self.capabilities();
         for (needed, has, name) in [
             (
@@ -303,6 +345,7 @@ impl ExecutorProvider for InProcessProvider {
             plan: plan.clone(),
             tape: WorldTape::new(plan.run.clone()),
             started: false,
+            cancelled: false,
         };
         let handle = self.handle_for(&trial);
         self.trials.insert(plan.trial.as_str().to_string(), trial);
@@ -310,7 +353,14 @@ impl ExecutorProvider for InProcessProvider {
     }
 
     fn start(&mut self, handle: &StateHandle) -> Result<(), RuntimeError> {
-        self.trial_mut(handle)?.started = true;
+        let trial = self.trial_mut(handle)?;
+        if trial.cancelled {
+            return Err(RuntimeError::UnknownHandle {
+                provider: IN_PROCESS.to_string(),
+                trial: format!("{} (cancelled)", handle.trial.as_str()),
+            });
+        }
+        trial.started = true;
         Ok(())
     }
 
@@ -328,9 +378,15 @@ impl ExecutorProvider for InProcessProvider {
 
     fn checkpoint(&mut self, handle: &StateHandle) -> Result<Checkpoint, RuntimeError> {
         let trial = self.trial_mut(handle)?;
-        Ok(trial
+        if !trial.started || trial.cancelled {
+            return Err(RuntimeError::UnknownHandle {
+                provider: IN_PROCESS.to_string(),
+                trial: format!("{} (not active)", handle.trial.as_str()),
+            });
+        }
+        trial
             .tape
-            .checkpoint(IN_PROCESS, RestorationDeclaration::portable()))
+            .checkpoint(IN_PROCESS, RestorationDeclaration::portable())
     }
 
     /// Restores by rewinding to the checkpointed prefix.
@@ -340,22 +396,71 @@ impl ExecutorProvider for InProcessProvider {
     /// filesystem could not honestly make the same claim, which is why the declaration is a field
     /// rather than an assumption.
     fn resume(&mut self, checkpoint: &Checkpoint) -> Result<StateHandle, RuntimeError> {
-        let trial = self
+        let matching_trials: Vec<String> = self
             .trials
-            .values_mut()
-            .find(|trial| {
+            .iter()
+            .filter_map(|(trial_id, trial)| {
                 trial
                     .tape
                     .checkpoints()
                     .iter()
                     .any(|existing| existing.id == checkpoint.id)
+                    .then_some(trial_id.clone())
             })
+            .collect();
+        let trial_id = match matching_trials.as_slice() {
+            [] => {
+                return Err(RuntimeError::CorruptCheckpoint {
+                    id: checkpoint.id.clone(),
+                    expected: checkpoint.tape_head.clone(),
+                    found: "no trial holds this checkpoint".to_string(),
+                });
+            }
+            [trial_id] => trial_id,
+            _ => {
+                return Err(RuntimeError::InvariantViolation {
+                    detail: format!(
+                        "checkpoint {} is ambiguous across {} trials",
+                        checkpoint.id,
+                        matching_trials.len()
+                    ),
+                });
+            }
+        };
+        let trial =
+            self.trials
+                .get_mut(trial_id)
+                .ok_or_else(|| RuntimeError::CorruptCheckpoint {
+                    id: checkpoint.id.clone(),
+                    expected: checkpoint.tape_head.clone(),
+                    found: "checkpoint holder disappeared before resume".to_string(),
+                })?;
+        if trial.cancelled {
+            return Err(RuntimeError::UnknownHandle {
+                provider: IN_PROCESS.to_string(),
+                trial: format!("{} (cancelled)", trial.plan.trial.as_str()),
+            });
+        }
+        trial.tape.verify_checkpoint(checkpoint)?;
+        let existing = trial
+            .tape
+            .checkpoints()
+            .iter()
+            .find(|existing| existing.id == checkpoint.id)
             .ok_or_else(|| RuntimeError::CorruptCheckpoint {
                 id: checkpoint.id.clone(),
                 expected: checkpoint.tape_head.clone(),
-                found: "no trial holds this checkpoint".to_string(),
+                found: "checkpoint disappeared before resume".to_string(),
             })?;
-        trial.tape.verify_checkpoint(checkpoint)?;
+        if existing != checkpoint {
+            return Err(RuntimeError::InvariantViolation {
+                detail: format!(
+                    "checkpoint {} metadata does not match the provider-owned checkpoint",
+                    checkpoint.id
+                ),
+            });
+        }
+        trial.tape.rewind_to(checkpoint.step)?;
         let plan = trial.plan.clone();
         let head = trial.tape.state_digest_at(checkpoint.step)?.to_string();
         Ok(StateHandle {
@@ -370,7 +475,9 @@ impl ExecutorProvider for InProcessProvider {
     }
 
     fn cancel(&mut self, handle: &StateHandle) -> Result<(), RuntimeError> {
-        self.trial_mut(handle)?.started = false;
+        let trial = self.trial_mut(handle)?;
+        trial.started = false;
+        trial.cancelled = true;
         Ok(())
     }
 
@@ -407,9 +514,23 @@ impl ExecutorProvider for InProcessProvider {
     }
 
     fn destroy(&mut self, handle: &StateHandle) -> Result<(), RuntimeError> {
+        self.trial(handle)?;
         self.trials.remove(handle.trial.as_str());
         Ok(())
     }
+}
+
+fn validate_handle(handle: &StateHandle, trial: &InProcessTrial) -> Result<(), RuntimeError> {
+    if handle.provider != IN_PROCESS
+        || handle.capability_version != CAPABILITY_VERSION
+        || handle.attempt != trial.plan.attempt
+    {
+        return Err(RuntimeError::UnknownHandle {
+            provider: IN_PROCESS.to_string(),
+            trial: handle.trial.as_str().to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// Declared, not implemented: isolation in a child process.

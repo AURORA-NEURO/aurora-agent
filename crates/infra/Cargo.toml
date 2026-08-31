@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Data infrastructure: provable cache hits, invalidation that reports its completeness, quality gates, tiering, lifecycle and storage quota"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-ledger = { workspace = true }
 serde = { workspace = true }

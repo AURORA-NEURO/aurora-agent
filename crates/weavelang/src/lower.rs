@@ -120,6 +120,9 @@ pub enum LowerError {
     #[error("`{block}` at {span} has an empty body; an empty branch reaches no state and cannot be given a meaning")]
     EmptyBlock { block: &'static str, span: Span },
 
+    #[error("ask expression at {span} does not have a valid participant and method target")]
+    InvalidAskTarget { span: Span },
+
     #[error(transparent)]
     Ir(#[from] IrError),
 }
@@ -140,6 +143,7 @@ impl Diagnostic for LowerError {
             LowerError::BudgetCeilingExceeded { .. } => "WEAVE-E3301",
             LowerError::BudgetResourceNotAllocated { .. } => "WEAVE-E3302",
             LowerError::EmptyBlock { .. } => "WEAVE-E3108",
+            LowerError::InvalidAskTarget { .. } => "WEAVE-E3109",
             LowerError::Ir(error) => error.code(),
         }
     }
@@ -159,7 +163,8 @@ impl Diagnostic for LowerError {
             | LowerError::EffectIntroducedByLowering { span, .. }
             | LowerError::BudgetCeilingExceeded { span, .. }
             | LowerError::BudgetResourceNotAllocated { span, .. }
-            | LowerError::EmptyBlock { span, .. } => Some(*span),
+            | LowerError::EmptyBlock { span, .. }
+            | LowerError::InvalidAskTarget { span } => Some(*span),
         }
     }
 }
@@ -884,8 +889,9 @@ impl Lowering<'_> {
                 span,
             } => {
                 self.record_hooks(attributes, name);
-                let (participant, method) =
-                    ask_target(value).expect("advances() checked for an ask");
+                let Some((participant, method)) = ask_target(value) else {
+                    return Err(LowerError::InvalidAskTarget { span: *span });
+                };
                 let role = self.role_of(&participant, *span)?;
                 let mut effects = self.method_effects(&method);
                 if effects.is_empty() {

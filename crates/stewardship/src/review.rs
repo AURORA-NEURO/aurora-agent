@@ -490,7 +490,12 @@ impl ReviewRecord {
                         why: why.clone(),
                     })
                 }
-                Some(Finding::Failed { .. }) => unreachable!("failures rejected above"),
+                Some(Finding::Failed { defect }) => {
+                    return Err(ReviewError::DimensionFailed {
+                        dimension: dimension.as_str(),
+                        defect: defect.clone(),
+                    });
+                }
                 None => {
                     return Err(ReviewError::MandatoryDimensionNotChecked {
                         dimension: dimension.as_str(),

@@ -4,9 +4,8 @@
 //! contributions cross an institution boundary; raw observations remain local.
 
 use bioprism_foundation::{
-    AuthorityRequirement, AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference,
-    EvidenceState, ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
-    RESEARCH_CONTRACT_SCHEMA_VERSION,
+    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceState, ResearchSurface,
+    TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION,
 };
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
@@ -19,6 +18,8 @@ pub const CONTRACT_VERSION: &str =
     "adapter-federated-continual-evidence-surveillance-research-copilot/1.0";
 pub const INPUT_SCHEMA: &str = "EvidenceFeed4@1";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet3@1";
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_ITEMS: usize = 16_384;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedCopilotEvidenceContribution {
@@ -74,6 +75,7 @@ pub struct FederatedCopilotQualifiedEvidenceSet {
     pub set_id: String,
     pub federation_id: String,
     pub purpose: String,
+    pub semantic_profile: String,
     pub peer_order: Vec<String>,
     pub selected_order: Vec<String>,
     pub selected_digests: Vec<ContentHash>,
@@ -91,11 +93,24 @@ pub struct FederatedContinualEvidenceSurveillanceResearchCopilotReceipt {
     pub schema_version: String,
     pub contract_version: String,
     pub feature_id: String,
+    pub input: FederatedContinualEvidenceSurveillanceResearchCopilotRequest,
+    pub input_digest: ContentHash,
     pub request_id: String,
     pub agent_id: String,
     pub federation_id: String,
     pub purpose: String,
     pub endpoint: String,
+    pub semantic_profile: String,
+    pub allowed_artifacts: Vec<String>,
+    pub min_peer_quorum: usize,
+    pub declared_tools: Vec<String>,
+    pub requested_tool: String,
+    pub max_tool_calls: usize,
+    pub dry_run: bool,
+    pub approval_granted: bool,
+    pub approval_reference: Option<String>,
+    pub policy_allow: bool,
+    pub protected_closure: bool,
     pub disposition: FederatedContinualResearchCopilotDisposition,
     pub peer_order: Vec<String>,
     pub candidate_order: Vec<String>,
@@ -106,6 +121,7 @@ pub struct FederatedContinualEvidenceSurveillanceResearchCopilotReceipt {
     pub replay_identity: ContentHash,
     pub federation_digest: ContentHash,
     pub envelope_digest: ContentHash,
+    pub capability_digest: ContentHash,
     pub evidence_digest: ContentHash,
     pub provenance_digest: ContentHash,
     pub run_digest: ContentHash,
@@ -128,8 +144,111 @@ pub enum FederatedContinualEvidenceSurveillanceResearchCopilotError {
     Artifact(String),
 }
 
-fn ordered(values: &[String]) -> bool {
-    values.windows(2).all(|pair| pair[0] < pair[1])
+fn validate_text(
+    field: &str,
+    value: &str,
+) -> Result<(), FederatedContinualEvidenceSurveillanceResearchCopilotError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(format!(
+                "{field} must be non-empty and trimmed"
+            )),
+        );
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(format!(
+                "{field} is outside its bounded text contract"
+            )),
+        );
+    }
+    Ok(())
+}
+
+fn validate_unique_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), FederatedContinualEvidenceSurveillanceResearchCopilotError> {
+    if values.len() > MAX_ITEMS {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(format!(
+                "{field} exceeds its item bound"
+            )),
+        );
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(format!(
+                    "{field} contains duplicate values"
+                )),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), FederatedContinualEvidenceSurveillanceResearchCopilotError> {
+    validate_unique_strings(field, values)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(format!(
+                "{field} ordering is not canonical"
+            )),
+        );
+    }
+    Ok(())
+}
+
+fn validate_digest(
+    field: &str,
+    digest: &ContentHash,
+) -> Result<(), FederatedContinualEvidenceSurveillanceResearchCopilotError> {
+    if digest.as_str().len() != 64
+        || !digest
+            .as_str()
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(format!(
+                "{field} must be a 64-character hex digest"
+            )),
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn canonical_federated_continual_evidence_surveillance_research_copilot_request(
+    request: &FederatedContinualEvidenceSurveillanceResearchCopilotRequest,
+) -> FederatedContinualEvidenceSurveillanceResearchCopilotRequest {
+    let mut canonical = request.clone();
+    canonical.allowed_artifacts.sort();
+    canonical.declared_tools.sort();
+    canonical.contributions.sort_by(|left, right| {
+        left.source_id
+            .cmp(&right.source_id)
+            .then_with(|| left.peer_id.cmp(&right.peer_id))
+    });
+    canonical
+}
+
+fn copilot_input_digest(
+    request: &FederatedContinualEvidenceSurveillanceResearchCopilotRequest,
+) -> Result<ContentHash, FederatedContinualEvidenceSurveillanceResearchCopilotError> {
+    let canonical =
+        canonical_federated_continual_evidence_surveillance_research_copilot_request(request);
+    let value = serde_json::to_value(canonical).map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+    })?;
+    ContentHash::of_value(&value).map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+    })
 }
 
 impl FederatedContinualEvidenceSurveillanceResearchCopilotReceipt {
@@ -148,37 +267,100 @@ impl FederatedContinualEvidenceSurveillanceResearchCopilotReceipt {
             || self.endpoint.trim().is_empty()
             || self.candidate_order.is_empty()
             || self.effect_receipts.is_empty()
+            || self.semantic_profile.trim().is_empty()
+            || self.allowed_artifacts.is_empty()
+            || self.min_peer_quorum == 0
+            || self.declared_tools.is_empty()
+            || self.requested_tool.trim().is_empty()
+            || self.max_tool_calls == 0
             || self.qualified_set.federation_id != self.federation_id
             || self.qualified_set.purpose != self.purpose
+            || self.qualified_set.semantic_profile != self.semantic_profile
         {
             return Err(FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid("federation identity, locality, candidates, effects, or qualified-set linkage is incomplete".into()));
         }
-        for values in [
-            &self.peer_order,
-            &self.candidate_order,
-            &self.selected_order,
-            &self.unresolved_order,
-            &self.denied_order,
-            &self.aggregate_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.tool_receipts,
-            &self.effect_receipts,
-            &self.qualified_set.peer_order,
+        validate_text("request_id", &self.request_id)?;
+        validate_text("agent_id", &self.agent_id)?;
+        validate_text("federation_id", &self.federation_id)?;
+        validate_text("purpose", &self.purpose)?;
+        validate_text("endpoint", &self.endpoint)?;
+        validate_text("semantic_profile", &self.semantic_profile)?;
+        validate_text("requested_tool", &self.requested_tool)?;
+        validate_text("boundary", &self.boundary)?;
+        validate_sorted_strings("allowed_artifacts", &self.allowed_artifacts)?;
+        validate_sorted_strings("declared_tools", &self.declared_tools)?;
+        validate_sorted_strings("peer_order", &self.peer_order)?;
+        validate_sorted_strings("candidate_order", &self.candidate_order)?;
+        validate_sorted_strings("selected_order", &self.selected_order)?;
+        validate_sorted_strings("unresolved_order", &self.unresolved_order)?;
+        validate_sorted_strings("denied_order", &self.denied_order)?;
+        validate_sorted_strings("aggregate_order", &self.aggregate_order)?;
+        validate_sorted_strings("omissions", &self.omissions)?;
+        validate_sorted_strings("uncertainty", &self.uncertainty)?;
+        validate_sorted_strings("negative_evidence", &self.negative_evidence)?;
+        validate_sorted_strings("tool_receipts", &self.tool_receipts)?;
+        validate_sorted_strings("effect_receipts", &self.effect_receipts)?;
+        validate_sorted_strings("qualified_set.peer_order", &self.qualified_set.peer_order)?;
+        validate_sorted_strings(
+            "qualified_set.selected_order",
             &self.qualified_set.selected_order,
+        )?;
+        validate_sorted_strings(
+            "qualified_set.aggregate_order",
             &self.qualified_set.aggregate_order,
-            &self.qualified_set.omissions,
-            &self.qualified_set.uncertainty,
+        )?;
+        validate_sorted_strings("qualified_set.omissions", &self.qualified_set.omissions)?;
+        validate_sorted_strings("qualified_set.uncertainty", &self.qualified_set.uncertainty)?;
+        validate_sorted_strings(
+            "qualified_set.negative_order",
             &self.qualified_set.negative_order,
-        ] {
-            if !ordered(values) {
-                return Err(
-                    FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
-                        "federated ordering is not canonical".into(),
-                    ),
-                );
-            }
+        )?;
+        if !self.declared_tools.contains(&self.requested_tool) {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "requested tool must be declared exactly once".into(),
+                ),
+            );
+        }
+        if let Some(reference) = &self.approval_reference {
+            validate_text("approval_reference", reference)?;
+        }
+        if self.qualified_set.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.qualified_set.set_id
+                != format!(
+                    "qualified-evidence-federated-continual-copilot:{}",
+                    self.request_id
+                )
+            || self.qualified_set.peer_order != self.peer_order
+            || self.qualified_set.selected_order != self.selected_order
+            || self.qualified_set.aggregate_order != self.aggregate_order
+            || self.qualified_set.omissions != self.omissions
+            || self.qualified_set.uncertainty != self.uncertainty
+            || self.qualified_set.negative_order != self.negative_evidence
+            || self.qualified_set.selected_digests.len() != self.selected_order.len()
+            || self.qualified_set.tool_mode
+                != if self.dry_run {
+                    "dry_run"
+                } else {
+                    "bounded_invocation"
+                }
+            || self.qualified_set.evidence_state
+                != if self.disposition == FederatedContinualResearchCopilotDisposition::Completed {
+                    EvidenceState::Supported
+                } else {
+                    EvidenceState::Unknown
+                }
+            || self.qualified_set.boundary != PRECLINICAL_BOUNDARY
+            || self.aggregate_order != self.selected_order
+        {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated qualified evidence set is not bound to the receipt".into(),
+                ),
+            );
+        }
+        for digest in &self.qualified_set.selected_digests {
+            validate_digest("qualified_set.selected_digest", digest)?;
         }
         let classified = self
             .selected_order
@@ -201,36 +383,237 @@ impl FederatedContinualEvidenceSurveillanceResearchCopilotReceipt {
             &self.replay_identity,
             &self.federation_digest,
             &self.envelope_digest,
+            &self.capability_digest,
             &self.evidence_digest,
             &self.provenance_digest,
             &self.run_digest,
             &self.artifact.content_hash,
         ] {
-            if digest.as_str().len() != 64 {
-                return Err(
-                    FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
-                        "federated digest is invalid".into(),
-                    ),
-                );
-            }
+            validate_digest("federated receipt digest", digest)?;
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("dry-run:bounded-tool:")
-                && !effect.starts_with("invoke:declared-tool:")
-                && effect != "block:unsafe-release"
-        }) {
+        let approval_missing = !self.dry_run
+            && (!self.approval_granted
+                || self.approval_reference.is_none()
+                || self
+                    .approval_reference
+                    .as_deref()
+                    .is_some_and(|reference| reference.trim().is_empty()));
+        let should_block = !self.policy_allow
+            || !self.protected_closure
+            || !self.raw_data_local
+            || self.peer_order.len() < self.min_peer_quorum
+            || approval_missing;
+        if (self.disposition == FederatedContinualResearchCopilotDisposition::Blocked)
+            != should_block
+        {
             return Err(
                 FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
-                    "federated effect is outside declared-tool gate".into(),
+                    "federated disposition does not match its global release gates".into(),
                 ),
             );
         }
         if self.disposition == FederatedContinualResearchCopilotDisposition::Blocked
-            && self.effect_receipts != ["block:unsafe-release"]
+            && !self.selected_order.is_empty()
         {
             return Err(
                 FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
-                    "blocked federation must be explicitly blocked".into(),
+                    "blocked federation cannot retain selected evidence".into(),
+                ),
+            );
+        }
+        if self.disposition == FederatedContinualResearchCopilotDisposition::Completed
+            && (!self.unresolved_order.is_empty() || !self.denied_order.is_empty())
+        {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "completed federation cannot retain unresolved or denied evidence".into(),
+                ),
+            );
+        }
+        if self.disposition == FederatedContinualResearchCopilotDisposition::Unknown
+            && !self.selected_order.is_empty()
+        {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "unknown federation cannot retain selected evidence".into(),
+                ),
+            );
+        }
+        let expected_tool_receipts =
+            if self.disposition == FederatedContinualResearchCopilotDisposition::Blocked {
+                vec![format!("tool:{}:denied", self.requested_tool)]
+            } else if self.dry_run {
+                vec![format!("tool:{}:dry-run", self.requested_tool)]
+            } else {
+                vec![format!(
+                    "tool:{}:bounded-call:1/{}",
+                    self.requested_tool, self.max_tool_calls
+                )]
+            };
+        if self.tool_receipts != expected_tool_receipts {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated tool receipt does not match mode or disposition".into(),
+                ),
+            );
+        }
+        let expected_effect =
+            if self.disposition == FederatedContinualResearchCopilotDisposition::Blocked {
+                "block:unsafe-release".to_string()
+            } else if self.dry_run {
+                format!("dry-run:bounded-tool:{}", self.agent_id)
+            } else {
+                format!("invoke:declared-tool:{}", self.agent_id)
+            };
+        if self.effect_receipts != vec![expected_effect] {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated effect receipt does not match mode or disposition".into(),
+                ),
+            );
+        }
+        let expected_federation = ContentHash::of_value(&json!({
+            "federation_id": self.federation_id,
+            "purpose": self.purpose,
+            "endpoint": self.endpoint,
+            "peer_order": self.peer_order,
+            "min_peer_quorum": self.min_peer_quorum,
+        }))
+        .map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+        })?;
+        if self.federation_digest != expected_federation {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated identity digest does not match federation scope".into(),
+                ),
+            );
+        }
+        let expected_envelope = ContentHash::of_value(&json!({
+            "allowed_artifacts": self.allowed_artifacts,
+            "semantic_profile": self.semantic_profile,
+            "aggregate_order": self.aggregate_order,
+            "raw_data_local": self.raw_data_local,
+            "policy_allow": self.policy_allow,
+            "protected_closure": self.protected_closure,
+        }))
+        .map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+        })?;
+        if self.envelope_digest != expected_envelope {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated envelope digest does not match artifact and policy scope".into(),
+                ),
+            );
+        }
+        let expected_capability = ContentHash::of_value(&json!({
+            "agent_id": self.agent_id,
+            "declared_tools": self.declared_tools,
+            "requested_tool": self.requested_tool,
+            "max_tool_calls": self.max_tool_calls,
+            "dry_run": self.dry_run,
+        }))
+        .map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+        })?;
+        if self.capability_digest != expected_capability {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated capability digest does not match declared tools".into(),
+                ),
+            );
+        }
+        let expected_evidence = ContentHash::of_value(&json!({
+            "candidate_order": self.candidate_order,
+            "selected_order": self.selected_order,
+            "unresolved_order": self.unresolved_order,
+            "denied_order": self.denied_order,
+        }))
+        .map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+        })?;
+        if self.evidence_digest != expected_evidence {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated evidence digest does not match state partitions".into(),
+                ),
+            );
+        }
+        let expected_provenance = ContentHash::of_value(&json!({
+            "request_id": self.request_id,
+            "agent_id": self.agent_id,
+            "replay_identity": self.replay_identity,
+            "federation_digest": self.federation_digest,
+            "envelope_digest": self.envelope_digest,
+            "capability_digest": self.capability_digest,
+            "evidence_digest": self.evidence_digest,
+        }))
+        .map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+        })?;
+        if self.provenance_digest != expected_provenance {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated provenance digest does not match receipt identity".into(),
+                ),
+            );
+        }
+        let expected_run = ContentHash::of_value(&json!({
+            "request_id": self.request_id,
+            "dry_run": self.dry_run,
+            "approval_reference": self.approval_reference,
+            "tool_receipts": self.tool_receipts,
+            "provenance_digest": self.provenance_digest,
+        }))
+        .map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+        })?;
+        if self.run_digest != expected_run {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated run digest does not match approval and tool receipts".into(),
+                ),
+            );
+        }
+        if self.artifact.artifact_id != self.qualified_set.set_id
+            || self.artifact.content_type != "application/vnd.aurora.qualified-evidence-set3+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(
+                    "federated artifact is not bound to the qualified evidence set".into(),
+                ),
+            );
+        }
+        self.artifact
+            .verify_payload(&serde_json::to_value(&self.qualified_set).map_err(|error| {
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(
+                    error.to_string(),
+                )
+            })?)
+            .map_err(|error| {
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(
+                    error.to_string(),
+                )
+            })?;
+        self.artifact.validate_metadata().map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+        })?;
+        if self.input_digest != copilot_input_digest(&self.input)? {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated copilot retained input digest mismatch".into(),
+                ),
+            );
+        }
+        let expected =
+            build_federated_continual_evidence_surveillance_research_copilot(&self.input)?;
+        if self != &expected {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated copilot receipt does not match its retained input".into(),
                 ),
             );
         }
@@ -251,14 +634,14 @@ pub fn federated_continual_evidence_surveillance_research_copilot_manifest() -> 
         ]
         .into(),
         behavior: "qualifies signed aggregate-only evidence contributions under purpose, signer, quorum, locality, and policy gates".into(),
-        value: "enables continual federated surveillance without moving raw experimental observations across institutions".into(),
+        value: "preserves federated evidence provenance while preventing raw-data exchange and unsafe release".into(),
         inputs: vec![TypedPort {
-            name: "federation_envelope".into(),
+            name: "federated_evidence_envelope".into(),
             schema: INPUT_SCHEMA.into(),
             required: true,
         }],
         outputs: vec![TypedPort {
-            name: "qualified_aggregate_evidence".into(),
+            name: "qualified_aggregate_evidence_set".into(),
             schema: OUTPUT_SCHEMA.into(),
             required: true,
         }],
@@ -266,7 +649,6 @@ pub fn federated_continual_evidence_surveillance_research_copilot_manifest() -> 
             Effect::ReadLocalData,
             Effect::ExecuteLocalComputation,
             Effect::WriteLocalArtifact,
-            Effect::FederationExport,
         ]
         .into(),
         permissions: [
@@ -275,15 +657,8 @@ pub fn federated_continual_evidence_surveillance_research_copilot_manifest() -> 
         ]
         .into(),
         determinism: Determinism::ByteStable,
-        evidence: vec![EvidenceReference {
-            source_id: "ga4gh-drs".into(),
-            state: EvidenceState::Supported,
-            locator: Some("https://ga4gh.github.io/data-repository-service-schemas/preview/release/drs-1.3.0/docs/".into()),
-        }],
-        authority_requirements: vec![AuthorityRequirement {
-            role: "federated evidence copilot approver".into(),
-            reason: "approve purpose, signer, quorum, and export policy before any federation effect".into(),
-        }],
+        evidence: Vec::new(),
+        authority_requirements: Vec::new(),
         autonomy_tier: AutonomyTier::A2,
         surfaces: [
             ResearchSurface::Ui,
@@ -304,6 +679,20 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot(
     FederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
     FederatedContinualEvidenceSurveillanceResearchCopilotError,
 > {
+    let receipt = build_federated_continual_evidence_surveillance_research_copilot(request)?;
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+fn build_federated_continual_evidence_surveillance_research_copilot(
+    request: &FederatedContinualEvidenceSurveillanceResearchCopilotRequest,
+) -> Result<
+    FederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
+    FederatedContinualEvidenceSurveillanceResearchCopilotError,
+> {
+    let canonical_request =
+        canonical_federated_continual_evidence_surveillance_research_copilot_request(request);
+    let request = &canonical_request;
     if request.request_id.trim().is_empty()
         || request.agent_id.trim().is_empty()
         || request.federation_id.trim().is_empty()
@@ -322,60 +711,83 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot(
     {
         return Err(FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid("federation identity, quorum, tools, contributions, locality, or boundary is invalid".into()));
     }
-    if request.replay_identity.as_str().len() != 64
-        || !request
-            .replay_identity
-            .as_str()
-            .chars()
-            .all(|c| c.is_ascii_hexdigit())
+    validate_text("request_id", &request.request_id)?;
+    validate_text("agent_id", &request.agent_id)?;
+    validate_text("federation_id", &request.federation_id)?;
+    validate_text("purpose", &request.purpose)?;
+    validate_text("endpoint", &request.endpoint)?;
+    validate_text("semantic_profile", &request.semantic_profile)?;
+    validate_text("requested_tool", &request.requested_tool)?;
+    validate_text("boundary", &request.boundary)?;
+    if request.allowed_artifacts.len() > MAX_ITEMS
+        || request.declared_tools.len() > MAX_ITEMS
+        || request.contributions.len() > MAX_ITEMS
     {
         return Err(
             FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
-                "replay identity is invalid".into(),
+                "federated artifact, tool, or contribution count exceeds its bound".into(),
+            ),
+        );
+    }
+    validate_unique_strings("allowed_artifacts", &request.allowed_artifacts)?;
+    validate_unique_strings("declared_tools", &request.declared_tools)?;
+    validate_digest("replay_identity", &request.replay_identity)?;
+    if let Some(reference) = &request.approval_reference {
+        validate_text("approval_reference", reference)?;
+    }
+    let mut allowed_artifacts = request.allowed_artifacts.clone();
+    allowed_artifacts.sort();
+    let mut declared_tools = request.declared_tools.clone();
+    declared_tools.sort();
+    if !declared_tools.contains(&request.requested_tool) {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                "requested tool must be declared exactly once".into(),
             ),
         );
     }
     let mut contributions = request.contributions.clone();
     contributions.sort_by(|a, b| {
-        a.peer_id
-            .cmp(&b.peer_id)
-            .then_with(|| a.source_id.cmp(&b.source_id))
+        a.source_id
+            .cmp(&b.source_id)
+            .then_with(|| a.peer_id.cmp(&b.peer_id))
     });
+    let mut peers = BTreeSet::new();
+    let mut sources = BTreeSet::new();
+    for item in &contributions {
+        validate_text("contribution.peer_id", &item.peer_id)?;
+        validate_text("contribution.institution_id", &item.institution_id)?;
+        validate_text("contribution.source_id", &item.source_id)?;
+        validate_text("contribution.semantic_profile", &item.semantic_profile)?;
+        validate_text("contribution.artifact_kind", &item.artifact_kind)?;
+        if let Some(digest) = &item.digest {
+            validate_digest("contribution.digest", digest)?;
+        }
+        if !peers.insert(item.peer_id.clone()) {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "each federated peer may contribute only once per receipt".into(),
+                ),
+            );
+        }
+        if !sources.insert(item.source_id.clone()) {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
+                    "federated source identities must be unique".into(),
+                ),
+            );
+        }
+    }
     let peer_order = contributions
         .iter()
         .map(|item| item.peer_id.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    if peer_order.len()
-        != contributions
-            .iter()
-            .map(|item| item.peer_id.as_str())
-            .collect::<BTreeSet<_>>()
-            .len()
-        || contributions.iter().any(|item| {
-            item.peer_id.trim().is_empty()
-                || item.institution_id.trim().is_empty()
-                || item.source_id.trim().is_empty()
-        })
-    {
-        return Err(
-            FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
-                "peer, institution, and source identities must be unique and non-empty".into(),
-            ),
-        );
-    }
     let candidate_order = contributions
         .iter()
         .map(|item| item.source_id.clone())
         .collect::<Vec<_>>();
-    if candidate_order.windows(2).any(|pair| pair[0] == pair[1]) {
-        return Err(
-            FederatedContinualEvidenceSurveillanceResearchCopilotError::Invalid(
-                "source identities must be unique".into(),
-            ),
-        );
-    }
     let mut selected = BTreeSet::new();
     let mut unresolved = BTreeSet::new();
     let mut denied = BTreeSet::new();
@@ -384,10 +796,23 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot(
     let mut uncertainty = BTreeSet::new();
     let mut negative = BTreeSet::new();
     let mut digests = std::collections::BTreeMap::new();
+    let approval_missing = !request.dry_run
+        && (!request.approval_granted
+            || request
+                .approval_reference
+                .as_deref()
+                .is_some_and(|reference| reference.trim().is_empty())
+            || request.approval_reference.is_none());
+    let quorum_incomplete = peer_order.len() < request.min_peer_quorum;
+    let global_release_blocked = !request.policy_allow
+        || !request.protected_closure
+        || !request.raw_data_local
+        || quorum_incomplete
+        || approval_missing;
     for item in &contributions {
-        if !request.policy_allow || !request.protected_closure {
+        if global_release_blocked {
             denied.insert(item.source_id.clone());
-            omissions.insert(format!("source:{}:policy-or-closure", item.source_id));
+            omissions.insert(format!("source:{}:global-release-gate", item.source_id));
         } else if item.semantic_profile != request.semantic_profile {
             denied.insert(item.source_id.clone());
             omissions.insert(format!(
@@ -397,8 +822,7 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot(
         } else if !item.signed
             || !item.permitted_artifact
             || !item.aggregate_only
-            || !request
-                .allowed_artifacts
+            || !allowed_artifacts
                 .iter()
                 .any(|kind| kind == &item.artifact_kind)
         {
@@ -420,37 +844,26 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot(
             denied.insert(item.source_id.clone());
             negative.insert(format!("source:{}:contradicted", item.source_id));
         } else {
-            selected.insert(item.source_id.clone());
-            aggregate.insert(item.source_id.clone());
-            digests.insert(
-                item.source_id.clone(),
-                item.digest.clone().expect("digest checked"),
-            );
-            if item.negative_result {
-                negative.insert(format!("source:{}:negative-result", item.source_id));
+            if let Some(digest) = item.digest.clone() {
+                selected.insert(item.source_id.clone());
+                aggregate.insert(item.source_id.clone());
+                digests.insert(item.source_id.clone(), digest);
+                if item.negative_result {
+                    negative.insert(format!("source:{}:negative-result", item.source_id));
+                }
+            } else {
+                unresolved.insert(item.source_id.clone());
+                omissions.insert(format!("source:{}:content-digest-missing", item.source_id));
             }
         }
     }
-    if peer_order.len() < request.min_peer_quorum {
+    if quorum_incomplete {
         omissions.insert("control:peer-quorum-incomplete".into());
     }
-    let approval_missing = !request.dry_run
-        && (!request.approval_granted
-            || request
-                .approval_reference
-                .as_deref()
-                .unwrap_or("")
-                .trim()
-                .is_empty());
     if approval_missing {
         omissions.insert("control:signed-approval-required".into());
     }
-    let disposition = if !request.policy_allow
-        || !request.protected_closure
-        || !request.raw_data_local
-        || peer_order.len() < request.min_peer_quorum
-        || approval_missing
-    {
+    let disposition = if global_release_blocked {
         FederatedContinualResearchCopilotDisposition::Blocked
     } else if selected.is_empty() {
         FederatedContinualResearchCopilotDisposition::Unknown
@@ -476,11 +889,68 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot(
             request.requested_tool, request.max_tool_calls
         )]
     };
-    let federation_digest=ContentHash::of_value(&json!({"federation_id":request.federation_id,"purpose":request.purpose,"endpoint":request.endpoint,"peer_order":peer_order,"min_peer_quorum":request.min_peer_quorum})).map_err(|e|FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(e.to_string()))?;
-    let envelope_digest=ContentHash::of_value(&json!({"allowed_artifacts":request.allowed_artifacts,"semantic_profile":request.semantic_profile,"aggregate_order":aggregate_order,"raw_data_local":request.raw_data_local})).map_err(|e|FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(e.to_string()))?;
-    let evidence_digest=ContentHash::of_value(&json!({"candidate_order":candidate_order,"selected_order":selected_order,"unresolved_order":unresolved_order,"denied_order":denied_order})).map_err(|e|FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(e.to_string()))?;
-    let provenance_digest=ContentHash::of_value(&json!({"request_id":request.request_id,"agent_id":request.agent_id,"replay_identity":request.replay_identity,"federation_digest":federation_digest,"envelope_digest":envelope_digest,"evidence_digest":evidence_digest})).map_err(|e|FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(e.to_string()))?;
-    let run_digest=ContentHash::of_value(&json!({"request_id":request.request_id,"dry_run":request.dry_run,"tool_receipts":tool_receipts,"provenance_digest":provenance_digest})).map_err(|e|FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(e.to_string()))?;
+    let federation_digest = ContentHash::of_value(&json!({
+        "federation_id": request.federation_id,
+        "purpose": request.purpose,
+        "endpoint": request.endpoint,
+        "peer_order": peer_order,
+        "min_peer_quorum": request.min_peer_quorum,
+    }))
+    .map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+    })?;
+    let envelope_digest = ContentHash::of_value(&json!({
+        "allowed_artifacts": allowed_artifacts,
+        "semantic_profile": request.semantic_profile,
+        "aggregate_order": aggregate_order,
+        "raw_data_local": request.raw_data_local,
+        "policy_allow": request.policy_allow,
+        "protected_closure": request.protected_closure,
+    }))
+    .map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+    })?;
+    let capability_digest = ContentHash::of_value(&json!({
+        "agent_id": request.agent_id,
+        "declared_tools": declared_tools,
+        "requested_tool": request.requested_tool,
+        "max_tool_calls": request.max_tool_calls,
+        "dry_run": request.dry_run,
+    }))
+    .map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+    })?;
+    let evidence_digest = ContentHash::of_value(&json!({
+        "candidate_order": candidate_order,
+        "selected_order": selected_order,
+        "unresolved_order": unresolved_order,
+        "denied_order": denied_order,
+    }))
+    .map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+    })?;
+    let provenance_digest = ContentHash::of_value(&json!({
+        "request_id": request.request_id,
+        "agent_id": request.agent_id,
+        "replay_identity": request.replay_identity,
+        "federation_digest": federation_digest,
+        "envelope_digest": envelope_digest,
+        "capability_digest": capability_digest,
+        "evidence_digest": evidence_digest,
+    }))
+    .map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+    })?;
+    let run_digest = ContentHash::of_value(&json!({
+        "request_id": request.request_id,
+        "dry_run": request.dry_run,
+        "approval_reference": request.approval_reference,
+        "tool_receipts": tool_receipts,
+        "provenance_digest": provenance_digest,
+    }))
+    .map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+    })?;
     let qualified_set = FederatedCopilotQualifiedEvidenceSet {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         set_id: format!(
@@ -489,6 +959,7 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot(
         ),
         federation_id: request.federation_id.clone(),
         purpose: request.purpose.clone(),
+        semantic_profile: request.semantic_profile.clone(),
         peer_order: peer_order.clone(),
         selected_order: selected_order.clone(),
         selected_digests: selected_order
@@ -525,15 +996,29 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot(
     .map_err(|e| {
         FederatedContinualEvidenceSurveillanceResearchCopilotError::Artifact(e.to_string())
     })?;
+    let input_digest = copilot_input_digest(request)?;
     let receipt = FederatedContinualEvidenceSurveillanceResearchCopilotReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
+        input: canonical_request.clone(),
+        input_digest,
         request_id: request.request_id.clone(),
         agent_id: request.agent_id.clone(),
         federation_id: request.federation_id.clone(),
         purpose: request.purpose.clone(),
         endpoint: request.endpoint.clone(),
+        semantic_profile: request.semantic_profile.clone(),
+        allowed_artifacts,
+        min_peer_quorum: request.min_peer_quorum,
+        declared_tools,
+        requested_tool: request.requested_tool.clone(),
+        max_tool_calls: request.max_tool_calls,
+        dry_run: request.dry_run,
+        approval_granted: request.approval_granted,
+        approval_reference: request.approval_reference.clone(),
+        policy_allow: request.policy_allow,
+        protected_closure: request.protected_closure,
         disposition,
         peer_order,
         candidate_order,
@@ -544,6 +1029,7 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot(
         replay_identity: request.replay_identity.clone(),
         federation_digest,
         envelope_digest,
+        capability_digest,
         evidence_digest,
         provenance_digest,
         run_digest,
@@ -563,7 +1049,6 @@ pub fn run_federated_continual_evidence_surveillance_research_copilot(
         raw_data_local: request.raw_data_local,
         boundary: request.boundary.clone(),
     };
-    receipt.validate()?;
     Ok(receipt)
 }
 
@@ -693,5 +1178,70 @@ mod tests {
                 .unwrap()
                 .run_digest
         )
+    }
+
+    #[test]
+    fn reordered_contributions_and_declarations_have_stable_identity() {
+        let mut reordered = request(true);
+        reordered.allowed_artifacts.reverse();
+        reordered.declared_tools.reverse();
+        reordered.contributions.reverse();
+        let first =
+            run_federated_continual_evidence_surveillance_research_copilot(&request(true)).unwrap();
+        let second =
+            run_federated_continual_evidence_surveillance_research_copilot(&reordered).unwrap();
+        assert_eq!(first.input_digest, second.input_digest);
+        assert_eq!(first.run_digest, second.run_digest);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn global_quorum_block_cannot_retain_selected_evidence() {
+        let mut i = request(true);
+        i.min_peer_quorum = 3;
+        let receipt = run_federated_continual_evidence_surveillance_research_copilot(&i).unwrap();
+        assert!(receipt.selected_order.is_empty());
+        assert!(receipt.aggregate_order.is_empty());
+        assert_eq!(receipt.denied_order, vec!["source-0", "source-1"]);
+    }
+
+    #[test]
+    fn duplicate_peer_contribution_is_rejected() {
+        let mut i = request(true);
+        i.contributions[1].peer_id = i.contributions[0].peer_id.clone();
+        assert!(run_federated_continual_evidence_surveillance_research_copilot(&i).is_err());
+    }
+
+    #[test]
+    fn missing_contribution_digest_is_unresolved() {
+        let mut i = request(true);
+        i.contributions[0].digest = None;
+        let receipt = run_federated_continual_evidence_surveillance_research_copilot(&i).unwrap();
+        assert!(receipt.unresolved_order.contains(&"source-0".to_string()));
+    }
+
+    #[test]
+    fn tampered_envelope_digest_is_rejected() {
+        let mut receipt =
+            run_federated_continual_evidence_surveillance_research_copilot(&request(true)).unwrap();
+        receipt.envelope_digest = ContentHash::of_bytes(b"tampered-envelope");
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn tampered_capability_digest_is_rejected() {
+        let mut receipt =
+            run_federated_continual_evidence_surveillance_research_copilot(&request(true)).unwrap();
+        receipt.capability_digest = ContentHash::of_bytes(b"tampered-capability");
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_retained_contribution() {
+        let mut receipt =
+            run_federated_continual_evidence_surveillance_research_copilot(&request(true)).unwrap();
+        receipt.input.contributions[0].artifact_kind = "tampered-artifact".into();
+        let error = receipt.validate().unwrap_err();
+        assert!(error.to_string().contains("retained input digest mismatch"));
     }
 }

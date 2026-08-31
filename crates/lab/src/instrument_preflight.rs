@@ -287,11 +287,15 @@ fn validate_request(request: &InstrumentPreflightRequest) -> Result<(), Instrume
         .iter()
         .any(|interlock| !request.declared_interlocks.contains(interlock))
     {
-        let missing = request
+        let Some(missing) = request
             .required_interlocks
             .iter()
             .find(|interlock| !request.declared_interlocks.contains(*interlock))
-            .expect("missing interlock exists");
+        else {
+            return Err(InstrumentPreflightError::InvalidRequest(
+                "interlock validation state changed while identifying the missing interlock".into(),
+            ));
+        };
         return Err(InstrumentPreflightError::MissingInterlock(missing.clone()));
     }
     if request

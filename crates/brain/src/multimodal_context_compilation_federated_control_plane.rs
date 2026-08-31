@@ -114,6 +114,11 @@ pub enum MultimodalContextControlError {
 
 impl MultimodalContextControlReceipt {
     pub fn validate(&self) -> Result<(), MultimodalContextControlError> {
+        let cell_count = u64::try_from(self.cell_order.len()).map_err(|_| {
+            MultimodalContextControlError::Invalid(
+                "multimodal cell count exceeds checkpoint sequence width".into(),
+            )
+        })?;
         if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
@@ -127,7 +132,7 @@ impl MultimodalContextControlReceipt {
             || self.study_order.len() < 2
             || self.modality_order.len() < 2
             || self.cell_order.is_empty()
-            || self.checkpoint_seq != self.cell_order.len() as u64
+            || self.checkpoint_seq != cell_count
             || self.effect_receipts.is_empty()
         {
             return Err(MultimodalContextControlError::Invalid("multimodal control identity, matrix closure, checkpoint, locality, or effects are incomplete".into()));
@@ -265,6 +270,11 @@ pub fn operate_multimodal_context_compilation(
                 .map(move |modality| format!("{}|{}", study, modality))
         })
         .collect::<Vec<_>>();
+    let checkpoint_seq = u64::try_from(cell_order.len()).map_err(|_| {
+        MultimodalContextControlError::Invalid(
+            "multimodal cell count exceeds checkpoint sequence width".into(),
+        )
+    })?;
     let mut cell_map = BTreeMap::new();
     for cell in &request.cells {
         let key = format!("{}|{}", cell.study_id, cell.modality);
@@ -307,7 +317,7 @@ pub fn operate_multimodal_context_compilation(
             omissions.insert(format!("cell:{}:missing-checkpoint", key));
             continue;
         };
-        retries = retries.saturating_add(cell.retry_count as u64);
+        retries = retries.saturating_add(u64::from(cell.retry_count));
         if !global_open || !cell.raw_data_local || cell.boundary != PRECLINICAL_BOUNDARY {
             denied.insert(key.clone());
             counterexamples.insert(format!("counterexample:{}:policy-approval-locality", key));
@@ -373,9 +383,9 @@ pub fn operate_multimodal_context_compilation(
     } else {
         MultimodalContextControlDisposition::Completed
     };
-    let checkpoint_seq = cell_order.len() as u64;
     let telemetry = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "workflow_id": request.workflow_id, "cell_order": cell_order, "retry_count": retries, "exchange_order": exchanges})).map_err(|error| MultimodalContextControlError::Artifact(error.to_string()))?;
-    let federation = ContentHash::of_value(&json!({"workspace_id": request.workspace_id, "workflow_id": request.workflow_id, "exchange_order": exchanges, "raw_data_local": request.raw_data_local, "replay_identity": request.replay_identity})).map_err(|error| MultimodalContextControlError::Artifact(error.to_string()))?;
+    let raw_data_local = true;
+    let federation = ContentHash::of_value(&json!({"workspace_id": request.workspace_id, "workflow_id": request.workflow_id, "exchange_order": exchanges, "raw_data_local": raw_data_local, "replay_identity": request.replay_identity})).map_err(|error| MultimodalContextControlError::Artifact(error.to_string()))?;
     let run = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "disposition": disposition, "completed_order": completed, "degraded_order": degraded, "unresolved_order": unresolved, "denied_order": denied, "checkpoint_seq": checkpoint_seq, "consumed_budget_units": consumed, "telemetry_digest": telemetry, "federation_digest": federation, "replay_identity": request.replay_identity})).map_err(|error| MultimodalContextControlError::Artifact(error.to_string()))?;
     let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "workspace_id": request.workspace_id, "workflow_id": request.workflow_id, "scope": request.scope, "goal": request.goal, "disposition": disposition, "study_order": studies, "modality_order": modalities, "cell_order": cell_order, "completed_order": completed, "degraded_order": degraded, "unresolved_order": unresolved, "denied_order": denied, "incomparable_order": incomparable, "exchange_order": exchanges, "checkpoint_seq": checkpoint_seq, "retry_count": retries, "consumed_budget_units": consumed, "run_digest": run, "telemetry_digest": telemetry, "federation_digest": federation, "replay_identity": request.replay_identity, "witness_order": witnesses, "counterexample_order": counterexamples, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
@@ -432,7 +442,7 @@ pub fn operate_multimodal_context_compilation(
             vec!["block:unsafe-release".into()]
         },
         artifact,
-        raw_data_local: request.raw_data_local,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
@@ -547,6 +557,17 @@ mod tests {
                 .disposition,
             MultimodalContextControlDisposition::Denied
         );
+    }
+    #[test]
+    fn non_local_input_returns_denied_metadata_receipt() {
+        let mut value = request();
+        value.raw_data_local = false;
+        let receipt = operate_multimodal_context_compilation(&value).unwrap();
+        assert_eq!(
+            receipt.disposition,
+            MultimodalContextControlDisposition::Denied
+        );
+        assert!(receipt.raw_data_local);
     }
     #[test]
     fn digest_is_stable() {

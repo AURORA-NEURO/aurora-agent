@@ -7,7 +7,7 @@
 //! restore. Importing and querying never dispatches, retries, resumes, or mutates a mission.
 
 use bioprism_ids::ContentHash;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -22,6 +22,8 @@ pub const DOMAIN_WORKFLOW_RECONCILIATION_SUMMARY_SCHEMA_VERSION: &str =
 pub const MAX_DOMAIN_WORKFLOW_RECONCILIATIONS: usize = 512;
 pub const MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS: usize = 256;
+const MAX_TEXT_BYTES: usize = 4_096;
+const MAX_FINDINGS: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum DomainWorkflowReconciliationRegistryError {
@@ -31,6 +33,8 @@ pub enum DomainWorkflowReconciliationRegistryError {
     InvalidRecord(String),
     #[error("workflow reconciliation registry has reached its {maximum}-record limit")]
     Full { maximum: usize },
+    #[error("workflow reconciliation registry generation counter is exhausted")]
+    GenerationExhausted,
     #[error("workflow reconciliation registry snapshot is invalid: {0}")]
     InvalidSnapshot(String),
     #[error(
@@ -88,7 +92,10 @@ impl DomainWorkflowReconciliationRegistry {
         if !already_present {
             let mut candidate = self.clone();
             candidate.records.insert(digest.clone(), normalized);
-            candidate.generation = candidate.generation.saturating_add(1);
+            candidate.generation = candidate
+                .generation
+                .checked_add(1)
+                .ok_or(DomainWorkflowReconciliationRegistryError::GenerationExhausted)?;
             candidate.ensure_snapshot_bound()?;
             self.records = candidate.records;
             self.generation = candidate.generation;
@@ -116,7 +123,9 @@ impl DomainWorkflowReconciliationRegistry {
     }
 
     pub fn get(&self, digest: &str) -> Option<Value> {
-        self.records.get(digest).cloned()
+        valid_digest(digest)
+            .then(|| self.records.get(digest).cloned())
+            .flatten()
     }
 
     /// Build a compact operator projection without returning report bodies.
@@ -253,7 +262,7 @@ impl DomainWorkflowReconciliationRegistry {
         }
         let state = if record_count == 0 {
             "missing"
-        } else if integrity_invalid_count > 0 || evidence_invalid_count > 0 {
+        } else if integrity_invalid_count > 0 {
             "invalid"
         } else if ready_count > 0 {
             "structurally_ready"
@@ -303,6 +312,51 @@ impl DomainWorkflowReconciliationRegistry {
                     "max_items must be between 1 and {MAX_DOMAIN_WORKFLOW_RECONCILIATION_QUERY_ITEMS}"
                 ),
             ));
+        }
+        if let Some(value) = mission_id {
+            if !valid_identifier(value) {
+                return Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                    "mission_id filter must be a bounded visible identifier".into(),
+                ));
+            }
+        }
+        if let Some(value) = workflow_id {
+            if !valid_identifier(value) {
+                return Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                    "workflow_id filter must be a bounded visible identifier".into(),
+                ));
+            }
+        }
+        if let Some(value) = mission_plan_digest {
+            if !valid_digest(value) {
+                return Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                    "mission_plan_digest filter must be a canonical lowercase content hash".into(),
+                ));
+            }
+        }
+        if let Some(value) = completion_status {
+            if !matches!(
+                value,
+                "complete" | "complete_with_output_omissions" | "partial" | "failed" | "unverified"
+            ) {
+                return Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                    "completion_status filter is not a recognized reconciliation status".into(),
+                ));
+            }
+        }
+        if let Some(value) = decision_readiness_state {
+            if !valid_text(value) {
+                return Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                    "decision_readiness_state filter must be bounded visible text".into(),
+                ));
+            }
+        }
+        if let Some(value) = after {
+            if !valid_digest(value) {
+                return Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                    "after cursor must be a canonical lowercase content hash".into(),
+                ));
+            }
         }
         let mut rows = Vec::new();
         let mut has_more = false;
@@ -435,6 +489,20 @@ impl DomainWorkflowReconciliationRegistry {
                 "schema is invalid".into(),
             ));
         }
+        if object.get("execution").and_then(Value::as_str) != Some("not_started") {
+            return Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                "execution must remain not_started".into(),
+            ));
+        }
+        let expected_retention = json!({
+            "max_reconciliations": MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
+            "max_bytes": MAX_DOMAIN_WORKFLOW_RECONCILIATION_BYTES
+        });
+        if object.get("retention") != Some(&expected_retention) {
+            return Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                "retention contract does not match the registry bounds".into(),
+            ));
+        }
         let claimed_digest = object
             .get("state_digest")
             .and_then(Value::as_str)
@@ -446,7 +514,11 @@ impl DomainWorkflowReconciliationRegistry {
         let mut unsigned = document.clone();
         unsigned
             .as_object_mut()
-            .expect("snapshot object was checked above")
+            .ok_or_else(|| {
+                DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                    "snapshot must remain an object while removing state_digest".into(),
+                )
+            })?
             .remove("state_digest");
         if claimed_digest != snapshot_digest(&unsigned)? {
             return Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
@@ -473,6 +545,11 @@ impl DomainWorkflowReconciliationRegistry {
             return Err(DomainWorkflowReconciliationRegistryError::Full {
                 maximum: MAX_DOMAIN_WORKFLOW_RECONCILIATIONS,
             });
+        }
+        if generation < rows.len() as u64 {
+            return Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                "generation cannot be below the retained reconciliation count".into(),
+            ));
         }
         let mut registry = Self {
             generation,
@@ -550,6 +627,98 @@ impl DomainWorkflowReconciliationRegistry {
     }
 }
 
+fn verify_decision_readiness(
+    object: &Map<String, Value>,
+) -> Result<(), DomainWorkflowReconciliationRegistryError> {
+    let Some(readiness) = object.get("decision_readiness") else {
+        return Ok(());
+    };
+    let readiness = readiness.as_object().ok_or_else(|| {
+        DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "decision_readiness must be an object".into(),
+        )
+    })?;
+    let required = readiness
+        .get("required")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "decision_readiness.required must be a boolean".into(),
+            )
+        })?;
+    let provided = readiness
+        .get("provided")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "decision_readiness.provided must be a boolean".into(),
+            )
+        })?;
+    let policy_satisfied = readiness
+        .get("policy_satisfied")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "decision_readiness.policy_satisfied must be a boolean".into(),
+            )
+        })?;
+    let gate_satisfied = readiness
+        .get("gate_satisfied")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| {
+            DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "decision_readiness.gate_satisfied must be a boolean".into(),
+            )
+        })?;
+    if gate_satisfied != (!required || policy_satisfied)
+        || object
+            .get("decision_review_gate_satisfied")
+            .and_then(Value::as_bool)
+            != Some(gate_satisfied)
+    {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "decision readiness gate does not match its policy and top-level projection".into(),
+        ));
+    }
+    if readiness.get("readiness_claimed") != Some(&Value::Bool(false))
+        || readiness.get("execution").and_then(Value::as_str) != Some("not_started")
+    {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "decision readiness must remain non-claiming and not_started".into(),
+        ));
+    }
+    let audit_digest = readiness.get("audit_digest");
+    let decision_state = readiness.get("decision_state");
+    let subject_id = readiness.get("subject_id");
+    if provided {
+        if audit_digest
+            .and_then(Value::as_str)
+            .is_none_or(|value| !valid_digest(value))
+            || decision_state
+                .and_then(Value::as_str)
+                .is_none_or(|value| !valid_text(value))
+            || subject_id
+                .and_then(Value::as_str)
+                .is_none_or(|value| !valid_identifier(value))
+        {
+            return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "provided decision readiness must carry valid subject, state, and audit digest"
+                    .into(),
+            ));
+        }
+    } else if audit_digest != Some(&Value::Null)
+        || decision_state != Some(&Value::Null)
+        || subject_id != Some(&Value::Null)
+        || policy_satisfied
+    {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "absent decision readiness must not carry an audit, state, subject, or satisfied policy"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 fn verify_record(record: &Value) -> Result<String, DomainWorkflowReconciliationRegistryError> {
     let object = record
         .as_object()
@@ -564,29 +733,196 @@ fn verify_record(record: &Value) -> Result<String, DomainWorkflowReconciliationR
             "workflow must be domain_workflow_reconcile".into(),
         ));
     }
+    if object.get("schema").and_then(Value::as_str)
+        != Some("bioprism-devplat-domain-workflow-reconcile/0.1")
+    {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "schema must be domain_workflow_reconcile/0.1".into(),
+        ));
+    }
+    if object.get("execution").and_then(Value::as_str) != Some("not_started") {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "execution must remain not_started".into(),
+        ));
+    }
+    verify_decision_readiness(object)?;
+    let completion = object
+        .get("completion")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "completion must be an object".into(),
+            )
+        })?;
+    let completion_status = completion.get("status").and_then(Value::as_str);
+    let completion_ready = completion.get("ready").and_then(Value::as_bool);
+    let review_required = completion.get("review_required").and_then(Value::as_bool);
+    if completion_status.is_none() || completion_ready.is_none() || review_required.is_none() {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "completion status, ready, and review_required are required".into(),
+        ));
+    }
+    if !matches!(
+        completion_status,
+        Some("complete" | "complete_with_output_omissions" | "partial" | "failed" | "unverified")
+    ) {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "completion.status is not a recognized reconciliation status".into(),
+        ));
+    }
+    if review_required != Some(true) {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "completion.review_required must remain true".into(),
+        ));
+    }
+    let evidence = object
+        .get("evidence")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "evidence must be an object".into(),
+            )
+        })?;
+    let evidence_valid = evidence.get("evidence_valid").and_then(Value::as_bool);
+    if evidence_valid.is_none() {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "evidence.evidence_valid is required".into(),
+        ));
+    }
+    if completion_ready != evidence_valid {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "completion.ready must equal evidence.evidence_valid".into(),
+        ));
+    }
+    if (completion_status == Some("complete")) != (evidence_valid == Some(true)) {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "complete status and evidence_valid must agree".into(),
+        ));
+    }
+    let integrity = object
+        .get("integrity")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "integrity must be an object".into(),
+            )
+        })?;
+    let integrity_valid = integrity.get("valid").and_then(Value::as_bool);
+    let findings = integrity.get("findings").and_then(Value::as_array);
+    let finding_count = integrity.get("finding_count").and_then(Value::as_u64);
+    if integrity_valid.is_none() || findings.is_none() || finding_count.is_none() {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "integrity.valid, integrity.finding_count, and integrity.findings are required".into(),
+        ));
+    }
+    let findings = findings.ok_or_else(|| {
+        DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "integrity.findings disappeared during validation".into(),
+        )
+    })?;
+    if findings.len() > MAX_FINDINGS {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            format!("integrity.findings exceeds the {MAX_FINDINGS}-item bound"),
+        ));
+    }
+    if finding_count != Some(findings.len() as u64) {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "integrity.finding_count does not match integrity.findings".into(),
+        ));
+    }
+    let computed_integrity_valid = findings.iter().try_fold(true, |valid, finding| {
+        let finding_object = finding.as_object().ok_or_else(|| {
+            DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "integrity.findings entries must be objects".into(),
+            )
+        })?;
+        if finding_object
+            .get("code")
+            .and_then(Value::as_str)
+            .is_none_or(|value| !valid_text(value))
+        {
+            return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "integrity finding code must be bounded visible text".into(),
+            ));
+        }
+        let severity = finding_object.get("severity").and_then(Value::as_str);
+        if !matches!(severity, Some("error" | "warning")) {
+            return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "integrity finding severity must be error or warning".into(),
+            ));
+        }
+        if finding_object
+            .get("message")
+            .and_then(Value::as_str)
+            .is_none_or(|value| !valid_text(value))
+        {
+            return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "integrity finding message must be bounded visible text".into(),
+            ));
+        }
+        if let Some(step_id) = finding_object.get("step_id") {
+            if !step_id.is_null()
+                && step_id
+                    .as_str()
+                    .is_none_or(|value| !valid_identifier(value))
+            {
+                return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                    "integrity finding step_id must be null or a bounded visible identifier".into(),
+                ));
+            }
+        }
+        Ok(valid && severity != Some("error"))
+    })?;
+    if integrity_valid != Some(computed_integrity_valid) {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "integrity.valid does not match finding severities".into(),
+        ));
+    }
+    for field in ["workflow_id", "mission_id"] {
+        if object
+            .get(field)
+            .and_then(Value::as_str)
+            .is_none_or(|value| !valid_identifier(value))
+        {
+            return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                format!("{field} must be a bounded visible identifier"),
+            ));
+        }
+    }
+    if object
+        .get("source")
+        .and_then(Value::as_str)
+        .is_none_or(|value| !valid_text(value))
+    {
+        return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
+            "source must be bounded visible text".into(),
+        ));
+    }
     for field in [
-        "workflow_id",
         "workflow_digest",
         "catalog_digest",
         "domain_contract_digest",
-        "mission_id",
         "mission_plan_digest",
         "reconciliation_digest",
     ] {
         if object
             .get(field)
             .and_then(Value::as_str)
-            .is_none_or(|value| value.trim().is_empty())
+            .is_none_or(|value| !valid_digest(value))
         {
             return Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(
-                format!("{field} must be a non-empty string"),
+                format!("{field} must be a canonical lowercase content hash"),
             ));
         }
     }
     let claimed = object
         .get("reconciliation_digest")
         .and_then(Value::as_str)
-        .expect("reconciliation_digest was checked above");
+        .ok_or_else(|| {
+            DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "reconciliation_digest disappeared during validation".into(),
+            )
+        })?;
     ContentHash::parse(claimed.to_string()).map_err(|_| {
         DomainWorkflowReconciliationRegistryError::InvalidRecord(
             "reconciliation_digest must be a lowercase SHA-256 content hash".into(),
@@ -595,7 +931,11 @@ fn verify_record(record: &Value) -> Result<String, DomainWorkflowReconciliationR
     let mut unsigned = record.clone();
     unsigned
         .as_object_mut()
-        .expect("record object was checked above")
+        .ok_or_else(|| {
+            DomainWorkflowReconciliationRegistryError::InvalidRecord(
+                "record must remain an object while removing reconciliation_digest".into(),
+            )
+        })?
         .remove("reconciliation_digest");
     let recomputed = ContentHash::of_value(&unsigned)
         .map_err(|error| {
@@ -610,6 +950,26 @@ fn verify_record(record: &Value) -> Result<String, DomainWorkflowReconciliationR
     Ok(claimed.to_string())
 }
 
+fn valid_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && value == trimmed
+        && value.len() <= MAX_TEXT_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_identifier(value: &str) -> bool {
+    valid_text(value) && value == value.trim()
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
+}
+
 fn normalized_record(record: &Value) -> Result<Value, DomainWorkflowReconciliationRegistryError> {
     if !record.is_object() {
         return Err(DomainWorkflowReconciliationRegistryError::NotObject);
@@ -617,7 +977,7 @@ fn normalized_record(record: &Value) -> Result<Value, DomainWorkflowReconciliati
     let mut normalized = record.clone();
     let object = normalized
         .as_object_mut()
-        .expect("record object was checked above");
+        .ok_or(DomainWorkflowReconciliationRegistryError::NotObject)?;
     object.remove("request_id");
     object.remove("__isError");
     // The MCP/API projection is appended after the canonical reconciliation digest is created.
@@ -683,12 +1043,21 @@ mod tests {
             "source": "mission_report",
             "completion": {"status": status, "ready": status == "complete", "review_required": true},
             "evidence": {"evidence_valid": status == "complete"},
-            "integrity": {"valid": true, "finding_count": 0},
+            "integrity": {"valid": true, "finding_count": 0, "findings": []},
             "execution": "not_started"
         });
         let digest = ContentHash::of_value(&record).unwrap().to_string();
         record["reconciliation_digest"] = Value::String(digest);
         record
+    }
+
+    fn reseal(record: &mut Value) {
+        record
+            .as_object_mut()
+            .expect("record is an object")
+            .remove("reconciliation_digest");
+        let digest = ContentHash::of_value(record).unwrap().to_string();
+        record["reconciliation_digest"] = json!(digest);
     }
 
     #[test]
@@ -750,6 +1119,191 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_restore_rejects_contract_drift_and_generation_regression() {
+        let mut registry = DomainWorkflowReconciliationRegistry::new();
+        registry
+            .import(&record("mission-contract", "workspace", "complete"))
+            .unwrap();
+        let snapshot = registry.snapshot().unwrap();
+
+        let mut retention_drift = snapshot.clone();
+        retention_drift["retention"]["max_bytes"] = json!(1);
+        retention_drift
+            .as_object_mut()
+            .unwrap()
+            .remove("state_digest");
+        retention_drift["state_digest"] = json!(snapshot_digest(&retention_drift).unwrap());
+        let error = DomainWorkflowReconciliationRegistry::from_snapshot(&retention_drift)
+            .expect_err("retention drift must be refused");
+        assert!(error.to_string().contains("retention contract"));
+
+        let mut generation_regression = snapshot;
+        generation_regression["generation"] = json!(0);
+        generation_regression
+            .as_object_mut()
+            .unwrap()
+            .remove("state_digest");
+        generation_regression["state_digest"] =
+            json!(snapshot_digest(&generation_regression).unwrap());
+        let error = DomainWorkflowReconciliationRegistry::from_snapshot(&generation_regression)
+            .expect_err("generation regression must be refused");
+        assert!(error.to_string().contains("generation cannot be below"));
+    }
+
+    #[test]
+    fn import_rejects_a_digest_valid_but_structurally_incomplete_record() {
+        let mut invalid = record("mission-incomplete", "workspace", "complete");
+        invalid
+            .as_object_mut()
+            .expect("record is an object")
+            .remove("integrity");
+        let mut unsigned = invalid.clone();
+        unsigned
+            .as_object_mut()
+            .expect("record is an object")
+            .remove("reconciliation_digest");
+        let digest = ContentHash::of_value(&unsigned).unwrap().to_string();
+        invalid["reconciliation_digest"] = json!(digest);
+
+        let mut registry = DomainWorkflowReconciliationRegistry::new();
+        assert!(matches!(
+            registry.import(&invalid),
+            Err(DomainWorkflowReconciliationRegistryError::InvalidRecord(_))
+        ));
+    }
+
+    #[test]
+    fn import_rejects_noncanonical_embedded_digests_and_invalid_statuses() {
+        let mut invalid = record("mission-invalid", "workspace", "complete");
+        invalid["workflow_digest"] = json!("A".repeat(64));
+        let mut unsigned = invalid.clone();
+        unsigned
+            .as_object_mut()
+            .expect("record is an object")
+            .remove("reconciliation_digest");
+        invalid["reconciliation_digest"] =
+            json!(ContentHash::of_value(&unsigned).unwrap().to_string());
+
+        let mut registry = DomainWorkflowReconciliationRegistry::new();
+        let error = registry
+            .import(&invalid)
+            .expect_err("uppercase digest must be refused");
+        assert!(error.to_string().contains("workflow_digest"));
+
+        let mut invalid_status = record("mission-invalid-status", "workspace", "unknown");
+        let mut unsigned = invalid_status.clone();
+        unsigned
+            .as_object_mut()
+            .expect("record is an object")
+            .remove("reconciliation_digest");
+        invalid_status["reconciliation_digest"] =
+            json!(ContentHash::of_value(&unsigned).unwrap().to_string());
+        let error = registry
+            .import(&invalid_status)
+            .expect_err("unknown status must be refused");
+        assert!(error.to_string().contains("completion.status"));
+    }
+
+    #[test]
+    fn import_rejects_padded_text_and_inconsistent_integrity_posture() {
+        let mut padded = record("mission-padded", "workspace", "complete");
+        padded["source"] = json!(" mission_report");
+        reseal(&mut padded);
+        let mut registry = DomainWorkflowReconciliationRegistry::new();
+        let error = registry
+            .import(&padded)
+            .expect_err("padded source must be refused");
+        assert!(error.to_string().contains("source"));
+
+        let mut inconsistent_completion = record("mission-ready-mismatch", "workspace", "complete");
+        inconsistent_completion["completion"]["ready"] = json!(false);
+        reseal(&mut inconsistent_completion);
+        let error = registry
+            .import(&inconsistent_completion)
+            .expect_err("ready/evidence mismatch must be refused");
+        assert!(error.to_string().contains("completion.ready"));
+
+        let mut inconsistent_integrity = record("mission-finding-mismatch", "workspace", "partial");
+        inconsistent_integrity["integrity"]["finding_count"] = json!(1);
+        inconsistent_integrity["integrity"]["findings"] = json!([{
+            "code": "evidence_missing",
+            "severity": "error",
+            "message": "required evidence is missing",
+            "step_id": null
+        }]);
+        reseal(&mut inconsistent_integrity);
+        let error = registry
+            .import(&inconsistent_integrity)
+            .expect_err("integrity validity mismatch must be refused");
+        assert!(error.to_string().contains("integrity.valid"));
+    }
+
+    #[test]
+    fn import_rejects_contradictory_decision_readiness_projection() {
+        let mut invalid = record("mission-readiness-mismatch", "workspace", "partial");
+        invalid["decision_readiness"] = json!({
+            "required": false,
+            "provided": false,
+            "subject_id": null,
+            "audit_digest": null,
+            "decision_state": null,
+            "policy_satisfied": false,
+            "gate_satisfied": true,
+            "readiness_claimed": false,
+            "execution": "not_started"
+        });
+        invalid["decision_review_gate_satisfied"] = json!(false);
+        reseal(&mut invalid);
+        let mut registry = DomainWorkflowReconciliationRegistry::new();
+        let error = registry
+            .import(&invalid)
+            .expect_err("contradictory decision-readiness posture must be refused");
+        assert!(error.to_string().contains("decision readiness gate"));
+    }
+
+    #[test]
+    fn query_and_get_reject_noncanonical_digest_inputs() {
+        let mut registry = DomainWorkflowReconciliationRegistry::new();
+        let stored = record("mission-one", "workspace", "complete");
+        let digest = stored["reconciliation_digest"].as_str().unwrap().to_owned();
+        registry.import(&stored).unwrap();
+        assert!(registry.get(&digest.to_uppercase()).is_none());
+        assert!(matches!(
+            registry.query(
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(&digest.to_uppercase()),
+                10,
+                false,
+            ),
+            Err(DomainWorkflowReconciliationRegistryError::InvalidSnapshot(
+                _
+            ))
+        ));
+    }
+
+    #[test]
+    fn import_rejects_generation_counter_overflow_without_mutating_registry() {
+        let mut registry = DomainWorkflowReconciliationRegistry {
+            generation: u64::MAX,
+            records: BTreeMap::new(),
+        };
+        let error = registry
+            .import(&record("mission-overflow", "workspace", "complete"))
+            .expect_err("generation overflow must be refused");
+        assert_eq!(
+            error,
+            DomainWorkflowReconciliationRegistryError::GenerationExhausted
+        );
+        assert_eq!(registry.generation(), u64::MAX);
+        assert!(registry.is_empty());
+    }
+
+    #[test]
     fn query_is_digest_ordered_and_cursor_bounded() {
         let mut registry = DomainWorkflowReconciliationRegistry::new();
         registry
@@ -776,6 +1330,6 @@ mod tests {
             summary["workflow_status_counts"]["workspace"]["complete"],
             1
         );
-        assert_eq!(registry.workflow_posture("oncology")["state"], "invalid");
+        assert_eq!(registry.workflow_posture("oncology")["state"], "incomplete");
     }
 }

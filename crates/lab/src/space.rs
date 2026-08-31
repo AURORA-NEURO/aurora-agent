@@ -377,14 +377,19 @@ impl CandidateArchitecture {
         let mut visited = 0usize;
         while let Some(id) = ready.pop_front() {
             visited += 1;
-            let spec = self
-                .components
-                .iter()
-                .find(|spec| spec.id == id)
-                .expect("indexed component is present");
+            let Some(spec) = self.components.iter().find(|spec| spec.id == id) else {
+                return Err(SpaceError::InvariantViolation(format!(
+                    "topological queue referenced missing component `{id}`"
+                )));
+            };
             for target in &spec.feeds {
                 if let Some(degree) = indegree.get_mut(target.as_str()) {
-                    *degree -= 1;
+                    let Some(next) = degree.checked_sub(1) else {
+                        return Err(SpaceError::InvariantViolation(format!(
+                            "indegree underflow while visiting `{id}` -> `{target}`"
+                        )));
+                    };
+                    *degree = next;
                     if *degree == 0 {
                         ready.push_back(target.as_str());
                     }

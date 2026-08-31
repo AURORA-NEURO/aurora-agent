@@ -20,6 +20,8 @@ use thiserror::Error;
 pub const FEATURE_ID: &str = "AFA-brain-P01-F01";
 pub const CONTRACT_VERSION: &str = "brain-evidence-surveillance/1.0";
 pub const MAX_OBSERVATIONS: usize = 4096;
+const SURVEILLANCE_CONTENT_TYPE: &str = "application/vnd.aurora.qualified-evidence-set+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceFeedRequest {
@@ -109,7 +111,6 @@ impl QualifiedEvidenceSet {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.study_id.trim().is_empty()
             || self.scope.trim().is_empty()
@@ -121,56 +122,125 @@ impl QualifiedEvidenceSet {
                 "evidence identity, ranking, locality, relevance, or effects are incomplete".into(),
             ));
         }
-        if self
-            .qualified_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.study_id, "study_id"),
+            (&self.scope, "scope"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        for (values, field) in [
+            (&self.candidate_order, "candidate_order"),
+            (&self.qualified_order, "qualified_order"),
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
+            (&self.source_order, "source_order"),
+            (&self.modality_order, "modality_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
+        for (values, field) in [
+            (&self.semantic_order, "semantic_order"),
+            (&self.artifact_order, "artifact_order"),
+            (&self.provenance_order, "provenance_order"),
+        ] {
+            validate_digest_order(values, field)?;
+        }
+        if self.relevance_order.iter().any(|value| *value > 1000) {
             return Err(EvidenceSurveillanceError::Invalid(
-                "evidence state is not covered by candidate order".into(),
+                "evidence relevance is outside the bounded range".into(),
             ));
         }
-        for values in [
-            &self.candidate_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.source_order,
-            &self.modality_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(EvidenceSurveillanceError::Invalid(
-                    "evidence ordering is not canonical".into(),
-                ));
-            }
-        }
-        for values in [
-            &self.semantic_order,
-            &self.artifact_order,
-            &self.provenance_order,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(EvidenceSurveillanceError::Invalid(
-                    "evidence digest ordering is not canonical".into(),
-                ));
-            }
-        }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("read:local-research-artifacts:")
-                && effect != "block:unsafe-release"
-        }) {
+        let qualified_keys = identity_keys(&self.qualified_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        let mut admitted_or_blocked = self
+            .qualified_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        admitted_or_blocked.extend(self.blocked_order.iter().cloned());
+        if admitted_or_blocked
+            != self
+                .candidate_order
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>()
+            || !qualified_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+        {
             return Err(EvidenceSurveillanceError::Invalid(
-                "effect is outside the evidence-surveillance gate".into(),
+                "evidence states must partition candidates without overlap".into(),
+            ));
+        }
+        let gate_blocked = self
+            .negative_evidence
+            .iter()
+            .any(|item| item == "request:policy-denied")
+            || self
+                .negative_evidence
+                .iter()
+                .any(|item| item == "request:raw-data-locality-failed")
+            || self
+                .uncertainty
+                .iter()
+                .any(|item| item == "request:protected-closure-incomplete");
+        let expected_disposition = if !self.raw_data_local || gate_blocked {
+            EvidenceSurveillanceDisposition::Blocked
+        } else if self.qualified_order.is_empty() {
+            EvidenceSurveillanceDisposition::Unknown
+        } else if self.blocked_order.is_empty()
+            && self.omissions.is_empty()
+            && self.uncertainty.is_empty()
+            && self.negative_evidence.is_empty()
+        {
+            EvidenceSurveillanceDisposition::Qualified
+        } else {
+            EvidenceSurveillanceDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
+            return Err(EvidenceSurveillanceError::Invalid(
+                "evidence disposition does not match state, locality, or gates".into(),
+            ));
+        }
+        if !self.raw_data_local {
+            return Err(EvidenceSurveillanceError::Invalid(
+                "evidence receipts must declare local emitted data".into(),
+            ));
+        }
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            EvidenceSurveillanceDisposition::Qualified | EvidenceSurveillanceDisposition::Partial
+        ) {
+            vec![format!("read:local-research-artifacts:{}", self.request_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(EvidenceSurveillanceError::Invalid(
+                "evidence effect does not match disposition".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-evidence-surveillance:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != SURVEILLANCE_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(EvidenceSurveillanceError::Invalid(
+                "evidence artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| EvidenceSurveillanceError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| EvidenceSurveillanceError::Artifact(error.to_string()))
     }
 
@@ -181,6 +251,92 @@ impl QualifiedEvidenceSet {
         ContentHash::of_value(&value)
             .map_err(|error| EvidenceSurveillanceError::Serialization(error.to_string()))
     }
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), EvidenceSurveillanceError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(EvidenceSurveillanceError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), EvidenceSurveillanceError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(EvidenceSurveillanceError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(values: &[String], field: &str) -> Result<(), EvidenceSurveillanceError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(EvidenceSurveillanceError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn validate_digest_order(
+    values: &[ContentHash],
+    field: &str,
+) -> Result<(), EvidenceSurveillanceError> {
+    if values.iter().any(|value| value.as_str().len() != 64)
+        || values.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(EvidenceSurveillanceError::Invalid(format!(
+            "{field} is not a canonical digest order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &QualifiedEvidenceSet) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "study_id": receipt.study_id,
+        "scope": receipt.scope,
+        "disposition": receipt.disposition,
+        "candidate_order": receipt.candidate_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "source_order": receipt.source_order,
+        "modality_order": receipt.modality_order,
+        "relevance_order": receipt.relevance_order,
+        "semantic_order": receipt.semantic_order,
+        "artifact_order": receipt.artifact_order,
+        "provenance_order": receipt.provenance_order,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "replay_identity": receipt.replay_identity,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn evidence_surveillance_manifest() -> CapabilityManifest {
@@ -325,31 +481,49 @@ pub fn surveil_evidence(
             }
         }
     }
-    let disposition =
-        if !request.policy_allow || !request.protected_closure || !request.raw_data_local {
-            EvidenceSurveillanceDisposition::Blocked
-        } else if qualified.is_empty() {
-            EvidenceSurveillanceDisposition::Unknown
-        } else if blocked.is_empty()
-            && omissions.is_empty()
-            && uncertainty.is_empty()
-            && negative.is_empty()
-        {
-            EvidenceSurveillanceDisposition::Qualified
-        } else {
-            EvidenceSurveillanceDisposition::Partial
-        };
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_id": request.study_id, "scope": request.scope, "disposition": disposition, "candidate_order": candidate_order, "qualified_order": qualified, "blocked_order": blocked, "unknown_order": unknown, "source_order": sources, "modality_order": modalities, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
-    let artifact = TypedResearchArtifact::from_payload(
-        format!("brain-evidence-surveillance:{}", request.request_id),
-        "application/vnd.aurora.qualified-evidence-set+json",
-        &payload,
-        Vec::new(),
-        Vec::new(),
-    )
-    .map_err(|error| EvidenceSurveillanceError::Artifact(error.to_string()))?;
-    let has_qualified = !qualified.is_empty();
-    let receipt = QualifiedEvidenceSet {
+    let locality_gate = request.raw_data_local
+        && observations
+            .iter()
+            .all(|observation| observation.raw_data_local);
+    if !locality_gate {
+        negative.insert("request:raw-data-locality-failed".into());
+    }
+    let disposition = if !request.policy_allow || !request.protected_closure || !locality_gate {
+        EvidenceSurveillanceDisposition::Blocked
+    } else if qualified.is_empty() {
+        EvidenceSurveillanceDisposition::Unknown
+    } else if blocked.is_empty()
+        && omissions.is_empty()
+        && uncertainty.is_empty()
+        && negative.is_empty()
+    {
+        EvidenceSurveillanceDisposition::Qualified
+    } else {
+        EvidenceSurveillanceDisposition::Partial
+    };
+    let blocked_order = blocked.into_iter().collect::<Vec<_>>();
+    let unknown_order = unknown.into_iter().collect::<Vec<_>>();
+    let source_order = sources.into_iter().collect::<Vec<_>>();
+    let modality_order = modalities.into_iter().collect::<Vec<_>>();
+    let semantic_order = semantics.into_iter().collect::<Vec<_>>();
+    let artifact_order = artifacts.into_iter().collect::<Vec<_>>();
+    let provenance_order = provenance.into_iter().collect::<Vec<_>>();
+    let omissions = omissions.into_iter().collect::<Vec<_>>();
+    let uncertainty = uncertainty.into_iter().collect::<Vec<_>>();
+    let negative_evidence = negative.into_iter().collect::<Vec<_>>();
+    let effect_receipts = if matches!(
+        disposition,
+        EvidenceSurveillanceDisposition::Qualified | EvidenceSurveillanceDisposition::Partial
+    ) {
+        vec![format!(
+            "read:local-research-artifacts:{}",
+            request.request_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let raw_data_local = true;
+    let receipt_without_artifact = QualifiedEvidenceSet {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
@@ -359,29 +533,41 @@ pub fn surveil_evidence(
         disposition,
         candidate_order,
         qualified_order: qualified,
-        blocked_order: blocked.into_iter().collect(),
-        unknown_order: unknown.into_iter().collect(),
-        source_order: sources.into_iter().collect(),
-        modality_order: modalities.into_iter().collect(),
+        blocked_order,
+        unknown_order,
+        source_order,
+        modality_order,
         relevance_order,
-        semantic_order: semantics.into_iter().collect(),
-        artifact_order: artifacts.into_iter().collect(),
-        provenance_order: provenance.into_iter().collect(),
-        omissions: omissions.into_iter().collect(),
-        uncertainty: uncertainty.into_iter().collect(),
-        negative_evidence: negative.into_iter().collect(),
+        semantic_order,
+        artifact_order,
+        provenance_order,
+        omissions,
+        uncertainty,
+        negative_evidence,
         replay_identity: request.replay_identity.clone(),
-        effect_receipts: if has_qualified {
-            vec![format!(
-                "read:local-research-artifacts:{}",
-                request.request_id
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
-        artifact,
-        raw_data_local: true,
+        effect_receipts,
+        artifact: TypedResearchArtifact::from_payload(
+            "placeholder",
+            SURVEILLANCE_CONTENT_TYPE,
+            &json!({}),
+            Vec::new(),
+            Vec::new(),
+        )
+        .map_err(|error| EvidenceSurveillanceError::Artifact(error.to_string()))?,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
+    };
+    let artifact = TypedResearchArtifact::from_payload(
+        format!("brain-evidence-surveillance:{}", request.request_id),
+        SURVEILLANCE_CONTENT_TYPE,
+        &receipt_payload(&receipt_without_artifact),
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|error| EvidenceSurveillanceError::Artifact(error.to_string()))?;
+    let receipt = QualifiedEvidenceSet {
+        artifact,
+        ..receipt_without_artifact
     };
     receipt.validate()?;
     Ok(receipt)
@@ -402,22 +588,60 @@ fn validate_request(request: &EvidenceFeedRequest) -> Result<(), EvidenceSurveil
                 .into(),
         ));
     }
-    let mut ids = BTreeSet::new();
+    for (value, field) in [
+        (&request.request_id, "request_id"),
+        (&request.study_id, "study_id"),
+        (&request.scope, "scope"),
+        (&request.query, "query"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    if request.replay_identity.as_str().len() != 64 {
+        return Err(EvidenceSurveillanceError::Invalid(
+            "evidence request replay identity is invalid".into(),
+        ));
+    }
+    let observation_ids = request
+        .observations
+        .iter()
+        .map(|observation| observation.evidence_id.clone())
+        .collect::<Vec<_>>();
+    validate_unique(&observation_ids, "observation.evidence_ids")?;
     for observation in &request.observations {
-        if observation.evidence_id.trim().is_empty()
-            || observation.source_id.trim().is_empty()
-            || observation.study_id.trim().is_empty()
-            || observation.modality.trim().is_empty()
-            || observation.scope.trim().is_empty()
-            || observation.relevance_milli > 1000
-            || observation.boundary != PRECLINICAL_BOUNDARY
-            || !ids.insert(observation.evidence_id.clone())
-        {
+        for (value, field) in [
+            (&observation.evidence_id, "observation.evidence_id"),
+            (&observation.source_id, "observation.source_id"),
+            (&observation.study_id, "observation.study_id"),
+            (&observation.modality, "observation.modality"),
+            (&observation.scope, "observation.scope"),
+            (&observation.boundary, "observation.boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        if observation.relevance_milli > 1000 || observation.boundary != PRECLINICAL_BOUNDARY {
             return Err(EvidenceSurveillanceError::Invalid(format!(
-                "observation {} is invalid or duplicated",
+                "observation {} is outside the bounded evidence contract",
                 observation.evidence_id
             )));
         }
+        for digest in [
+            &observation.semantic_digest,
+            &observation.artifact_digest,
+            &observation.provenance_digest,
+            &observation.replay_identity,
+        ] {
+            if digest.as_str().len() != 64 {
+                return Err(EvidenceSurveillanceError::Invalid(
+                    "observation digest is invalid".into(),
+                ));
+            }
+        }
+        validate_unique(&observation.omissions, "observation.omissions")?;
+        validate_unique(
+            &observation.negative_evidence,
+            "observation.negative_evidence",
+        )?;
     }
     Ok(())
 }
@@ -525,6 +749,32 @@ mod tests {
             .iter()
             .any(|value| value.contains("replay-mismatch")));
     }
+    #[test]
+    fn non_local_observation_is_blocked_and_retained() {
+        let mut input = request(vec![observation("a", EvidenceState::Supported)]);
+        input.observations[0].raw_data_local = false;
+        let receipt = surveil_evidence(&input).unwrap();
+        assert_eq!(
+            receipt.disposition,
+            EvidenceSurveillanceDisposition::Blocked
+        );
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .negative_evidence
+            .contains(&"request:raw-data-locality-failed".into()));
+    }
+
+    #[test]
+    fn artifact_payload_is_bound() {
+        let mut receipt =
+            surveil_evidence(&request(vec![observation("a", EvidenceState::Supported)])).unwrap();
+        receipt.artifact.content_hash = hash("tampered");
+        assert!(matches!(
+            receipt.validate(),
+            Err(EvidenceSurveillanceError::Artifact(_))
+        ));
+    }
+
     #[test]
     fn duplicate_observation_is_rejected() {
         let mut duplicate = observation("a", EvidenceState::Supported);

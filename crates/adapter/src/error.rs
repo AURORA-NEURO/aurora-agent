@@ -27,6 +27,24 @@ use thiserror::Error;
 /// 2 forbids, so each ambiguity is an error that names its record.
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum CsvError {
+    #[error("{source_id} exceeds the {maximum}-byte source limit")]
+    SourceTooLarge { source_id: String, maximum: usize },
+
+    #[error("{source_id} uses an invalid delimiter byte {found}")]
+    InvalidDelimiter { source_id: String, found: u8 },
+
+    #[error("{source_id} exceeds the {maximum}-column limit")]
+    TooManyColumns { source_id: String, maximum: usize },
+
+    #[error("{source_id} exceeds the {maximum}-record limit")]
+    TooManyRecords { source_id: String, maximum: usize },
+
+    #[error("{location} exceeds the {maximum}-byte field limit")]
+    FieldTooLarge {
+        location: Box<SourceLocation>,
+        maximum: usize,
+    },
+
     #[error("{source_id} is not valid UTF-8 at byte {offset}")]
     NotUtf8 { source_id: String, offset: usize },
 
@@ -108,6 +126,18 @@ impl CsvError {
 /// Everything that can stop an ingest.
 #[derive(Debug, Error)]
 pub enum AdapterError {
+    #[error("invalid source: {0}")]
+    InvalidSource(String),
+
+    #[error("invalid semantic loss: {0}")]
+    InvalidLoss(String),
+
+    #[error("adapter source traversal limit exceeded at {path}: maximum {maximum}")]
+    TraversalLimit { path: String, maximum: usize },
+
+    #[error("conformance report is invalid: {0}")]
+    Conformance(String),
+
     #[error("adapter {adapter} does not accept source {source_id}: {expected}")]
     UnsupportedSource {
         adapter: &'static str,

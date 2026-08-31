@@ -201,7 +201,8 @@ impl ReleaseGate {
         Ok(ReleaseGate {
             gate,
             rationale,
-            formula: "weighted mean of per-capability full-pass rates, cluster-balanced".to_string(),
+            formula: "weighted mean of per-capability full-pass rates, cluster-balanced"
+                .to_string(),
             floors: BTreeMap::new(),
         })
     }
@@ -296,7 +297,10 @@ impl CapabilityPosterior {
                 pass_sample.push_unknown(&observation.parent);
                 outcome_sample.push_unknown(&observation.parent);
             } else {
-                pass_sample.push(&observation.parent, f64::from(u8::from(conclusion.is_full_pass())));
+                pass_sample.push(
+                    &observation.parent,
+                    f64::from(u8::from(conclusion.is_full_pass())),
+                );
                 outcome_sample.push(
                     &observation.parent,
                     f64::from(u8::from(conclusion.outcome_was_correct())),
@@ -330,10 +334,23 @@ impl CapabilityPosterior {
 
         let mut capabilities = BTreeMap::new();
         for (capability, pass_sample) in pass {
-            let credit_sample = credit.remove(&capability).expect("built in step");
-            let outcome_sample = outcome.remove(&capability).expect("built in step");
-            let (vetoes, disputed, abstained, optimistic, weakest_tier) =
-                extras.remove(&capability).expect("built in step");
+            let Some(credit_sample) = credit.remove(&capability) else {
+                return Err(EvalError::InvariantViolation {
+                    detail: format!("capability `{capability}` is missing its credit sample"),
+                });
+            };
+            let Some(outcome_sample) = outcome.remove(&capability) else {
+                return Err(EvalError::InvariantViolation {
+                    detail: format!("capability `{capability}` is missing its outcome sample"),
+                });
+            };
+            let Some((vetoes, disputed, abstained, optimistic, weakest_tier)) =
+                extras.remove(&capability)
+            else {
+                return Err(EvalError::InvariantViolation {
+                    detail: format!("capability `{capability}` is missing its aggregate extras"),
+                });
+            };
             capabilities.insert(
                 capability.clone(),
                 CapabilityEstimate {
@@ -389,13 +406,12 @@ impl CapabilityPosterior {
         let mut min_effective = f64::INFINITY;
 
         for (capability, floor) in &gate.floors {
-            let estimate =
-                self.capabilities
-                    .get(capability)
-                    .ok_or_else(|| EvalError::CapabilityUnobserved {
-                        gate: gate.gate.clone(),
-                        capability: capability.clone(),
-                    })?;
+            let estimate = self.capabilities.get(capability).ok_or_else(|| {
+                EvalError::CapabilityUnobserved {
+                    gate: gate.gate.clone(),
+                    capability: capability.clone(),
+                }
+            })?;
 
             if let Some(veto) = estimate.vetoes.first() {
                 return Err(EvalError::VetoOutstanding {
@@ -523,7 +539,11 @@ impl CapabilityPosterior {
             (true, true) => Dominance::Equivalent,
             (false, true) => Dominance::Dominates,
             (true, false) => Dominance::DominatedBy,
-            (false, false) => unreachable!("handled above"),
+            (false, false) => Dominance::Incomparable {
+                better,
+                worse,
+                uncertain,
+            },
         }
     }
 
@@ -627,11 +647,7 @@ mod tests {
                 Observation::new(
                     *capability,
                     *parent,
-                    scored(
-                        &format!("r{index}"),
-                        ScoreTier::Deterministic,
-                        *conclusion,
-                    ),
+                    scored(&format!("r{index}"), ScoreTier::Deterministic, *conclusion),
                 )
             })
             .collect();
@@ -692,7 +708,11 @@ mod tests {
     fn an_overall_scalar_is_refused_when_effective_sample_size_is_too_small() {
         let mut rows = Vec::new();
         for index in 0..40 {
-            rows.push(("planning", if index < 20 { "p1" } else { "p2" }, Conclusion::Pass));
+            rows.push((
+                "planning",
+                if index < 20 { "p1" } else { "p2" },
+                Conclusion::Pass,
+            ));
         }
         let posterior = posterior(&rows);
         let gate = ReleaseGate::new("ship", "checklist")
@@ -708,12 +728,14 @@ mod tests {
     fn an_overall_scalar_is_refused_when_a_veto_is_outstanding() {
         let vetoed = compose(
             "r0",
-            &[Contribution::new(
-                ScoreTier::Deterministic,
-                "leak-scan@1",
-                Conclusion::Pass,
-            )
-            .with_veto(Veto::new(VetoKind::Safety, "leak-scan@1", "unsafe tool call"))],
+            &[
+                Contribution::new(ScoreTier::Deterministic, "leak-scan@1", Conclusion::Pass)
+                    .with_veto(Veto::new(
+                        VetoKind::Safety,
+                        "leak-scan@1",
+                        "unsafe tool call",
+                    )),
+            ],
             &UnknownPolicy::Block,
         )
         .expect("composes");

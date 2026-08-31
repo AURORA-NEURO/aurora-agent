@@ -34,6 +34,8 @@ use bioprism_section::OracleStatus;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
+const MAX_TASK_ID_BYTES: usize = 512;
+
 /// Utility assigned to any selection that failed the decision contract.
 ///
 /// Strictly below the worst admissible utility, which is 0. Encoding disqualification as a
@@ -88,6 +90,18 @@ impl Observation {
     }
 }
 
+pub(crate) fn validate_task_id(value: &str) -> Result<(), RoutingError> {
+    if value.is_empty() {
+        return Err(RoutingError::EmptyTaskId);
+    }
+    if !valid_task_id(value) {
+        return Err(RoutingError::InvalidTaskId {
+            task: value.to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// An append-only table of prior outcomes.
 ///
 /// The ledger is deliberately dumb. It holds no model, fits nothing, and cannot be updated in
@@ -104,13 +118,18 @@ pub struct EvidenceLedger {
 impl EvidenceLedger {
     pub fn new(observations: impl IntoIterator<Item = Observation>) -> Result<Self, RoutingError> {
         let observations: Vec<Observation> = observations.into_iter().collect();
-        let mut seen: BTreeSet<(&str, String)> = BTreeSet::new();
+        let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
         for observation in &observations {
-            if observation.task_id.is_empty() {
-                return Err(RoutingError::EmptyTaskId);
+            validate_task_id(&observation.task_id)?;
+            observation.fingerprint.validate()?;
+            if observation.facts_exposed > observation.total_facts {
+                return Err(RoutingError::InvalidObservation {
+                    task: observation.task_id.clone(),
+                    detail: "facts_exposed cannot exceed total_facts".into(),
+                });
             }
             let key = (
-                observation.task_id.as_str(),
+                observation.task_id.to_ascii_lowercase(),
                 observation.architecture.label(),
             );
             if !seen.insert(key) {
@@ -143,12 +162,14 @@ impl EvidenceLedger {
     }
 
     pub fn contains_task(&self, task_id: &str) -> bool {
-        self.observations.iter().any(|o| o.task_id == task_id)
+        self.observations
+            .iter()
+            .any(|o| o.task_id.eq_ignore_ascii_case(task_id))
     }
 
     /// The held-out view. Everything a router is allowed to know about an unseen task.
     pub fn excluding_task(&self, task_id: &str) -> EvidenceLedger {
-        self.filtered(|observation| observation.task_id != task_id)
+        self.filtered(|observation| !observation.task_id.eq_ignore_ascii_case(task_id))
     }
 
     /// A narrower view for stricter holdouts.
@@ -236,6 +257,13 @@ impl EvidenceLedger {
     }
 }
 
+fn valid_task_id(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value == value.trim()
+        && value.len() <= MAX_TASK_ID_BYTES
+        && !value.chars().any(char::is_control)
+}
+
 impl TryFrom<Vec<Observation>> for EvidenceLedger {
     type Error = RoutingError;
 
@@ -288,6 +316,46 @@ mod tests {
     }
 
     #[test]
+    fn a_ledger_rejects_task_aliases_padding_controls_and_impossible_costs() {
+        let error = EvidenceLedger::new([
+            observation("task", Architecture::FiberCompiled, true, 11, 761),
+            observation("TASK", Architecture::FiberCompiled, true, 12, 761),
+        ])
+        .unwrap_err();
+        assert_eq!(
+            error,
+            RoutingError::DuplicateObservation {
+                task: "TASK".to_string(),
+                architecture: "fiber".to_string()
+            }
+        );
+
+        assert!(matches!(
+            EvidenceLedger::new([observation(
+                " task",
+                Architecture::FiberCompiled,
+                true,
+                11,
+                761
+            )])
+            .unwrap_err(),
+            RoutingError::InvalidTaskId { .. }
+        ));
+
+        assert!(matches!(
+            EvidenceLedger::new([observation(
+                "task",
+                Architecture::FiberCompiled,
+                true,
+                762,
+                761
+            )])
+            .unwrap_err(),
+            RoutingError::InvalidObservation { .. }
+        ));
+    }
+
+    #[test]
     fn excluding_a_task_removes_every_observation_of_that_task() {
         let ledger = EvidenceLedger::new([
             observation("t1", Architecture::FiberCompiled, true, 11, 761),
@@ -303,6 +371,20 @@ mod tests {
             ledger.contains_task("t1"),
             "the original ledger is unchanged"
         );
+    }
+
+    #[test]
+    fn holdout_and_leak_checks_are_case_insensitive() {
+        let ledger = EvidenceLedger::new([observation(
+            "task-one",
+            Architecture::FiberCompiled,
+            true,
+            11,
+            761,
+        )])
+        .unwrap();
+        assert!(ledger.contains_task("TASK-ONE"));
+        assert!(ledger.excluding_task("TASK-ONE").is_empty());
     }
 
     #[test]

@@ -122,23 +122,46 @@
 
 pub mod ast;
 pub mod compile;
+pub mod computational_execution_assurance;
 pub mod contract;
 pub mod diagnostic;
+pub mod federated_commons_assurance;
 pub mod ir;
 pub mod lexer;
+pub mod limitation_closure_control_plane;
 pub mod lower;
 pub mod parser;
 pub mod printer;
 pub mod reference;
 pub mod release_assurance;
-pub mod limitation_closure_control_plane;
-pub mod computational_execution_assurance;
 pub mod semantics;
 
 pub use compile::{compile, CompileError};
+pub use computational_execution_assurance::{
+    assure_computational_execution, assure_computational_execution_json,
+    computational_execution_assurance_manifest, validate_computational_execution_json,
+    ComputationalExecutionError, ExecutionEvidenceState, ExecutionNode, ExecutionRunDisposition,
+    ExecutionRunReceipt, ResearchWorkflowSpec,
+    CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
+    TOOL_NAME as COMPUTATIONAL_EXECUTION_ASSURANCE_TOOL,
+};
 pub use contract::{check, CognitiveType, ParticipantContract, TypeError};
 pub use diagnostic::{render, Diagnostic, Span};
+pub use federated_commons_assurance::{
+    assure_weavelang_federated_commons, weavelang_federated_commons_assurance_manifest,
+    WeaveCapability5, WeavelangFederationArtifact8, WeavelangFederationDisposition,
+    WeavelangFederationEnvelope8, WeavelangFederationError, WeavelangFederationRequest5,
+    CONTRACT_VERSION as WEAVELANG_FEDERATED_COMMONS_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as WEAVELANG_FEDERATED_COMMONS_ASSURANCE_FEATURE_ID,
+};
 pub use ir::{WeaveEvent, WeaveIr, WEAVE_EVENT_VERSION, WEAVE_IR_VERSION};
+pub use limitation_closure_control_plane::{
+    assure_weavelang_limitation_closure, weavelang_limitation_closure_manifest, ClosureDisposition,
+    LimitationClosureError, PeerClosureSummary, WeavelangClosureReceipt, WeavelangClosureRequest,
+    WeavelangLimitationCase, CONTRACT_VERSION as WEAVELANG_LIMITATION_CLOSURE_CONTRACT_VERSION,
+    FEATURE_ID as WEAVELANG_LIMITATION_CLOSURE_FEATURE_ID,
+};
 pub use lower::{lower_program, LowerError};
 pub use parser::{parse, ParseError};
 pub use printer::print;
@@ -147,21 +170,5 @@ pub use release_assurance::{
     WeaveLangReleaseAssuranceReceipt, WeaveLangReleaseAssuranceRequest,
     CONTRACT_VERSION as WEAVELANG_RELEASE_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as WEAVELANG_RELEASE_ASSURANCE_FEATURE_ID,
-};
-pub use limitation_closure_control_plane::{
-    assure_weavelang_limitation_closure, weavelang_limitation_closure_manifest,
-    ClosureDisposition, LimitationClosureError, PeerClosureSummary, WeavelangClosureReceipt,
-    WeavelangClosureRequest, WeavelangLimitationCase,
-    CONTRACT_VERSION as WEAVELANG_LIMITATION_CLOSURE_CONTRACT_VERSION,
-    FEATURE_ID as WEAVELANG_LIMITATION_CLOSURE_FEATURE_ID,
-};
-pub use computational_execution_assurance::{
-    assure_computational_execution, assure_computational_execution_json,
-    computational_execution_assurance_manifest, validate_computational_execution_json,
-    ComputationalExecutionError, ExecutionEvidenceState, ExecutionNode,
-    ExecutionRunDisposition, ExecutionRunReceipt, ResearchWorkflowSpec,
-    CONTRACT_VERSION as COMPUTATIONAL_EXECUTION_ASSURANCE_CONTRACT_VERSION,
-    FEATURE_ID as COMPUTATIONAL_EXECUTION_ASSURANCE_FEATURE_ID,
-    TOOL_NAME as COMPUTATIONAL_EXECUTION_ASSURANCE_TOOL,
 };
 pub use semantics::{ExecutionMode, Invariant, LivenessReport, Machine, Trace};

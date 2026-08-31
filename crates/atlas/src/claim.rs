@@ -189,9 +189,12 @@ pub fn assess_claim(atlas: &Atlas, capability: &CapabilityId) -> ClaimAssessment
         };
         match cell.measurement() {
             None => {
-                let reason = cell
-                    .unmeasured_reason()
-                    .expect("a cell is either measured or unmeasured");
+                let Some(reason) = cell.unmeasured_reason() else {
+                    return refuse(vec![ClaimConstraint::UnmeasuredInSubtree {
+                        capability: member.to_string(),
+                        reason: "cell is missing its unmeasured reason".into(),
+                    }]);
+                };
                 if reason.supports_claim() {
                     continue;
                 }
@@ -337,9 +340,12 @@ fn failing_safety_gate(atlas: &Atlas, capability: &CapabilityId) -> Option<Claim
             }
             Some(cell) => match cell.measurement() {
                 None => {
-                    let reason = cell
-                        .unmeasured_reason()
-                        .expect("a cell is either measured or unmeasured");
+                    let Some(reason) = cell.unmeasured_reason() else {
+                        return Some(ClaimConstraint::SafetyGate {
+                            guard: guard.to_string(),
+                            detail: "cell is missing its unmeasured reason".into(),
+                        });
+                    };
                     if reason.supports_claim() {
                         continue;
                     }

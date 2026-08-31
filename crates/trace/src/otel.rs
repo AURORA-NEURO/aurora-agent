@@ -106,7 +106,9 @@ impl OtelIngestion {
     }
 
     pub fn is_compilable(&self) -> bool {
-        !self.trace.is_empty() && self.loss.is_lossless()
+        !self.trace.is_empty()
+            && self.loss.is_lossless()
+            && crate::ingest::validate(&self.trace).is_ok()
     }
 
     pub fn into_parts(self) -> (Trace, OtelLoss, OtelMapping) {
@@ -743,7 +745,13 @@ fn normalize_value(raw: Option<&Value>, path: &str, loss: &mut OtelLoss) -> Valu
             }
             Value::Object(map)
         }
-        _ => unreachable!("present is restricted to known OTLP variants"),
+        _ => {
+            loss.unmapped_fields.push(OtelFieldLoss {
+                path: path.into(),
+                detail: "OTLP value variant is not supported".into(),
+            });
+            Value::Null
+        }
     }
 }
 

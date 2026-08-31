@@ -9,7 +9,7 @@
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const DOMAIN_EVIDENCE_PROVIDER_NORMALIZATION_SCHEMA: &str =
@@ -204,6 +204,8 @@ pub enum DomainEvidenceProviderNormalizationError {
     UnsupportedConnector(String),
     #[error("domains must contain between 1 and {MAX_DOMAIN_EVIDENCE_PROVIDER_DOMAINS} values")]
     InvalidDomains,
+    #[error("{0} must not contain duplicate values")]
+    DuplicateValues(&'static str),
     #[error("outcome must be one of: {0}")]
     InvalidOutcome(String),
     #[error("claim_posture must be an object")]
@@ -237,6 +239,17 @@ fn bounded_text(
         return Err(DomainEvidenceProviderNormalizationError::InvalidText { field });
     }
     Ok(value.to_owned())
+}
+
+fn bounded_identifier(
+    field: &'static str,
+    value: &str,
+) -> Result<String, DomainEvidenceProviderNormalizationError> {
+    let value = bounded_text(field, value)?;
+    if value != value.trim() {
+        return Err(DomainEvidenceProviderNormalizationError::InvalidText { field });
+    }
+    Ok(value)
 }
 
 fn digest(
@@ -290,9 +303,16 @@ fn validate_claim_posture(value: &Value) -> Result<(), DomainEvidenceProviderNor
         .and_then(Value::as_array)
         .ok_or(DomainEvidenceProviderNormalizationError::MissingNonClaims)?;
     if non_claims.is_empty()
-        || non_claims
-            .iter()
-            .any(|value| value.as_str().is_none_or(|text| text.trim().is_empty()))
+        || non_claims.iter().any(|value| {
+            value
+                .as_str()
+                .map(|text| {
+                    text.trim().is_empty()
+                        || text.len() > MAX_DOMAIN_EVIDENCE_PROVIDER_TEXT_BYTES
+                        || text.chars().any(char::is_control)
+                })
+                .unwrap_or(true)
+        })
     {
         return Err(DomainEvidenceProviderNormalizationError::MissingNonClaims);
     }
@@ -368,10 +388,16 @@ fn audit_records(
             add_missing_field(audit, "record.identifier");
         }
         if let Some(digest_fields) = digest_fields {
-            let coverage = audit
-                .content_digest_coverage
-                .as_mut()
-                .expect("digest coverage is initialized with digest fields");
+            if audit.content_digest_coverage.is_none() {
+                add_warning(
+                    audit,
+                    "digest coverage was requested but its audit state was not initialized",
+                );
+                continue;
+            }
+            let Some(coverage) = audit.content_digest_coverage.as_mut() else {
+                continue;
+            };
             if record_has_any_field(record, digest_fields) {
                 coverage.present_record_count += 1;
             } else {
@@ -462,10 +488,12 @@ fn finish_shape_audit(
     }
     let mut digest_input = serde_json::to_value(&audit)
         .map_err(|error| DomainEvidenceProviderNormalizationError::Canonical(error.to_string()))?;
-    digest_input
-        .as_object_mut()
-        .expect("shape audit serializes as an object")
-        .remove("shape_digest");
+    let Some(object) = digest_input.as_object_mut() else {
+        return Err(DomainEvidenceProviderNormalizationError::Canonical(
+            "shape audit did not serialize as an object".into(),
+        ));
+    };
+    object.remove("shape_digest");
     audit.shape_digest = canonical_digest(&digest_input)?;
     Ok(audit)
 }
@@ -586,7 +614,13 @@ fn audit_provider_payload(
                 None,
             ),
             "fhir" => return audit_fhir_payload(payload),
-            _ => unreachable!("connector kind was validated before shape auditing"),
+            _ => {
+                return Err(
+                    DomainEvidenceProviderNormalizationError::UnsupportedConnector(
+                        connector_kind.to_string(),
+                    ),
+                )
+            }
         };
     let mut audit = shape_audit_base(connector_kind, payload, identifier_fields, digest_fields);
     if connector_kind == "provider_api" && payload.is_array() {
@@ -687,14 +721,15 @@ fn build_record_index(
         .map(canonical_digest)
         .collect::<Result<Vec<_>, _>>()?;
     let omitted_record_count = record_count.saturating_sub(row_digests.len());
+    let indexed_record_count = row_digests.len();
     let mut digest_input = json!({
         "schema": DOMAIN_EVIDENCE_PROVIDER_RECORD_INDEX_SCHEMA,
         "connector_kind": connector_kind,
         "recognized_container": shape_audit.recognized_container,
         "record_count": record_count,
-        "indexed_record_count": row_digests.len(),
+        "indexed_record_count": indexed_record_count,
         "omitted_record_count": omitted_record_count,
-        "row_digests": row_digests,
+        "row_digests": row_digests.clone(),
     });
     let index_digest = canonical_digest(&digest_input)?;
     digest_input["index_digest"] = json!(index_digest);
@@ -703,17 +738,9 @@ fn build_record_index(
         connector_kind: connector_kind.into(),
         recognized_container: shape_audit.recognized_container.clone(),
         record_count,
-        indexed_record_count: digest_input["row_digests"]
-            .as_array()
-            .map_or(0, Vec::len),
+        indexed_record_count,
         omitted_record_count,
-        row_digests: digest_input["row_digests"]
-            .as_array()
-            .expect("record index row digests are an array")
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect(),
+        row_digests,
         index_digest,
         limitations: vec![
             "row digests identify canonical JSON rows but do not reveal row values or identifiers".into(),
@@ -727,10 +754,10 @@ fn build_record_index(
 pub fn normalize_domain_evidence_provider(
     request: &DomainEvidenceProviderNormalizationRequest,
 ) -> Result<DomainEvidenceProviderNormalization, DomainEvidenceProviderNormalizationError> {
-    let group_id = bounded_text("group_id", &request.group_id)?;
-    let subject_id = bounded_text("subject_id", &request.subject_id)?;
-    let source_tool = bounded_text("source_tool", &request.source_tool)?;
-    let provider = bounded_text("provider", &request.provider)?;
+    let group_id = bounded_identifier("group_id", &request.group_id)?;
+    let subject_id = bounded_identifier("subject_id", &request.subject_id)?;
+    let source_tool = bounded_identifier("source_tool", &request.source_tool)?;
+    let provider = bounded_identifier("provider", &request.provider)?;
     if !CONNECTOR_KINDS.contains(&request.connector_kind.as_str()) {
         return Err(
             DomainEvidenceProviderNormalizationError::UnsupportedConnector(
@@ -738,15 +765,25 @@ pub fn normalize_domain_evidence_provider(
             ),
         );
     }
-    let connector_kind = bounded_text("connector_kind", &request.connector_kind)?;
+    let connector_kind = bounded_identifier("connector_kind", &request.connector_kind)?;
     if request.domains.is_empty() || request.domains.len() > MAX_DOMAIN_EVIDENCE_PROVIDER_DOMAINS {
         return Err(DomainEvidenceProviderNormalizationError::InvalidDomains);
     }
-    let domains = request
+    let mut domains = request
         .domains
         .iter()
-        .map(|domain| bounded_text("domain", domain))
+        .map(|domain| bounded_identifier("domain", domain))
         .collect::<Result<Vec<_>, _>>()?;
+    let mut domain_keys = BTreeSet::new();
+    if domains
+        .iter()
+        .any(|domain| !domain_keys.insert(domain.to_ascii_lowercase()))
+    {
+        return Err(DomainEvidenceProviderNormalizationError::DuplicateValues(
+            "domains",
+        ));
+    }
+    domains.sort();
     if !OUTCOMES.contains(&request.outcome.as_str()) {
         return Err(DomainEvidenceProviderNormalizationError::InvalidOutcome(
             request.outcome.clone(),
@@ -756,11 +793,17 @@ pub fn normalize_domain_evidence_provider(
     if request.parent_digests.len() > MAX_DOMAIN_EVIDENCE_PROVIDER_PARENTS {
         return Err(DomainEvidenceProviderNormalizationError::TooManyParents);
     }
-    let parent_digests = request
+    let mut parent_digests = request
         .parent_digests
         .iter()
         .map(|parent| digest("parent_digest", parent))
         .collect::<Result<Vec<_>, _>>()?;
+    if parent_digests.iter().collect::<BTreeSet<_>>().len() != parent_digests.len() {
+        return Err(DomainEvidenceProviderNormalizationError::DuplicateValues(
+            "parent_digests",
+        ));
+    }
+    parent_digests.sort();
     let source_plan_digest = request
         .source_plan_digest
         .as_deref()
@@ -839,10 +882,12 @@ fn finish_replay_verification(
 ) -> Result<DomainEvidenceProviderReplayVerification, DomainEvidenceProviderNormalizationError> {
     let mut digest_input = serde_json::to_value(&verification)
         .map_err(|error| DomainEvidenceProviderNormalizationError::Canonical(error.to_string()))?;
-    digest_input
-        .as_object_mut()
-        .expect("replay verification serializes as an object")
-        .remove("replay_digest");
+    let Some(object) = digest_input.as_object_mut() else {
+        return Err(DomainEvidenceProviderNormalizationError::Canonical(
+            "replay verification did not serialize as an object".into(),
+        ));
+    };
+    object.remove("replay_digest");
     verification.replay_digest = canonical_digest(&digest_input)?;
     ensure_size(&serde_json::to_value(&verification).map_err(|error| {
         DomainEvidenceProviderNormalizationError::Canonical(error.to_string())
@@ -1017,6 +1062,25 @@ mod tests {
             json!("b".repeat(64))
         );
         assert_eq!(normalized.payload_digest.len(), 64);
+    }
+
+    #[test]
+    fn normalization_is_invariant_to_domain_and_parent_input_order() {
+        let mut first = base_request();
+        first.domains = vec!["oncology".into(), "biology".into()];
+        first.parent_digests = vec!["b".repeat(64), "a".repeat(64)];
+        let mut second = first.clone();
+        second.domains.reverse();
+        second.parent_digests.reverse();
+
+        let first = normalize_domain_evidence_provider(&first).unwrap();
+        let second = normalize_domain_evidence_provider(&second).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.domains, vec!["biology", "oncology"]);
+        assert_eq!(
+            first.intake_arguments["parent_digests"],
+            json!(["a".repeat(64), "b".repeat(64)])
+        );
     }
 
     #[test]
@@ -1236,5 +1300,38 @@ mod tests {
             normalize_domain_evidence_provider(&request),
             Err(DomainEvidenceProviderNormalizationError::InvalidDigest { .. })
         ));
+
+        let mut request = base_request();
+        request.domains = vec!["oncology".into(), "oncology".into()];
+        assert_eq!(
+            normalize_domain_evidence_provider(&request).unwrap_err(),
+            DomainEvidenceProviderNormalizationError::DuplicateValues("domains")
+        );
+
+        let mut request = base_request();
+        request.parent_digests = vec!["a".repeat(64), "a".repeat(64)];
+        assert_eq!(
+            normalize_domain_evidence_provider(&request).unwrap_err(),
+            DomainEvidenceProviderNormalizationError::DuplicateValues("parent_digests")
+        );
+    }
+
+    #[test]
+    fn rejects_case_colliding_domains_and_identity_whitespace() {
+        let mut request = base_request();
+        request.domains = vec!["Oncology".into(), "oncology".into()];
+        assert_eq!(
+            normalize_domain_evidence_provider(&request).unwrap_err(),
+            DomainEvidenceProviderNormalizationError::DuplicateValues("domains")
+        );
+
+        let mut request = base_request();
+        request.subject_id = " subject-1".into();
+        assert_eq!(
+            normalize_domain_evidence_provider(&request).unwrap_err(),
+            DomainEvidenceProviderNormalizationError::InvalidText {
+                field: "subject_id"
+            }
+        );
     }
 }

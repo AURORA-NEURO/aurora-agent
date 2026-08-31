@@ -23,6 +23,8 @@ pub const FEATURE_ID: &str = "AFA-biolang-P16-F11";
 pub const CONTRACT_VERSION: &str = "biolang-publication-copilot/1.0";
 pub const MAX_RUNS: usize = 4096;
 pub const MAX_TOOLS: usize = 128;
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_LIST_ITEMS: usize = 8192;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -145,6 +147,65 @@ pub enum PublicationCopilotError {
     Serialization(String),
 }
 
+fn validate_text(field: &str, value: &str) -> Result<(), PublicationCopilotError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(PublicationCopilotError::Invalid(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > MAX_TEXT_BYTES {
+        return Err(PublicationCopilotError::Invalid(format!(
+            "{field} exceeds the {MAX_TEXT_BYTES}-byte bound"
+        )));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(PublicationCopilotError::Invalid(format!(
+            "{field} must not contain control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_string_order(
+    values: &[String],
+    field: &str,
+    allow_empty: bool,
+) -> Result<(), PublicationCopilotError> {
+    if !allow_empty && values.is_empty() {
+        return Err(PublicationCopilotError::Invalid(format!(
+            "{field} must not be empty"
+        )));
+    }
+    if values.len() > MAX_LIST_ITEMS {
+        return Err(PublicationCopilotError::Invalid(format!(
+            "{field} exceeds the {MAX_LIST_ITEMS}-item bound"
+        )));
+    }
+    for value in values {
+        validate_text(field, value)?;
+    }
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(PublicationCopilotError::Invalid(format!(
+            "{field} must be strictly sorted and unique"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_hash_order(values: &[ContentHash], field: &str) -> Result<(), PublicationCopilotError> {
+    if values.len() > MAX_LIST_ITEMS {
+        return Err(PublicationCopilotError::Invalid(format!(
+            "{field} exceeds the {MAX_LIST_ITEMS}-item bound"
+        )));
+    }
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(PublicationCopilotError::Invalid(format!(
+            "{field} must be strictly sorted and unique"
+        )));
+    }
+    Ok(())
+}
+
 impl PublicationCopilotReceipt {
     pub fn validate(&self) -> Result<(), PublicationCopilotError> {
         if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
@@ -156,62 +217,64 @@ impl PublicationCopilotReceipt {
             || self.workflow_id.trim().is_empty()
             || self.scope.trim().is_empty()
             || self.ranked_order.is_empty()
-            || (self.effect_receipts.is_empty()
-                && self.disposition != PublicationDisposition::Qualified)
+            || self.effect_receipts.is_empty()
         {
             return Err(PublicationCopilotError::Invalid(
                 "identity, ranking, locality, effects, or boundary is incomplete".into(),
             ));
         }
-        if self
-            .admitted_order
-            .iter()
-            .any(|id| !self.ranked_order.contains(id))
+        for (field, value) in [
+            ("request_id", &self.request_id),
+            ("workflow_id", &self.workflow_id),
+            ("scope", &self.scope),
+        ] {
+            validate_text(field, value)?;
+        }
+        for (values, field, allow_empty) in [
+            (&self.ranked_order, "ranked_order", false),
+            (&self.admitted_order, "admitted_order", true),
+            (&self.blocked_order, "blocked_order", true),
+            (&self.unknown_order, "unknown_order", true),
+            (&self.release_order, "release_order", true),
+            (&self.artifact_order, "artifact_order", true),
+            (&self.evidence_order, "evidence_order", true),
+            (&self.tool_invocation_order, "tool_invocation_order", true),
+            (&self.omissions, "omissions", true),
+            (&self.uncertainty, "uncertainty", true),
+            (&self.negative_evidence, "negative_evidence", true),
+            (&self.effect_receipts, "effect_receipts", false),
+        ] {
+            validate_string_order(values, field, allow_empty)?;
+        }
+        for (values, field) in [
+            (&self.provenance_order, "provenance_order"),
+            (&self.replay_order, "replay_order"),
+            (&self.benchmark_order, "benchmark_order"),
+        ] {
+            validate_hash_order(values, field)?;
+        }
+        if self.release_order != self.admitted_order
+            || self
+                .admitted_order
+                .iter()
+                .any(|id| !self.ranked_order.contains(id) || self.blocked_order.contains(id))
             || self
                 .blocked_order
                 .iter()
-                .any(|id| !self.ranked_order.contains(id))
+                .any(|id| !self.ranked_order.contains(id) || self.admitted_order.contains(id))
             || self
                 .unknown_order
                 .iter()
-                .any(|id| !self.ranked_order.contains(id))
-            || self.ranked_order.len() != self.objects.len() + self.blocked_order.len()
-                && self.admitted_order.len() + self.unknown_order.len() == self.ranked_order.len()
+                .any(|id| !self.blocked_order.contains(id))
+            || self
+                .ranked_order
+                .iter()
+                .any(|id| !self.admitted_order.contains(id) && !self.blocked_order.contains(id))
+            || self.objects.len() != self.admitted_order.len()
         {
             return Err(PublicationCopilotError::Invalid(
-                "publication candidate linkage is incomplete".into(),
+                "publication candidate state and signed-object coverage are inconsistent".into(),
             ));
-        }
-        for values in [
-            &self.ranked_order,
-            &self.admitted_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.release_order,
-            &self.artifact_order,
-            &self.evidence_order,
-            &self.tool_invocation_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(PublicationCopilotError::Invalid(
-                    "publication copilot ordering is not canonical".into(),
-                ));
-            }
-        }
-        for values in [
-            &self.provenance_order,
-            &self.replay_order,
-            &self.benchmark_order,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(PublicationCopilotError::Invalid(
-                    "publication copilot digest ordering is not canonical".into(),
-                ));
-            }
         }
         if self.effect_receipts.iter().any(|effect| {
             !effect.starts_with("invoke:declared-tools:") && effect != "block:unsafe-release"
@@ -220,6 +283,7 @@ impl PublicationCopilotReceipt {
                 "effect is outside the bounded publication-tool gate".into(),
             ));
         }
+        let mut object_releases = Vec::with_capacity(self.objects.len());
         for object in &self.objects {
             if !object.raw_data_local
                 || object.boundary != PRECLINICAL_BOUNDARY
@@ -227,15 +291,36 @@ impl PublicationCopilotReceipt {
                 || object.release_id.trim().is_empty()
                 || object.artifact_ids.is_empty()
                 || object.evidence_receipt_ids.is_empty()
-                || object
-                    .tool_invocations
-                    .windows(2)
-                    .any(|pair| pair[0] >= pair[1])
+                || !self.admitted_order.contains(&object.release_id)
+                || self
+                    .benchmark_digest
+                    .as_ref()
+                    .is_none_or(|digest| digest != &object.benchmark_digest)
             {
                 return Err(PublicationCopilotError::Invalid(
                     "signed research object is incomplete or non-local".into(),
                 ));
             }
+            validate_text("object.run_id", &object.run_id)?;
+            validate_text("object.release_id", &object.release_id)?;
+            validate_string_order(&object.artifact_ids, "object.artifact_ids", false)?;
+            validate_string_order(
+                &object.evidence_receipt_ids,
+                "object.evidence_receipt_ids",
+                false,
+            )?;
+            validate_string_order(&object.tool_invocations, "object.tool_invocations", true)?;
+            if object_releases.contains(&object.release_id) {
+                return Err(PublicationCopilotError::Invalid(
+                    "signed object release identities must be unique".into(),
+                ));
+            }
+            object_releases.push(object.release_id.clone());
+        }
+        if object_releases != self.admitted_order {
+            return Err(PublicationCopilotError::Invalid(
+                "signed object release order does not match admitted order".into(),
+            ));
         }
         self.publication_artifact
             .validate_metadata()
@@ -361,6 +446,8 @@ pub fn prepare_publication_queue(
             && run.replay_identity == request.replay_identity
             && run.benchmark_digest.is_some()
             && request.benchmark_digest.is_some()
+            && run.benchmark_digest == request.benchmark_digest
+            && run.release_digest != ContentHash::of_bytes(b"")
             && run.omissions.is_empty()
             && run.uncertainty.is_empty()
             && run.negative_evidence.is_empty()
@@ -371,6 +458,11 @@ pub fn prepare_publication_queue(
             && tools_ok
             && budget_ok;
         if complete && admitted.len() < request.max_releases {
+            let benchmark_digest = run.benchmark_digest.clone().ok_or_else(|| {
+                PublicationCopilotError::Invalid(
+                    "admitted publication run is missing its benchmark digest".into(),
+                )
+            })?;
             spent = spent.saturating_add(cost);
             admitted.push(run.release_id.clone());
             releases.insert(run.release_id.clone());
@@ -379,9 +471,7 @@ pub fn prepare_publication_queue(
             tools.extend(run.requested_tools.iter().cloned());
             provenance.insert(run.provenance_digest.clone());
             replay.insert(run.replay_identity.clone());
-            if let Some(digest) = &run.benchmark_digest {
-                benchmarks.insert(digest.clone());
-            }
+            benchmarks.insert(benchmark_digest.clone());
             objects.push(SignedResearchObject {
                 run_id: run.run_id.clone(),
                 release_id: run.release_id.clone(),
@@ -390,7 +480,7 @@ pub fn prepare_publication_queue(
                 release_digest: run.release_digest.clone(),
                 provenance_digest: run.provenance_digest.clone(),
                 replay_identity: run.replay_identity.clone(),
-                benchmark_digest: run.benchmark_digest.clone().expect("checked above"),
+                benchmark_digest,
                 tool_invocations: run.requested_tools.clone(),
                 raw_data_local: true,
                 boundary: PRECLINICAL_BOUNDARY.into(),
@@ -421,6 +511,9 @@ pub fn prepare_publication_queue(
             }
             if run.benchmark_digest.is_none() || request.benchmark_digest.is_none() {
                 omissions.insert(format!("release:{}:benchmark-missing", run.release_id));
+            }
+            if run.benchmark_digest != request.benchmark_digest {
+                uncertainty.insert(format!("release:{}:benchmark-mismatch", run.release_id));
             }
             if run.replay_identity != request.replay_identity {
                 uncertainty.insert(format!("release:{}:replay-mismatch", run.release_id));
@@ -505,7 +598,7 @@ pub fn prepare_publication_queue(
         Vec::new(),
     )
     .map_err(|error| PublicationCopilotError::Artifact(error.to_string()))?;
-    let effect_receipts = if tools.is_empty() {
+    let effect_receipts = if admitted.is_empty() {
         vec!["block:unsafe-release".into()]
     } else {
         vec![format!("invoke:declared-tools:{}", request.request_id)]
@@ -554,11 +647,30 @@ fn validate_request(request: &PublicationCopilotRequest) -> Result<(), Publicati
         || request.declared_tools.len() > MAX_TOOLS
         || request.tool_allow_list.is_empty()
         || request.max_releases == 0
+        || request.max_releases > MAX_RUNS
         || request.budget == 0
         || request.boundary != PRECLINICAL_BOUNDARY
     {
         return Err(PublicationCopilotError::Invalid(
             "request identity, runs, bounded tools, release limit, budget, or boundary is incomplete".into(),
+        ));
+    }
+    for (field, value) in [
+        ("request_id", &request.request_id),
+        ("workflow_id", &request.workflow_id),
+        ("scope", &request.scope),
+    ] {
+        validate_text(field, value)?;
+    }
+    let empty_hash = ContentHash::of_bytes(b"");
+    if request.replay_identity == empty_hash
+        || request
+            .benchmark_digest
+            .as_ref()
+            .is_some_and(|digest| digest == &empty_hash)
+    {
+        return Err(PublicationCopilotError::Invalid(
+            "request content identity must not be empty".into(),
         ));
     }
     unique_strings(&request.declared_tools, "declared tool")?;
@@ -590,21 +702,39 @@ fn validate_request(request: &PublicationCopilotRequest) -> Result<(), Publicati
                 run.run_id
             )));
         }
+        validate_text("run.run_id", &run.run_id)?;
+        validate_text("run.release_id", &run.release_id)?;
+        validate_text("run.origin", &run.origin)?;
+        validate_text("run.purpose", &run.purpose)?;
+        validate_text("run.source_contract_version", &run.source_contract_version)?;
         unique_strings(&run.artifact_ids, "artifact")?;
         unique_strings(&run.evidence_receipt_ids, "evidence receipt")?;
         unique_strings(&run.requested_tools, "requested tool")?;
+        unique_strings(&run.omissions, "omission")?;
+        unique_strings(&run.uncertainty, "uncertainty")?;
+        unique_strings(&run.negative_evidence, "negative evidence")?;
     }
     Ok(())
 }
 
 fn unique_strings(values: &[String], kind: &str) -> Result<(), PublicationCopilotError> {
+    if values.len() > MAX_LIST_ITEMS {
+        return Err(PublicationCopilotError::Invalid(format!(
+            "{kind} list exceeds the {MAX_LIST_ITEMS}-item bound"
+        )));
+    }
     let mut seen = BTreeSet::new();
     for value in values {
-        if value.trim().is_empty() || !seen.insert(value) {
+        if validate_text(kind, value).is_err() || !seen.insert(value) {
             return Err(PublicationCopilotError::Invalid(format!(
                 "{kind} identity is empty or duplicated"
             )));
         }
+    }
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(PublicationCopilotError::Invalid(format!(
+            "{kind} list must be strictly sorted"
+        )));
     }
     Ok(())
 }
@@ -749,5 +879,26 @@ mod tests {
             duplicate
         ]))
         .is_err());
+    }
+
+    #[test]
+    fn benchmark_identity_mismatch_is_not_admitted() {
+        let mut input = request(vec![run("a", RunState::Supported)]);
+        input.runs[0].benchmark_digest = Some(hash("different-benchmark"));
+        let receipt = prepare_publication_queue(&input).unwrap();
+        assert_ne!(receipt.disposition, PublicationDisposition::Qualified);
+        assert!(receipt
+            .uncertainty
+            .iter()
+            .any(|item| item.contains("benchmark-mismatch")));
+    }
+
+    #[test]
+    fn tampered_admitted_object_is_rejected_by_receipt_validation() {
+        let receipt =
+            prepare_publication_queue(&request(vec![run("a", RunState::Supported)])).unwrap();
+        let mut tampered = receipt;
+        tampered.objects[0].release_id = "release:not-admitted".into();
+        assert!(tampered.validate().is_err());
     }
 }

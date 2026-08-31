@@ -124,9 +124,8 @@ pub enum ConformanceError {
     #[error("certification refused: {reason}")]
     CertificationRefused { reason: String },
 
-    #[error("conformance certificate digest mismatch: claims {claimed}, recomputes to {recomputed}")]
-    CertificateDigestMismatch {
-        claimed: String,
-        recomputed: String,
-    },
+    #[error(
+        "conformance certificate digest mismatch: claims {claimed}, recomputes to {recomputed}"
+    )]
+    CertificateDigestMismatch { claimed: String, recomputed: String },
 }

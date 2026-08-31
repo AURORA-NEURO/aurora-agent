@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-protocol-simulation-p10-f08.json",
+  "title": "AFA-worldgen-P10-F08 receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "request_id",
+    "consumer",
+    "producer",
+    "namespace",
+    "semantic_profile",
+    "negotiated_version",
+    "compatibility",
+    "disposition",
+    "field_order",
+    "retained_field_order",
+    "missing_field_order",
+    "omitted_field_order",
+    "semantic_loss_order",
+    "replay_identity",
+    "contract_digest",
+    "effect_receipts",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "worldgen-federated-continual-protocol-simulation-contract/1.0"
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P10-F08"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "consumer": {
+      "type": "string"
+    },
+    "producer": {
+      "type": "string"
+    },
+    "namespace": {
+      "type": "string"
+    },
+    "semantic_profile": {
+      "type": "string"
+    },
+    "negotiated_version": {
+      "type": "string"
+    },
+    "compatibility": {
+      "type": "string"
+    },
+    "disposition": {
+      "enum": [
+        "qualified",
+        "partial",
+        "unknown",
+        "blocked",
+        "compatible"
+      ]
+    },
+    "field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "retained_field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "missing_field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "omitted_field_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "semantic_loss_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "contract_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "aggregate_only": {
+      "const": true
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "content_type": {
+          "type": "string"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "boundary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "required_step_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ repository.workspace = true
 description = "OncoWorld: neuro-oncology domain model, longitudinal tumour worldlines, response criteria, molecular classification"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
 bioprism-world = { workspace = true }

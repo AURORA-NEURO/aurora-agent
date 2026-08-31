@@ -180,6 +180,23 @@ pub mod lifecycle;
 pub mod quality;
 pub mod quota;
 pub mod tiering;
+pub mod reliability_integrity_support;
+pub mod local_reliability_integrity_inference;
+pub mod multimodal_reliability_integrity_inference;
+pub mod throughput_reliability_integrity_inference;
+pub mod federated_continual_reliability_integrity_inference;
+pub mod local_reliability_integrity_contract_model;
+pub mod multimodal_reliability_integrity_contract_model;
+pub mod throughput_reliability_integrity_contract_model;
+pub mod federated_continual_reliability_integrity_contract_model;
+pub mod local_reliability_integrity_research_copilot;
+pub mod multimodal_reliability_integrity_research_copilot;
+pub mod throughput_reliability_integrity_research_copilot;
+pub mod federated_continual_reliability_integrity_research_copilot;
+pub mod local_reliability_integrity_workflow_fabric;
+pub mod multimodal_reliability_integrity_workflow_fabric;
+pub mod throughput_reliability_integrity_workflow_fabric;
+pub mod federated_continual_reliability_integrity_workflow_fabric;
 
 pub use backup::{BackedUpItem, BackupClass, BackupSet, RestoreReport, RestoreVerdict};
 pub use cache::{
@@ -206,6 +223,23 @@ pub use quality::{
 };
 pub use quota::{Purpose, StorageClass, StorageQuota};
 pub use tiering::{AccessRecord, Tier, TierReason, TierTransition, TieringPlan, TieringPolicy};
+pub use reliability_integrity_support::*;
+pub use local_reliability_integrity_inference::*;
+pub use multimodal_reliability_integrity_inference::*;
+pub use throughput_reliability_integrity_inference::*;
+pub use federated_continual_reliability_integrity_inference::*;
+pub use local_reliability_integrity_contract_model::*;
+pub use multimodal_reliability_integrity_contract_model::*;
+pub use throughput_reliability_integrity_contract_model::*;
+pub use federated_continual_reliability_integrity_contract_model::*;
+pub use local_reliability_integrity_research_copilot::*;
+pub use multimodal_reliability_integrity_research_copilot::*;
+pub use throughput_reliability_integrity_research_copilot::*;
+pub use federated_continual_reliability_integrity_research_copilot::*;
+pub use local_reliability_integrity_workflow_fabric::*;
+pub use multimodal_reliability_integrity_workflow_fabric::*;
+pub use throughput_reliability_integrity_workflow_fabric::*;
+pub use federated_continual_reliability_integrity_workflow_fabric::*;
 
 #[doc(inline)]
 pub use bioprism_ledger::RetentionWindow;

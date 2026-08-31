@@ -17,6 +17,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-brain-P03-F02";
 pub const CONTRACT_VERSION: &str = "brain-multimodal-context-compilation/1.0";
+const CONTEXT_CONTENT_TYPE: &str = "application/vnd.aurora.multimodal-research-context+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MultimodalContextFact {
@@ -92,7 +94,6 @@ impl MultimodalContextCompilationReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.objective.trim().is_empty()
             || self.scope.trim().is_empty()
@@ -103,24 +104,28 @@ impl MultimodalContextCompilationReceipt {
         {
             return Err(MultimodalContextCompilationError::Invalid("multimodal context identity, study/modality closure, required facts, locality, or effects are incomplete".into()));
         }
-        for values in [
-            &self.study_order,
-            &self.modality_order,
-            &self.required_fact_order,
-            &self.resolved_fact_order,
-            &self.missing_fact_order,
-            &self.blocked_fact_order,
-            &self.unknown_fact_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.objective, "objective"),
+            (&self.scope, "scope"),
+            (&self.boundary, "boundary"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(MultimodalContextCompilationError::Invalid(
-                    "multimodal context vectors are not canonical".into(),
-                ));
-            }
+            validate_text(value, field)?;
+        }
+        for (values, field) in [
+            (&self.study_order, "study_order"),
+            (&self.modality_order, "modality_order"),
+            (&self.required_fact_order, "required_fact_order"),
+            (&self.resolved_fact_order, "resolved_fact_order"),
+            (&self.missing_fact_order, "missing_fact_order"),
+            (&self.blocked_fact_order, "blocked_fact_order"),
+            (&self.unknown_fact_order, "unknown_fact_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
         }
         let required = self
             .required_fact_order
@@ -135,7 +140,18 @@ impl MultimodalContextCompilationReceipt {
         classified.extend(self.missing_fact_order.iter().cloned());
         classified.extend(self.blocked_fact_order.iter().cloned());
         classified.extend(self.unknown_fact_order.iter().cloned());
-        if classified != required {
+        let resolved = identity_keys(&self.resolved_fact_order);
+        let missing = identity_keys(&self.missing_fact_order);
+        let blocked = identity_keys(&self.blocked_fact_order);
+        let unknown = identity_keys(&self.unknown_fact_order);
+        if classified != required
+            || !resolved.is_disjoint(&missing)
+            || !resolved.is_disjoint(&blocked)
+            || !resolved.is_disjoint(&unknown)
+            || !missing.is_disjoint(&blocked)
+            || !missing.is_disjoint(&unknown)
+            || !blocked.is_disjoint(&unknown)
+        {
             return Err(MultimodalContextCompilationError::Invalid(
                 "multimodal context fact states do not partition required facts".into(),
             ));
@@ -151,16 +167,72 @@ impl MultimodalContextCompilationReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("compile:local-multimodal-research-context:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            ContextCompilationDisposition::Qualified | ContextCompilationDisposition::Partial
+        ) {
+            vec![format!(
+                "compile:local-multimodal-research-context:{}",
+                self.request_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
             return Err(MultimodalContextCompilationError::Invalid(
-                "multimodal context effect is outside local compilation gate".into(),
+                "multimodal context effect does not match disposition".into(),
+            ));
+        }
+        if !self.raw_data_local {
+            return Err(MultimodalContextCompilationError::Invalid(
+                "multimodal context receipts must declare local emitted data".into(),
+            ));
+        }
+        let expected_comparability_digest = ContentHash::of_value(&json!({
+            "study_order": self.study_order,
+            "modality_order": self.modality_order,
+            "scope": self.scope,
+        }))
+        .map_err(|error| MultimodalContextCompilationError::Artifact(error.to_string()))?;
+        if self.comparability_digest != expected_comparability_digest {
+            return Err(MultimodalContextCompilationError::Invalid(
+                "multimodal comparability digest is not bound to closure".into(),
+            ));
+        }
+        let expected_context_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "required_fact_order": self.required_fact_order,
+            "resolved_fact_order": self.resolved_fact_order,
+            "missing_fact_order": self.missing_fact_order,
+            "blocked_fact_order": self.blocked_fact_order,
+            "unknown_fact_order": self.unknown_fact_order,
+            "comparability_digest": self.comparability_digest,
+            "disposition": self.disposition,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| MultimodalContextCompilationError::Artifact(error.to_string()))?;
+        if self.context_digest != expected_context_digest {
+            return Err(MultimodalContextCompilationError::Invalid(
+                "multimodal context digest is not bound to fact state".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-multimodal-research-context:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != CONTEXT_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(MultimodalContextCompilationError::Invalid(
+                "multimodal context artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| MultimodalContextCompilationError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| MultimodalContextCompilationError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, MultimodalContextCompilationError> {
@@ -296,6 +368,9 @@ pub fn compile_multimodal_context(
         } else {
             ContextCompilationDisposition::Partial
         };
+    if !request.raw_data_local {
+        omissions.insert("request:raw-data-locality-failed".into());
+    }
     let effect_receipts = if matches!(
         disposition,
         ContextCompilationDisposition::Qualified | ContextCompilationDisposition::Partial
@@ -307,11 +382,12 @@ pub fn compile_multimodal_context(
     } else {
         vec!["block:unsafe-release".into()]
     };
-    let context_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "required_fact_order": required, "resolved_fact_order": resolved, "missing_fact_order": missing, "blocked_fact_order": blocked, "unknown_fact_order": unknown, "comparability_digest": comparability_digest, "replay_identity": request.replay_identity})).map_err(|error| MultimodalContextCompilationError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "objective": request.objective, "scope": request.scope, "study_order": study_order, "modality_order": modality_order, "disposition": disposition, "required_fact_order": required, "resolved_fact_order": resolved, "missing_fact_order": missing, "blocked_fact_order": blocked, "unknown_fact_order": unknown, "comparability_digest": comparability_digest, "context_digest": context_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let raw_data_local = true;
+    let context_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "required_fact_order": required, "resolved_fact_order": resolved, "missing_fact_order": missing, "blocked_fact_order": blocked, "unknown_fact_order": unknown, "comparability_digest": comparability_digest, "disposition": disposition, "replay_identity": request.replay_identity, "raw_data_local": raw_data_local})).map_err(|error| MultimodalContextCompilationError::Artifact(error.to_string()))?;
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "objective": request.objective, "scope": request.scope, "study_order": study_order, "modality_order": modality_order, "disposition": disposition, "required_fact_order": required, "resolved_fact_order": resolved, "missing_fact_order": missing, "blocked_fact_order": blocked, "unknown_fact_order": unknown, "comparability_digest": comparability_digest, "context_digest": context_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": raw_data_local, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-multimodal-research-context:{}", request.request_id),
-        "application/vnd.aurora.multimodal-research-context+json",
+        CONTEXT_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -340,11 +416,88 @@ pub fn compile_multimodal_context(
         negative_evidence: negative.into_iter().collect(),
         effect_receipts,
         artifact,
-        raw_data_local: true,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), MultimodalContextCompilationError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(MultimodalContextCompilationError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), MultimodalContextCompilationError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(MultimodalContextCompilationError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), MultimodalContextCompilationError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(MultimodalContextCompilationError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &MultimodalContextCompilationReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "objective": receipt.objective,
+        "scope": receipt.scope,
+        "study_order": receipt.study_order,
+        "modality_order": receipt.modality_order,
+        "disposition": receipt.disposition,
+        "required_fact_order": receipt.required_fact_order,
+        "resolved_fact_order": receipt.resolved_fact_order,
+        "missing_fact_order": receipt.missing_fact_order,
+        "blocked_fact_order": receipt.blocked_fact_order,
+        "unknown_fact_order": receipt.unknown_fact_order,
+        "comparability_digest": receipt.comparability_digest,
+        "context_digest": receipt.context_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -431,5 +584,24 @@ mod tests {
     fn digest_is_stable() {
         let receipt = compile_multimodal_context(&request()).unwrap();
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut input = request();
+        input.raw_data_local = false;
+        let receipt = compile_multimodal_context(&input).unwrap();
+        assert_eq!(receipt.disposition, ContextCompilationDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "request:raw-data-locality-failed"));
+        assert!(receipt.validate().is_ok());
+    }
+    #[test]
+    fn context_artifact_payload_is_bound() {
+        let mut receipt = compile_multimodal_context(&request()).unwrap();
+        receipt.scope = "scope:tampered".into();
+        assert!(receipt.validate().is_err());
     }
 }

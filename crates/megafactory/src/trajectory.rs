@@ -202,9 +202,28 @@ fn completeness_of(spans: &[Span]) -> Completeness {
 
 /// A captured research session, before redaction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "CaptureSessionDocument")]
 pub struct CaptureSession {
     pub id: String,
     spans: Vec<Span>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CaptureSessionDocument {
+    id: String,
+    spans: Vec<Span>,
+}
+
+impl TryFrom<CaptureSessionDocument> for CaptureSession {
+    type Error = CaptureError;
+
+    fn try_from(document: CaptureSessionDocument) -> Result<Self, Self::Error> {
+        let mut session = CaptureSession::new(document.id);
+        for span in document.spans {
+            session.append(span)?;
+        }
+        Ok(session)
+    }
 }
 
 impl CaptureSession {
@@ -340,12 +359,73 @@ impl RedactionPolicy {
 
 /// A session after redaction. The only form this module will digest or release.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RedactedSessionDocument")]
 pub struct RedactedSession {
     pub id: String,
     spans: Vec<Span>,
     pub policy: RedactionPolicy,
     pub redacted_fields: usize,
     pub total_fields: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct RedactedSessionDocument {
+    id: String,
+    spans: Vec<Span>,
+    policy: RedactionPolicy,
+    redacted_fields: usize,
+    total_fields: usize,
+}
+
+impl TryFrom<RedactedSessionDocument> for RedactedSession {
+    type Error = CaptureError;
+
+    fn try_from(document: RedactedSessionDocument) -> Result<Self, Self::Error> {
+        let mut previous = None;
+        let mut observed_redacted = 0usize;
+        let mut observed_total = 0usize;
+        for span in &document.spans {
+            if let Some(previous) = previous {
+                if span.seq == previous {
+                    return Err(CaptureError::DuplicateSequence {
+                        session: document.id.clone(),
+                        seq: span.seq,
+                    });
+                }
+                if span.seq < previous {
+                    return Err(CaptureError::OutOfOrder {
+                        session: document.id.clone(),
+                        seq: span.seq,
+                        previous,
+                    });
+                }
+            }
+            previous = Some(span.seq);
+            for field in span.fields.values() {
+                observed_total += 1;
+                if field.is_redacted() {
+                    observed_redacted += 1;
+                }
+            }
+        }
+        if observed_redacted != document.redacted_fields || observed_total != document.total_fields
+        {
+            return Err(CaptureError::InconsistentAccounting {
+                session: document.id,
+                redacted: document.redacted_fields,
+                total: document.total_fields,
+                observed_redacted,
+                observed_total,
+            });
+        }
+        Ok(RedactedSession {
+            id: document.id,
+            spans: document.spans,
+            policy: document.policy,
+            redacted_fields: document.redacted_fields,
+            total_fields: document.total_fields,
+        })
+    }
 }
 
 impl RedactedSession {

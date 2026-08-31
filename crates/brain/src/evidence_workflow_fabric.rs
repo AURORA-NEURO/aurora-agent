@@ -22,6 +22,8 @@ pub const FEATURE_ID: &str = "AFA-brain-P01-F13";
 pub const CONTRACT_VERSION: &str = "brain-evidence-surveillance-workflow-fabric/1.0";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet3@1";
 pub const MAX_STAGES: usize = 8;
+const WORKFLOW_CONTENT_TYPE: &str = "application/vnd.aurora.research-workflow-receipt+json";
+const MAX_ITEMS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvidenceWorkflowRequest {
@@ -98,17 +100,7 @@ impl EvidenceWorkflowReceipt {
         {
             return Err(EvidenceWorkflowError::Invalid("workflow identity, stages, plan, checkpoint, locality, budget, or effects are incomplete".into()));
         }
-        if self
-            .qualified_order
-            .iter()
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
-            return Err(EvidenceWorkflowError::Invalid(
-                "workflow evidence state is not covered by candidates".into(),
-            ));
-        }
-        for values in [
+        let collections = [
             &self.stage_order,
             &self.plan_order,
             &self.completed_order,
@@ -121,12 +113,102 @@ impl EvidenceWorkflowReceipt {
             &self.uncertainty,
             &self.negative_evidence,
             &self.effect_receipts,
-        ] {
+        ];
+        if collections.iter().any(|values| values.len() > MAX_ITEMS) {
+            return Err(EvidenceWorkflowError::Invalid(
+                "workflow collection exceeds the bounded contract limit".into(),
+            ));
+        }
+        let candidates = self.candidate_order.iter().collect::<BTreeSet<_>>();
+        let qualified = self.qualified_order.iter().collect::<BTreeSet<_>>();
+        let unknown = self.unknown_order.iter().collect::<BTreeSet<_>>();
+        if !qualified.is_subset(&candidates)
+            || !unknown.is_subset(&candidates)
+            || !qualified.is_disjoint(&unknown)
+        {
+            return Err(EvidenceWorkflowError::Invalid(
+                "workflow evidence state is not covered by candidates".into(),
+            ));
+        }
+        for values in collections {
             if values.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(EvidenceWorkflowError::Invalid(
                     "workflow ordering is not canonical".into(),
                 ));
             }
+        }
+        let expected_stages = vec![
+            "stage:checkpoint".to_string(),
+            "stage:surveil-evidence".to_string(),
+            "stage:validate-input".to_string(),
+        ];
+        if self.stage_order != expected_stages || self.completed_order != expected_stages {
+            return Err(EvidenceWorkflowError::Invalid(
+                "workflow stages are not canonical or complete".into(),
+            ));
+        }
+        let mut expected_plan = expected_stages
+            .iter()
+            .map(|stage| format!("plan:{stage}"))
+            .collect::<Vec<_>>();
+        if self.qualified_order.is_empty() {
+            expected_plan.push("plan:retain-unknown-evidence".into());
+        } else {
+            expected_plan.push("plan:publish-qualified-local-artifact".into());
+        }
+        expected_plan.sort();
+        if self.plan_order != expected_plan {
+            return Err(EvidenceWorkflowError::Invalid(
+                "workflow plan does not match evidence state".into(),
+            ));
+        }
+        let expected_blocked = if self.qualified_order.is_empty() {
+            self.unknown_order.clone()
+        } else {
+            Vec::new()
+        };
+        if self.blocked_order != expected_blocked {
+            return Err(EvidenceWorkflowError::Invalid(
+                "workflow blocked state does not match evidence state".into(),
+            ));
+        }
+        let expected_compensation: Vec<String> = if self.qualified_order.is_empty() {
+            vec!["compensate:research-work:retain-unresolved-evidence".into()]
+        } else {
+            Vec::new()
+        };
+        if self.compensation_order != expected_compensation {
+            return Err(EvidenceWorkflowError::Invalid(
+                "workflow compensation does not match evidence state".into(),
+            ));
+        }
+        let gate_blocked = self.omissions.iter().any(|item| {
+            item == "workflow:policy-denied"
+                || item == "workflow:protected-closure-incomplete"
+                || item == "workflow:raw-data-locality-failed"
+        }) || self.negative_evidence.iter().any(|item| {
+            item == "request:policy-denied" || item == "request:raw-data-locality-failed"
+        }) || self
+            .uncertainty
+            .iter()
+            .any(|item| item == "request:protected-closure-incomplete");
+        let expected_disposition = if gate_blocked {
+            EvidenceSurveillanceDisposition::Blocked
+        } else if self.qualified_order.is_empty() {
+            EvidenceSurveillanceDisposition::Unknown
+        } else if self.blocked_order.is_empty()
+            && self.omissions.is_empty()
+            && self.uncertainty.is_empty()
+            && self.negative_evidence.is_empty()
+        {
+            EvidenceSurveillanceDisposition::Qualified
+        } else {
+            EvidenceSurveillanceDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
+            return Err(EvidenceWorkflowError::Invalid(
+                "workflow disposition does not match evidence state or gates".into(),
+            ));
         }
         for value in [
             &self.evidence_receipt_digest,
@@ -134,36 +216,53 @@ impl EvidenceWorkflowReceipt {
             &self.workflow_digest,
             &self.replay_identity,
         ] {
-            let _ = value;
+            if value.as_str().len() != 64 {
+                return Err(EvidenceWorkflowError::Invalid(
+                    "workflow digest length is invalid".into(),
+                ));
+            }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("schedule:research-work:")
-                && !effect.starts_with("compensate:research-work:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_workflow_digest = ContentHash::of_value(&json!({
+            "workflow_id": self.workflow_id,
+            "plan_order": self.plan_order,
+            "completed_order": self.completed_order,
+            "checkpoint_digest": self.checkpoint_digest,
+            "budget_units": self.budget_units,
+            "replay_identity": self.replay_identity
+        }))
+        .map_err(|error| EvidenceWorkflowError::Artifact(error.to_string()))?;
+        if self.workflow_digest != expected_workflow_digest {
             return Err(EvidenceWorkflowError::Invalid(
-                "workflow effect is outside schedule/compensation gate".into(),
+                "workflow digest does not match its receipt fields".into(),
             ));
         }
-        if self.disposition == EvidenceSurveillanceDisposition::Qualified
-            && !self
-                .effect_receipts
-                .iter()
-                .any(|effect| effect.starts_with("schedule:research-work:"))
-        {
+        let expected_effect = if self.disposition == EvidenceSurveillanceDisposition::Qualified {
+            vec![format!("schedule:research-work:{}", self.workflow_id)]
+        } else if !self.compensation_order.is_empty() {
+            vec![format!("compensate:research-work:{}", self.workflow_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect {
             return Err(EvidenceWorkflowError::Invalid(
-                "qualified workflow requires schedule receipt".into(),
+                "workflow effect does not match disposition".into(),
             ));
         }
-        if self.disposition != EvidenceSurveillanceDisposition::Qualified
-            && self.effect_receipts == ["schedule:research-work:unsafe"]
+        let expected_artifact_id = format!("brain-evidence-workflow:{}", self.workflow_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != WORKFLOW_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
         {
             return Err(EvidenceWorkflowError::Invalid(
-                "unsafe workflow schedule is invalid".into(),
+                "workflow artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| EvidenceWorkflowError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| EvidenceWorkflowError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, EvidenceWorkflowError> {
@@ -217,12 +316,13 @@ pub fn compile_evidence_workflow(
     } else {
         plan_order.insert("plan:publish-qualified-local-artifact".into());
     }
-    let actionable = request.budget_units >= plan_order.len() as u32
+    let plan_count = u64::try_from(plan_order.len()).unwrap_or(u64::MAX);
+    let actionable = u64::from(request.budget_units) >= plan_count
         && request.policy_allow
         && request.protected_closure
         && request.raw_data_local
         && evidence.disposition != EvidenceSurveillanceDisposition::Blocked;
-    if request.budget_units < plan_order.len() as u32 {
+    if u64::from(request.budget_units) < plan_count {
         omissions.insert("workflow:budget-exhausted".into());
     }
     if !request.policy_allow {
@@ -246,10 +346,10 @@ pub fn compile_evidence_workflow(
         .map_err(|error| EvidenceWorkflowError::Engine(error.to_string()))?;
     let checkpoint_digest = ContentHash::of_value(&json!({"workflow_id": request.workflow_id, "checkpoint_id": request.checkpoint_id, "stage_order": stage_order, "replay_identity": request.replay_identity})).map_err(|error| EvidenceWorkflowError::Artifact(error.to_string()))?;
     let workflow_digest = ContentHash::of_value(&json!({"workflow_id": request.workflow_id, "plan_order": plan_vec, "completed_order": completed_vec, "checkpoint_digest": checkpoint_digest, "budget_units": request.budget_units, "replay_identity": request.replay_identity})).map_err(|error| EvidenceWorkflowError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "workflow_id": request.workflow_id, "study_id": request.request.study_id, "scope": request.request.scope, "disposition": disposition, "stage_order": stage_order, "plan_order": plan_vec, "completed_order": completed_vec, "blocked_order": blocked_order, "compensation_order": compensation_order, "candidate_order": evidence.candidate_order, "qualified_order": evidence.qualified_order, "unknown_order": evidence.unknown_order, "evidence_receipt_digest": evidence_digest, "checkpoint_digest": checkpoint_digest, "workflow_digest": workflow_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "workflow_id": request.workflow_id, "study_id": request.request.study_id, "scope": request.request.scope, "disposition": disposition, "stage_order": stage_order, "plan_order": plan_vec, "completed_order": completed_vec, "blocked_order": blocked_order, "compensation_order": compensation_order, "candidate_order": evidence.candidate_order, "qualified_order": evidence.qualified_order, "unknown_order": evidence.unknown_order, "evidence_receipt_digest": evidence_digest, "checkpoint_digest": checkpoint_digest, "workflow_digest": workflow_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-evidence-workflow:{}", request.workflow_id),
-        "application/vnd.aurora.research-workflow-receipt+json",
+        WORKFLOW_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -265,18 +365,9 @@ pub fn compile_evidence_workflow(
         study_id: request.request.study_id.clone(),
         scope: request.request.scope.clone(),
         disposition,
-        stage_order: payload
-            .get("stage_order")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default(),
-        plan_order: payload
-            .get("plan_order")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default(),
-        completed_order: payload
-            .get("completed_order")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default(),
+        stage_order,
+        plan_order: plan_vec.clone(),
+        completed_order: completed_vec.clone(),
         blocked_order: blocked_order.into_iter().collect(),
         compensation_order: compensation_order.into_iter().collect(),
         candidate_order: evidence.candidate_order.clone(),
@@ -303,6 +394,37 @@ pub fn compile_evidence_workflow(
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn receipt_payload(receipt: &EvidenceWorkflowReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "workflow_id": receipt.workflow_id,
+        "study_id": receipt.study_id,
+        "scope": receipt.scope,
+        "disposition": receipt.disposition,
+        "stage_order": receipt.stage_order,
+        "plan_order": receipt.plan_order,
+        "completed_order": receipt.completed_order,
+        "blocked_order": receipt.blocked_order,
+        "compensation_order": receipt.compensation_order,
+        "candidate_order": receipt.candidate_order,
+        "qualified_order": receipt.qualified_order,
+        "unknown_order": receipt.unknown_order,
+        "evidence_receipt_digest": receipt.evidence_receipt_digest,
+        "checkpoint_digest": receipt.checkpoint_digest,
+        "workflow_digest": receipt.workflow_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 fn validate_request(request: &EvidenceWorkflowRequest) -> Result<(), EvidenceWorkflowError> {

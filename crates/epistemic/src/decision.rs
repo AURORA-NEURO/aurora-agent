@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 /// Exposed because a caller comparing decisions across two runs needs the same tolerance the
 /// library used, and because a hidden epsilon is a hidden decision.
 pub const LOSS_EPSILON: f64 = 1e-12;
+const BELIEF_NORMALIZATION_EPSILON: f64 = 1e-9;
 
 /// Actions, models, and the loss of taking one under the other.
 ///
@@ -62,7 +63,12 @@ impl DecisionProblem {
                 models: models.len(),
             });
         }
-        let want = actions.len() * models.len();
+        let want = actions.len().checked_mul(models.len()).ok_or(
+            EpistemicError::DecisionProblemSizeOverflow {
+                actions: actions.len(),
+                models: models.len(),
+            },
+        )?;
         if loss.len() != want {
             return Err(EpistemicError::LossMatrixShape {
                 got: loss.len(),
@@ -119,7 +125,12 @@ impl DecisionProblem {
                 models: self.models.len(),
             });
         }
-        let want = self.actions.len() * self.models.len();
+        let want = self.actions.len().checked_mul(self.models.len()).ok_or(
+            EpistemicError::DecisionProblemSizeOverflow {
+                actions: self.actions.len(),
+                models: self.models.len(),
+            },
+        )?;
         if self.loss.len() != want {
             return Err(EpistemicError::LossMatrixShape {
                 got: self.loss.len(),
@@ -351,11 +362,36 @@ impl Belief {
 
     /// Checks the belief is over the same model set as `problem`.
     pub fn check_against(&self, problem: &DecisionProblem) -> Result<(), EpistemicError> {
+        problem.validate()?;
         if self.mass.len() != problem.model_count() {
             return Err(EpistemicError::BeliefShape {
                 models: problem.model_count(),
                 got: self.mass.len(),
             });
+        }
+        self.validate()
+    }
+
+    /// Re-checks the invariants after a value arrived through derived serde deserialisation.
+    ///
+    /// The constructor normalises its input, but serde can populate the private mass vector
+    /// without invoking it. Accepting such a value would let an unnormalised prior rescale every
+    /// expected loss while still looking like a valid belief to downstream callers.
+    pub fn validate(&self) -> Result<(), EpistemicError> {
+        for (model, value) in self.mass.iter().enumerate() {
+            if !value.is_finite() || *value < 0.0 {
+                return Err(EpistemicError::InadmissibleBeliefMass {
+                    model,
+                    value: *value,
+                });
+            }
+        }
+        let total: f64 = self.mass.iter().sum();
+        if total <= 0.0 || !total.is_finite() {
+            return Err(EpistemicError::DegenerateBelief { mass: total });
+        }
+        if (total - 1.0).abs() > BELIEF_NORMALIZATION_EPSILON {
+            return Err(EpistemicError::InvalidBeliefNormalization { total });
         }
         Ok(())
     }

@@ -20,6 +20,9 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-adapter-P07-F01";
 pub const FEATURE_VERSION: &str = "0.1.0";
+pub const CONTRACT_VERSION: &str = "quality-control/1.0";
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_METRICS: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -68,9 +71,22 @@ impl QualityControlRequest {
                 "at least one quality metric is required".into(),
             ));
         }
+        if self.metrics.len() > MAX_METRICS {
+            return Err(QualityControlError::InvalidField(
+                "quality metric count exceeds the bounded contract".into(),
+            ));
+        }
+        validate_text("dataset_id", &self.dataset_id)?;
+        validate_text("modality", &self.modality)?;
+        if self.source_digest == ContentHash::of_bytes(b"") {
+            return Err(QualityControlError::InvalidField(
+                "source digest is required".into(),
+            ));
+        }
         let mut ids = BTreeSet::new();
         for metric in &self.metrics {
-            if metric.metric_id.trim().is_empty() || !ids.insert(metric.metric_id.clone()) {
+            validate_text("metric_id", &metric.metric_id)?;
+            if !ids.insert(metric.metric_id.clone()) {
                 return Err(QualityControlError::InvalidField(
                     "metric identifiers must be unique and non-empty".into(),
                 ));
@@ -108,11 +124,16 @@ pub struct QualityControlSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QualityControlReceipt {
     pub schema_version: String,
+    pub contract_version: String,
     pub feature_id: String,
     pub dataset_id: String,
     pub modality: String,
+    pub source_digest: ContentHash,
     pub request_digest: ContentHash,
+    pub metrics: Vec<QualityMetric>,
+    pub conformance_verified: bool,
     pub summary: QualityControlSummary,
+    pub semantic_loss: Vec<SemanticLoss>,
     pub artifact: TypedResearchArtifact,
     pub raw_data_local: bool,
     pub boundary: String,
@@ -120,7 +141,9 @@ pub struct QualityControlReceipt {
 
 impl QualityControlReceipt {
     pub fn validate(&self) -> Result<(), QualityControlError> {
-        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION {
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.contract_version != CONTRACT_VERSION
+        {
             return Err(QualityControlError::Contract(
                 ResearchContractError::SchemaVersion {
                     expected: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
@@ -131,6 +154,10 @@ impl QualityControlReceipt {
         if self.feature_id != FEATURE_ID
             || self.dataset_id.trim().is_empty()
             || self.modality.trim().is_empty()
+            || self.metrics.is_empty()
+            || self.metrics.len() > MAX_METRICS
+            || self.source_digest == ContentHash::of_bytes(b"")
+            || self.request_digest == ContentHash::of_bytes(b"")
         {
             return Err(QualityControlError::InvalidField(
                 "quality-control identity is incomplete".into(),
@@ -148,8 +175,66 @@ impl QualityControlReceipt {
                 "quality receipt requires reasons and local raw data".into(),
             ));
         }
+        validate_text("dataset_id", &self.dataset_id)?;
+        validate_text("modality", &self.modality)?;
+        if self
+            .metrics
+            .windows(2)
+            .any(|pair| pair[0].metric_id >= pair[1].metric_id)
+        {
+            return Err(QualityControlError::InvalidField(
+                "quality metrics must be strictly sorted".into(),
+            ));
+        }
+        let request = QualityControlRequest {
+            dataset_id: self.dataset_id.clone(),
+            modality: self.modality.clone(),
+            source_digest: self.source_digest.clone(),
+            metrics: self.metrics.clone(),
+            conformance_verified: self.conformance_verified,
+            raw_data_local: self.raw_data_local,
+        };
+        request.validate()?;
+        let expected_request_digest = request_digest(&request)?;
+        if self.request_digest != expected_request_digest {
+            return Err(QualityControlError::InvalidField(
+                "request digest does not match the retained quality inputs".into(),
+            ));
+        }
+        let (expected_summary, _) = derive_quality_control(
+            &self.metrics,
+            self.conformance_verified,
+            self.raw_data_local,
+        );
+        if self.summary != expected_summary {
+            return Err(QualityControlError::InvalidField(
+                "quality summary is not derived from metric and gate state".into(),
+            ));
+        }
+        if self.semantic_loss != quality_control_semantic_loss() {
+            return Err(QualityControlError::InvalidField(
+                "quality semantic loss is not canonical".into(),
+            ));
+        }
+        let expected_provenance = vec![ProvenanceLink {
+            source_id: self.dataset_id.clone(),
+            relation: "quality-control-source-digest".into(),
+            digest: self.source_digest.clone(),
+        }];
+        if self.artifact.artifact_id != format!("quality-control:{}", self.dataset_id)
+            || self.artifact.content_type != "application/vnd.aurora.quality-control+json"
+            || self.artifact.semantic_loss != self.semantic_loss
+            || self.artifact.provenance != expected_provenance
+        {
+            return Err(QualityControlError::InvalidField(
+                "quality-control artifact is not bound to its retained inputs".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(QualityControlError::Contract)?;
+        self.artifact
+            .verify_payload(&quality_control_payload(self))
             .map_err(QualityControlError::Contract)
     }
 
@@ -161,6 +246,7 @@ impl QualityControlReceipt {
     }
 
     pub fn digest(&self) -> Result<ContentHash, QualityControlError> {
+        self.validate()?;
         let value = serde_json::to_value(self)
             .map_err(|error| QualityControlError::Serialization(error.to_string()))?;
         ContentHash::of_value(&value)
@@ -217,21 +303,42 @@ fn metric_status(metric: &QualityMetric) -> MetricStatus {
     }
 }
 
-pub fn evaluate_quality_control(
-    request: &QualityControlRequest,
-) -> Result<QualityControlReceipt, QualityControlError> {
-    request.validate()?;
-    let request_value = serde_json::to_value(request)
+fn validate_text(field: &str, value: &str) -> Result<(), QualityControlError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(QualityControlError::InvalidField(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(QualityControlError::InvalidField(format!(
+            "{field} is outside its bounded text contract"
+        )));
+    }
+    Ok(())
+}
+
+fn request_digest(request: &QualityControlRequest) -> Result<ContentHash, QualityControlError> {
+    let mut canonical = request.clone();
+    canonical
+        .metrics
+        .sort_by(|left, right| left.metric_id.cmp(&right.metric_id));
+    let value = serde_json::to_value(&canonical)
         .map_err(|error| QualityControlError::Serialization(error.to_string()))?;
-    let request_digest = ContentHash::of_value(&request_value)
-        .map_err(|error| QualityControlError::Serialization(error.to_string()))?;
+    ContentHash::of_value(&value)
+        .map_err(|error| QualityControlError::Serialization(error.to_string()))
+}
+
+fn derive_quality_control(
+    metrics: &[QualityMetric],
+    conformance_verified: bool,
+    raw_data_local: bool,
+) -> (QualityControlSummary, Vec<Value>) {
     let mut passed = 0;
     let mut warnings = 0;
     let mut blocked = 0;
     let mut unknown = 0;
     let mut reasons = Vec::new();
-    let metric_rows = request
-        .metrics
+    let metric_rows = metrics
         .iter()
         .map(|metric| {
             let status = metric_status(metric);
@@ -266,11 +373,11 @@ pub fn evaluate_quality_control(
             })
         })
         .collect::<Vec<_>>();
-    if !request.conformance_verified {
+    if !conformance_verified {
         blocked += 1;
         reasons.push("adapter conformance is not verified".into());
     }
-    if !request.raw_data_local {
+    if !raw_data_local {
         blocked += 1;
         reasons.push("raw research data is not local to the institution".into());
     }
@@ -286,53 +393,146 @@ pub fn evaluate_quality_control(
     } else {
         QualityDisposition::Pass
     };
-    let summary = QualityControlSummary {
-        disposition,
-        passed,
-        warnings,
-        blocked,
-        unknown,
-        reasons,
-    };
-    let payload = json!({
-        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
-        "feature_id": FEATURE_ID,
-        "dataset_id": request.dataset_id,
-        "modality": request.modality,
-        "source_digest": request.source_digest,
+    (
+        QualityControlSummary {
+            disposition,
+            passed,
+            warnings,
+            blocked,
+            unknown,
+            reasons,
+        },
+        metric_rows,
+    )
+}
+
+fn quality_control_semantic_loss() -> Vec<SemanticLoss> {
+    vec![SemanticLoss {
+        field: "raw_data".into(),
+        reason: "raw experimental data remains institution-local; receipt exports metrics and digests only".into(),
+        severity: LossSeverity::Bounded,
+    }]
+}
+
+fn quality_control_payload(receipt: &QualityControlReceipt) -> Value {
+    let (_, metric_rows) = derive_quality_control(
+        &receipt.metrics,
+        receipt.conformance_verified,
+        receipt.raw_data_local,
+    );
+    quality_control_payload_from_parts(
+        &receipt.schema_version,
+        &receipt.contract_version,
+        &receipt.feature_id,
+        &receipt.dataset_id,
+        &receipt.modality,
+        &receipt.source_digest,
+        &receipt.request_digest,
+        receipt.conformance_verified,
+        &receipt.summary,
+        &metric_rows,
+        &receipt.semantic_loss,
+        &receipt.artifact.provenance,
+        receipt.raw_data_local,
+        &receipt.boundary,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn quality_control_payload_from_parts(
+    schema_version: &str,
+    contract_version: &str,
+    feature_id: &str,
+    dataset_id: &str,
+    modality: &str,
+    source_digest: &ContentHash,
+    request_digest: &ContentHash,
+    conformance_verified: bool,
+    summary: &QualityControlSummary,
+    metric_rows: &[Value],
+    semantic_loss: &[SemanticLoss],
+    provenance: &[ProvenanceLink],
+    raw_data_local: bool,
+    boundary: &str,
+) -> Value {
+    json!({
+        "schema_version": schema_version,
+        "contract_version": contract_version,
+        "feature_id": feature_id,
+        "dataset_id": dataset_id,
+        "modality": modality,
+        "source_digest": source_digest,
         "request_digest": request_digest,
+        "conformance_verified": conformance_verified,
         "summary": summary,
         "metrics": metric_rows,
-        "boundary": PRECLINICAL_BOUNDARY,
-    });
+        "semantic_loss": semantic_loss,
+        "provenance": provenance,
+        "raw_data_local": raw_data_local,
+        "boundary": boundary,
+    })
+}
+
+pub fn evaluate_quality_control(
+    request: &QualityControlRequest,
+) -> Result<QualityControlReceipt, QualityControlError> {
+    request.validate()?;
+    let mut canonical_request = request.clone();
+    canonical_request
+        .metrics
+        .sort_by(|left, right| left.metric_id.cmp(&right.metric_id));
+    let request_digest = request_digest(&canonical_request)?;
+    let (summary, metric_rows) = derive_quality_control(
+        &canonical_request.metrics,
+        canonical_request.conformance_verified,
+        canonical_request.raw_data_local,
+    );
+    let semantic_loss = quality_control_semantic_loss();
+    let provenance = vec![ProvenanceLink {
+        source_id: canonical_request.dataset_id.clone(),
+        relation: "quality-control-source-digest".into(),
+        digest: canonical_request.source_digest.clone(),
+    }];
+    let payload = quality_control_payload_from_parts(
+        RESEARCH_CONTRACT_SCHEMA_VERSION,
+        CONTRACT_VERSION,
+        FEATURE_ID,
+        &canonical_request.dataset_id,
+        &canonical_request.modality,
+        &canonical_request.source_digest,
+        &request_digest,
+        canonical_request.conformance_verified,
+        &summary,
+        &metric_rows,
+        &semantic_loss,
+        &provenance,
+        canonical_request.raw_data_local,
+        PRECLINICAL_BOUNDARY,
+    );
     let artifact = TypedResearchArtifact::from_payload(
-        format!("quality-control:{}", request.dataset_id),
+        format!("quality-control:{}", canonical_request.dataset_id),
         "application/vnd.aurora.quality-control+json",
         &payload,
-        vec![SemanticLoss {
-            field: "raw_data".into(),
-            reason: "raw experimental data remains institution-local; receipt exports metrics and digests only".into(),
-            severity: LossSeverity::Bounded,
-        }],
-        vec![ProvenanceLink {
-            source_id: request.dataset_id.clone(),
-            relation: "quality-control-source-digest".into(),
-            digest: request.source_digest.clone(),
-        }],
+        semantic_loss.clone(),
+        provenance,
     )?;
     let receipt = QualityControlReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
-        dataset_id: request.dataset_id.clone(),
-        modality: request.modality.clone(),
+        dataset_id: canonical_request.dataset_id,
+        modality: canonical_request.modality,
+        source_digest: canonical_request.source_digest,
         request_digest,
+        metrics: canonical_request.metrics,
+        conformance_verified: canonical_request.conformance_verified,
         summary,
+        semantic_loss,
         artifact,
-        raw_data_local: request.raw_data_local,
+        raw_data_local: canonical_request.raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
-    receipt.verify_payload(&payload)?;
     Ok(receipt)
 }
 
@@ -395,5 +595,35 @@ mod tests {
         let right = evaluate_quality_control(&input).unwrap();
         assert_eq!(left.digest().unwrap(), right.digest().unwrap());
         manifest().validate().unwrap();
+    }
+
+    #[test]
+    fn metric_input_order_is_canonicalized() {
+        let ordered = request(vec![
+            metric("focus", Some(0.95), true),
+            metric("signal", Some(0.95), true),
+        ]);
+        let mut reversed = ordered.clone();
+        reversed.metrics.reverse();
+        let left = evaluate_quality_control(&ordered).unwrap();
+        let right = evaluate_quality_control(&reversed).unwrap();
+        assert_eq!(left.digest().unwrap(), right.digest().unwrap());
+        assert_eq!(left.request_digest, right.request_digest);
+    }
+
+    #[test]
+    fn retained_metric_tampering_is_rejected() {
+        let mut receipt =
+            evaluate_quality_control(&request(vec![metric("focus", Some(0.95), true)])).unwrap();
+        receipt.metrics[0].value = Some(0.1);
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn quality_artifact_payload_tampering_is_rejected() {
+        let mut receipt =
+            evaluate_quality_control(&request(vec![metric("focus", Some(0.95), true)])).unwrap();
+        receipt.artifact.content_hash = ContentHash::of_bytes(b"tampered");
+        assert!(receipt.validate().is_err());
     }
 }

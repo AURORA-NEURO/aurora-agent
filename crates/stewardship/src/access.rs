@@ -551,9 +551,10 @@ impl AccessLedger {
             });
         }
         if !contract.retention.permits(at) {
-            let until = match contract.retention {
-                Retention::Until { epoch } => epoch,
-                Retention::Unbounded => unreachable!("unbounded retention permits every epoch"),
+            let Retention::Until { epoch: until } = contract.retention else {
+                return Err(AccessError::InvariantViolation {
+                    detail: "unbounded retention rejected an epoch it should permit",
+                });
             };
             return Err(AccessError::PastRetention {
                 contract: contract.id.to_string(),

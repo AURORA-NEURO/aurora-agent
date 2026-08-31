@@ -68,14 +68,24 @@ impl ResearchReleaseBatchReceipt {
                 "schema, feature, or boundary".into(),
             ));
         }
+        let classified_releases = self.published_releases.checked_add(self.blocked_releases);
         if self.total_releases == 0
             || self.total_releases != self.entries.len()
-            || self.published_releases + self.blocked_releases != self.total_releases
+            || classified_releases != Some(self.total_releases)
+            || self
+                .entries
+                .windows(2)
+                .any(|pair| pair[0].release_id >= pair[1].release_id)
             || self.entries.iter().any(|entry| {
                 entry.release_id.trim().is_empty()
                     || entry.reasons.is_empty()
-                    || (entry.disposition == ResearchReleaseBatchDisposition::Published
-                        && entry.release_digest.is_none())
+                    || entry.reasons.iter().any(|reason| reason.trim().is_empty())
+                    || match entry.disposition {
+                        ResearchReleaseBatchDisposition::Published => {
+                            entry.release_digest.is_none()
+                        }
+                        ResearchReleaseBatchDisposition::Blocked => entry.release_digest.is_some(),
+                    }
             })
         {
             return Err(ResearchReleaseBatchError::InvalidField(
@@ -84,6 +94,25 @@ impl ResearchReleaseBatchReceipt {
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| ResearchReleaseBatchError::Artifact(error.to_string()))?;
+        if self.artifact.artifact_id != "research-release-batch"
+            || self.artifact.content_type != "application/vnd.aurora.research-release-batch+json"
+        {
+            return Err(ResearchReleaseBatchError::Artifact(
+                "artifact identity or content type does not match the release batch".into(),
+            ));
+        }
+        let payload = json!({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "total_releases": self.total_releases,
+            "published_releases": self.published_releases,
+            "blocked_releases": self.blocked_releases,
+            "entries": self.entries,
+            "boundary": self.boundary,
+        });
+        self.artifact
+            .verify_payload(&payload)
             .map_err(|error| ResearchReleaseBatchError::Artifact(error.to_string()))
     }
 
@@ -282,6 +311,40 @@ mod tests {
         assert!(matches!(
             validate_request(&request),
             Err(ResearchReleaseBatchError::DuplicateRelease(_))
+        ));
+    }
+
+    #[test]
+    fn receipt_rejects_overflow_duplicate_and_artifact_tampering() {
+        let signer = FederationSigner::new(
+            "fixture-key",
+            ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]),
+        )
+        .unwrap();
+        let request = ResearchReleaseBatchRequest {
+            releases: vec![ResearchReleaseRequest {
+                release_id: "release:a".into(),
+                origin: "site-a".into(),
+                purpose: "benchmark".into(),
+                artifacts: vec![],
+                evidence_receipts: vec![],
+                policy: policy("a"),
+                localization_statement: "local".into(),
+            }],
+        };
+        let mut receipt = build_research_release_batch(&request, &signer).unwrap();
+        receipt.artifact.content_hash = ContentHash::of_bytes(b"tampered");
+        assert!(matches!(
+            receipt.validate(),
+            Err(ResearchReleaseBatchError::Artifact(_))
+        ));
+
+        receipt.artifact.content_hash = ContentHash::of_bytes(b"restored");
+        receipt.published_releases = usize::MAX;
+        receipt.blocked_releases = usize::MAX;
+        assert!(matches!(
+            receipt.validate(),
+            Err(ResearchReleaseBatchError::InvalidField(_))
         ));
     }
 }

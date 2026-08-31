@@ -36,6 +36,24 @@ pub mod authority;
 pub mod error;
 pub mod job;
 pub mod lease;
+pub mod federated_quality_workbench;
+pub mod lease_fencing_integrity_support;
+pub mod local_lease_fencing_integrity_inference;
+pub mod multimodal_lease_fencing_integrity_inference;
+pub mod throughput_lease_fencing_integrity_inference;
+pub mod federated_continual_lease_fencing_integrity_inference;
+pub mod local_lease_fencing_integrity_contract_model;
+pub mod multimodal_lease_fencing_integrity_contract_model;
+pub mod throughput_lease_fencing_integrity_contract_model;
+pub mod federated_continual_lease_fencing_integrity_contract_model;
+pub mod local_lease_fencing_integrity_research_copilot;
+pub mod multimodal_lease_fencing_integrity_research_copilot;
+pub mod throughput_lease_fencing_integrity_research_copilot;
+pub mod federated_continual_lease_fencing_integrity_research_copilot;
+pub mod local_lease_fencing_integrity_workflow_fabric;
+pub mod multimodal_lease_fencing_integrity_workflow_fabric;
+pub mod throughput_lease_fencing_integrity_workflow_fabric;
+pub mod federated_continual_lease_fencing_integrity_workflow_fabric;
 pub mod snapshot;
 pub mod store;
 
@@ -49,6 +67,20 @@ pub use authority::{
 pub use error::FactoryError;
 pub use job::{Idempotency, Job, JobState, ResourceClass};
 pub use lease::{Lease, WorkerCapability};
+pub use federated_quality_workbench::{
+    assure_factory_federated_quality_workbench, factory_federated_quality_workbench_manifest,
+    FactoryQualityPeer4, FactoryQualityVerdict5, FactoryQualityVerdict5Artifact,
+    FactoryQualityWorkbenchError, FactoryQualityWorkbenchRequest, QualityEvidenceState,
+    QualityObservation4, CONTENT_TYPE as FEDERATED_QUALITY_WORKBENCH_CONTENT_TYPE,
+    CONTRACT_VERSION as FEDERATED_QUALITY_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_QUALITY_WORKBENCH_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_QUALITY_WORKBENCH_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_QUALITY_WORKBENCH_OUTPUT_SCHEMA,
+};
+pub use lease_fencing_integrity_support::{
+    LeaseFencingArtifact4, LeaseFencingIntegrityCard7, LeaseFencingIntegrityError,
+    LeaseFencingIntegrityRequest4, WorkerLease4,
+};
 pub use snapshot::{
     CompensationRecord, IdempotencyIndexEntry, JobStoreSnapshot, OutputRecord,
     JOB_STORE_SNAPSHOT_SCHEMA_VERSION, MAX_JOB_STORE_SNAPSHOT_BYTES,

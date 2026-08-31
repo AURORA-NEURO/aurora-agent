@@ -92,5 +92,3 @@ def operate_mutation_knowledge_federated_control(*, request: Mapping[str, Any]) 
 
 
 __all__ = ["FEATURE_ID", "CONTRACT_VERSION", "INPUT_SCHEMA", "OUTPUT_SCHEMA", "MutationKnowledgeFederatedReceipt", "operate_mutation_knowledge_federated_control"]
-
-

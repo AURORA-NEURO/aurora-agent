@@ -114,6 +114,18 @@ impl RoutingPolicy {
         self.approved.require(&self.safe_default)?;
         check_range("neighbourhood_radius", self.neighbourhood_radius, 0.0, 1.0)?;
         check_range("min_margin", self.min_margin, 0.0, 2.0)?;
+        if self.min_observations_per_architecture == 0 {
+            return Err(RoutingError::InvalidParameter {
+                field: "min_observations_per_architecture",
+                value: 0.0,
+            });
+        }
+        if self.min_distinct_tasks == 0 {
+            return Err(RoutingError::InvalidParameter {
+                field: "min_distinct_tasks",
+                value: 0.0,
+            });
+        }
         if !(self.confidence_margin_scale.is_finite() && self.confidence_margin_scale > 0.0) {
             return Err(RoutingError::InvalidParameter {
                 field: "confidence_margin_scale",
@@ -133,6 +145,7 @@ impl RoutingPolicy {
         evidence: &EvidenceLedger,
     ) -> Result<RoutingDecision, RoutingError> {
         self.validate()?;
+        fingerprint.validate()?;
 
         let neighbourhood = evidence.neighbourhood(fingerprint, self.neighbourhood_radius);
         let mut considered: Vec<ArchitectureScore> = Vec::new();
@@ -227,6 +240,8 @@ impl RoutingPolicy {
         fingerprint: &Fingerprint,
         evidence: &EvidenceLedger,
     ) -> Result<RoutingDecision, RoutingError> {
+        self.validate()?;
+        crate::evidence::validate_task_id(task_id)?;
         if evidence.contains_task(task_id) {
             return Err(RoutingError::EvidenceLeak {
                 task: task_id.to_string(),
@@ -504,6 +519,13 @@ mod tests {
                 task: "held-out".to_string()
             }
         );
+
+        assert!(matches!(
+            policy()
+                .route_unseen(" held-out", &fingerprint, &evidence)
+                .unwrap_err(),
+            RoutingError::InvalidTaskId { .. }
+        ));
     }
 
     #[test]
@@ -582,6 +604,51 @@ mod tests {
                 value: 4.0
             }
         );
+    }
+
+    #[test]
+    fn zero_support_thresholds_are_refused() {
+        let mut zero_observations_policy = policy();
+        zero_observations_policy.min_observations_per_architecture = 0;
+        assert_eq!(
+            zero_observations_policy.validate().unwrap_err(),
+            RoutingError::InvalidParameter {
+                field: "min_observations_per_architecture",
+                value: 0.0
+            }
+        );
+
+        let mut zero_distinct_policy = policy();
+        zero_distinct_policy.min_distinct_tasks = 0;
+        assert_eq!(
+            zero_distinct_policy.validate().unwrap_err(),
+            RoutingError::InvalidParameter {
+                field: "min_distinct_tasks",
+                value: 0.0
+            }
+        );
+
+        let fingerprint = synthetic_fingerprint(1.0, 1, false, 100);
+        let evidence = EvidenceLedger::new([observation_with(
+            &fingerprint,
+            "held-out",
+            Architecture::FiberCompiled,
+            true,
+            10,
+            100,
+        )])
+        .unwrap();
+        let mut invalid_policy = policy();
+        invalid_policy.min_distinct_tasks = 0;
+        assert!(matches!(
+            invalid_policy
+                .route_unseen("held-out", &fingerprint, &evidence)
+                .unwrap_err(),
+            RoutingError::InvalidParameter {
+                field: "min_distinct_tasks",
+                value: 0.0
+            }
+        ));
     }
 
     #[test]

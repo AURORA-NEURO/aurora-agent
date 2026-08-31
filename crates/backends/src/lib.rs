@@ -71,6 +71,24 @@ pub mod direct;
 pub mod elimination;
 pub mod error;
 pub mod estimate;
+pub mod federated_retrieval_synthesis_workflow_fabric;
+pub mod capability_negotiation_integrity_support;
+pub mod local_capability_negotiation_integrity_inference;
+pub mod multimodal_capability_negotiation_integrity_inference;
+pub mod throughput_capability_negotiation_integrity_inference;
+pub mod federated_continual_capability_negotiation_integrity_inference;
+pub mod local_capability_negotiation_integrity_contract_model;
+pub mod multimodal_capability_negotiation_integrity_contract_model;
+pub mod throughput_capability_negotiation_integrity_contract_model;
+pub mod federated_continual_capability_negotiation_integrity_contract_model;
+pub mod local_capability_negotiation_integrity_research_copilot;
+pub mod multimodal_capability_negotiation_integrity_research_copilot;
+pub mod throughput_capability_negotiation_integrity_research_copilot;
+pub mod federated_continual_capability_negotiation_integrity_research_copilot;
+pub mod local_capability_negotiation_integrity_workflow_fabric;
+pub mod multimodal_capability_negotiation_integrity_workflow_fabric;
+pub mod throughput_capability_negotiation_integrity_workflow_fabric;
+pub mod federated_continual_capability_negotiation_integrity_workflow_fabric;
 pub mod order;
 pub mod phase;
 pub mod portfolio;
@@ -86,6 +104,17 @@ pub use direct::DirectMaterialization;
 pub use elimination::VariableElimination;
 pub use error::{Declined, RegionError};
 pub use estimate::{Budget, CostModel, Estimate};
+pub use federated_retrieval_synthesis_workflow_fabric::{
+    federated_retrieval_synthesis_workflow_manifest, run_federated_retrieval_synthesis,
+    FederatedRetrievalArtifact8, FederatedRetrievalDisposition, FederatedRetrievalError,
+    FederatedRetrievalSynthesisRequest6, FederatedRetrievalSynthesisRun8, RetrievalPeer5,
+    CONTRACT_VERSION as FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_RETRIEVAL_SYNTHESIS_WORKFLOW_FEATURE_ID,
+};
+pub use capability_negotiation_integrity_support::{
+    BackendArtifact4, BackendCandidate4, BackendCard7, BackendRequest4,
+    CapabilityNegotiationIntegrityError,
+};
 pub use order::{
     elimination_order, Bound, EliminationClique, EliminationOrder, OrderStrategy, PrimalGraph,
     WidthMetric, EXACT_ORDER_MAX_VARIABLES,

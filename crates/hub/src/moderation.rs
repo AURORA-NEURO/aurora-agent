@@ -273,7 +273,10 @@ impl ModerationLedger {
 
     /// Every tombstone on the ledger, in identifier order. A transparency report reads this.
     pub fn tombstones(&self) -> Vec<&Tombstone> {
-        self.records.values().filter_map(|r| r.tombstone.as_ref()).collect()
+        self.records
+            .values()
+            .filter_map(|r| r.tombstone.as_ref())
+            .collect()
     }
 
     pub fn history(&self, id: &SubmissionId) -> Vec<&ModerationEvent> {
@@ -331,7 +334,9 @@ impl ModerationLedger {
         };
         self.events.push(event);
         self.records.insert(id.clone(), record);
-        Ok(self.records.get(&id).expect("just inserted"))
+        self.records
+            .get(&id)
+            .ok_or_else(|| HubError::UnknownSubmission(id.to_string()))
     }
 
     /// Move a submission, or refuse.
@@ -385,7 +390,10 @@ impl ModerationLedger {
             superseded_by: decision.superseded_by.clone(),
         };
 
-        let record = self.records.get_mut(id).expect("state was read above");
+        let record = self
+            .records
+            .get_mut(id)
+            .ok_or_else(|| HubError::UnknownSubmission(id.to_string()))?;
         record.state = to;
         record.history.push(event.clone());
         if to == ModerationState::Withdrawn {
@@ -409,7 +417,9 @@ impl ModerationLedger {
             });
         }
         self.events.push(event);
-        Ok(self.records.get(id).expect("present"))
+        self.records
+            .get(id)
+            .ok_or_else(|| HubError::UnknownSubmission(id.to_string()))
     }
 
     /// Raise a published submission's verification status.
@@ -445,7 +455,9 @@ impl ModerationLedger {
         }
         let from = record.verification;
         if to <= from {
-            return Err(HubError::SelfAssertedVerification { claimed: to.as_str() });
+            return Err(HubError::SelfAssertedVerification {
+                claimed: to.as_str(),
+            });
         }
 
         self.advance(at)?;
@@ -457,11 +469,16 @@ impl ModerationLedger {
             reason: None,
             superseded_by: None,
         };
-        let record = self.records.get_mut(id).expect("read above");
+        let record = self
+            .records
+            .get_mut(id)
+            .ok_or_else(|| HubError::UnknownSubmission(id.to_string()))?;
         record.verification = to;
         record.history.push(event.clone());
         self.events.push(event);
-        Ok(self.records.get(id).expect("present"))
+        self.records
+            .get(id)
+            .ok_or_else(|| HubError::UnknownSubmission(id.to_string()))
     }
 
     /// Drop a submission back to self-reported, with a reason. Used when a reproduction later
@@ -496,11 +513,16 @@ impl ModerationLedger {
             reason: Some(reason),
             superseded_by: None,
         };
-        let record = self.records.get_mut(id).expect("read above");
+        let record = self
+            .records
+            .get_mut(id)
+            .ok_or_else(|| HubError::UnknownSubmission(id.to_string()))?;
         record.verification = VerificationStatus::SelfReported;
         record.history.push(event.clone());
         self.events.push(event);
-        Ok(self.records.get(id).expect("present"))
+        self.records
+            .get(id)
+            .ok_or_else(|| HubError::UnknownSubmission(id.to_string()))
     }
 }
 
@@ -515,10 +537,18 @@ mod tests {
         let mut ledger = ModerationLedger::new();
         ledger.open(submission, "hub", Epoch(1)).unwrap();
         ledger
-            .transition(&id, ModerationState::UnderReview, Decision::by("rev-1", Epoch(2)))
+            .transition(
+                &id,
+                ModerationState::UnderReview,
+                Decision::by("rev-1", Epoch(2)),
+            )
             .unwrap();
         ledger
-            .transition(&id, ModerationState::Accepted, Decision::by("rev-1", Epoch(3)))
+            .transition(
+                &id,
+                ModerationState::Accepted,
+                Decision::by("rev-1", Epoch(3)),
+            )
             .unwrap();
         (ledger, id)
     }
@@ -538,7 +568,9 @@ mod tests {
         let submission = accepted_submission();
         let mut ledger = ModerationLedger::new();
         ledger.open(submission.clone(), "hub", Epoch(1)).unwrap();
-        let err = ledger.open(submission, "hub", Epoch(2)).expect_err("duplicate");
+        let err = ledger
+            .open(submission, "hub", Epoch(2))
+            .expect_err("duplicate");
         assert_eq!(err, HubError::DuplicateSubmission("sub-1".into()));
     }
 
@@ -549,7 +581,11 @@ mod tests {
         let mut ledger = ModerationLedger::new();
         ledger.open(submission, "hub", Epoch(1)).unwrap();
         let err = ledger
-            .transition(&id, ModerationState::Rejected, Decision::by("rev-1", Epoch(2)))
+            .transition(
+                &id,
+                ModerationState::Rejected,
+                Decision::by("rev-1", Epoch(2)),
+            )
             .expect_err("no reason");
         assert_eq!(
             err,
@@ -573,7 +609,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(record.state, ModerationState::Rejected);
-        assert_eq!(record.current_reason(), Some("pack digest does not resolve"));
+        assert_eq!(
+            record.current_reason(),
+            Some("pack digest does not resolve")
+        );
     }
 
     #[test]
@@ -613,11 +652,17 @@ mod tests {
         let tombstone = ledger.tombstone(&id).expect("tombstone written");
         assert_eq!(tombstone.reason, "participant withdrawal upstream");
         assert_eq!(tombstone.withdrawn_at, Epoch(4));
-        assert!(tombstone.states_traversed.contains(&ModerationState::Accepted));
+        assert!(tombstone
+            .states_traversed
+            .contains(&ModerationState::Accepted));
         assert_eq!(ledger.tombstones().len(), 1);
 
         let err = ledger
-            .transition(&id, ModerationState::Accepted, Decision::by("hub", Epoch(5)))
+            .transition(
+                &id,
+                ModerationState::Accepted,
+                Decision::by("hub", Epoch(5)),
+            )
             .expect_err("withdrawal is terminal");
         assert_eq!(
             err,
@@ -641,7 +686,10 @@ mod tests {
             .unwrap();
         let tombstone = ledger.tombstone(&id).unwrap();
         let rendered = serde_json::to_string(tombstone).unwrap();
-        assert!(!rendered.contains("glioma"), "tombstone leaked scope prose: {rendered}");
+        assert!(
+            !rendered.contains("glioma"),
+            "tombstone leaked scope prose: {rendered}"
+        );
         assert!(rendered.contains(tombstone.content.as_str()));
     }
 
@@ -649,7 +697,11 @@ mod tests {
     fn supersession_requires_a_named_successor_that_is_not_itself() {
         let (mut ledger, id) = published_ledger();
         let err = ledger
-            .transition(&id, ModerationState::Superseded, Decision::by("hub", Epoch(4)))
+            .transition(
+                &id,
+                ModerationState::Superseded,
+                Decision::by("hub", Epoch(4)),
+            )
             .expect_err("no successor");
         assert_eq!(err, HubError::MissingSupersedingSubmission);
 
@@ -683,7 +735,13 @@ mod tests {
                 Decision::by("hub", Epoch(1)).because("backdated"),
             )
             .expect_err("backdated event");
-        assert_eq!(err, HubError::NonMonotonicEpoch { proposed: 1, last: 3 });
+        assert_eq!(
+            err,
+            HubError::NonMonotonicEpoch {
+                proposed: 1,
+                last: 3
+            }
+        );
     }
 
     #[test]
@@ -707,7 +765,10 @@ mod tests {
         ledger
             .attest(&id, VerificationStatus::Reproduced, "rev-2", Epoch(4))
             .unwrap();
-        assert_eq!(ledger.verification(&id), Some(VerificationStatus::Reproduced));
+        assert_eq!(
+            ledger.verification(&id),
+            Some(VerificationStatus::Reproduced)
+        );
 
         let err = ledger
             .attest(&id, VerificationStatus::SelfReported, "rev-2", Epoch(5))
@@ -733,13 +794,21 @@ mod tests {
         let err = ledger
             .attest(&id, VerificationStatus::Verified, "rev-2", Epoch(2))
             .expect_err("not published");
-        assert!(matches!(err, HubError::IllegalTransition { from: ModerationState::Submitted, .. }));
+        assert!(matches!(
+            err,
+            HubError::IllegalTransition {
+                from: ModerationState::Submitted,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn the_ledger_round_trips_through_json_with_its_history_intact() {
         let (mut ledger, id) = published_ledger();
-        ledger.open(submission_with_id("sub-2"), "hub", Epoch(4)).unwrap();
+        ledger
+            .open(submission_with_id("sub-2"), "hub", Epoch(4))
+            .unwrap();
         let encoded = serde_json::to_string(&ledger).unwrap();
         let decoded: ModerationLedger = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, ledger);
@@ -750,9 +819,23 @@ mod tests {
     #[test]
     fn every_state_has_an_explicit_successor_set_and_only_withdrawn_is_terminal() {
         use ModerationState::*;
-        for state in [Submitted, UnderReview, Accepted, Rejected, Superseded, Withdrawn] {
-            assert_eq!(state.successors().is_empty(), state.is_terminal(), "{state}");
-            assert!(!state.permits(state), "{state} must not transition to itself");
+        for state in [
+            Submitted,
+            UnderReview,
+            Accepted,
+            Rejected,
+            Superseded,
+            Withdrawn,
+        ] {
+            assert_eq!(
+                state.successors().is_empty(),
+                state.is_terminal(),
+                "{state}"
+            );
+            assert!(
+                !state.permits(state),
+                "{state} must not transition to itself"
+            );
         }
     }
 }

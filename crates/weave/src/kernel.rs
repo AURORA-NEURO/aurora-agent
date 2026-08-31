@@ -23,6 +23,20 @@ pub enum KernelError {
     #[error("unknown participant: {0}")]
     UnknownParticipant(String),
 
+    #[error("participant identity `{0}` is already admitted")]
+    DuplicateParticipant(String),
+
+    #[error("participant {participant} has an invalid {field} identity")]
+    InvalidParticipantIdentity {
+        participant: String,
+        field: &'static str,
+    },
+
+    #[error(
+        "participant {participant} is bound to grant held by {holder}, not by the participant"
+    )]
+    GrantHolderMismatch { participant: String, holder: String },
+
     #[error("{kind} requires an antecedent act")]
     MissingAntecedent { kind: &'static str },
 
@@ -114,10 +128,33 @@ impl Kernel {
         self.rejected
     }
 
-    pub fn admit(&mut self, participant: Participant, budget: Budget) {
+    pub fn admit(&mut self, participant: Participant, budget: Budget) -> Result<(), KernelError> {
+        for (field, value) in [
+            ("name", participant.name.as_str()),
+            ("role", participant.role.as_str()),
+            ("grant", participant.grant.as_str()),
+        ] {
+            if value.trim().is_empty() || value.chars().any(char::is_control) {
+                return Err(KernelError::InvalidParticipantIdentity {
+                    participant: participant.name.clone(),
+                    field,
+                });
+            }
+        }
+        if self.participants.contains_key(&participant.name) {
+            return Err(KernelError::DuplicateParticipant(participant.name));
+        }
+        let grant = self.authority.effective(&participant.grant)?;
+        if grant.holder != participant.name {
+            return Err(KernelError::GrantHolderMismatch {
+                participant: participant.name,
+                holder: grant.holder.clone(),
+            });
+        }
         self.budgets.insert(participant.name.clone(), budget);
         self.participants
             .insert(participant.name.clone(), participant);
+        Ok(())
     }
 
     pub fn participant(&self, name: &str) -> Option<&Participant> {
@@ -152,6 +189,9 @@ impl Kernel {
             .get(&act.from)
             .ok_or_else(|| KernelError::UnknownParticipant(act.from.clone()))?
             .clone();
+        if !self.participants.contains_key(&act.to) {
+            return Err(KernelError::UnknownParticipant(act.to.clone()));
+        }
 
         if let Some(expected) = act.kind.requires_antecedent() {
             let referenced = act

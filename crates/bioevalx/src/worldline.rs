@@ -39,6 +39,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::WorldlineError;
 
+const MAX_WORLDLINE_TEXT_BYTES: usize = 256;
+const MAX_OBSERVATIONS: usize = 8192;
+const MAX_DECISIONS: usize = 8192;
+const MAX_CONTEXT_REFERENCES: usize = 4096;
+
 /// Which of the four clocks a fact is being read on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -87,6 +92,10 @@ impl Observation {
         accessible: Timestamp,
     ) -> Result<Self, WorldlineError> {
         let id = id.into();
+        validate_worldline_text(&id).map_err(|detail| WorldlineError::InvalidObservation {
+            observation: id.clone(),
+            detail,
+        })?;
         if measured < occurred {
             return Err(WorldlineError::MeasuredBeforeOccurred {
                 observation: id,
@@ -115,6 +124,35 @@ impl Observation {
             recorded,
             accessible,
         })
+    }
+
+    fn validate(&self) -> Result<(), WorldlineError> {
+        validate_worldline_text(&self.id).map_err(|detail| WorldlineError::InvalidObservation {
+            observation: self.id.clone(),
+            detail,
+        })?;
+        if self.measured < self.occurred {
+            return Err(WorldlineError::MeasuredBeforeOccurred {
+                observation: self.id.clone(),
+                occurred: self.occurred.to_rfc3339(),
+                measured: self.measured.to_rfc3339(),
+            });
+        }
+        if self.recorded < self.measured {
+            return Err(WorldlineError::RecordedBeforeMeasured {
+                observation: self.id.clone(),
+                measured: self.measured.to_rfc3339(),
+                recorded: self.recorded.to_rfc3339(),
+            });
+        }
+        if self.accessible < self.recorded {
+            return Err(WorldlineError::AccessibleBeforeRecorded {
+                observation: self.id.clone(),
+                recorded: self.recorded.to_rfc3339(),
+                accessible: self.accessible.to_rfc3339(),
+            });
+        }
+        Ok(())
     }
 
     /// Read one clock.
@@ -160,7 +198,7 @@ pub struct LeakWitness {
 }
 
 /// A set of observations and the decisions taken over them.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Worldline {
     observations: BTreeMap<String, Observation>,
     decisions: Vec<Decision>,
@@ -174,16 +212,33 @@ impl Worldline {
 
     /// Add an observation.
     pub fn observe(&mut self, observation: Observation) -> Result<(), WorldlineError> {
+        observation.validate()?;
+        if self.observations.len() >= MAX_OBSERVATIONS {
+            return Err(WorldlineError::TooManyObservations {
+                limit: MAX_OBSERVATIONS,
+            });
+        }
         if self.observations.contains_key(&observation.id) {
             return Err(WorldlineError::DuplicateObservation(observation.id));
         }
-        self.observations.insert(observation.id.clone(), observation);
+        self.observations
+            .insert(observation.id.clone(), observation);
         Ok(())
     }
 
     /// Add a decision.
-    pub fn decide(&mut self, decision: Decision) {
+    pub fn decide(&mut self, decision: Decision) -> Result<(), WorldlineError> {
+        self.validate_decision(&decision)?;
+        if self.decisions.len() >= MAX_DECISIONS {
+            return Err(WorldlineError::TooManyDecisions {
+                limit: MAX_DECISIONS,
+            });
+        }
+        if self.decisions.iter().any(|existing| existing.id == decision.id) {
+            return Err(WorldlineError::DuplicateDecision(decision.id));
+        }
         self.decisions.push(decision);
+        Ok(())
     }
 
     /// Every observation a decision saw before it was available.
@@ -248,4 +303,94 @@ impl Worldline {
     pub fn decisions(&self) -> &[Decision] {
         &self.decisions
     }
+
+    fn validate(&self) -> Result<(), WorldlineError> {
+        if self.observations.len() > MAX_OBSERVATIONS {
+            return Err(WorldlineError::TooManyObservations {
+                limit: MAX_OBSERVATIONS,
+            });
+        }
+        for (key, observation) in &self.observations {
+            if key != &observation.id {
+                return Err(WorldlineError::InvalidObservation {
+                    observation: observation.id.clone(),
+                    detail: "observation map key must equal the observation id".into(),
+                });
+            }
+            observation.validate()?;
+        }
+        if self.decisions.len() > MAX_DECISIONS {
+            return Err(WorldlineError::TooManyDecisions {
+                limit: MAX_DECISIONS,
+            });
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        for decision in &self.decisions {
+            if !ids.insert(decision.id.clone()) {
+                return Err(WorldlineError::DuplicateDecision(decision.id.clone()));
+            }
+            self.validate_decision(decision)?;
+        }
+        Ok(())
+    }
+
+    fn validate_decision(&self, decision: &Decision) -> Result<(), WorldlineError> {
+        validate_worldline_text(&decision.id).map_err(|detail| WorldlineError::InvalidDecision {
+            decision: decision.id.clone(),
+            detail,
+        })?;
+        if decision.context.len() > MAX_CONTEXT_REFERENCES {
+            return Err(WorldlineError::TooManyContextReferences {
+                limit: MAX_CONTEXT_REFERENCES,
+            });
+        }
+        let mut context = std::collections::BTreeSet::new();
+        for observation in &decision.context {
+            validate_worldline_text(observation).map_err(|detail| {
+                WorldlineError::InvalidDecision {
+                    decision: decision.id.clone(),
+                    detail: format!("context reference is invalid: {detail}"),
+                }
+            })?;
+            if !context.insert(observation.clone()) {
+                return Err(WorldlineError::DuplicateContextReference {
+                    decision: decision.id.clone(),
+                    observation: observation.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+struct WorldlineWire {
+    observations: BTreeMap<String, Observation>,
+    decisions: Vec<Decision>,
+}
+
+impl<'de> Deserialize<'de> for Worldline {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = WorldlineWire::deserialize(deserializer)?;
+        let worldline = Worldline {
+            observations: wire.observations,
+            decisions: wire.decisions,
+        };
+        worldline.validate().map_err(serde::de::Error::custom)?;
+        Ok(worldline)
+    }
+}
+
+fn validate_worldline_text(value: &str) -> Result<(), String> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_WORLDLINE_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err("value must be a bounded, trimmed, control-free string".into());
+    }
+    Ok(())
 }

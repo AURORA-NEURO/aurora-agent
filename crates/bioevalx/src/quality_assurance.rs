@@ -16,6 +16,10 @@ pub const CONTRACT_VERSION: &str = "bioevalx-multimodal-quality-assurance/1.0";
 pub const SCHEMA_VERSION: &str = "aurora-research-contract/1.0";
 pub const PRECLINICAL_BOUNDARY: &str =
     "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions";
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_OBJECTS: usize = 4096;
+const MAX_METRICS_PER_OBJECT: usize = 4096;
+const MAX_LIST_ITEMS: usize = 8192;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -77,7 +81,7 @@ pub enum QualityDisposition {
     Blocked,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct QualityVerdict {
     pub verdict_id: String,
     pub disposition: QualityDisposition,
@@ -96,7 +100,7 @@ pub struct QualityVerdict {
     pub boundary: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct QualityAssuranceReceipt {
     pub schema_version: String,
     pub contract_version: String,
@@ -122,6 +126,62 @@ pub enum QualityAssuranceError {
     Serialization(String),
 }
 
+fn validate_text(field: &str, value: &str) -> Result<(), QualityAssuranceError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(QualityAssuranceError::Invalid(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > MAX_TEXT_BYTES {
+        return Err(QualityAssuranceError::Invalid(format!(
+            "{field} exceeds the {MAX_TEXT_BYTES}-byte bound"
+        )));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(QualityAssuranceError::Invalid(format!(
+            "{field} must not contain control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(values: &[String], field: &str) -> Result<(), QualityAssuranceError> {
+    if values.len() > MAX_LIST_ITEMS {
+        return Err(QualityAssuranceError::Invalid(format!(
+            "{field} exceeds the {MAX_LIST_ITEMS}-item bound"
+        )));
+    }
+    for value in values {
+        validate_text(field, value)?;
+    }
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(QualityAssuranceError::Invalid(format!(
+            "{field} must be strictly sorted and unique"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_hash_order(values: &[ContentHash], field: &str) -> Result<(), QualityAssuranceError> {
+    if values.len() > MAX_LIST_ITEMS {
+        return Err(QualityAssuranceError::Invalid(format!(
+            "{field} exceeds the {MAX_LIST_ITEMS}-item bound"
+        )));
+    }
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(QualityAssuranceError::Invalid(format!(
+            "{field} must be strictly sorted and unique"
+        )));
+    }
+    Ok(())
+}
+
+impl QualityAssuranceRequest {
+    pub fn validate(&self) -> Result<(), QualityAssuranceError> {
+        validate_request(self)
+    }
+}
+
 impl QualityAssuranceReceipt {
     pub fn validate(&self) -> Result<(), QualityAssuranceError> {
         if self.schema_version != SCHEMA_VERSION
@@ -144,32 +204,63 @@ impl QualityAssuranceReceipt {
                 "quality identity, witness verdict, checks, effects, locality, or boundary is incomplete".into(),
             ));
         }
-        for values in [
-            &self.verdict.study_order,
-            &self.verdict.qualified_order,
-            &self.verdict.blocked_order,
-            &self.verdict.witness_order,
-            &self.verdict.omissions,
-            &self.verdict.uncertainty,
-            &self.verdict.negative_evidence,
-            &self.checks,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        for (values, field) in [
+            (&self.verdict.study_order, "verdict.study_order"),
+            (&self.verdict.qualified_order, "verdict.qualified_order"),
+            (&self.verdict.blocked_order, "verdict.blocked_order"),
+            (&self.verdict.witness_order, "verdict.witness_order"),
+            (&self.verdict.omissions, "verdict.omissions"),
+            (&self.verdict.uncertainty, "verdict.uncertainty"),
+            (&self.verdict.negative_evidence, "verdict.negative_evidence"),
+            (&self.checks, "checks"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(QualityAssuranceError::Invalid(
-                    "quality assurance ordering is not canonical".into(),
-                ));
-            }
+            validate_sorted_unique(values, field)?;
         }
-        for values in [&self.verdict.artifact_order, &self.verdict.provenance_order] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(QualityAssuranceError::Invalid(
-                    "quality assurance digest ordering is not canonical".into(),
-                ));
-            }
+        validate_hash_order(&self.verdict.artifact_order, "verdict.artifact_order")?;
+        validate_hash_order(&self.verdict.provenance_order, "verdict.provenance_order")?;
+        if self.verdict.verdict_id != format!("quality-verdict:{}", self.request_id)
+            || self.verdict.replay_identity == ContentHash::of_bytes(b"")
+            || self.verdict.disposition != self.disposition
+            || self.verdict.qualified_order.iter().any(|id| {
+                !self.verdict.study_order.contains(id) || self.verdict.blocked_order.contains(id)
+            })
+            || self
+                .verdict
+                .blocked_order
+                .iter()
+                .any(|id| !self.verdict.study_order.contains(id))
+        {
+            return Err(QualityAssuranceError::Invalid(
+                "quality verdict identity, state partition, or replay identity is inconsistent"
+                    .into(),
+            ));
+        }
+        let verdict_payload = json!({
+            "verdict_id": self.verdict.verdict_id,
+            "disposition": self.verdict.disposition,
+            "study_order": self.verdict.study_order,
+            "qualified_order": self.verdict.qualified_order,
+            "blocked_order": self.verdict.blocked_order,
+            "comparability_digest": self.verdict.comparability_digest,
+            "artifact_order": self.verdict.artifact_order,
+            "provenance_order": self.verdict.provenance_order,
+            "witness_order": self.verdict.witness_order,
+            "omissions": self.verdict.omissions,
+            "uncertainty": self.verdict.uncertainty,
+            "negative_evidence": self.verdict.negative_evidence,
+            "replay_identity": self.verdict.replay_identity,
+            "boundary": self.verdict.boundary,
+        });
+        let expected_digest = ContentHash::of_value(&verdict_payload)
+            .map_err(|error| QualityAssuranceError::Serialization(error.to_string()))?;
+        if self.verdict.verdict_digest != expected_digest {
+            return Err(QualityAssuranceError::Invalid(
+                "quality verdict digest does not match its visible fields".into(),
+            ));
         }
         Ok(())
     }
@@ -186,7 +277,7 @@ impl QualityAssuranceReceipt {
 pub fn assure_quality(
     request: &QualityAssuranceRequest,
 ) -> Result<QualityAssuranceReceipt, QualityAssuranceError> {
-    validate_request(request)?;
+    request.validate()?;
     let mut objects = request.objects.clone();
     objects.sort_by(|left, right| left.study_id.cmp(&right.study_id));
     let mut studies = BTreeSet::new();
@@ -364,7 +455,9 @@ fn validate_request(request: &QualityAssuranceRequest) -> Result<(), QualityAssu
     if request.request_id.trim().is_empty()
         || request.workflow_id.trim().is_empty()
         || request.objects.len() < 2
+        || request.objects.len() > MAX_OBJECTS
         || request.minimum_studies == 0
+        || request.minimum_studies as usize > MAX_OBJECTS
         || request.budget == 0
         || request.boundary != PRECLINICAL_BOUNDARY
     {
@@ -373,13 +466,18 @@ fn validate_request(request: &QualityAssuranceRequest) -> Result<(), QualityAssu
                 .into(),
         ));
     }
+    validate_text("request_id", &request.request_id)?;
+    validate_text("workflow_id", &request.workflow_id)?;
     let mut studies = BTreeSet::new();
+    let mut object_ids = BTreeSet::new();
     for object in &request.objects {
         if object.object_id.trim().is_empty()
             || object.study_id.trim().is_empty()
+            || !object_ids.insert(object.object_id.clone())
             || !studies.insert(object.study_id.clone())
             || object.scope.trim().is_empty()
             || object.modality_order.is_empty()
+            || object.modality_order.len() > MAX_LIST_ITEMS
             || object.boundary != PRECLINICAL_BOUNDARY
             || object
                 .modality_order
@@ -391,9 +489,38 @@ fn validate_request(request: &QualityAssuranceRequest) -> Result<(), QualityAssu
                 object.object_id
             )));
         }
+        validate_text("object_id", &object.object_id)?;
+        validate_text("study_id", &object.study_id)?;
+        validate_text("scope", &object.scope)?;
+        validate_sorted_unique(&object.modality_order, "modality_order")?;
+        validate_hash_order(&object.artifact_order, "artifact_order")?;
+        validate_hash_order(&object.provenance_order, "provenance_order")?;
+        for (field, values) in [
+            ("omissions", &object.omissions),
+            ("uncertainty", &object.uncertainty),
+            ("negative_evidence", &object.negative_evidence),
+        ] {
+            if values.len() > MAX_LIST_ITEMS {
+                return Err(QualityAssuranceError::Invalid(format!(
+                    "{field} exceeds the {MAX_LIST_ITEMS}-item bound"
+                )));
+            }
+            for value in values {
+                validate_text(field, value)?;
+            }
+        }
+        if object.metrics.len() > MAX_METRICS_PER_OBJECT {
+            return Err(QualityAssuranceError::Invalid(format!(
+                "metrics for {} exceed the {MAX_METRICS_PER_OBJECT}-item bound",
+                object.object_id
+            )));
+        }
+        let mut metric_ids = BTreeSet::new();
         for metric in &object.metrics {
             if metric.metric_id.trim().is_empty()
                 || metric.modality.trim().is_empty()
+                || !metric_ids.insert(metric.metric_id.clone())
+                || !object.modality_order.contains(&metric.modality)
                 || metric.boundary != PRECLINICAL_BOUNDARY
             {
                 return Err(QualityAssuranceError::Invalid(format!(
@@ -401,6 +528,8 @@ fn validate_request(request: &QualityAssuranceRequest) -> Result<(), QualityAssu
                     metric.metric_id
                 )));
             }
+            validate_text("metric_id", &metric.metric_id)?;
+            validate_text("metric.modality", &metric.modality)?;
         }
     }
     Ok(())
@@ -517,5 +646,46 @@ mod tests {
             "comparability",
         )]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn duplicate_object_identity_is_rejected_before_pooling() {
+        let mut duplicate = object("study:b", QualityState::Pass, "comparability");
+        duplicate.object_id = "object:study:a".into();
+        let result = assure_quality(&request(vec![
+            object("study:a", QualityState::Pass, "comparability"),
+            duplicate,
+        ]));
+        assert!(matches!(result, Err(QualityAssuranceError::Invalid(_))));
+    }
+
+    #[test]
+    fn metric_for_an_undeclared_modality_is_rejected() {
+        let mut invalid = object("study:b", QualityState::Pass, "comparability");
+        invalid.metrics[0].modality = "spatial".into();
+        let result = assure_quality(&request(vec![
+            object("study:a", QualityState::Pass, "comparability"),
+            invalid,
+        ]));
+        assert!(matches!(result, Err(QualityAssuranceError::Invalid(_))));
+    }
+
+    #[test]
+    fn changing_a_visible_verdict_field_invalidates_its_digest() {
+        let receipt = assure_quality(&request(vec![
+            object("study:a", QualityState::Pass, "comparability"),
+            object("study:b", QualityState::Pass, "comparability"),
+        ]))
+        .unwrap();
+        let mut tampered = receipt;
+        tampered
+            .verdict
+            .witness_order
+            .push("tampered-witness".into());
+        assert!(matches!(
+            tampered.validate(),
+            Err(QualityAssuranceError::Invalid(message))
+                if message.contains("digest")
+        ));
     }
 }

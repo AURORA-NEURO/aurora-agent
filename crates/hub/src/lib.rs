@@ -63,6 +63,24 @@ pub mod id;
 pub mod leaderboard;
 pub mod moderation;
 pub mod submission;
+pub mod policy_autonomy_inference_engine;
+pub mod submission_release_integrity_support;
+pub mod local_submission_release_integrity_inference;
+pub mod multimodal_submission_release_integrity_inference;
+pub mod throughput_submission_release_integrity_inference;
+pub mod federated_continual_submission_release_integrity_inference;
+pub mod local_submission_release_integrity_contract_model;
+pub mod multimodal_submission_release_integrity_contract_model;
+pub mod throughput_submission_release_integrity_contract_model;
+pub mod federated_continual_submission_release_integrity_contract_model;
+pub mod local_submission_release_integrity_research_copilot;
+pub mod multimodal_submission_release_integrity_research_copilot;
+pub mod throughput_submission_release_integrity_research_copilot;
+pub mod federated_continual_submission_release_integrity_research_copilot;
+pub mod local_submission_release_integrity_workflow_fabric;
+pub mod multimodal_submission_release_integrity_workflow_fabric;
+pub mod throughput_submission_release_integrity_workflow_fabric;
+pub mod federated_continual_submission_release_integrity_workflow_fabric;
 
 #[cfg(test)]
 mod fixtures;
@@ -86,4 +104,19 @@ pub use moderation::{
 pub use submission::{
     accept, BuildProvenance, DeclaredScope, EvidenceScale, NonClaim, NonClaimKind, Provenance,
     Standing, Submission, SubmissionDraft, Submitter, VerificationStatus,
+};
+pub use policy_autonomy_inference_engine::{
+    infer_policy_receipt, infer_policy_receipt_json,
+    policy_autonomy_inference_engine_manifest, validate_policy_receipt_json,
+    ActionAndAuthority3, PolicyAutonomyInferenceError, PolicyInferenceRequest3, PolicyReceipt1,
+    CONTRACT_VERSION as POLICY_AUTONOMY_INFERENCE_CONTRACT_VERSION,
+    FEATURE_ID as POLICY_AUTONOMY_INFERENCE_FEATURE_ID,
+    INPUT_SCHEMA as POLICY_AUTONOMY_INFERENCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as POLICY_AUTONOMY_INFERENCE_OUTPUT_SCHEMA,
+};
+pub use submission_release_integrity_support::{
+    release as release_submission_release_integrity,
+    manifest as submission_release_integrity_manifest,
+    SubmissionArtifact4, SubmissionCandidate4, SubmissionReleaseCard7,
+    SubmissionReleaseIntegrityError, SubmissionReleaseRequest4,
 };

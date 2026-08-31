@@ -77,9 +77,13 @@ pub mod calibration;
 pub mod comparator;
 pub mod error;
 pub mod evidence;
+pub mod federated_execution_copilot;
 pub mod federated_multimodal_assurance;
+pub mod federated_replication_negative_results_copilot;
 pub mod fingerprint;
 pub mod lab;
+pub mod limitation_closure_workflow;
+pub mod laboratory_inference_engine;
 pub mod policy;
 pub mod regret;
 pub mod report;
@@ -92,14 +96,42 @@ pub use calibration::{CalibrationBin, CalibrationCurve};
 pub use comparator::Comparator;
 pub use error::RoutingError;
 pub use evidence::{utility, EvidenceLedger, Observation, INADMISSIBLE_UTILITY};
+pub use federated_execution_copilot::{
+    federated_execution_copilot_manifest, route_federated_execution, ExecutionPlanCandidate6,
+    ExecutionPlanEvidenceState, ExecutionPlanPeer5, ExecutionRoutingReceipt9,
+    FederatedExecutionCopilotError, FederatedExecutionCopilotRequest8,
+    CONTRACT_VERSION as FEDERATED_EXECUTION_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_EXECUTION_COPILOT_FEATURE_ID,
+};
 pub use federated_multimodal_assurance::{
     assure_federated_multimodal, FederatedAssuranceDisposition, FederatedAssuranceError,
     FederatedMultimodalAssuranceReceipt, FederatedMultimodalAssuranceRequest,
     CONTRACT_VERSION as FEDERATED_MULTIMODAL_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as FEDERATED_MULTIMODAL_ASSURANCE_FEATURE_ID,
 };
+pub use federated_replication_negative_results_copilot::{
+    assure_federated_replication, federated_replication_negative_results_manifest,
+    ReplicationCopilotArtifact8, ReplicationCopilotError, ReplicationCopilotReceipt8,
+    ReplicationObservation6, ReplicationOutcome, ReplicationPeer5, ReplicationQuestion6,
+    CONTRACT_VERSION as FEDERATED_REPLICATION_NEGATIVE_RESULTS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_REPLICATION_NEGATIVE_RESULTS_FEATURE_ID,
+};
 pub use fingerprint::{AttachmentRegime, ChainRegime, Fingerprint, Regime, TagRegime};
 pub use lab::{observe, Holdout, LabSettings, Task};
+pub use limitation_closure_workflow::{
+    compile_limitation_closure_workflow, limitation_closure_workflow_manifest, Limitation6,
+    LimitationClosureDisposition, LimitationClosureError, LimitationClosureWorkflowReceipt7,
+    LimitationClosureWorkflowRequest5,
+    CONTRACT_VERSION as LIMITATION_CLOSURE_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as LIMITATION_CLOSURE_WORKFLOW_FEATURE_ID,
+};
+pub use laboratory_inference_engine::{
+    infer_laboratory_actions, infer_laboratory_actions_json, laboratory_inference_manifest,
+    validate_laboratory_actions_json, InstrumentActionReceipt1, InstrumentActionRequest4,
+    InstrumentCandidate4, InstrumentDisposition, LaboratoryInferenceError,
+    CONTRACT_VERSION as LABORATORY_INFERENCE_CONTRACT_VERSION,
+    FEATURE_ID as LABORATORY_INFERENCE_FEATURE_ID,
+};
 pub use policy::{
     ArchitectureScore, DecisionReason, RoutingDecision, RoutingPolicy,
     DEFAULT_CONFIDENCE_MARGIN_SCALE, DEFAULT_MIN_MARGIN, DEFAULT_NEIGHBOURHOOD_RADIUS,

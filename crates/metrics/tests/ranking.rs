@@ -5,7 +5,8 @@ mod common;
 use bioprism_atlas::UnmeasuredReason;
 use bioprism_metrics::{
     breakdown, compare, CapabilityGrid, CapabilityVector, DeclaredWeighting, Dominance, GridCell,
-    Instability, MetricsError, PartialRanking, RankInstability, SystemId, Unorderable,
+    Instability, MetricsError, PartialRanking, RankInstability, SystemId, TotalRanking,
+    Unorderable,
 };
 use common::{cap, grid_of, lower_is_better, point_cell, recorded, unrecorded};
 
@@ -263,6 +264,46 @@ fn every_row_of_a_total_ranking_carries_its_coverage_rather_than_a_bare_number()
 }
 
 #[test]
+fn deserialized_partial_rankings_must_reference_each_pair_exactly_once() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.9, 0.4)),
+        system("b", two_cell_grid("b", 0.4, 0.9)),
+    ])
+    .expect("two systems");
+    let mut document = serde_json::to_value(&ranking).expect("serializable");
+    document["relations"][0]["left"] = serde_json::Value::String("ghost".into());
+
+    assert!(serde_json::from_value::<PartialRanking>(document).is_err());
+}
+
+#[test]
+fn deserialized_total_rankings_must_bind_the_weighting_digest_and_row_receipts() {
+    let ranking = PartialRanking::over(vec![
+        system("a", two_cell_grid("a", 0.9, 0.4)),
+        system("b", two_cell_grid("b", 0.4, 0.9)),
+    ])
+    .expect("two systems");
+    let weighting = DeclaredWeighting::declare(
+        "balanced",
+        vec![(cap("verify.oracle"), 1.0), (cap("safety.escalation"), 1.0)],
+    )
+    .expect("valid weighting");
+    let total = ranking.totalise(&weighting).expect("both cells measured");
+    let encoded = serde_json::to_value(&total).expect("serializable");
+    let restored: TotalRanking = serde_json::from_value(encoded.clone()).expect("valid ranking");
+    assert_eq!(restored.order.len(), 2);
+
+    let mut bad_digest = encoded.clone();
+    bad_digest["weighting_digest"] = serde_json::Value::String("0".repeat(64));
+    assert!(serde_json::from_value::<TotalRanking>(bad_digest).is_err());
+
+    let mut bad_receipt = encoded;
+    bad_receipt["order"][0]["aggregate"]["weighting_digest"] =
+        serde_json::Value::String("0".repeat(64));
+    assert!(serde_json::from_value::<TotalRanking>(bad_receipt).is_err());
+}
+
+#[test]
 fn tied_systems_share_a_rank_and_no_tiebreak_is_applied() {
     let ranking = PartialRanking::over(vec![
         system("a", two_cell_grid("a", 0.7, 0.7)),
@@ -448,6 +489,27 @@ fn an_instability_without_a_denominator_does_not_serialize_as_a_number() {
     for state in [measured, nothing, none] {
         let decoded: Instability = serde_json::from_value(state.clone()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), state);
+    }
+}
+
+#[test]
+fn a_deserialized_instability_cannot_claim_an_impossible_denominator() {
+    for document in [
+        serde_json::json!({
+            "instability": "measured",
+            "top_changed_in": 3,
+            "evaluated": 2
+        }),
+        serde_json::json!({
+            "instability": "nothing_evaluable",
+            "attempted": 0
+        }),
+        serde_json::json!({
+            "instability": "not_perturbable",
+            "weighted_capabilities": 0
+        }),
+    ] {
+        assert!(serde_json::from_value::<Instability>(document).is_err());
     }
 }
 

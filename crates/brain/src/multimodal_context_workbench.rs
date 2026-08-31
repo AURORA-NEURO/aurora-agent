@@ -17,6 +17,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-brain-P03-F18";
 pub const CONTRACT_VERSION: &str = "brain-multimodal-context-workbench/1.0";
+const WORKBENCH_CONTENT_TYPE: &str = "application/vnd.aurora.multimodal-context-workbench+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MultimodalContextWorkbenchCell {
@@ -93,7 +95,6 @@ impl MultimodalContextWorkbenchReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.session_id.trim().is_empty()
             || self.query_id.trim().is_empty()
             || self.goal.trim().is_empty()
@@ -110,27 +111,31 @@ impl MultimodalContextWorkbenchReceipt {
         {
             return Err(MultimodalContextWorkbenchError::Invalid("multimodal workbench identity, cell closure, view, action, locality, disposition, or effects are incomplete".into()));
         }
-        for values in [
-            &self.study_order,
-            &self.modality_order,
-            &self.cell_order,
-            &self.qualified_cell_order,
-            &self.missing_cell_order,
-            &self.incompatible_cell_order,
-            &self.unknown_cell_order,
-            &self.view_order,
-            &self.action_order,
-            &self.blocked_action_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        for (value, field) in [
+            (&self.session_id, "session_id"),
+            (&self.query_id, "query_id"),
+            (&self.goal, "goal"),
+            (&self.boundary, "boundary"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(MultimodalContextWorkbenchError::Invalid(
-                    "multimodal workbench vectors are not canonical".into(),
-                ));
-            }
+            validate_text(value, field)?;
+        }
+        for (values, field) in [
+            (&self.study_order, "study_order"),
+            (&self.modality_order, "modality_order"),
+            (&self.cell_order, "cell_order"),
+            (&self.qualified_cell_order, "qualified_cell_order"),
+            (&self.missing_cell_order, "missing_cell_order"),
+            (&self.incompatible_cell_order, "incompatible_cell_order"),
+            (&self.unknown_cell_order, "unknown_cell_order"),
+            (&self.view_order, "view_order"),
+            (&self.action_order, "action_order"),
+            (&self.blocked_action_order, "blocked_action_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
         }
         let cells = self.cell_order.iter().cloned().collect::<BTreeSet<_>>();
         let mut classified = self
@@ -146,6 +151,13 @@ impl MultimodalContextWorkbenchReceipt {
                 "multimodal cells do not partition outcomes".into(),
             ));
         }
+        if !identity_keys(&self.action_order)
+            .is_disjoint(&identity_keys(&self.blocked_action_order))
+        {
+            return Err(MultimodalContextWorkbenchError::Invalid(
+                "multimodal workbench actions cannot be both available and blocked".into(),
+            ));
+        }
         for digest in [
             &self.context_digest,
             &self.section_digest,
@@ -157,16 +169,40 @@ impl MultimodalContextWorkbenchReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("view:local-multimodal-workbench:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_effect_receipts = if self.disposition == "blocked" {
+            vec!["block:unsafe-release".into()]
+        } else {
+            vec![format!(
+                "view:local-multimodal-workbench:{}",
+                self.session_id
+            )]
+        };
+        if self.effect_receipts != expected_effect_receipts {
             return Err(MultimodalContextWorkbenchError::Invalid(
-                "multimodal workbench effect is outside read-only view gate".into(),
+                "multimodal workbench effect does not match disposition".into(),
+            ));
+        }
+        if !self.raw_data_local {
+            return Err(MultimodalContextWorkbenchError::Invalid(
+                "multimodal context workbench receipts must declare local emitted data".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-multimodal-context-workbench:{}", self.session_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != WORKBENCH_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(MultimodalContextWorkbenchError::Invalid(
+                "multimodal workbench artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| MultimodalContextWorkbenchError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| MultimodalContextWorkbenchError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, MultimodalContextWorkbenchError> {
@@ -289,7 +325,12 @@ pub fn render_multimodal_context_workbench(
             }
         }
     }
-    let disposition = if !request.policy_allow || !request.raw_data_local {
+    let locality_failure =
+        !request.raw_data_local || cell_map.values().any(|cell| !cell.raw_data_local);
+    if locality_failure {
+        omissions.insert("workbench:policy-or-locality-blocked".into());
+    }
+    let disposition = if !request.policy_allow || locality_failure {
         omissions.insert("workbench:policy-or-locality-blocked".into());
         "blocked"
     } else if request.projection_disposition == "admitted" && qualified.len() == cells.len() {
@@ -328,10 +369,11 @@ pub fn render_multimodal_context_workbench(
             request.session_id
         )]
     };
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "session_id": request.session_id, "query_id": request.query_id, "goal": request.goal, "disposition": disposition, "study_order": studies, "modality_order": modalities, "cell_order": cells, "qualified_cell_order": qualified, "missing_cell_order": missing, "incompatible_cell_order": incompatible, "unknown_cell_order": unknown, "view_order": views, "action_order": actions, "blocked_action_order": blocked_actions, "context_digest": request.context_digest, "section_digest": request.section_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let raw_data_local = true;
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "session_id": request.session_id, "query_id": request.query_id, "goal": request.goal, "disposition": disposition, "study_order": studies, "modality_order": modalities, "cell_order": cells, "qualified_cell_order": qualified, "missing_cell_order": missing, "incompatible_cell_order": incompatible, "unknown_cell_order": unknown, "view_order": views, "action_order": actions, "blocked_action_order": blocked_actions, "context_digest": request.context_digest, "section_digest": request.section_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effects, "raw_data_local": raw_data_local, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-multimodal-context-workbench:{}", request.session_id),
-        "application/vnd.aurora.multimodal-context-workbench+json",
+        WORKBENCH_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -363,11 +405,88 @@ pub fn render_multimodal_context_workbench(
         negative_evidence: negative.into_iter().collect(),
         effect_receipts: effects,
         artifact,
-        raw_data_local: true,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), MultimodalContextWorkbenchError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(MultimodalContextWorkbenchError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), MultimodalContextWorkbenchError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(MultimodalContextWorkbenchError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), MultimodalContextWorkbenchError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(MultimodalContextWorkbenchError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &MultimodalContextWorkbenchReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "session_id": receipt.session_id,
+        "query_id": receipt.query_id,
+        "goal": receipt.goal,
+        "disposition": receipt.disposition,
+        "study_order": receipt.study_order,
+        "modality_order": receipt.modality_order,
+        "cell_order": receipt.cell_order,
+        "qualified_cell_order": receipt.qualified_cell_order,
+        "missing_cell_order": receipt.missing_cell_order,
+        "incompatible_cell_order": receipt.incompatible_cell_order,
+        "unknown_cell_order": receipt.unknown_cell_order,
+        "view_order": receipt.view_order,
+        "action_order": receipt.action_order,
+        "blocked_action_order": receipt.blocked_action_order,
+        "context_digest": receipt.context_digest,
+        "section_digest": receipt.section_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -455,5 +574,20 @@ mod tests {
     fn digest_is_stable() {
         let receipt = render_multimodal_context_workbench(&request()).unwrap();
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+    #[test]
+    fn cell_locality_failure_blocks_release() {
+        let mut input = request();
+        input.cells[0].raw_data_local = false;
+        let receipt = render_multimodal_context_workbench(&input).unwrap();
+        assert_eq!(receipt.disposition, "blocked");
+        assert!(receipt.raw_data_local);
+        assert!(receipt.validate().is_ok());
+    }
+    #[test]
+    fn workbench_artifact_payload_is_bound() {
+        let mut receipt = render_multimodal_context_workbench(&request()).unwrap();
+        receipt.query_id = "query:tampered".into();
+        assert!(receipt.validate().is_err());
     }
 }

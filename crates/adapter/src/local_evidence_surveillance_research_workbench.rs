@@ -39,6 +39,8 @@ const CANONICAL_PANELS: [&str; 4] = [
     "panel:qualified",
     "panel:unknown",
 ];
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_ITEMS: usize = 16_384;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalEvidenceSurveillanceResearchWorkbenchRequest {
@@ -57,6 +59,8 @@ pub struct LocalEvidenceSurveillanceResearchWorkbenchReceipt {
     pub schema_version: String,
     pub contract_version: String,
     pub feature_id: String,
+    pub input: LocalEvidenceSurveillanceResearchWorkbenchRequest,
+    pub input_digest: ContentHash,
     pub request_id: String,
     pub workspace_id: String,
     pub study_id: String,
@@ -91,6 +95,74 @@ pub enum LocalEvidenceSurveillanceResearchWorkbenchError {
     Copilot(String),
 }
 
+fn validate_text(
+    field: &str,
+    value: &str,
+) -> Result<(), LocalEvidenceSurveillanceResearchWorkbenchError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+            format!("{field} must be non-empty and trimmed"),
+        ));
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+            format!("{field} is outside its bounded text contract"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_unique_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), LocalEvidenceSurveillanceResearchWorkbenchError> {
+    if values.len() > MAX_ITEMS {
+        return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+            format!("{field} exceeds its item bound"),
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                format!("{field} contains duplicate values"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), LocalEvidenceSurveillanceResearchWorkbenchError> {
+    validate_unique_strings(field, values)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+            format!("{field} ordering is not canonical"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_digest(
+    field: &str,
+    digest: &ContentHash,
+) -> Result<(), LocalEvidenceSurveillanceResearchWorkbenchError> {
+    if digest.as_str().len() != 64
+        || !digest
+            .as_str()
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+            format!("{field} must be a 64-character hex digest"),
+        ));
+    }
+    Ok(())
+}
+
 impl LocalEvidenceSurveillanceResearchWorkbenchReceipt {
     pub fn validate(&self) -> Result<(), LocalEvidenceSurveillanceResearchWorkbenchError> {
         if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
@@ -112,29 +184,34 @@ impl LocalEvidenceSurveillanceResearchWorkbenchReceipt {
                 "workbench identity, views, candidates, locality, or effects are incomplete".into(),
             ));
         }
-        if self.view_order != CANONICAL_VIEWS.iter().map(|value| (*value).to_string()).collect::<Vec<_>>()
-            || self.panel_order != CANONICAL_PANELS.iter().map(|value| (*value).to_string()).collect::<Vec<_>>()
+        validate_text("request_id", &self.request_id)?;
+        validate_text("workspace_id", &self.workspace_id)?;
+        validate_text("study_id", &self.study_id)?;
+        validate_text("scope", &self.scope)?;
+        validate_text("intent", &self.intent)?;
+        if self.view_order
+            != CANONICAL_VIEWS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+            || self.panel_order
+                != CANONICAL_PANELS
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect::<Vec<_>>()
         {
             return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
                 "workbench view or panel order is not canonical".into(),
             ));
         }
-        for values in [
-            &self.candidate_order,
-            &self.qualified_order,
-            &self.unknown_order,
-            &self.blocked_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
-                    "workbench ordering is not canonical".into(),
-                ));
-            }
-        }
+        validate_sorted_strings("candidate_order", &self.candidate_order)?;
+        validate_sorted_strings("qualified_order", &self.qualified_order)?;
+        validate_sorted_strings("unknown_order", &self.unknown_order)?;
+        validate_sorted_strings("blocked_order", &self.blocked_order)?;
+        validate_sorted_strings("omissions", &self.omissions)?;
+        validate_sorted_strings("uncertainty", &self.uncertainty)?;
+        validate_sorted_strings("negative_evidence", &self.negative_evidence)?;
+        validate_sorted_strings("effect_receipts", &self.effect_receipts)?;
         let classified = self
             .qualified_order
             .iter()
@@ -147,29 +224,115 @@ impl LocalEvidenceSurveillanceResearchWorkbenchReceipt {
                 "workbench evidence states do not partition candidates".into(),
             ));
         }
+        if self.disposition == ResearchCopilotDisposition::Completed
+            && (!self.unknown_order.is_empty() || !self.blocked_order.is_empty())
+        {
+            return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                "completed workbench cannot retain unknown or blocked evidence".into(),
+            ));
+        }
+        if matches!(
+            self.disposition,
+            ResearchCopilotDisposition::Unknown | ResearchCopilotDisposition::Blocked
+        ) && !self.qualified_order.is_empty()
+        {
+            return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                "unknown or blocked workbench cannot retain qualified evidence".into(),
+            ));
+        }
         for value in [
             &self.replay_identity,
             &self.copilot_run_digest,
             &self.workbench_digest,
             &self.artifact.content_hash,
         ] {
-            if value.as_str().len() != 64 {
-                return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
-                    "workbench digest is invalid".into(),
-                ));
-            }
+            validate_digest("workbench receipt digest", value)?;
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("view:local-evidence-workbench:")
-                && effect != "block:unsafe-release"
-        }) {
+        if self.effect_receipts
+            != vec![format!(
+                "view:local-evidence-workbench:{}",
+                self.workspace_id
+            )]
+        {
             return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
-                "workbench effect is outside read-only view gate".into(),
+                "workbench effect is not the declared read-only view".into(),
             ));
         }
+        let expected_workbench_digest = ContentHash::of_value(&json!({
+            "workspace_id": self.workspace_id,
+            "study_id": self.study_id,
+            "scope": self.scope,
+            "view_order": self.view_order,
+            "panel_order": self.panel_order,
+            "candidate_order": self.candidate_order,
+            "qualified_order": self.qualified_order,
+            "unknown_order": self.unknown_order,
+            "blocked_order": self.blocked_order,
+            "replay_identity": self.replay_identity,
+            "copilot_run_digest": self.copilot_run_digest,
+        }))
+        .map_err(|error| {
+            LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string())
+        })?;
+        if self.workbench_digest != expected_workbench_digest {
+            return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                "workbench digest does not match its rendered state".into(),
+            ));
+        }
+        if self.artifact.artifact_id
+            != format!("adapter-local-evidence-workbench:{}", self.workspace_id)
+            || self.artifact.content_type != "application/vnd.aurora.local-evidence-workbench+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(
+                "workbench artifact is not bound to its rendered state".into(),
+            ));
+        }
+        let payload = json!({
+            "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+            "contract_version": CONTRACT_VERSION,
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "workspace_id": self.workspace_id,
+            "study_id": self.study_id,
+            "scope": self.scope,
+            "intent": self.intent,
+            "disposition": self.disposition,
+            "view_order": self.view_order,
+            "panel_order": self.panel_order,
+            "candidate_order": self.candidate_order,
+            "qualified_order": self.qualified_order,
+            "unknown_order": self.unknown_order,
+            "blocked_order": self.blocked_order,
+            "replay_identity": self.replay_identity,
+            "copilot_run_digest": self.copilot_run_digest,
+            "workbench_digest": self.workbench_digest,
+            "omissions": self.omissions,
+            "uncertainty": self.uncertainty,
+            "negative_evidence": self.negative_evidence,
+            "effect_receipts": self.effect_receipts,
+            "boundary": PRECLINICAL_BOUNDARY,
+            "raw_data_local": self.raw_data_local,
+        });
+        self.artifact.verify_payload(&payload).map_err(|error| {
+            LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string())
+        })?;
         self.artifact.validate_metadata().map_err(|error| {
             LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string())
-        })
+        })?;
+        if self.input_digest != workbench_input_digest(&self.input)? {
+            return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                "workbench retained input digest mismatch".into(),
+            ));
+        }
+        let expected = build_local_evidence_surveillance_research_workbench(&self.input)?;
+        if self != &expected {
+            return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                "workbench receipt does not match its retained input".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -197,36 +360,200 @@ pub fn local_evidence_surveillance_research_workbench_manifest() -> CapabilityMa
 
 pub fn render_local_evidence_surveillance_research_workbench(
     request: &LocalEvidenceSurveillanceResearchWorkbenchRequest,
-) -> Result<LocalEvidenceSurveillanceResearchWorkbenchReceipt, LocalEvidenceSurveillanceResearchWorkbenchError> {
-    validate_request(request)?;
-    let copilot = run_local_evidence_surveillance_research_copilot(&request.copilot_request)
-        .map_err(|error| LocalEvidenceSurveillanceResearchWorkbenchError::Copilot(error.to_string()))?;
-    let view_order = CANONICAL_VIEWS.iter().map(|value| (*value).to_string()).collect::<Vec<_>>();
-    let panel_order = CANONICAL_PANELS.iter().map(|value| (*value).to_string()).collect::<Vec<_>>();
-    let candidate_order = copilot.candidate_order.clone();
-    let qualified_order = copilot.selected_order.clone();
-    let unknown_order = copilot.unresolved_order.clone();
-    let blocked_order = copilot.denied_order.clone();
-    let copilot_value = serde_json::to_value(&copilot).map_err(|error| LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string()))?;
-    let copilot_run_digest = ContentHash::of_value(&copilot_value).map_err(|error| LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string()))?;
-    let workbench_digest = ContentHash::of_value(&json!({"workspace_id":request.workspace_id,"study_id":request.copilot_request.study_id,"scope":request.scope,"view_order":view_order,"panel_order":panel_order,"candidate_order":candidate_order,"qualified_order":qualified_order,"unknown_order":unknown_order,"blocked_order":blocked_order,"replay_identity":request.replay_identity,"copilot_run_digest":copilot_run_digest})).map_err(|error| LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string()))?;
-    let mut omissions = copilot.omissions.clone();
-    omissions.push("workbench:read-only-local-view".into());
-    omissions.sort(); omissions.dedup();
-    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":request.copilot_request.request_id,"workspace_id":request.workspace_id,"study_id":request.copilot_request.study_id,"scope":request.scope,"intent":request.copilot_request.intent,"disposition":copilot.disposition,"view_order":view_order,"panel_order":panel_order,"candidate_order":candidate_order,"qualified_order":qualified_order,"unknown_order":unknown_order,"blocked_order":blocked_order,"replay_identity":request.replay_identity,"copilot_run_digest":copilot_run_digest,"workbench_digest":workbench_digest,"omissions":omissions,"uncertainty":copilot.uncertainty,"negative_evidence":copilot.negative_evidence,"boundary":PRECLINICAL_BOUNDARY,"raw_data_local":true});
-    let artifact = TypedResearchArtifact::from_payload(format!("adapter-local-evidence-workbench:{}", request.workspace_id), "application/vnd.aurora.local-evidence-workbench+json", &payload, vec![], vec![]).map_err(|error| LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string()))?;
-    let effect_receipts = vec![format!("view:local-evidence-workbench:{}", request.workspace_id)];
-    let receipt = LocalEvidenceSurveillanceResearchWorkbenchReceipt { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), contract_version: CONTRACT_VERSION.into(), feature_id: FEATURE_ID.into(), request_id: request.copilot_request.request_id.clone(), workspace_id: request.workspace_id.clone(), study_id: request.copilot_request.study_id.clone(), scope: request.scope.clone(), intent: request.copilot_request.intent.clone(), disposition: copilot.disposition, view_order, panel_order, candidate_order, qualified_order, unknown_order, blocked_order, replay_identity: request.replay_identity.clone(), copilot_run_digest, workbench_digest, omissions, uncertainty: copilot.uncertainty.clone(), negative_evidence: copilot.negative_evidence.clone(), effect_receipts, artifact, raw_data_local: request.copilot_request.raw_data_local, boundary: request.boundary.clone() };
+) -> Result<
+    LocalEvidenceSurveillanceResearchWorkbenchReceipt,
+    LocalEvidenceSurveillanceResearchWorkbenchError,
+> {
+    let receipt = build_local_evidence_surveillance_research_workbench(request)?;
     receipt.validate()?;
     Ok(receipt)
 }
 
-fn validate_request(request: &LocalEvidenceSurveillanceResearchWorkbenchRequest) -> Result<(), LocalEvidenceSurveillanceResearchWorkbenchError> {
-    if request.workspace_id.trim().is_empty() || request.scope.trim().is_empty() || request.budget_units == 0 || request.boundary != PRECLINICAL_BOUNDARY || request.copilot_request.boundary != PRECLINICAL_BOUNDARY || !request.copilot_request.raw_data_local || !request.copilot_request.dry_run { return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid("workbench identity, budget, dry-run, locality, or preclinical boundary is invalid".into())); }
-    let expected_views = CANONICAL_VIEWS.iter().map(|value| (*value).to_string()).collect::<Vec<_>>();
-    let expected_panels = CANONICAL_PANELS.iter().map(|value| (*value).to_string()).collect::<Vec<_>>();
-    if request.requested_view_order != expected_views || request.requested_panel_order != expected_panels { return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid("workbench views or panels are not canonical".into())); }
-    if request.replay_identity.as_str().len() != 64 || request.copilot_request.replay_identity.as_str().len() != 64 { return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid("workbench replay identity is invalid".into())); }
+fn workbench_input_digest(
+    request: &LocalEvidenceSurveillanceResearchWorkbenchRequest,
+) -> Result<ContentHash, LocalEvidenceSurveillanceResearchWorkbenchError> {
+    let canonical = canonical_local_evidence_surveillance_research_workbench_request(request);
+    let value = serde_json::to_value(canonical).map_err(|error| {
+        LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string())
+    })?;
+    ContentHash::of_value(&value).map_err(|error| {
+        LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string())
+    })
+}
+
+fn canonical_local_evidence_surveillance_research_workbench_request(
+    request: &LocalEvidenceSurveillanceResearchWorkbenchRequest,
+) -> LocalEvidenceSurveillanceResearchWorkbenchRequest {
+    let mut canonical = request.clone();
+    canonical.copilot_request = crate::local_evidence_surveillance_research_copilot::
+        canonical_local_evidence_surveillance_research_copilot_request(
+            &canonical.copilot_request,
+        );
+    canonical
+}
+
+fn build_local_evidence_surveillance_research_workbench(
+    request: &LocalEvidenceSurveillanceResearchWorkbenchRequest,
+) -> Result<
+    LocalEvidenceSurveillanceResearchWorkbenchReceipt,
+    LocalEvidenceSurveillanceResearchWorkbenchError,
+> {
+    validate_request(request)?;
+    let copilot = run_local_evidence_surveillance_research_copilot(&request.copilot_request)
+        .map_err(|error| {
+            LocalEvidenceSurveillanceResearchWorkbenchError::Copilot(error.to_string())
+        })?;
+    let view_order = CANONICAL_VIEWS
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    let panel_order = CANONICAL_PANELS
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    let candidate_order = copilot.candidate_order.clone();
+    let qualified_order = copilot.selected_order.clone();
+    let unknown_order = copilot.unresolved_order.clone();
+    let blocked_order = copilot.denied_order.clone();
+    let copilot_run_digest = copilot.run_digest.clone();
+    let workbench_digest = ContentHash::of_value(&json!({
+        "workspace_id": request.workspace_id,
+        "study_id": request.copilot_request.study_id,
+        "scope": request.scope,
+        "view_order": view_order,
+        "panel_order": panel_order,
+        "candidate_order": candidate_order,
+        "qualified_order": qualified_order,
+        "unknown_order": unknown_order,
+        "blocked_order": blocked_order,
+        "replay_identity": request.replay_identity,
+        "copilot_run_digest": copilot_run_digest,
+    }))
+    .map_err(|error| {
+        LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string())
+    })?;
+    let mut omissions = copilot.omissions.clone();
+    omissions.push("workbench:read-only-local-view".into());
+    omissions.sort();
+    omissions.dedup();
+    let effect_receipts = vec![format!(
+        "view:local-evidence-workbench:{}",
+        request.workspace_id
+    )];
+    let payload = json!({
+        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "feature_id": FEATURE_ID,
+        "request_id": request.copilot_request.request_id,
+        "workspace_id": request.workspace_id,
+        "study_id": request.copilot_request.study_id,
+        "scope": request.scope,
+        "intent": request.copilot_request.intent,
+        "disposition": copilot.disposition,
+        "view_order": view_order,
+        "panel_order": panel_order,
+        "candidate_order": candidate_order,
+        "qualified_order": qualified_order,
+        "unknown_order": unknown_order,
+        "blocked_order": blocked_order,
+        "replay_identity": request.replay_identity,
+        "copilot_run_digest": copilot_run_digest,
+        "workbench_digest": workbench_digest,
+        "omissions": omissions,
+        "uncertainty": copilot.uncertainty,
+        "negative_evidence": copilot.negative_evidence,
+        "effect_receipts": effect_receipts,
+        "boundary": PRECLINICAL_BOUNDARY,
+        "raw_data_local": true,
+    });
+    let artifact = TypedResearchArtifact::from_payload(
+        format!("adapter-local-evidence-workbench:{}", request.workspace_id),
+        "application/vnd.aurora.local-evidence-workbench+json",
+        &payload,
+        vec![],
+        vec![],
+    )
+    .map_err(|error| {
+        LocalEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string())
+    })?;
+    let canonical_request =
+        canonical_local_evidence_surveillance_research_workbench_request(request);
+    let receipt = LocalEvidenceSurveillanceResearchWorkbenchReceipt {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: CONTRACT_VERSION.into(),
+        feature_id: FEATURE_ID.into(),
+        input: canonical_request,
+        input_digest: workbench_input_digest(request)?,
+        request_id: request.copilot_request.request_id.clone(),
+        workspace_id: request.workspace_id.clone(),
+        study_id: request.copilot_request.study_id.clone(),
+        scope: request.scope.clone(),
+        intent: request.copilot_request.intent.clone(),
+        disposition: copilot.disposition,
+        view_order,
+        panel_order,
+        candidate_order,
+        qualified_order,
+        unknown_order,
+        blocked_order,
+        replay_identity: request.replay_identity.clone(),
+        copilot_run_digest,
+        workbench_digest,
+        omissions,
+        uncertainty: copilot.uncertainty.clone(),
+        negative_evidence: copilot.negative_evidence.clone(),
+        effect_receipts,
+        artifact,
+        raw_data_local: request.copilot_request.raw_data_local,
+        boundary: request.boundary.clone(),
+    };
+    Ok(receipt)
+}
+
+fn validate_request(
+    request: &LocalEvidenceSurveillanceResearchWorkbenchRequest,
+) -> Result<(), LocalEvidenceSurveillanceResearchWorkbenchError> {
+    if request.budget_units == 0
+        || u64::from(request.budget_units) > MAX_ITEMS as u64
+        || request.boundary != PRECLINICAL_BOUNDARY
+        || request.copilot_request.boundary != PRECLINICAL_BOUNDARY
+        || !request.copilot_request.raw_data_local
+        || !request.copilot_request.dry_run
+    {
+        return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+            "workbench identity, budget, dry-run, locality, or preclinical boundary is invalid"
+                .into(),
+        ));
+    }
+    validate_text("workspace_id", &request.workspace_id)?;
+    validate_text("scope", &request.scope)?;
+    validate_text("boundary", &request.boundary)?;
+    validate_text("copilot.study_id", &request.copilot_request.study_id)?;
+    if request.scope != format!("study:{}", request.copilot_request.study_id) {
+        return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+            "workbench scope must name exactly its single study".into(),
+        ));
+    }
+    let expected_views = CANONICAL_VIEWS
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    let expected_panels = CANONICAL_PANELS
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    if request.requested_view_order != expected_views
+        || request.requested_panel_order != expected_panels
+    {
+        return Err(LocalEvidenceSurveillanceResearchWorkbenchError::Invalid(
+            "workbench views or panels are not canonical".into(),
+        ));
+    }
+    validate_digest("workbench.replay_identity", &request.replay_identity)?;
+    validate_digest(
+        "copilot.replay_identity",
+        &request.copilot_request.replay_identity,
+    )?;
     Ok(())
 }
 
@@ -237,12 +564,137 @@ mod tests {
     use bioprism_foundation::{EvidenceAvailability, EvidenceState};
 
     fn request() -> LocalEvidenceSurveillanceResearchWorkbenchRequest {
-        LocalEvidenceSurveillanceResearchWorkbenchRequest { copilot_request: LocalEvidenceSurveillanceResearchCopilotRequest { request_id: "req-17".into(), agent_id: "researcher-17".into(), study_id: "study-17".into(), intent: "inspect preclinical evidence".into(), declared_tools: vec!["evidence.inspect".into()], requested_tool: "evidence.inspect".into(), max_tool_calls: 1, dry_run: true, required_source_ids: vec!["source-a".into()], observations: vec![CopilotEvidenceObservation { source_id: "source-a".into(), study_id: "study-17".into(), source_type: "paper".into(), locator: "local://source-a".into(), digest: Some(ContentHash::of_bytes(b"source-a")), availability: EvidenceAvailability::Available, evidence_state: EvidenceState::Supported, relevance_score: 90, negative_result: false }], min_relevance_score: 50, policy_allow: true, protected_closure: true, raw_data_local: true, replay_identity: ContentHash::of_bytes(b"copilot-17"), boundary: PRECLINICAL_BOUNDARY.into() }, workspace_id: "workspace-17".into(), scope: "study:study-17".into(), requested_view_order: CANONICAL_VIEWS.iter().map(|value| (*value).to_string()).collect(), requested_panel_order: CANONICAL_PANELS.iter().map(|value| (*value).to_string()).collect(), budget_units: 4, replay_identity: ContentHash::of_bytes(b"workbench-17"), boundary: PRECLINICAL_BOUNDARY.into() }
+        LocalEvidenceSurveillanceResearchWorkbenchRequest {
+            copilot_request: LocalEvidenceSurveillanceResearchCopilotRequest {
+                request_id: "req-17".into(),
+                agent_id: "researcher-17".into(),
+                study_id: "study-17".into(),
+                intent: "inspect preclinical evidence".into(),
+                declared_tools: vec!["evidence.inspect".into()],
+                requested_tool: "evidence.inspect".into(),
+                max_tool_calls: 1,
+                dry_run: true,
+                required_source_ids: vec!["source-a".into()],
+                observations: vec![CopilotEvidenceObservation {
+                    source_id: "source-a".into(),
+                    study_id: "study-17".into(),
+                    source_type: "paper".into(),
+                    locator: "local://source-a".into(),
+                    digest: Some(ContentHash::of_bytes(b"source-a")),
+                    availability: EvidenceAvailability::Available,
+                    evidence_state: EvidenceState::Supported,
+                    relevance_score: 90,
+                    negative_result: false,
+                }],
+                min_relevance_score: 50,
+                policy_allow: true,
+                protected_closure: true,
+                raw_data_local: true,
+                replay_identity: ContentHash::of_bytes(b"copilot-17"),
+                boundary: PRECLINICAL_BOUNDARY.into(),
+            },
+            workspace_id: "workspace-17".into(),
+            scope: "study:study-17".into(),
+            requested_view_order: CANONICAL_VIEWS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            requested_panel_order: CANONICAL_PANELS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            budget_units: 4,
+            replay_identity: ContentHash::of_bytes(b"workbench-17"),
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
     }
-    #[test] fn manifest_is_a0_read_only() { let m = local_evidence_surveillance_research_workbench_manifest(); assert_eq!(m.autonomy_tier, AutonomyTier::A0); assert!(m.authority_requirements.is_empty()); assert!(m.validate().is_ok()); }
-    #[test] fn renders_qualified_read_only_view() { let receipt = render_local_evidence_surveillance_research_workbench(&request()).unwrap(); assert_eq!(receipt.feature_id, FEATURE_ID); assert!(receipt.effect_receipts[0].starts_with("view:local-evidence-workbench:")); }
-    #[test] fn policy_denial_remains_visible() { let mut r = request(); r.copilot_request.policy_allow = false; let receipt = render_local_evidence_surveillance_research_workbench(&r).unwrap(); assert_eq!(receipt.disposition, ResearchCopilotDisposition::Blocked); assert!(receipt.omissions.iter().any(|item| item.contains("policy"))); }
-    #[test] fn rejects_non_dry_run() { let mut r = request(); r.copilot_request.dry_run = false; assert!(render_local_evidence_surveillance_research_workbench(&r).is_err()); }
-    #[test] fn rejects_noncanonical_panels() { let mut r = request(); r.requested_panel_order.reverse(); assert!(render_local_evidence_surveillance_research_workbench(&r).is_err()); }
-    #[test] fn replay_is_stable() { let r = request(); assert_eq!(render_local_evidence_surveillance_research_workbench(&r).unwrap(), render_local_evidence_surveillance_research_workbench(&r).unwrap()); }
+    #[test]
+    fn manifest_is_a0_read_only() {
+        let m = local_evidence_surveillance_research_workbench_manifest();
+        assert_eq!(m.autonomy_tier, AutonomyTier::A0);
+        assert!(m.authority_requirements.is_empty());
+        assert!(m.validate().is_ok());
+    }
+    #[test]
+    fn renders_qualified_read_only_view() {
+        let receipt = render_local_evidence_surveillance_research_workbench(&request()).unwrap();
+        assert_eq!(receipt.feature_id, FEATURE_ID);
+        assert!(receipt.effect_receipts[0].starts_with("view:local-evidence-workbench:"));
+    }
+    #[test]
+    fn policy_denial_remains_visible() {
+        let mut r = request();
+        r.copilot_request.policy_allow = false;
+        let receipt = render_local_evidence_surveillance_research_workbench(&r).unwrap();
+        assert_eq!(receipt.disposition, ResearchCopilotDisposition::Blocked);
+        assert!(receipt.omissions.iter().any(|item| item.contains("policy")));
+    }
+    #[test]
+    fn rejects_non_dry_run() {
+        let mut r = request();
+        r.copilot_request.dry_run = false;
+        assert!(render_local_evidence_surveillance_research_workbench(&r).is_err());
+    }
+    #[test]
+    fn rejects_noncanonical_panels() {
+        let mut r = request();
+        r.requested_panel_order.reverse();
+        assert!(render_local_evidence_surveillance_research_workbench(&r).is_err());
+    }
+    #[test]
+    fn replay_is_stable() {
+        let r = request();
+        assert_eq!(
+            render_local_evidence_surveillance_research_workbench(&r).unwrap(),
+            render_local_evidence_surveillance_research_workbench(&r).unwrap()
+        );
+    }
+
+    #[test]
+    fn reordered_nested_copilot_input_has_stable_identity() {
+        let mut reordered = request();
+        reordered.copilot_request.declared_tools.reverse();
+        reordered.copilot_request.required_source_ids.reverse();
+        reordered.copilot_request.observations.reverse();
+        let first = render_local_evidence_surveillance_research_workbench(&request()).unwrap();
+        let second = render_local_evidence_surveillance_research_workbench(&reordered).unwrap();
+        assert_eq!(first.input_digest, second.input_digest);
+        assert_eq!(first.workbench_digest, second.workbench_digest);
+    }
+
+    #[test]
+    fn tampered_workbench_digest_is_rejected() {
+        let mut receipt =
+            render_local_evidence_surveillance_research_workbench(&request()).unwrap();
+        receipt.workbench_digest = ContentHash::of_bytes(b"tampered-workbench");
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn scope_must_bind_to_single_study() {
+        let mut value = request();
+        value.scope = "study:other".into();
+        assert!(render_local_evidence_surveillance_research_workbench(&value).is_err());
+    }
+
+    #[test]
+    fn blocked_view_remains_read_only_and_unqualified() {
+        let mut value = request();
+        value.copilot_request.policy_allow = false;
+        let receipt = render_local_evidence_surveillance_research_workbench(&value).unwrap();
+        assert!(receipt.qualified_order.is_empty());
+        assert_eq!(
+            receipt.effect_receipts,
+            vec!["view:local-evidence-workbench:workspace-17"]
+        );
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_retained_view_request() {
+        let mut receipt =
+            render_local_evidence_surveillance_research_workbench(&request()).unwrap();
+        receipt.input.scope = "study:tampered".into();
+        let error = receipt.validate().unwrap_err();
+        assert!(error.to_string().contains("retained input digest mismatch"));
+    }
 }

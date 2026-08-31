@@ -427,99 +427,24 @@ pub fn assure_federated_retrieval_synthesis(
         federation_id: query.federation_id.clone(),
         semantic_profile: query.semantic_profile.clone(),
         disposition,
-        evidence_order: payload["evidence_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        selected_order: payload["selected_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        unresolved_order: payload["unresolved_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        blocked_order: payload["blocked_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        missing_evidence_order: payload["missing_evidence_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        stale_order: payload["stale_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        missing_scope_order: payload["missing_scope_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        peer_order: payload["peer_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        qualified_peer_order: payload["qualified_peer_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        missing_peer_order: payload["missing_peer_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        omission_order: payload["omission_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        uncertainty_order: payload["uncertainty_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        contradiction_order: payload["contradiction_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        negative_evidence_order: payload["negative_evidence_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
+        evidence_order,
+        selected_order,
+        unresolved_order,
+        blocked_order,
+        missing_evidence_order,
+        stale_order,
+        missing_scope_order,
+        peer_order,
+        qualified_peer_order,
+        missing_peer_order,
+        omission_order,
+        uncertainty_order,
+        contradiction_order,
+        negative_evidence_order,
         replay_identity: query.replay_identity.clone(),
         synthesis_digest,
         artifact,
-        effect_receipts: payload["effect_receipts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
+        effect_receipts,
         raw_data_local: query.raw_data_local,
         aggregate_only: query.aggregate_only,
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -534,8 +459,16 @@ fn validate_query(query: &ScopedRetrievalQuery) -> Result<(), RetrievalSynthesis
         || query.federation_id.trim().is_empty()
         || query.semantic_profile.trim().is_empty()
         || query.required_evidence_order.is_empty()
+        || query
+            .required_evidence_order
+            .iter()
+            .any(|evidence_id| evidence_id.trim().is_empty())
         || !canonical(&query.required_evidence_order)
         || query.required_scope_order.is_empty()
+        || query
+            .required_scope_order
+            .iter()
+            .any(|scope| scope.trim().is_empty())
         || !canonical(&query.required_scope_order)
         || query.candidates.is_empty()
         || query.peers.is_empty()

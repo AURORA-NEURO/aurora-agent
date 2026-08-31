@@ -39,6 +39,7 @@ impl SortedIndexWriter {
 
     /// Writes the index. Later duplicates win, matching the reference runtime's dict semantics.
     pub fn finish(mut self, directory: &Path, name: &str) -> Result<(), StoreError> {
+        validate_index_name(name)?;
         for (key, value) in &self.records {
             if key.contains('\t') || key.contains('\n') {
                 return Err(StoreError::UnsupportedKey(key.clone()));
@@ -68,7 +69,9 @@ impl SortedIndexWriter {
             offs.write_all(&cursor.to_le_bytes())?;
             let line = format!("{key}\t{value}\n");
             keys.write_all(line.as_bytes())?;
-            cursor += line.len() as u64;
+            cursor = cursor
+                .checked_add(line.len() as u64)
+                .ok_or(StoreError::IndexTooLarge)?;
         }
         keys.flush()?;
         offs.flush()?;
@@ -94,6 +97,7 @@ impl SortedIndex {
     /// while the records themselves stay on disk. This is the deliberate trade: a small dense
     /// array bought with one sequential read, against per-probe seeks into a large file.
     pub fn open(directory: &Path, name: &str) -> Result<Self, StoreError> {
+        validate_index_name(name)?;
         let keys_path = directory.join(format!("{name}.keys"));
         let offs_path = directory.join(format!("{name}.offs"));
 
@@ -102,10 +106,22 @@ impl SortedIndex {
         if raw.len() % 8 != 0 {
             return Err(StoreError::CorruptIndex(name.to_string()));
         }
-        let offsets = raw
-            .chunks_exact(8)
-            .map(|chunk| u64::from_le_bytes(chunk.try_into().expect("chunk is 8 bytes")))
-            .collect();
+        let mut offsets = Vec::with_capacity(raw.len() / 8);
+        for chunk in raw.chunks_exact(8) {
+            let bytes: [u8; 8] = chunk
+                .try_into()
+                .map_err(|_| StoreError::CorruptIndex("invalid offset width".into()))?;
+            offsets.push(u64::from_le_bytes(bytes));
+        }
+
+        let key_length = File::open(&keys_path)?.metadata()?.len();
+        if offsets.windows(2).any(|pair| pair[0] >= pair[1])
+            || offsets.last().is_some_and(|offset| *offset > key_length)
+        {
+            return Err(StoreError::CorruptIndex(
+                "offsets must be strictly increasing and within the keys file".into(),
+            ));
+        }
 
         Ok(SortedIndex { keys_path, offsets })
     }
@@ -143,13 +159,19 @@ impl SortedIndex {
         file: &mut File,
         position: usize,
     ) -> Result<(String, String), StoreError> {
-        let start = self.offsets[position];
-        let end = self
-            .offsets
-            .get(position + 1)
-            .copied()
-            .unwrap_or_else(|| file.metadata().map(|m| m.len()).unwrap_or(start));
-        let length = (end - start) as usize;
+        let start =
+            self.offsets.get(position).copied().ok_or_else(|| {
+                StoreError::CorruptIndex("offset position is out of bounds".into())
+            })?;
+        let end = match self.offsets.get(position + 1).copied() {
+            Some(end) => end,
+            None => file.metadata()?.len(),
+        };
+        let length =
+            usize::try_from(end.checked_sub(start).ok_or_else(|| {
+                StoreError::CorruptIndex("record offsets are not monotonic".into())
+            })?)
+            .map_err(|_| StoreError::CorruptIndex("record is too large to address".into()))?;
 
         file.seek(SeekFrom::Start(start))?;
         let mut buffer = vec![0u8; length];
@@ -163,4 +185,19 @@ impl SortedIndex {
             .ok_or_else(|| StoreError::CorruptIndex("missing separator".into()))?;
         Ok((key.to_string(), value.to_string()))
     }
+}
+
+fn validate_index_name(name: &str) -> Result<(), StoreError> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.chars().any(|character| {
+            character.is_control() || matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*')
+        })
+    {
+        return Err(StoreError::InvalidIndexName(name.to_string()));
+    }
+    Ok(())
 }

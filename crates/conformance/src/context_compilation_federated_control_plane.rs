@@ -596,5 +596,3 @@ mod tests {
         assert!(manifest.validate().is_ok());
     }
 }
-
-

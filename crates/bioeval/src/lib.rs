@@ -53,6 +53,7 @@ pub mod error;
 pub mod layer;
 pub mod reference;
 pub mod score;
+mod validation;
 pub mod wrongness;
 
 pub use aggregate::{ConsensusPolicy, ConsensusState, PanelAggregate, PooledScore, Rating, Veto};
@@ -62,7 +63,8 @@ pub use comparability::{
 };
 pub use credit::{Credit, CreditEvidence, CreditRule, CreditTerm};
 pub use error::{
-    AggregationError, CollapseError, CreditError, PredictionError, ReferenceError, ScoreError,
+    AggregationError, CollapseError, CreditError, LayerError, PredictionError, ReferenceError,
+    ScoreError,
 };
 pub use layer::{
     ClassifiedError, Conclusion, CorrectnessLayer, FailureSignature, LayerVerdict, LayeredOutcome,

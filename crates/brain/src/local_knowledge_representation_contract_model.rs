@@ -19,6 +19,8 @@ pub const FEATURE_ID: &str = "AFA-brain-P04-F05";
 pub const CONTRACT_VERSION: &str = "brain-local-knowledge-representation-contract-model/1.0";
 pub const INPUT_SCHEMA: &str = "ScopedResearchClaims1@1";
 pub const OUTPUT_SCHEMA: &str = "TypedKnowledgeWorld1@1";
+const CONTRACT_CONTENT_TYPE: &str = "application/vnd.aurora.typed-knowledge-world+json";
+const MAX_ITEMS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KnowledgeContractClaim {
@@ -118,7 +120,7 @@ impl KnowledgeContractModelReceipt {
                 "knowledge contract identity, schema, revision, locality, candidates, or effects are incomplete".into(),
             ));
         }
-        for values in [
+        let collections = [
             &self.candidate_order,
             &self.admitted_order,
             &self.unresolved_order,
@@ -129,23 +131,38 @@ impl KnowledgeContractModelReceipt {
             &self.uncertainty,
             &self.negative_evidence,
             &self.effect_receipts,
-        ] {
+        ];
+        if collections.iter().any(|values| values.len() > MAX_ITEMS) {
+            return Err(KnowledgeContractModelError::Invalid(
+                "knowledge contract collection exceeds the bounded contract limit".into(),
+            ));
+        }
+        for values in collections {
             if values.windows(2).any(|pair| pair[0] >= pair[1]) {
                 return Err(KnowledgeContractModelError::Invalid(
                     "knowledge contract ordering is not canonical".into(),
                 ));
             }
         }
-        let classified = self
-            .admitted_order
-            .iter()
-            .chain(self.unresolved_order.iter())
-            .chain(self.denied_order.iter())
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        if classified.len() != self.candidate_order.len()
-            || classified.iter().any(|claim| !self.candidate_order.contains(claim))
-            || self.missing_order.iter().any(|claim| !self.candidate_order.contains(claim))
+        let candidates = self.candidate_order.iter().collect::<BTreeSet<_>>();
+        let admitted = self.admitted_order.iter().collect::<BTreeSet<_>>();
+        let unresolved = self.unresolved_order.iter().collect::<BTreeSet<_>>();
+        let denied = self.denied_order.iter().collect::<BTreeSet<_>>();
+        let mut classified = admitted.clone();
+        classified.extend(unresolved.iter());
+        classified.extend(denied.iter());
+        if classified != candidates
+            || !admitted.is_disjoint(&unresolved)
+            || !admitted.is_disjoint(&denied)
+            || !unresolved.is_disjoint(&denied)
+            || self
+                .missing_order
+                .iter()
+                .any(|claim| !candidates.contains(claim))
+            || !self
+                .semantic_loss_order
+                .iter()
+                .all(|claim| admitted.contains(claim))
         {
             return Err(KnowledgeContractModelError::Invalid(
                 "knowledge contract states do not partition declared claims".into(),
@@ -163,16 +180,85 @@ impl KnowledgeContractModelReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("read:local-knowledge-contract:")
-                && effect != "block:unsafe-release"
-        }) {
+        let gate_blocked = self.omissions.iter().any(|item| {
+            item == "control:policy-denied"
+                || item == "control:protected-closure-incomplete"
+                || item == "control:raw-data-locality-failed"
+        });
+        let expected_disposition = if gate_blocked {
+            KnowledgeContractDisposition::Blocked
+        } else if self.admitted_order.is_empty()
+            || !self.unresolved_order.is_empty()
+            || !self.denied_order.is_empty()
+            || !self.missing_order.is_empty()
+        {
+            KnowledgeContractDisposition::Partial
+        } else if self.target_revision > self.source_revision {
+            KnowledgeContractDisposition::Migrated
+        } else {
+            KnowledgeContractDisposition::Compatible
+        };
+        if self.disposition != expected_disposition {
             return Err(KnowledgeContractModelError::Invalid(
-                "knowledge contract effect is outside local read gate".into(),
+                "knowledge contract disposition does not match classified claims or gates".into(),
+            ));
+        }
+        let expected_contract_digest = ContentHash::of_value(&json!({
+            "study_id": self.study_id,
+            "input_schema": INPUT_SCHEMA,
+            "output_schema": OUTPUT_SCHEMA,
+            "source_revision": self.source_revision,
+            "target_revision": self.target_revision,
+            "candidate_order": self.candidate_order,
+            "admitted_order": self.admitted_order,
+            "unresolved_order": self.unresolved_order,
+            "denied_order": self.denied_order,
+            "missing_order": self.missing_order,
+            "semantic_loss_order": self.semantic_loss_order
+        }))
+        .map_err(|error| KnowledgeContractModelError::Artifact(error.to_string()))?;
+        if self.contract_digest != expected_contract_digest {
+            return Err(KnowledgeContractModelError::Invalid(
+                "knowledge contract digest does not match classified claims".into(),
+            ));
+        }
+        let expected_migration_digest = ContentHash::of_value(&json!({
+            "source_revision": self.source_revision,
+            "target_revision": self.target_revision,
+            "migration_requested": self.target_revision > self.source_revision,
+            "semantic_loss_order": self.semantic_loss_order
+        }))
+        .map_err(|error| KnowledgeContractModelError::Artifact(error.to_string()))?;
+        if self.migration_digest != expected_migration_digest {
+            return Err(KnowledgeContractModelError::Invalid(
+                "knowledge migration digest does not match revision state".into(),
+            ));
+        }
+        let expected_effect = if self.disposition == KnowledgeContractDisposition::Blocked {
+            vec!["block:unsafe-release".into()]
+        } else {
+            vec![format!("read:local-knowledge-contract:{}", self.request_id)]
+        };
+        if self.effect_receipts != expected_effect {
+            return Err(KnowledgeContractModelError::Invalid(
+                "knowledge contract effect does not match disposition".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-local-knowledge-contract:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != CONTRACT_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(KnowledgeContractModelError::Invalid(
+                "knowledge contract artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| KnowledgeContractModelError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| KnowledgeContractModelError::Artifact(error.to_string()))
     }
 
@@ -228,7 +314,10 @@ pub fn model_local_knowledge_representation_contract(
     }
     let mut claims = request.claims.clone();
     claims.sort_by(|left, right| left.claim_id.cmp(&right.claim_id));
-    let candidate = claims.iter().map(|claim| claim.claim_id.clone()).collect::<Vec<_>>();
+    let candidate = claims
+        .iter()
+        .map(|claim| claim.claim_id.clone())
+        .collect::<Vec<_>>();
     if candidate.windows(2).any(|pair| pair[0] == pair[1])
         || candidate.iter().any(|value| value.trim().is_empty())
     {
@@ -246,18 +335,29 @@ pub fn model_local_knowledge_representation_contract(
     let mut missing = BTreeSet::new();
     let mut semantic_loss = BTreeSet::new();
     let mut omissions = BTreeSet::new();
-    let mut uncertainty = BTreeSet::from(["gate:schema-compatibility".to_string(), "gate:unknown-is-not-asserted".to_string(), "gate:locality".to_string()]);
+    let mut uncertainty = BTreeSet::from([
+        "gate:schema-compatibility".to_string(),
+        "gate:unknown-is-not-asserted".to_string(),
+        "gate:locality".to_string(),
+    ]);
     let mut negative = BTreeSet::new();
     for claim_id in &candidate {
         let claim = map[claim_id];
-        if !request.policy_allow || !request.protected_closure || claim.study_id != request.study_id || claim.boundary != PRECLINICAL_BOUNDARY {
+        if !request.policy_allow
+            || !request.protected_closure
+            || claim.study_id != request.study_id
+            || claim.boundary != PRECLINICAL_BOUNDARY
+        {
             denied.insert(claim_id.clone());
             negative.insert(format!("claim:{claim_id}:scope-policy-closure"));
         } else if claim.evidence_digest.is_none() || claim.provenance_digest.is_none() {
             unresolved.insert(claim_id.clone());
             missing.insert(claim_id.clone());
             omissions.insert(format!("claim:{claim_id}:evidence-or-provenance-missing"));
-        } else if matches!(claim.state, EvidenceState::Unknown | EvidenceState::Speculative) {
+        } else if matches!(
+            claim.state,
+            EvidenceState::Unknown | EvidenceState::Speculative
+        ) {
             unresolved.insert(claim_id.clone());
             uncertainty.insert(format!("claim:{claim_id}:unknown-not-asserted"));
         } else if matches!(claim.state, EvidenceState::Contradicted) {
@@ -279,43 +379,219 @@ pub fn model_local_knowledge_representation_contract(
         }
     }
     if request.target_revision > request.source_revision {
-        uncertainty.insert(format!("migration:{}-to-{}", request.source_revision, request.target_revision));
+        uncertainty.insert(format!(
+            "migration:{}-to-{}",
+            request.source_revision, request.target_revision
+        ));
     }
-    if !request.policy_allow { omissions.insert("control:policy-denied".into()); }
-    if !request.protected_closure { omissions.insert("control:protected-closure-incomplete".into()); }
-    let disposition = if !request.policy_allow || !request.protected_closure || !request.raw_data_local {
-        KnowledgeContractDisposition::Blocked
-    } else if admitted.is_empty() || !unresolved.is_empty() || !denied.is_empty() || !missing.is_empty() {
-        KnowledgeContractDisposition::Partial
-    } else if request.target_revision > request.source_revision {
-        KnowledgeContractDisposition::Migrated
-    } else {
-        KnowledgeContractDisposition::Compatible
-    };
+    if !request.policy_allow {
+        omissions.insert("control:policy-denied".into());
+    }
+    if !request.protected_closure {
+        omissions.insert("control:protected-closure-incomplete".into());
+    }
+    if !request.raw_data_local {
+        omissions.insert("control:raw-data-locality-failed".into());
+    }
+    let disposition =
+        if !request.policy_allow || !request.protected_closure || !request.raw_data_local {
+            KnowledgeContractDisposition::Blocked
+        } else if admitted.is_empty()
+            || !unresolved.is_empty()
+            || !denied.is_empty()
+            || !missing.is_empty()
+        {
+            KnowledgeContractDisposition::Partial
+        } else if request.target_revision > request.source_revision {
+            KnowledgeContractDisposition::Migrated
+        } else {
+            KnowledgeContractDisposition::Compatible
+        };
     let contract_digest = ContentHash::of_value(&json!({"study_id": request.study_id, "input_schema": INPUT_SCHEMA, "output_schema": OUTPUT_SCHEMA, "source_revision": request.source_revision, "target_revision": request.target_revision, "candidate_order": candidate, "admitted_order": admitted, "unresolved_order": unresolved, "denied_order": denied, "missing_order": missing, "semantic_loss_order": semantic_loss})).map_err(|error| KnowledgeContractModelError::Artifact(error.to_string()))?;
     let migration_digest = ContentHash::of_value(&json!({"source_revision": request.source_revision, "target_revision": request.target_revision, "migration_requested": request.migration_requested, "semantic_loss_order": semantic_loss})).map_err(|error| KnowledgeContractModelError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_id": request.study_id, "disposition": disposition, "input_schema": INPUT_SCHEMA, "output_schema": OUTPUT_SCHEMA, "source_revision": request.source_revision, "target_revision": request.target_revision, "contract_digest": contract_digest, "migration_digest": migration_digest, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
-    let artifact = TypedResearchArtifact::from_payload(format!("brain-local-knowledge-contract:{}", request.request_id), "application/vnd.aurora.typed-knowledge-world+json", &payload, Vec::new(), Vec::new()).map_err(|error| KnowledgeContractModelError::Artifact(error.to_string()))?;
-    let receipt = KnowledgeContractModelReceipt { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), contract_version: CONTRACT_VERSION.into(), feature_id: FEATURE_ID.into(), request_id: request.request_id.clone(), study_id: request.study_id.clone(), disposition, input_schema: INPUT_SCHEMA.into(), output_schema: OUTPUT_SCHEMA.into(), source_revision: request.source_revision, target_revision: request.target_revision, candidate_order: candidate, admitted_order: admitted.into_iter().collect(), unresolved_order: unresolved.into_iter().collect(), denied_order: denied.into_iter().collect(), missing_order: missing.into_iter().collect(), semantic_loss_order: semantic_loss.into_iter().collect(), contract_digest, migration_digest, replay_identity: request.replay_identity.clone(), omissions: omissions.into_iter().collect(), uncertainty: uncertainty.into_iter().collect(), negative_evidence: negative.into_iter().collect(), effect_receipts: if matches!(disposition, KnowledgeContractDisposition::Compatible | KnowledgeContractDisposition::Migrated | KnowledgeContractDisposition::Partial) { vec![format!("read:local-knowledge-contract:{}", request.request_id)] } else { vec!["block:unsafe-release".into()] }, artifact, raw_data_local: request.raw_data_local, boundary: PRECLINICAL_BOUNDARY.into() };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "study_id": request.study_id, "disposition": disposition, "input_schema": INPUT_SCHEMA, "output_schema": OUTPUT_SCHEMA, "source_revision": request.source_revision, "target_revision": request.target_revision, "candidate_order": candidate, "admitted_order": admitted, "unresolved_order": unresolved, "denied_order": denied, "missing_order": missing, "semantic_loss_order": semantic_loss, "contract_digest": contract_digest, "migration_digest": migration_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
+    let artifact = TypedResearchArtifact::from_payload(
+        format!("brain-local-knowledge-contract:{}", request.request_id),
+        CONTRACT_CONTENT_TYPE,
+        &payload,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|error| KnowledgeContractModelError::Artifact(error.to_string()))?;
+    let receipt = KnowledgeContractModelReceipt {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: CONTRACT_VERSION.into(),
+        feature_id: FEATURE_ID.into(),
+        request_id: request.request_id.clone(),
+        study_id: request.study_id.clone(),
+        disposition,
+        input_schema: INPUT_SCHEMA.into(),
+        output_schema: OUTPUT_SCHEMA.into(),
+        source_revision: request.source_revision,
+        target_revision: request.target_revision,
+        candidate_order: candidate,
+        admitted_order: admitted.into_iter().collect(),
+        unresolved_order: unresolved.into_iter().collect(),
+        denied_order: denied.into_iter().collect(),
+        missing_order: missing.into_iter().collect(),
+        semantic_loss_order: semantic_loss.into_iter().collect(),
+        contract_digest,
+        migration_digest,
+        replay_identity: request.replay_identity.clone(),
+        omissions: omissions.into_iter().collect(),
+        uncertainty: uncertainty.into_iter().collect(),
+        negative_evidence: negative.into_iter().collect(),
+        effect_receipts: if matches!(
+            disposition,
+            KnowledgeContractDisposition::Compatible
+                | KnowledgeContractDisposition::Migrated
+                | KnowledgeContractDisposition::Partial
+        ) {
+            vec![format!(
+                "read:local-knowledge-contract:{}",
+                request.request_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        },
+        artifact,
+        raw_data_local: true,
+        boundary: PRECLINICAL_BOUNDARY.into(),
+    };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn receipt_payload(receipt: &KnowledgeContractModelReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "study_id": receipt.study_id,
+        "disposition": receipt.disposition,
+        "input_schema": receipt.input_schema,
+        "output_schema": receipt.output_schema,
+        "source_revision": receipt.source_revision,
+        "target_revision": receipt.target_revision,
+        "candidate_order": receipt.candidate_order,
+        "admitted_order": receipt.admitted_order,
+        "unresolved_order": receipt.unresolved_order,
+        "denied_order": receipt.denied_order,
+        "missing_order": receipt.missing_order,
+        "semantic_loss_order": receipt.semantic_loss_order,
+        "contract_digest": receipt.contract_digest,
+        "migration_digest": receipt.migration_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn hash(value: &str) -> ContentHash { ContentHash::of_bytes(value.as_bytes()) }
+    fn hash(value: &str) -> ContentHash {
+        ContentHash::of_bytes(value.as_bytes())
+    }
     fn request() -> KnowledgeContractModelRequest {
         let h = hash("contract");
-        let claim = |id: &str, state: EvidenceState| KnowledgeContractClaim { claim_id: id.into(), subject: "organoid".into(), predicate: "expresses".into(), object: "marker".into(), evidence_digest: Some(h.clone()), provenance_digest: Some(h.clone()), state, study_id: "study:one".into(), boundary: PRECLINICAL_BOUNDARY.into() };
-        KnowledgeContractModelRequest { request_id: "request:contract".into(), study_id: "study:one".into(), claims: vec![claim("claim:a", EvidenceState::Supported), claim("claim:b", EvidenceState::Supported)], required_claim_ids: vec!["claim:a".into()], input_schema: INPUT_SCHEMA.into(), output_schema: OUTPUT_SCHEMA.into(), source_revision: 1, target_revision: 1, migration_requested: false, replay_identity: h, policy_allow: true, protected_closure: true, raw_data_local: true, boundary: PRECLINICAL_BOUNDARY.into() }
+        let claim = |id: &str, state: EvidenceState| KnowledgeContractClaim {
+            claim_id: id.into(),
+            subject: "organoid".into(),
+            predicate: "expresses".into(),
+            object: "marker".into(),
+            evidence_digest: Some(h.clone()),
+            provenance_digest: Some(h.clone()),
+            state,
+            study_id: "study:one".into(),
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        KnowledgeContractModelRequest {
+            request_id: "request:contract".into(),
+            study_id: "study:one".into(),
+            claims: vec![
+                claim("claim:a", EvidenceState::Supported),
+                claim("claim:b", EvidenceState::Supported),
+            ],
+            required_claim_ids: vec!["claim:a".into()],
+            input_schema: INPUT_SCHEMA.into(),
+            output_schema: OUTPUT_SCHEMA.into(),
+            source_revision: 1,
+            target_revision: 1,
+            migration_requested: false,
+            replay_identity: h,
+            policy_allow: true,
+            protected_closure: true,
+            raw_data_local: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
     }
-    #[test] fn manifest_is_a0() { assert_eq!(local_knowledge_representation_contract_model_manifest().autonomy_tier, AutonomyTier::A0); }
-    #[test] fn compatible_contract_is_admitted() { assert_eq!(model_local_knowledge_representation_contract(&request()).unwrap().disposition, KnowledgeContractDisposition::Compatible); }
-    #[test] fn revision_migration_is_explicit() { let mut v = request(); v.target_revision = 2; v.migration_requested = true; let r = model_local_knowledge_representation_contract(&v).unwrap(); assert_eq!(r.disposition, KnowledgeContractDisposition::Migrated); assert!(r.uncertainty.iter().any(|x| x.starts_with("migration:"))); }
-    #[test] fn missing_evidence_is_partial() { let mut v = request(); v.claims[0].evidence_digest = None; let r = model_local_knowledge_representation_contract(&v).unwrap(); assert_eq!(r.disposition, KnowledgeContractDisposition::Partial); assert_eq!(r.missing_order, vec!["claim:a".to_string()]); }
-    #[test] fn unknown_and_contradiction_remain_nonasserted() { let mut v = request(); v.claims[0].state = EvidenceState::Unknown; v.claims[1].state = EvidenceState::Contradicted; let r = model_local_knowledge_representation_contract(&v).unwrap(); assert_eq!(r.disposition, KnowledgeContractDisposition::Partial); assert!(!r.negative_evidence.is_empty()); }
-    #[test] fn schema_mismatch_is_rejected() { let mut v = request(); v.input_schema = "Other@1".into(); assert!(matches!(model_local_knowledge_representation_contract(&v), Err(KnowledgeContractModelError::Invalid(_)))); }
-    #[test] fn policy_denial_blocks_effects() { let mut v = request(); v.policy_allow = false; let r = model_local_knowledge_representation_contract(&v).unwrap(); assert_eq!(r.disposition, KnowledgeContractDisposition::Blocked); assert_eq!(r.effect_receipts, vec!["block:unsafe-release"]); }
-    #[test] fn digest_is_stable() { let r = model_local_knowledge_representation_contract(&request()).unwrap(); assert_eq!(r.digest().unwrap(), r.digest().unwrap()); }
+    #[test]
+    fn manifest_is_a0() {
+        assert_eq!(
+            local_knowledge_representation_contract_model_manifest().autonomy_tier,
+            AutonomyTier::A0
+        );
+    }
+    #[test]
+    fn compatible_contract_is_admitted() {
+        assert_eq!(
+            model_local_knowledge_representation_contract(&request())
+                .unwrap()
+                .disposition,
+            KnowledgeContractDisposition::Compatible
+        );
+    }
+    #[test]
+    fn revision_migration_is_explicit() {
+        let mut v = request();
+        v.target_revision = 2;
+        v.migration_requested = true;
+        let r = model_local_knowledge_representation_contract(&v).unwrap();
+        assert_eq!(r.disposition, KnowledgeContractDisposition::Migrated);
+        assert!(r.uncertainty.iter().any(|x| x.starts_with("migration:")));
+    }
+    #[test]
+    fn missing_evidence_is_partial() {
+        let mut v = request();
+        v.claims[0].evidence_digest = None;
+        let r = model_local_knowledge_representation_contract(&v).unwrap();
+        assert_eq!(r.disposition, KnowledgeContractDisposition::Partial);
+        assert_eq!(r.missing_order, vec!["claim:a".to_string()]);
+    }
+    #[test]
+    fn unknown_and_contradiction_remain_nonasserted() {
+        let mut v = request();
+        v.claims[0].state = EvidenceState::Unknown;
+        v.claims[1].state = EvidenceState::Contradicted;
+        let r = model_local_knowledge_representation_contract(&v).unwrap();
+        assert_eq!(r.disposition, KnowledgeContractDisposition::Partial);
+        assert!(!r.negative_evidence.is_empty());
+    }
+    #[test]
+    fn schema_mismatch_is_rejected() {
+        let mut v = request();
+        v.input_schema = "Other@1".into();
+        assert!(matches!(
+            model_local_knowledge_representation_contract(&v),
+            Err(KnowledgeContractModelError::Invalid(_))
+        ));
+    }
+    #[test]
+    fn policy_denial_blocks_effects() {
+        let mut v = request();
+        v.policy_allow = false;
+        let r = model_local_knowledge_representation_contract(&v).unwrap();
+        assert_eq!(r.disposition, KnowledgeContractDisposition::Blocked);
+        assert_eq!(r.effect_receipts, vec!["block:unsafe-release"]);
+    }
+    #[test]
+    fn digest_is_stable() {
+        let r = model_local_knowledge_representation_contract(&request()).unwrap();
+        assert_eq!(r.digest().unwrap(), r.digest().unwrap());
+    }
 }

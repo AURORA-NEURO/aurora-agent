@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 use crate::multimodal_evidence_surveillance_research_copilot::{
+    canonical_multimodal_evidence_surveillance_research_copilot_request,
     run_multimodal_evidence_surveillance_research_copilot,
     MultimodalEvidenceSurveillanceResearchCopilotRequest, MultimodalResearchCopilotDisposition,
 };
@@ -31,6 +32,8 @@ const CANONICAL_STAGES: [&str; 4] = [
     "stage:surveil-evidence",
     "stage:validate-comparability",
 ];
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_ITEMS: usize = 16_384;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MultimodalEvidenceSurveillanceWorkflowRequest {
@@ -48,10 +51,15 @@ pub struct MultimodalEvidenceSurveillanceWorkflowReceipt {
     pub schema_version: String,
     pub contract_version: String,
     pub feature_id: String,
+    pub input: MultimodalEvidenceSurveillanceWorkflowRequest,
+    pub input_digest: ContentHash,
     pub request_id: String,
     pub workflow_id: String,
     pub agent_id: String,
     pub semantic_profile: String,
+    pub checkpoint_id: String,
+    pub budget_units: u32,
+    pub required_budget: u32,
     pub disposition: MultimodalResearchCopilotDisposition,
     pub stage_order: Vec<String>,
     pub plan_order: Vec<String>,
@@ -61,6 +69,7 @@ pub struct MultimodalEvidenceSurveillanceWorkflowReceipt {
     pub candidate_order: Vec<String>,
     pub selected_order: Vec<String>,
     pub unresolved_order: Vec<String>,
+    pub denied_order: Vec<String>,
     pub incomparable_order: Vec<String>,
     pub missing_cell_order: Vec<String>,
     pub replay_identity: ContentHash,
@@ -86,6 +95,94 @@ pub enum MultimodalEvidenceSurveillanceWorkflowError {
     Copilot(String),
 }
 
+fn validate_text(
+    field: &str,
+    value: &str,
+) -> Result<(), MultimodalEvidenceSurveillanceWorkflowError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+            format!("{field} must be non-empty and trimmed"),
+        ));
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+            format!("{field} is outside its bounded text contract"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_unique_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), MultimodalEvidenceSurveillanceWorkflowError> {
+    if values.len() > MAX_ITEMS {
+        return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+            format!("{field} exceeds its item bound"),
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                format!("{field} contains duplicate values"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), MultimodalEvidenceSurveillanceWorkflowError> {
+    validate_unique_strings(field, values)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+            format!("{field} ordering is not canonical"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_digest(
+    field: &str,
+    digest: &ContentHash,
+) -> Result<(), MultimodalEvidenceSurveillanceWorkflowError> {
+    if digest.as_str().len() != 64
+        || !digest
+            .as_str()
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+            format!("{field} must be a 64-character hex digest"),
+        ));
+    }
+    Ok(())
+}
+
+fn workflow_input_digest(
+    request: &MultimodalEvidenceSurveillanceWorkflowRequest,
+) -> Result<ContentHash, MultimodalEvidenceSurveillanceWorkflowError> {
+    let canonical = canonical_multimodal_evidence_surveillance_workflow_request(request);
+    let value = serde_json::to_value(canonical).map_err(|error| {
+        MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string())
+    })?;
+    ContentHash::of_value(&value)
+        .map_err(|error| MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string()))
+}
+
+fn canonical_multimodal_evidence_surveillance_workflow_request(
+    request: &MultimodalEvidenceSurveillanceWorkflowRequest,
+) -> MultimodalEvidenceSurveillanceWorkflowRequest {
+    let mut canonical = request.clone();
+    canonical.request =
+        canonical_multimodal_evidence_surveillance_research_copilot_request(&canonical.request);
+    canonical
+}
+
 impl MultimodalEvidenceSurveillanceWorkflowReceipt {
     pub fn validate(&self) -> Result<(), MultimodalEvidenceSurveillanceWorkflowError> {
         if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
@@ -97,9 +194,11 @@ impl MultimodalEvidenceSurveillanceWorkflowReceipt {
             || self.workflow_id.trim().is_empty()
             || self.agent_id.trim().is_empty()
             || self.semantic_profile.trim().is_empty()
+            || self.checkpoint_id.trim().is_empty()
+            || self.budget_units == 0
+            || self.required_budget == 0
             || self.stage_order.is_empty()
             || self.plan_order.is_empty()
-            || self.completed_order.is_empty()
             || self.effect_receipts.is_empty()
         {
             return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
@@ -107,27 +206,71 @@ impl MultimodalEvidenceSurveillanceWorkflowReceipt {
                     .into(),
             ));
         }
-        for values in [
-            &self.stage_order,
-            &self.plan_order,
-            &self.completed_order,
-            &self.blocked_order,
-            &self.compensation_order,
-            &self.candidate_order,
-            &self.selected_order,
-            &self.unresolved_order,
-            &self.incomparable_order,
-            &self.missing_cell_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
-                    "workflow ordering is not canonical".into(),
-                ));
-            }
+        validate_text("request_id", &self.request_id)?;
+        validate_text("workflow_id", &self.workflow_id)?;
+        validate_text("agent_id", &self.agent_id)?;
+        validate_text("semantic_profile", &self.semantic_profile)?;
+        validate_text("checkpoint_id", &self.checkpoint_id)?;
+        validate_text("boundary", &self.boundary)?;
+        if self.stage_order
+            != CANONICAL_STAGES
+                .iter()
+                .map(|stage| (*stage).to_string())
+                .collect::<Vec<_>>()
+        {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                "workflow stage order is not canonical".into(),
+            ));
+        }
+        validate_sorted_strings("plan_order", &self.plan_order)?;
+        validate_sorted_strings("blocked_order", &self.blocked_order)?;
+        validate_sorted_strings("compensation_order", &self.compensation_order)?;
+        validate_sorted_strings("candidate_order", &self.candidate_order)?;
+        validate_sorted_strings("selected_order", &self.selected_order)?;
+        validate_sorted_strings("unresolved_order", &self.unresolved_order)?;
+        validate_sorted_strings("denied_order", &self.denied_order)?;
+        validate_sorted_strings("incomparable_order", &self.incomparable_order)?;
+        validate_sorted_strings("missing_cell_order", &self.missing_cell_order)?;
+        validate_sorted_strings("omissions", &self.omissions)?;
+        validate_sorted_strings("uncertainty", &self.uncertainty)?;
+        validate_sorted_strings("negative_evidence", &self.negative_evidence)?;
+        validate_sorted_strings("effect_receipts", &self.effect_receipts)?;
+        if self.required_budget != self.plan_order.len() as u32 {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                "workflow required budget does not match its plan".into(),
+            ));
+        }
+        let classified = self
+            .selected_order
+            .iter()
+            .chain(self.unresolved_order.iter())
+            .chain(self.denied_order.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if classified != self.candidate_order.iter().cloned().collect() {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                "workflow multimodal states do not partition candidates".into(),
+            ));
+        }
+        if self
+            .incomparable_order
+            .iter()
+            .any(|id| !self.unresolved_order.contains(id) && !self.denied_order.contains(id))
+        {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                "incomparable evidence must remain unresolved in the workflow".into(),
+            ));
+        }
+        let workflow_blocked = !self.blocked_order.is_empty();
+        if workflow_blocked && !self.completed_order.is_empty() {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                "blocked multimodal workflow cannot report completed stages".into(),
+            ));
+        }
+        if !workflow_blocked && self.completed_order != self.stage_order {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                "unblocked multimodal workflow must complete every canonical stage".into(),
+            ));
         }
         for value in [
             &self.replay_identity,
@@ -136,24 +279,115 @@ impl MultimodalEvidenceSurveillanceWorkflowReceipt {
             &self.workflow_digest,
             &self.artifact.content_hash,
         ] {
-            if value.as_str().len() != 64 {
-                return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
-                    "workflow digest is invalid".into(),
-                ));
-            }
+            validate_digest("multimodal workflow receipt digest", value)?;
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("schedule:research-work:")
-                && !effect.starts_with("compensate:research-work:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_effect = if self.disposition == MultimodalResearchCopilotDisposition::Blocked {
+            "block:unsafe-release".to_string()
+        } else if !self.compensation_order.is_empty() || !self.blocked_order.is_empty() {
+            format!("compensate:research-work:{}", self.workflow_id)
+        } else {
+            format!("schedule:research-work:{}", self.workflow_id)
+        };
+        if self.effect_receipts != vec![expected_effect] {
             return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
-                "workflow effect is outside schedule/compensation gate".into(),
+                "workflow effect does not match its plan and disposition".into(),
             ));
         }
+        let expected_checkpoint = ContentHash::of_value(&json!({
+            "workflow_id": self.workflow_id,
+            "checkpoint_id": self.checkpoint_id,
+            "stage_order": self.stage_order,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| {
+            MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string())
+        })?;
+        if self.checkpoint_digest != expected_checkpoint {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                "multimodal workflow checkpoint digest does not match identity".into(),
+            ));
+        }
+        let expected_workflow = ContentHash::of_value(&json!({
+            "workflow_id": self.workflow_id,
+            "semantic_profile": self.semantic_profile,
+            "plan_order": self.plan_order,
+            "completed_order": self.completed_order,
+            "blocked_order": self.blocked_order,
+            "compensation_order": self.compensation_order,
+            "checkpoint_digest": self.checkpoint_digest,
+            "copilot_run_digest": self.copilot_run_digest,
+            "budget_units": self.budget_units,
+            "required_budget": self.required_budget,
+        }))
+        .map_err(|error| {
+            MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string())
+        })?;
+        if self.workflow_digest != expected_workflow {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                "multimodal workflow digest does not match plan and budget state".into(),
+            ));
+        }
+        if self.artifact.artifact_id
+            != format!("adapter-multimodal-evidence-workflow:{}", self.workflow_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.multimodal-research-workflow+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Artifact(
+                "multimodal workflow artifact is not bound to its receipt".into(),
+            ));
+        }
+        let payload = json!({
+            "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+            "contract_version": CONTRACT_VERSION,
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "workflow_id": self.workflow_id,
+            "agent_id": self.agent_id,
+            "semantic_profile": self.semantic_profile,
+            "checkpoint_id": self.checkpoint_id,
+            "disposition": self.disposition,
+            "stage_order": self.stage_order,
+            "plan_order": self.plan_order,
+            "completed_order": self.completed_order,
+            "blocked_order": self.blocked_order,
+            "compensation_order": self.compensation_order,
+            "candidate_order": self.candidate_order,
+            "selected_order": self.selected_order,
+            "unresolved_order": self.unresolved_order,
+            "denied_order": self.denied_order,
+            "incomparable_order": self.incomparable_order,
+            "missing_cell_order": self.missing_cell_order,
+            "replay_identity": self.replay_identity,
+            "copilot_run_digest": self.copilot_run_digest,
+            "checkpoint_digest": self.checkpoint_digest,
+            "workflow_digest": self.workflow_digest,
+            "omissions": self.omissions,
+            "uncertainty": self.uncertainty,
+            "negative_evidence": self.negative_evidence,
+            "effect_receipts": self.effect_receipts,
+            "boundary": PRECLINICAL_BOUNDARY,
+            "raw_data_local": self.raw_data_local,
+        });
+        self.artifact.verify_payload(&payload).map_err(|error| {
+            MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string())
+        })?;
         self.artifact.validate_metadata().map_err(|error| {
             MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string())
-        })
+        })?;
+        if self.input_digest != workflow_input_digest(&self.input)? {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                "multimodal workflow retained input digest mismatch".into(),
+            ));
+        }
+        let expected = build_multimodal_evidence_surveillance_workflow(&self.input)?;
+        if self != &expected {
+            return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
+                "multimodal workflow receipt does not match its retained input".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -185,6 +419,17 @@ pub fn schedule_multimodal_evidence_surveillance_workflow(
     MultimodalEvidenceSurveillanceWorkflowReceipt,
     MultimodalEvidenceSurveillanceWorkflowError,
 > {
+    let receipt = build_multimodal_evidence_surveillance_workflow(request)?;
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+fn build_multimodal_evidence_surveillance_workflow(
+    request: &MultimodalEvidenceSurveillanceWorkflowRequest,
+) -> Result<
+    MultimodalEvidenceSurveillanceWorkflowReceipt,
+    MultimodalEvidenceSurveillanceWorkflowError,
+> {
     validate_request(request)?;
     let copilot = run_multimodal_evidence_surveillance_research_copilot(&request.request)
         .map_err(|error| MultimodalEvidenceSurveillanceWorkflowError::Copilot(error.to_string()))?;
@@ -193,11 +438,9 @@ pub fn schedule_multimodal_evidence_surveillance_workflow(
         .map(|stage| (*stage).to_string())
         .collect::<Vec<_>>();
     let mut plan = BTreeSet::new();
-    let mut completed = BTreeSet::new();
     let mut compensation = BTreeSet::new();
     for stage in &stage_order {
         plan.insert(format!("plan:{stage}"));
-        completed.insert(stage.clone());
     }
     if copilot.selected_order.is_empty() {
         plan.insert("plan:retain-unresolved-multimodal-evidence".into());
@@ -205,10 +448,11 @@ pub fn schedule_multimodal_evidence_surveillance_workflow(
     } else {
         plan.insert("plan:publish-qualified-multimodal-artifact".into());
     }
-    let required_budget = plan.len() as u32;
-    if request.budget_units < required_budget {
+    if request.budget_units < plan.len() as u32 {
+        plan.insert("plan:budget-review".into());
         compensation.insert("compensate:research-work:budget-exhausted".into());
     }
+    let required_budget = plan.len() as u32;
     let mut omissions = copilot.omissions.clone();
     if !request.request.policy_allow {
         omissions.push("workflow:policy-denied".into());
@@ -227,23 +471,81 @@ pub fn schedule_multimodal_evidence_surveillance_workflow(
     } else {
         copilot.disposition
     };
-    let blocked_order = if disposition == MultimodalResearchCopilotDisposition::Blocked {
-        vec!["stage:release".into()]
+    let mut blocked = BTreeSet::new();
+    if copilot.disposition == MultimodalResearchCopilotDisposition::Blocked {
+        blocked.insert("stage:release".into());
+    }
+    if request.budget_units < required_budget {
+        blocked.insert("stage:budget".into());
+    }
+    let blocked_order = blocked.into_iter().collect::<Vec<_>>();
+    let plan_order = plan.into_iter().collect::<Vec<_>>();
+    let completed_order = if blocked_order.is_empty() {
+        stage_order.clone()
     } else {
         Vec::new()
     };
-    let plan_order = plan.into_iter().collect::<Vec<_>>();
-    let completed_order = completed.into_iter().collect::<Vec<_>>();
     let compensation_order = compensation.into_iter().collect::<Vec<_>>();
-    let checkpoint_digest = ContentHash::of_value(&json!({"workflow_id":request.workflow_id,"checkpoint_id":request.checkpoint_id,"stage_order":stage_order,"replay_identity":request.replay_identity})).map_err(|error| MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string()))?;
-    let copilot_value = serde_json::to_value(&copilot).map_err(|error| {
-        MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string())
-    })?;
-    let copilot_run_digest = ContentHash::of_value(&copilot_value).map_err(|error| {
-        MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string())
-    })?;
-    let workflow_digest = ContentHash::of_value(&json!({"workflow_id":request.workflow_id,"plan_order":plan_order,"completed_order":completed_order,"compensation_order":compensation_order,"checkpoint_digest":checkpoint_digest,"copilot_run_digest":copilot_run_digest,"budget_units":request.budget_units})).map_err(|error| MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":request.request.request_id,"workflow_id":request.workflow_id,"agent_id":request.request.agent_id,"semantic_profile":request.request.semantic_profile,"disposition":disposition,"stage_order":stage_order,"plan_order":plan_order,"completed_order":completed_order,"blocked_order":blocked_order,"compensation_order":compensation_order,"candidate_order":copilot.candidate_order,"selected_order":copilot.selected_order,"unresolved_order":copilot.unresolved_order,"incomparable_order":copilot.incomparable_order,"missing_cell_order":copilot.missing_cell_order,"replay_identity":request.replay_identity,"copilot_run_digest":copilot_run_digest,"checkpoint_digest":checkpoint_digest,"workflow_digest":workflow_digest,"omissions":omissions,"uncertainty":copilot.uncertainty,"negative_evidence":copilot.negative_evidence,"boundary":PRECLINICAL_BOUNDARY});
+    let checkpoint_digest = ContentHash::of_value(&json!({
+        "workflow_id": request.workflow_id,
+        "checkpoint_id": request.checkpoint_id,
+        "stage_order": stage_order,
+        "replay_identity": request.replay_identity,
+    }))
+    .map_err(|error| MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string()))?;
+    let copilot_run_digest = copilot.run_digest.clone();
+    let workflow_digest = ContentHash::of_value(&json!({
+        "workflow_id": request.workflow_id,
+        "semantic_profile": request.request.semantic_profile,
+        "plan_order": plan_order,
+        "completed_order": completed_order,
+        "blocked_order": blocked_order,
+        "compensation_order": compensation_order,
+        "checkpoint_digest": checkpoint_digest,
+        "copilot_run_digest": copilot_run_digest,
+        "budget_units": request.budget_units,
+        "required_budget": required_budget,
+    }))
+    .map_err(|error| MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string()))?;
+    let effect_receipts = if disposition == MultimodalResearchCopilotDisposition::Blocked {
+        vec!["block:unsafe-release".into()]
+    } else if !compensation_order.is_empty() || !blocked_order.is_empty() {
+        vec![format!("compensate:research-work:{}", request.workflow_id)]
+    } else {
+        vec![format!("schedule:research-work:{}", request.workflow_id)]
+    };
+    let payload = json!({
+        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "feature_id": FEATURE_ID,
+        "request_id": request.request.request_id,
+        "workflow_id": request.workflow_id,
+        "agent_id": request.request.agent_id,
+        "semantic_profile": request.request.semantic_profile,
+        "checkpoint_id": request.checkpoint_id,
+        "disposition": disposition,
+        "stage_order": stage_order,
+        "plan_order": plan_order,
+        "completed_order": completed_order,
+        "blocked_order": blocked_order,
+        "compensation_order": compensation_order,
+        "candidate_order": copilot.candidate_order,
+        "selected_order": copilot.selected_order,
+        "unresolved_order": copilot.unresolved_order,
+        "denied_order": copilot.denied_order,
+        "incomparable_order": copilot.incomparable_order,
+        "missing_cell_order": copilot.missing_cell_order,
+        "replay_identity": request.replay_identity,
+        "copilot_run_digest": copilot_run_digest,
+        "checkpoint_digest": checkpoint_digest,
+        "workflow_digest": workflow_digest,
+        "omissions": omissions,
+        "uncertainty": copilot.uncertainty,
+        "negative_evidence": copilot.negative_evidence,
+        "effect_receipts": effect_receipts,
+        "boundary": PRECLINICAL_BOUNDARY,
+        "raw_data_local": request.request.raw_data_local,
+    });
     let artifact = TypedResearchArtifact::from_payload(
         format!(
             "adapter-multimodal-evidence-workflow:{}",
@@ -255,21 +557,20 @@ pub fn schedule_multimodal_evidence_surveillance_workflow(
         vec![],
     )
     .map_err(|error| MultimodalEvidenceSurveillanceWorkflowError::Artifact(error.to_string()))?;
-    let effect_receipts = if disposition == MultimodalResearchCopilotDisposition::Blocked {
-        vec!["block:unsafe-release".into()]
-    } else if !compensation_order.is_empty() {
-        vec![format!("compensate:research-work:{}", request.workflow_id)]
-    } else {
-        vec![format!("schedule:research-work:{}", request.workflow_id)]
-    };
+    let canonical_request = canonical_multimodal_evidence_surveillance_workflow_request(request);
     let receipt = MultimodalEvidenceSurveillanceWorkflowReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
+        input: canonical_request,
+        input_digest: workflow_input_digest(request)?,
         request_id: request.request.request_id.clone(),
         workflow_id: request.workflow_id.clone(),
         agent_id: request.request.agent_id.clone(),
         semantic_profile: request.request.semantic_profile.clone(),
+        checkpoint_id: request.checkpoint_id.clone(),
+        budget_units: request.budget_units,
+        required_budget,
         disposition,
         stage_order,
         plan_order,
@@ -279,6 +580,7 @@ pub fn schedule_multimodal_evidence_surveillance_workflow(
         candidate_order: copilot.candidate_order.clone(),
         selected_order: copilot.selected_order.clone(),
         unresolved_order: copilot.unresolved_order.clone(),
+        denied_order: copilot.denied_order.clone(),
         incomparable_order: copilot.incomparable_order.clone(),
         missing_cell_order: copilot.missing_cell_order.clone(),
         replay_identity: request.replay_identity.clone(),
@@ -293,7 +595,6 @@ pub fn schedule_multimodal_evidence_surveillance_workflow(
         raw_data_local: request.request.raw_data_local,
         boundary: request.boundary.clone(),
     };
-    receipt.validate()?;
     Ok(receipt)
 }
 
@@ -321,13 +622,19 @@ fn validate_request(
             "workflow stage order is not canonical".into(),
         ));
     }
-    if request.request.replay_identity.as_str().len() != 64
-        || request.replay_identity.as_str().len() != 64
-    {
+    validate_text("workflow_id", &request.workflow_id)?;
+    validate_text("checkpoint_id", &request.checkpoint_id)?;
+    validate_text("boundary", &request.boundary)?;
+    validate_text("request_id", &request.request.request_id)?;
+    validate_text("agent_id", &request.request.agent_id)?;
+    validate_text("semantic_profile", &request.request.semantic_profile)?;
+    if u64::from(request.budget_units) > MAX_ITEMS as u64 {
         return Err(MultimodalEvidenceSurveillanceWorkflowError::Invalid(
-            "replay identity is invalid".into(),
+            "workflow budget exceeds its bound".into(),
         ));
     }
+    validate_digest("workflow.replay_identity", &request.replay_identity)?;
+    validate_digest("copilot.replay_identity", &request.request.replay_identity)?;
     Ok(())
 }
 
@@ -417,6 +724,8 @@ mod tests {
         let receipt = schedule_multimodal_evidence_surveillance_workflow(&r).unwrap();
         assert_eq!(receipt.effect_receipts.len(), 1);
         assert!(receipt.effect_receipts[0].starts_with("compensate:"));
+        assert!(receipt.completed_order.is_empty());
+        assert!(receipt.blocked_order.contains(&"stage:budget".to_string()));
     }
     #[test]
     fn stage_order_is_rejected() {
@@ -431,5 +740,42 @@ mod tests {
             schedule_multimodal_evidence_surveillance_workflow(&r).unwrap(),
             schedule_multimodal_evidence_surveillance_workflow(&r).unwrap()
         );
+    }
+
+    #[test]
+    fn reordered_nested_copilot_input_has_stable_identity() {
+        let mut reordered = request();
+        reordered.request.required_studies.reverse();
+        reordered.request.required_modalities.reverse();
+        reordered.request.declared_tools.reverse();
+        reordered.request.observations.reverse();
+        let first = schedule_multimodal_evidence_surveillance_workflow(&request()).unwrap();
+        let second = schedule_multimodal_evidence_surveillance_workflow(&reordered).unwrap();
+        assert_eq!(first.input_digest, second.input_digest);
+        assert_eq!(first.workflow_digest, second.workflow_digest);
+    }
+
+    #[test]
+    fn semantic_mismatch_remains_denied_and_incomparable() {
+        let mut r = request();
+        r.request.observations[0].semantic_profile = "profile-other".into();
+        let receipt = schedule_multimodal_evidence_surveillance_workflow(&r).unwrap();
+        assert!(receipt.denied_order.contains(&"s1".to_string()));
+        assert!(receipt.incomparable_order.contains(&"s1".to_string()));
+    }
+
+    #[test]
+    fn tampered_workflow_digest_is_rejected() {
+        let mut receipt = schedule_multimodal_evidence_surveillance_workflow(&request()).unwrap();
+        receipt.workflow_digest = ContentHash::of_bytes(b"tampered-workflow");
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_retained_workflow_request() {
+        let mut receipt = schedule_multimodal_evidence_surveillance_workflow(&request()).unwrap();
+        receipt.input.checkpoint_id = "tampered-checkpoint".into();
+        let error = receipt.validate().unwrap_err();
+        assert!(error.to_string().contains("retained input digest mismatch"));
     }
 }

@@ -26,6 +26,8 @@ pub const ACTION_ORDER: [&str; 4] = [
     "control:authorize",
     "control:publish",
 ];
+const CONTROL_CONTENT_TYPE: &str = "application/vnd.aurora.federated-retrieval-control-plane+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedRetrievalControlPlaneRequest {
@@ -99,7 +101,6 @@ impl FederatedRetrievalControlPlaneReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.plane_id.trim().is_empty()
             || self.session_id.trim().is_empty()
@@ -151,46 +152,81 @@ impl FederatedRetrievalControlPlaneReceipt {
                 ));
             }
         }
-        if self
-            .ranked_order
-            .iter()
-            .chain(self.qualified_order.iter())
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.plane_id, "plane_id"),
+            (&self.session_id, "session_id"),
+            (&self.federation_id, "federation_id"),
+            (&self.institution_id, "institution_id"),
+            (&self.purpose, "purpose"),
+            (&self.semantic_profile, "semantic_profile"),
+            (&self.endpoint, "endpoint"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        if self.completed_action_order.len() > self.action_order.len()
+            || self.completed_action_order != self.action_order[..self.completed_action_order.len()]
+            || self.blocked_action_order != self.action_order[self.completed_action_order.len()..]
         {
             return Err(FederatedRetrievalControlPlaneError::Invalid(
-                "federated control-plane evidence state is not covered by candidates".into(),
+                "federated control-plane actions are not a canonical prefix and suffix".into(),
             ));
         }
-        for values in [
-            &self.study_order,
-            &self.modality_order,
-            &self.compensation_order,
-            &self.candidate_order,
-            &self.ranked_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        validate_sorted_unique(&self.study_order, "study_order")?;
+        validate_sorted_unique(&self.modality_order, "modality_order")?;
+        validate_sorted_unique(&self.compensation_order, "compensation_order")?;
+        validate_sorted_unique(&self.candidate_order, "candidate_order")?;
+        for (values, field) in [
+            (&self.ranked_order, "ranked_order"),
+            (&self.qualified_order, "qualified_order"),
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(FederatedRetrievalControlPlaneError::Invalid(
-                    "federated control-plane ordering is not canonical".into(),
-                ));
-            }
+            validate_unique(values, field)?;
         }
-        let aggregate = self.aggregate_order.clone();
-        let mut sorted = aggregate.clone();
-        sorted.sort_by(|left, right| left.as_str().cmp(right.as_str()));
-        if aggregate != sorted {
+        for (values, field) in [
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
+        let candidate_values = self
+            .candidate_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let ranked_values = self.ranked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let qualified_values = self
+            .qualified_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let blocked_values = self.blocked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let unknown_values = self.unknown_order.iter().cloned().collect::<BTreeSet<_>>();
+        if ranked_values != candidate_values {
             return Err(FederatedRetrievalControlPlaneError::Invalid(
-                "federated aggregate order is not canonical".into(),
+                "federated control-plane ranked order must contain every candidate exactly once"
+                    .into(),
             ));
         }
+        if !qualified_values.is_subset(&candidate_values)
+            || !blocked_values.is_subset(&candidate_values)
+            || !unknown_values.is_subset(&blocked_values)
+            || !qualified_values.is_disjoint(&blocked_values)
+            || qualified_values
+                .union(&blocked_values)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_values
+        {
+            return Err(FederatedRetrievalControlPlaneError::Invalid(
+                "federated control-plane candidate states must partition candidates".into(),
+            ));
+        }
+        validate_digest_order(&self.aggregate_order)?;
         for digest in [
             &self.comparability_digest,
             &self.envelope_digest,
@@ -204,16 +240,76 @@ impl FederatedRetrievalControlPlaneReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("manage:local-federated-retrieval-control:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            FederatedRetrievalDisposition::Qualified | FederatedRetrievalDisposition::Partial
+        ) {
+            vec![format!(
+                "manage:local-federated-retrieval-control:{}",
+                self.plane_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
             return Err(FederatedRetrievalControlPlaneError::Invalid(
-                "federated control-plane effect is outside local management gate".into(),
+                "federated control-plane effect does not match disposition".into(),
+            ));
+        }
+        if !self.raw_data_local {
+            return Err(FederatedRetrievalControlPlaneError::Invalid(
+                "federated control-plane receipts must declare that emitted data is local".into(),
+            ));
+        }
+        let expected_control_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "plane_id": self.plane_id,
+            "session_id": self.session_id,
+            "federation_id": self.federation_id,
+            "institution_id": self.institution_id,
+            "purpose": self.purpose,
+            "semantic_profile": self.semantic_profile,
+            "endpoint": self.endpoint,
+            "study_order": self.study_order,
+            "modality_order": self.modality_order,
+            "action_order": self.action_order,
+            "completed": self.completed_action_order,
+            "blocked": self.blocked_action_order,
+            "compensation": self.compensation_order,
+            "candidate_order": self.candidate_order,
+            "ranked_order": self.ranked_order,
+            "qualified_order": self.qualified_order,
+            "blocked_order": self.blocked_order,
+            "unknown_order": self.unknown_order,
+            "aggregate_order": self.aggregate_order,
+            "comparability_digest": self.comparability_digest,
+            "envelope_digest": self.envelope_digest,
+            "synthesis_digest": self.synthesis_digest,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| FederatedRetrievalControlPlaneError::Artifact(error.to_string()))?;
+        if self.control_digest != expected_control_digest {
+            return Err(FederatedRetrievalControlPlaneError::Invalid(
+                "federated control-plane digest is not bound to control state".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-federated-retrieval-control-plane:{}", self.plane_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != CONTROL_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(FederatedRetrievalControlPlaneError::Invalid(
+                "federated control-plane artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedRetrievalControlPlaneError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedRetrievalControlPlaneError::Artifact(error.to_string()))
     }
 
@@ -272,7 +368,7 @@ pub fn operate_federated_retrieval_control_plane(
         && request.signer_valid
         && request.approval_valid
         && request.raw_data_local
-        && request.budget_units >= ACTION_ORDER.len() as u32;
+        && u64::from(request.budget_units) >= u64::try_from(ACTION_ORDER.len()).unwrap_or(u64::MAX);
     let disposition = if gate {
         synthesis.disposition
     } else {
@@ -332,19 +428,7 @@ pub fn operate_federated_retrieval_control_plane(
     if disposition != FederatedRetrievalDisposition::Qualified {
         compensation.insert("compensate:retain-unresolved-federated-retrieval".into());
     }
-    let control_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "plane_id": request.plane_id, "session_id": request.session_id, "federation_id": synthesis.federation_id, "institution_id": synthesis.institution_id, "purpose": synthesis.purpose, "action_order": ACTION_ORDER, "completed": completed_action_order, "blocked": blocked_action_order, "compensation": compensation, "comparability_digest": synthesis.comparability_digest, "envelope_digest": synthesis.envelope_digest, "synthesis_digest": synthesis.synthesis_digest, "replay_identity": request.request.replay_identity})).map_err(|error| FederatedRetrievalControlPlaneError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "plane_id": request.plane_id, "session_id": request.session_id, "federation_id": synthesis.federation_id, "institution_id": synthesis.institution_id, "purpose": synthesis.purpose, "semantic_profile": synthesis.semantic_profile, "endpoint": synthesis.endpoint, "study_order": synthesis.study_order, "modality_order": synthesis.modality_order, "disposition": disposition, "action_order": ACTION_ORDER, "completed_action_order": completed_action_order, "blocked_action_order": blocked_action_order, "compensation_order": compensation, "aggregate_order": synthesis.aggregate_order, "comparability_digest": synthesis.comparability_digest, "envelope_digest": synthesis.envelope_digest, "synthesis_digest": synthesis.synthesis_digest, "control_digest": control_digest, "replay_identity": request.request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
-    let artifact = TypedResearchArtifact::from_payload(
-        format!(
-            "brain-federated-retrieval-control-plane:{}",
-            request.plane_id
-        ),
-        "application/vnd.aurora.federated-retrieval-control-plane+json",
-        &payload,
-        Vec::new(),
-        Vec::new(),
-    )
-    .map_err(|error| FederatedRetrievalControlPlaneError::Artifact(error.to_string()))?;
+    let raw_data_local = true;
     let effect_receipts = if matches!(
         disposition,
         FederatedRetrievalDisposition::Qualified | FederatedRetrievalDisposition::Partial
@@ -356,6 +440,46 @@ pub fn operate_federated_retrieval_control_plane(
     } else {
         vec!["block:unsafe-release".into()]
     };
+    let control_digest = ContentHash::of_value(&json!({
+        "feature_id": FEATURE_ID,
+        "plane_id": request.plane_id,
+        "session_id": request.session_id,
+        "federation_id": synthesis.federation_id,
+        "institution_id": synthesis.institution_id,
+        "purpose": synthesis.purpose,
+        "semantic_profile": synthesis.semantic_profile,
+        "endpoint": synthesis.endpoint,
+        "study_order": synthesis.study_order,
+        "modality_order": synthesis.modality_order,
+        "action_order": ACTION_ORDER,
+        "completed": completed_action_order,
+        "blocked": blocked_action_order,
+        "compensation": compensation,
+        "candidate_order": synthesis.candidate_order,
+        "ranked_order": synthesis.ranked_order,
+        "qualified_order": synthesis.qualified_order,
+        "blocked_order": synthesis.blocked_order,
+        "unknown_order": synthesis.unknown_order,
+        "aggregate_order": synthesis.aggregate_order,
+        "comparability_digest": synthesis.comparability_digest,
+        "envelope_digest": synthesis.envelope_digest,
+        "synthesis_digest": synthesis.synthesis_digest,
+        "replay_identity": request.request.replay_identity,
+        "raw_data_local": raw_data_local,
+    }))
+    .map_err(|error| FederatedRetrievalControlPlaneError::Artifact(error.to_string()))?;
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "plane_id": request.plane_id, "session_id": request.session_id, "federation_id": synthesis.federation_id, "institution_id": synthesis.institution_id, "purpose": synthesis.purpose, "semantic_profile": synthesis.semantic_profile, "endpoint": synthesis.endpoint, "study_order": synthesis.study_order, "modality_order": synthesis.modality_order, "disposition": disposition, "action_order": ACTION_ORDER, "completed_action_order": completed_action_order, "blocked_action_order": blocked_action_order, "compensation_order": compensation, "candidate_order": synthesis.candidate_order, "ranked_order": synthesis.ranked_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "aggregate_order": synthesis.aggregate_order, "comparability_digest": synthesis.comparability_digest, "envelope_digest": synthesis.envelope_digest, "synthesis_digest": synthesis.synthesis_digest, "control_digest": control_digest, "replay_identity": request.request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": raw_data_local, "boundary": PRECLINICAL_BOUNDARY});
+    let artifact = TypedResearchArtifact::from_payload(
+        format!(
+            "brain-federated-retrieval-control-plane:{}",
+            request.plane_id
+        ),
+        CONTROL_CONTENT_TYPE,
+        &payload,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|error| FederatedRetrievalControlPlaneError::Artifact(error.to_string()))?;
     let receipt = FederatedRetrievalControlPlaneReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -392,11 +516,107 @@ pub fn operate_federated_retrieval_control_plane(
         negative_evidence: negative.into_iter().collect(),
         effect_receipts,
         artifact,
-        raw_data_local: true,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedRetrievalControlPlaneError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedRetrievalControlPlaneError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), FederatedRetrievalControlPlaneError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedRetrievalControlPlaneError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), FederatedRetrievalControlPlaneError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedRetrievalControlPlaneError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_digest_order(
+    values: &[ContentHash],
+) -> Result<(), FederatedRetrievalControlPlaneError> {
+    if values.iter().any(|value| value.as_str().len() != 64)
+        || values.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(FederatedRetrievalControlPlaneError::Invalid(
+            "federated aggregate order or digest is invalid".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &FederatedRetrievalControlPlaneReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "plane_id": receipt.plane_id,
+        "session_id": receipt.session_id,
+        "federation_id": receipt.federation_id,
+        "institution_id": receipt.institution_id,
+        "purpose": receipt.purpose,
+        "semantic_profile": receipt.semantic_profile,
+        "endpoint": receipt.endpoint,
+        "study_order": receipt.study_order,
+        "modality_order": receipt.modality_order,
+        "disposition": receipt.disposition,
+        "action_order": receipt.action_order,
+        "completed_action_order": receipt.completed_action_order,
+        "blocked_action_order": receipt.blocked_action_order,
+        "compensation_order": receipt.compensation_order,
+        "candidate_order": receipt.candidate_order,
+        "ranked_order": receipt.ranked_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "aggregate_order": receipt.aggregate_order,
+        "comparability_digest": receipt.comparability_digest,
+        "envelope_digest": receipt.envelope_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "control_digest": receipt.control_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -480,6 +700,34 @@ mod tests {
         assert_eq!(receipt.disposition, FederatedRetrievalDisposition::Blocked);
         assert!(!receipt.compensation_order.is_empty());
     }
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut value = request();
+        value.raw_data_local = false;
+        value.request.raw_data_local = false;
+        let receipt = operate_federated_retrieval_control_plane(&value).unwrap();
+        assert_eq!(receipt.disposition, FederatedRetrievalDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "control:raw-data-locality-failed"));
+        assert!(receipt.validate().is_ok());
+    }
+    #[test]
+    fn control_artifact_payload_is_bound() {
+        let mut receipt = operate_federated_retrieval_control_plane(&request()).unwrap();
+        receipt.endpoint = "urn:tampered".into();
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn case_mismatched_candidate_identity_is_rejected() {
+        let mut receipt = operate_federated_retrieval_control_plane(&request()).unwrap();
+        receipt.ranked_order[0] = receipt.ranked_order[0].to_ascii_uppercase();
+        assert!(receipt.validate().is_err());
+    }
+
     #[test]
     fn digest_is_stable() {
         let receipt = operate_federated_retrieval_control_plane(&request()).unwrap();

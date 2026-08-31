@@ -34,6 +34,22 @@ pub struct SourceLocation {
 }
 
 impl SourceLocation {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_text("source", &self.source, 512)?;
+        if self.record == Some(0) {
+            return Err("records are one-based".into());
+        }
+        for (field, value) in [
+            ("artifact", self.artifact.as_deref()),
+            ("field", self.field.as_deref()),
+        ] {
+            if let Some(value) = value {
+                validate_text(field, value, 512)?;
+            }
+        }
+        Ok(())
+    }
+
     /// The source as a whole. Used for losses that are properties of the source rather than of
     /// any one field, such as an absent upstream accession.
     pub fn source(source: impl Into<String>) -> Self {
@@ -151,6 +167,16 @@ impl SourceLocation {
     }
 }
 
+fn validate_text(field: &str, value: &str, maximum: usize) -> Result<(), String> {
+    if value.is_empty() || value.trim() != value {
+        return Err(format!("{field} must be non-empty and trimmed"));
+    }
+    if value.len() > maximum || value.chars().any(char::is_control) {
+        return Err(format!("{field} is outside its bounded text contract"));
+    }
+    Ok(())
+}
+
 impl fmt::Display for SourceLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.locator())
@@ -196,5 +222,12 @@ mod tests {
             location.locator(),
             "cohort/labs/a.csv#record=3&field=tumor_volume"
         );
+    }
+
+    #[test]
+    fn locations_reject_empty_components_and_zero_based_records() {
+        assert!(SourceLocation::source(" ").validate().is_err());
+        assert!(SourceLocation::record("source", 0).validate().is_err());
+        assert!(SourceLocation::column("source", " ").validate().is_err());
     }
 }

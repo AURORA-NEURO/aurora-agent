@@ -157,6 +157,23 @@ pub mod reconcile;
 pub mod register;
 pub mod report;
 pub mod verdict;
+pub mod reconciliation_integrity_support;
+pub mod local_reconciliation_integrity_inference;
+pub mod multimodal_reconciliation_integrity_inference;
+pub mod throughput_reconciliation_integrity_inference;
+pub mod federated_continual_reconciliation_integrity_inference;
+pub mod local_reconciliation_integrity_contract_model;
+pub mod multimodal_reconciliation_integrity_contract_model;
+pub mod throughput_reconciliation_integrity_contract_model;
+pub mod federated_continual_reconciliation_integrity_contract_model;
+pub mod local_reconciliation_integrity_research_copilot;
+pub mod multimodal_reconciliation_integrity_research_copilot;
+pub mod throughput_reconciliation_integrity_research_copilot;
+pub mod federated_continual_reconciliation_integrity_research_copilot;
+pub mod local_reconciliation_integrity_workflow_fabric;
+pub mod multimodal_reconciliation_integrity_workflow_fabric;
+pub mod throughput_reconciliation_integrity_workflow_fabric;
+pub mod federated_continual_reconciliation_integrity_workflow_fabric;
 
 pub use citations::{audit_self, forbidden_ids, scan, CitationAudit};
 pub use entry::{Entry, EntryFields, Register};
@@ -169,6 +186,23 @@ pub use verdict::{
     Classification, Dischargers, ForeignSurface, Source, SourceFields, Standing, Survey,
     UncoveredStanding, Verdict, VerdictFields,
 };
+pub use reconciliation_integrity_support::*;
+pub use local_reconciliation_integrity_inference::*;
+pub use multimodal_reconciliation_integrity_inference::*;
+pub use throughput_reconciliation_integrity_inference::*;
+pub use federated_continual_reconciliation_integrity_inference::*;
+pub use local_reconciliation_integrity_contract_model::*;
+pub use multimodal_reconciliation_integrity_contract_model::*;
+pub use throughput_reconciliation_integrity_contract_model::*;
+pub use federated_continual_reconciliation_integrity_contract_model::*;
+pub use local_reconciliation_integrity_research_copilot::*;
+pub use multimodal_reconciliation_integrity_research_copilot::*;
+pub use throughput_reconciliation_integrity_research_copilot::*;
+pub use federated_continual_reconciliation_integrity_research_copilot::*;
+pub use local_reconciliation_integrity_workflow_fabric::*;
+pub use multimodal_reconciliation_integrity_workflow_fabric::*;
+pub use throughput_reconciliation_integrity_workflow_fabric::*;
+pub use federated_continual_reconciliation_integrity_workflow_fabric::*;
 
 /// The schema version of the register objects this crate emits.
 ///

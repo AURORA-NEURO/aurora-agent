@@ -86,7 +86,9 @@ impl OmissionManifest {
     /// A manifest with any unknown, policy-blocked or deferred group is *not* sufficient, and
     /// the compiler must abstain or refine rather than present the context as complete.
     pub fn supports_sufficiency_claim(&self) -> bool {
-        self.groups.iter().all(|g| g.influence.supports_sufficiency())
+        self.groups
+            .iter()
+            .all(|g| g.influence.supports_sufficiency())
     }
 
     pub fn blocking_groups(&self) -> impl Iterator<Item = &OmissionGroup> {

@@ -5,6 +5,7 @@ edition = "2021"
 description = "Million-scale factory: effective size, hidden-family splits, prospective escrow, cost accounting, content-addressed storage"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-worldgen = { workspace = true }
 bioprism-store = { workspace = true }

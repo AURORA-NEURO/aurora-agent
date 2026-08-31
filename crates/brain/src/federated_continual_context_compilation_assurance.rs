@@ -124,6 +124,7 @@ impl FederatedContextAssuranceReceipt {
             || self.goal.trim().is_empty()
             || self.semantic_profile.trim().is_empty()
             || self.institution_order.len() < 2
+            || self.institution_order.len() > usize::from(u16::MAX)
             || self.candidate_order.is_empty()
             || self.witness_order.is_empty()
             || self.effect_receipts.is_empty()
@@ -272,6 +273,7 @@ pub fn assure_federated_continual_context_compilation(
         || request.goal.trim().is_empty()
         || request.semantic_profile.trim().is_empty()
         || request.institution_order.len() < 2
+        || request.institution_order.len() > usize::from(u16::MAX)
         || request.minimum_quorum == 0
         || request.replay_identity.as_str().len() != 64
         || !request.raw_data_local
@@ -291,7 +293,7 @@ pub fn assure_federated_continual_context_compilation(
         || institutions
             .iter()
             .any(|institution| institution.trim().is_empty())
-        || request.minimum_quorum as usize > institutions.len()
+        || usize::from(request.minimum_quorum) > institutions.len()
     {
         return Err(FederatedContextAssuranceError::Invalid(
             "federated institution identifiers or quorum are invalid".into(),
@@ -414,13 +416,13 @@ pub fn assure_federated_continual_context_compilation(
         counterexamples.insert("counterexample:signed-approval-missing".into());
         omissions.insert("assurance:signed-approval-missing".into());
     }
-    if !unknown.is_empty() || qualified.len() < request.minimum_quorum as usize {
+    if !unknown.is_empty() || qualified.len() < usize::from(request.minimum_quorum) {
         witnesses.insert("gate:incomplete-federated-closure-retained".into());
     }
     aggregate_order.sort_by(|left, right| left.as_str().cmp(right.as_str()));
     let verdict = if !global_open || !blocked.is_empty() {
         FederatedContextAssuranceVerdict::Blocked
-    } else if !unknown.is_empty() || qualified.len() < request.minimum_quorum as usize {
+    } else if !unknown.is_empty() || qualified.len() < usize::from(request.minimum_quorum) {
         FederatedContextAssuranceVerdict::Unresolved
     } else {
         FederatedContextAssuranceVerdict::Qualified
@@ -489,7 +491,11 @@ pub fn assure_federated_continual_context_compilation(
         Vec::new(),
     )
     .map_err(|error| FederatedContextAssuranceError::Artifact(error.to_string()))?;
-    let quorum = qualified.len() as u16;
+    let quorum = u16::try_from(qualified.len()).map_err(|_| {
+        FederatedContextAssuranceError::Invalid(
+            "federated qualified institution count exceeds the receipt quorum width".into(),
+        )
+    })?;
     let receipt = FederatedContextAssuranceReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -527,7 +533,7 @@ pub fn assure_federated_continual_context_compilation(
             vec!["block:unsafe-release".into()]
         },
         artifact,
-        raw_data_local: request.raw_data_local,
+        raw_data_local: true,
         aggregate_only: request.aggregate_only,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
@@ -644,8 +650,27 @@ mod tests {
         );
     }
     #[test]
+    fn non_local_input_returns_blocked_metadata_receipt() {
+        let mut value = request();
+        value.peers[0].raw_data_local = false;
+        let receipt = assure_federated_continual_context_compilation(&value).unwrap();
+        assert_eq!(receipt.verdict, FederatedContextAssuranceVerdict::Blocked);
+        assert!(receipt.raw_data_local);
+    }
+    #[test]
     fn digest_is_stable() {
         let receipt = assure_federated_continual_context_compilation(&request()).unwrap();
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+    #[test]
+    fn institution_count_cannot_overflow_receipt_quorum() {
+        let mut value = request();
+        value.institution_order = (0..=usize::from(u16::MAX))
+            .map(|index| format!("institution:{index}"))
+            .collect();
+        assert!(matches!(
+            assure_federated_continual_context_compilation(&value),
+            Err(FederatedContextAssuranceError::Invalid(_))
+        ));
     }
 }

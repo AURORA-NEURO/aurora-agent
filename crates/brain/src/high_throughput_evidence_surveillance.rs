@@ -78,6 +78,11 @@ pub enum HighThroughputEvidenceError {
 
 impl HighThroughputEvidenceReceipt {
     pub fn validate(&self) -> Result<(), HighThroughputEvidenceError> {
+        let candidate_count = u64::try_from(self.candidate_order.len()).map_err(|_| {
+            HighThroughputEvidenceError::Invalid(
+                "throughput candidate count exceeds checkpoint sequence width".into(),
+            )
+        })?;
         if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
@@ -92,6 +97,11 @@ impl HighThroughputEvidenceReceipt {
         {
             return Err(HighThroughputEvidenceError::Invalid(
                 "identity, batch partition, ranking, locality, or effects are incomplete".into(),
+            ));
+        }
+        if self.checkpoint_seq != candidate_count {
+            return Err(HighThroughputEvidenceError::Invalid(
+                "throughput checkpoint does not cover the candidate batch".into(),
             ));
         }
         if self
@@ -129,8 +139,24 @@ impl HighThroughputEvidenceReceipt {
                 "effect is outside the throughput gate".into(),
             ));
         }
+        let expected_queue_digest = ContentHash::of_value(&json!({
+            "batch_id": self.batch_id,
+            "partition": self.partition,
+            "candidate_order": self.candidate_order,
+            "checkpoint_seq": self.checkpoint_seq,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| HighThroughputEvidenceError::Artifact(error.to_string()))?;
+        if self.queue_digest != expected_queue_digest {
+            return Err(HighThroughputEvidenceError::Invalid(
+                "throughput queue digest is not bound to batch state".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| HighThroughputEvidenceError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| HighThroughputEvidenceError::Artifact(error.to_string()))
     }
 
@@ -264,7 +290,11 @@ pub fn admit_high_throughput_evidence(
         } else {
             HighThroughputDisposition::Partial
         };
-    let checkpoint_seq = request.observations.len() as u64;
+    let checkpoint_seq = u64::try_from(request.observations.len()).map_err(|_| {
+        HighThroughputEvidenceError::Invalid(
+            "throughput observation count exceeds checkpoint sequence width".into(),
+        )
+    })?;
     let queue_digest = ContentHash::of_value(&json!({"batch_id": request.batch_id, "partition": request.partition, "candidate_order": candidate_order, "checkpoint_seq": checkpoint_seq, "replay_identity": request.replay_identity})).map_err(|error| HighThroughputEvidenceError::Artifact(error.to_string()))?;
     let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "disposition": disposition, "candidate_order": candidate_order, "admitted_order": admitted, "blocked_order": blocked, "unknown_order": unknown, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "checkpoint_seq": checkpoint_seq, "queue_digest": queue_digest, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
@@ -340,6 +370,29 @@ fn validate_request(
         }
     }
     Ok(())
+}
+
+fn receipt_payload(receipt: &HighThroughputEvidenceReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "batch_id": receipt.batch_id,
+        "partition": receipt.partition,
+        "disposition": receipt.disposition,
+        "candidate_order": receipt.candidate_order,
+        "admitted_order": receipt.admitted_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "checkpoint_seq": receipt.checkpoint_seq,
+        "queue_digest": receipt.queue_digest,
+        "replay_identity": receipt.replay_identity,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -440,5 +493,24 @@ mod tests {
             duplicate
         ]))
         .is_err());
+    }
+
+    #[test]
+    fn checkpoint_and_queue_digest_are_bound() {
+        let mut checkpoint_drift = admit_high_throughput_evidence(&request(vec![observation(
+            "a",
+            EvidenceState::Supported,
+        )]))
+        .unwrap();
+        checkpoint_drift.checkpoint_seq += 1;
+        assert!(checkpoint_drift.validate().is_err());
+
+        let mut digest_drift = admit_high_throughput_evidence(&request(vec![observation(
+            "a",
+            EvidenceState::Supported,
+        )]))
+        .unwrap();
+        digest_drift.queue_digest = hash("tampered");
+        assert!(digest_drift.validate().is_err());
     }
 }

@@ -1,0 +1,4 @@
+from .worldgen_laboratory_integration_workflow_support import InstrumentWorkflowRequest, InstrumentWorkflowReceipt, schedule, manifest
+FEATURE_ID="AFA-worldgen-P11-F16"; CONTRACT_VERSION="worldgen-federated_continual-laboratory_integration-workflow/1.0"
+def worldgen_federated_continual_laboratory_integration_workflow_fabric_manifest(): return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,input_schema="InstrumentWorkflowRequest1@1",scale="federated continual autonomous",autonomy_tier="A1")
+def schedule_worldgen_federated_continual_laboratory_integration_workflow(request:InstrumentWorkflowRequest)->InstrumentWorkflowReceipt: return schedule(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated continual autonomous",require_approval=False,require_federation=True)

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora-neuro.org/schemas/worldgen/throughput-retrieval-synthesis-copilot/1.0",
+  "title": "Worldgen throughput retrieval synthesis copilot receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_version", "feature_id", "request_id", "agent_id", "disposition", "action_order", "denied_action_order", "tool_receipts", "synthesis", "dry_run", "copilot_digest", "artifact", "effect_receipts", "raw_data_local", "aggregate_only", "boundary"],
+  "properties": {
+    "schema_version": {"const": "aurora-research-contract/1.0"}, "contract_version": {"const": "worldgen-throughput-retrieval-synthesis-copilot/1.0"}, "feature_id": {"const": "AFA-worldgen-P02-F11"}, "request_id": {"type": "string", "minLength": 1}, "agent_id": {"type": "string", "minLength": 1}, "disposition": {"enum": ["qualified", "partial", "blocked"]}, "action_order": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "denied_action_order": {"type": "array", "items": {"type": "string"}}, "tool_receipts": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "synthesis": {"type": "object", "required": ["schema_version", "contract_version", "feature_id", "request_id", "researcher", "corpus_id", "semantic_profile", "disposition", "candidate_order", "ranked_order", "ranked_scores_milli", "synthesis_digest", "artifact", "effect_receipts", "raw_data_local", "aggregate_only", "boundary"]}, "dry_run": {"type": "boolean"}, "copilot_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["artifact_id", "content_type", "content_hash", "boundary"], "properties": {"artifact_id": {"type": "string"}, "content_type": {"const": "application/vnd.aurora.worldgen.retrieval-copilot-receipt+json"}, "content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}}},
+    "effect_receipts": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "raw_data_local": {"const": true}, "aggregate_only": {"const": true}, "boundary": {"const": "preclinical-research-only; no human-subject or clinical-source data; no diagnosis, treatment, triage, enrollment, or clinical decisions"}
+  }
+}
+

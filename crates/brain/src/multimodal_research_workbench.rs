@@ -226,9 +226,10 @@ pub fn compile_multimodal_research_workbench(
     let actionable = request.policy_allow
         && request.protected_closure
         && request.raw_data_local
-        && request.budget_units >= action_receipts.len() as u32
+        && u64::from(request.budget_units)
+            >= u64::try_from(action_receipts.len()).unwrap_or(u64::MAX)
         && evidence.disposition != MultimodalEvidenceDisposition::Blocked;
-    if request.budget_units < action_receipts.len() as u32 {
+    if u64::from(request.budget_units) < u64::try_from(action_receipts.len()).unwrap_or(u64::MAX) {
         omissions.insert("workbench:budget-exhausted".into());
     }
     if !request.policy_allow {

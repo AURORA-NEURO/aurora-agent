@@ -1,0 +1,15 @@
+//! Choreography P32 local inference protocol-execution integrity feature.
+use super::protocol_execution_integrity_support::{
+    execute, manifest, ProtocolExecutionCard7, ProtocolExecutionIntegrityError,
+    ProtocolExecutionRequest4,
+};
+pub const FEATURE_ID: &str = "AFA-choreography-P32-F01";
+pub const CONTRACT_VERSION: &str = "choreography-local_protocol_execution_integrity_inference/1.0";
+pub fn local_protocol_execution_integrity_inference_manifest() -> serde_json::Value {
+    manifest(FEATURE_ID, CONTRACT_VERSION, "local", "inference")
+}
+pub fn execute_local_protocol_execution_integrity_inference(
+    request: &ProtocolExecutionRequest4,
+) -> Result<ProtocolExecutionCard7, ProtocolExecutionIntegrityError> {
+    execute(request, FEATURE_ID, CONTRACT_VERSION, "local", "inference")
+}

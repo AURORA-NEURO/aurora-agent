@@ -137,6 +137,17 @@ impl GridCell {
         self.unmeasured_reason()
             .is_some_and(UnmeasuredReason::supports_claim)
     }
+
+    pub fn validate(&self) -> Result<(), MetricsError> {
+        if let GridCell::Measured { effective_size, .. } = self {
+            if *effective_size == 0 {
+                return Err(MetricsError::MalformedGrid {
+                    detail: "a measured cell must have a positive effective size".to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 /// One system's capability grid, under one set of conditions.
@@ -229,6 +240,37 @@ impl CapabilityGrid {
 
     pub fn is_empty(&self) -> bool {
         self.cells.is_empty()
+    }
+
+    pub fn validate(&self) -> Result<(), MetricsError> {
+        if self.label.trim().is_empty() {
+            return Err(MetricsError::MalformedGrid {
+                detail: "grid label must not be empty".to_string(),
+            });
+        }
+        self.conditions
+            .validate()
+            .map_err(|detail| MetricsError::MalformedGrid {
+                detail: format!("grid conditions are invalid: {detail}"),
+            })?;
+        match &self.conditions.subject {
+            Subject::Grid { label } if label == &self.label => {}
+            subject => {
+                return Err(MetricsError::MalformedGrid {
+                    detail: format!(
+                        "grid label {} does not match its subject {}",
+                        self.label, subject
+                    ),
+                })
+            }
+        }
+        for (capability, cell) in &self.cells {
+            cell.validate()
+                .map_err(|error| MetricsError::MalformedGrid {
+                    detail: format!("cell {capability}: {error}"),
+                })?;
+        }
+        Ok(())
     }
 
     pub fn measured(&self) -> impl Iterator<Item = (&CapabilityId, &GridCell)> {

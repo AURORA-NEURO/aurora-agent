@@ -1,0 +1,14 @@
+{
+  "capability": {
+    "input": "Genomics.Align-2",
+    "normalized": "genomics.align-2"
+  },
+  "sha256": {
+    "input_utf8": "hello",
+    "hex": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+  },
+  "canonical_object": {
+    "fields": [["b", "2"], ["a", "1"]],
+    "output": "{\"a\":1,\"b\":2}"
+  }
+}

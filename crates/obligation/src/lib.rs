@@ -34,25 +34,62 @@
 //! token count is an estimate that names its own method, per [`budget::EstimationMethod`].
 
 pub mod budget;
+pub mod closure_gate_support;
+pub mod local_closure_gate_inference;
+pub mod multimodal_closure_gate_inference;
+pub mod throughput_closure_gate_inference;
+pub mod federated_continual_closure_gate_inference;
+pub mod local_closure_gate_contract_model;
+pub mod multimodal_closure_gate_contract_model;
+pub mod throughput_closure_gate_contract_model;
+pub mod federated_continual_closure_gate_contract_model;
+pub mod local_closure_gate_research_copilot;
+pub mod multimodal_closure_gate_research_copilot;
+pub mod throughput_closure_gate_research_copilot;
+pub mod federated_continual_closure_gate_research_copilot;
+pub mod local_closure_gate_workflow_fabric;
+pub mod multimodal_closure_gate_workflow_fabric;
+pub mod throughput_closure_gate_workflow_fabric;
+pub mod federated_continual_closure_gate_workflow_fabric;
 pub mod capsule;
 pub mod error;
 pub mod evidence_gateway;
 pub mod gate;
 pub mod graph;
 pub mod invariants;
+pub mod knowledge_representation_assurance;
 pub mod ledger;
+pub mod prospective_release_assurance;
 pub mod release_harness;
+pub mod security_federation_interoperability_gateway;
 pub mod state;
 
 pub use budget::{
     Allocation, BudgetEvent, BudgetLedger, BudgetPlan, BudgetRequest, EstimationMethod, Lease,
     LeaseId, Rejection, RejectionReason, StopDecision, TokenBudgetController, TokenEstimate,
 };
+pub use closure_gate_support::{certify as certify_closure_gate, manifest as closure_gate_manifest, ClosureGateArtifact4, ClosureGateCard7, ClosureGateError, ClosureGateRequest4, ObligationPredicate4, BOUNDARY as CLOSURE_GATE_BOUNDARY, CONTENT_TYPE as CLOSURE_GATE_CONTENT_TYPE};
+pub use local_closure_gate_inference::*;
+pub use multimodal_closure_gate_inference::*;
+pub use throughput_closure_gate_inference::*;
+pub use federated_continual_closure_gate_inference::*;
+pub use local_closure_gate_contract_model::*;
+pub use multimodal_closure_gate_contract_model::*;
+pub use throughput_closure_gate_contract_model::*;
+pub use federated_continual_closure_gate_contract_model::*;
+pub use local_closure_gate_research_copilot::*;
+pub use multimodal_closure_gate_research_copilot::*;
+pub use throughput_closure_gate_research_copilot::*;
+pub use federated_continual_closure_gate_research_copilot::*;
+pub use local_closure_gate_workflow_fabric::*;
+pub use multimodal_closure_gate_workflow_fabric::*;
+pub use throughput_closure_gate_workflow_fabric::*;
+pub use federated_continual_closure_gate_workflow_fabric::*;
 pub use capsule::{BioContextCapsule, CAPSULE_SCHEMA_VERSION};
 pub use error::{BudgetError, CapsuleError, LedgerError, ObligationError};
 pub use evidence_gateway::{
-    evidence_gateway_manifest, integrate_evidence_feed, EvidenceFeed,
-    EvidenceGatewayError, EvidenceObservation, QualifiedEvidenceSet,
+    evidence_gateway_manifest, integrate_evidence_feed, EvidenceFeed, EvidenceGatewayError,
+    EvidenceObservation, QualifiedEvidenceSet,
     CONTRACT_VERSION as EVIDENCE_GATEWAY_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_GATEWAY_FEATURE_ID,
 };
@@ -63,13 +100,37 @@ pub use graph::{FrontierEntry, Obligation, ObligationGraph};
 pub use invariants::{
     ClosureReport, ClosureSelection, ClosureViolation, ProtectedClass, Representation,
 };
+pub use knowledge_representation_assurance::{
+    assure_knowledge_representation, knowledge_representation_assurance_manifest,
+    KnowledgeEvidenceState as AssuranceKnowledgeEvidenceState,
+    KnowledgePeer4 as AssuranceKnowledgePeer4,
+    KnowledgeRepresentationAssuranceError, ResearchClaim4 as AssuranceResearchClaim4,
+    ScopedResearchClaims4 as AssuranceScopedResearchClaims4,
+    TypedKnowledgeWorld7 as AssuranceTypedKnowledgeWorld7,
+    CONTRACT_VERSION as KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
+};
 pub use ledger::{
     CertificateCheck, OmissionLedger, OmissionReason, OmittedCandidate, RelevanceIndex,
     RelevanceRecord, SufficiencyCertificate, SufficiencyInputs, SufficiencyStatus, UnmetObligation,
+};
+pub use prospective_release_assurance::{
+    assure_prospective_release, prospective_release_assurance_manifest, AssuranceDisposition,
+    ProspectiveReleaseAssuranceError, ProspectiveReleaseAssuranceReceipt,
+    ProspectiveReleaseAssuranceRequest, ValidatedResearchRun3,
+    CONTRACT_VERSION as PROSPECTIVE_RELEASE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as PROSPECTIVE_RELEASE_ASSURANCE_FEATURE_ID,
 };
 pub use release_harness::{
     assess_release_harness, HarnessCheck, HarnessDisposition, ReleaseHarnessError,
     ReleaseHarnessReceipt, ReleaseHarnessRequest,
     CONTRACT_VERSION as RELEASE_HARNESS_CONTRACT_VERSION, FEATURE_ID as RELEASE_HARNESS_FEATURE_ID,
+};
+pub use security_federation_interoperability_gateway::{
+    negotiate_security_federation, security_federation_interoperability_gateway_manifest,
+    FederationCapability6, FederationEnvelope6, FederationEvidenceState, FederationRequest4,
+    SecurityFederationGatewayError,
+    CONTRACT_VERSION as SECURITY_FEDERATION_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
+    FEATURE_ID as SECURITY_FEDERATION_INTEROPERABILITY_GATEWAY_FEATURE_ID,
 };
 pub use state::{ObligationState, StateRecord};

@@ -33,6 +33,8 @@ pub const CAPABILITY_ORDER: [&str; 4] = [
     "capability:replay-v1",
     "capability:scoped-query-v1",
 ];
+const PROTOCOL_CONTENT_TYPE: &str = "application/vnd.aurora.retrieval-protocol-receipt+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetrievalProtocolRequest {
@@ -102,7 +104,6 @@ impl RetrievalProtocolReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.protocol_id.trim().is_empty()
             || self.session_id.trim().is_empty()
@@ -113,64 +114,129 @@ impl RetrievalProtocolReceipt {
             || self.action_receipts.is_empty()
             || self.candidate_order.is_empty()
             || self.effect_receipts.is_empty()
-            || self.budget_units < STAGE_ORDER.len() as u32
+            || u64::from(self.budget_units) < u64::try_from(STAGE_ORDER.len()).unwrap_or(u64::MAX)
         {
             return Err(RetrievalProtocolError::Invalid(
                 "protocol identity, negotiation, stage, retrieval, locality, budget, or effects are incomplete".into(),
             ));
         }
-        if !is_sorted_unique(&self.offered_capability_order)
-            || !is_sorted_unique(&self.required_capability_order)
-            || !is_sorted_unique(&self.negotiated_capability_order)
-            || !is_sorted_unique(&self.action_receipts)
-            || !is_sorted_unique(&self.candidate_order)
-            || !is_sorted_unique(&self.ranked_order)
-            || !is_sorted_unique(&self.qualified_order)
-            || !is_sorted_unique(&self.blocked_order)
-            || !is_sorted_unique(&self.unknown_order)
-            || !is_sorted_unique(&self.omissions)
-            || !is_sorted_unique(&self.uncertainty)
-            || !is_sorted_unique(&self.negative_evidence)
-            || !is_sorted_unique(&self.effect_receipts)
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.protocol_id, "protocol_id"),
+            (&self.session_id, "session_id"),
+        ] {
+            validate_text(value, field)?;
+        }
+        for (values, field) in [
+            (&self.offered_capability_order, "offered_capability_order"),
+            (&self.required_capability_order, "required_capability_order"),
+            (
+                &self.negotiated_capability_order,
+                "negotiated_capability_order",
+            ),
+            (&self.action_receipts, "action_receipts"),
+            (&self.candidate_order, "candidate_order"),
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
+        for (values, field) in [
+            (&self.ranked_order, "ranked_order"),
+            (&self.qualified_order, "qualified_order"),
+        ] {
+            validate_unique(values, field)?;
+        }
+        if self
+            .offered_capability_order
+            .iter()
+            .chain(self.required_capability_order.iter())
+            .chain(self.negotiated_capability_order.iter())
+            .any(|capability| !CAPABILITY_ORDER.contains(&capability.as_str()))
         {
             return Err(RetrievalProtocolError::Invalid(
-                "protocol vectors are not canonical".into(),
+                "protocol capability is not declared".into(),
             ));
         }
-        if (self.disposition != SynthesisDisposition::Blocked
-            && self
-                .required_capability_order
-                .iter()
-                .any(|capability| !self.offered_capability_order.contains(capability)))
-            || self
-                .negotiated_capability_order
-                .iter()
-                .any(|capability| !self.required_capability_order.contains(capability))
-            || self
-                .ranked_order
-                .iter()
-                .chain(self.qualified_order.iter())
-                .chain(self.blocked_order.iter())
-                .chain(self.unknown_order.iter())
-                .any(|id| !self.candidate_order.contains(id))
-        {
+        let expected_negotiated = self
+            .required_capability_order
+            .iter()
+            .filter(|capability| self.offered_capability_order.contains(capability))
+            .cloned()
+            .collect::<Vec<_>>();
+        if self.negotiated_capability_order != expected_negotiated {
             return Err(RetrievalProtocolError::Invalid(
-                "protocol negotiation or synthesis state is not covered by its declaration".into(),
+                "negotiated capabilities do not match the offered/required intersection".into(),
+            ));
+        }
+        let candidate_keys = identity_keys(&self.candidate_order);
+        if identity_keys(&self.ranked_order) != candidate_keys {
+            return Err(RetrievalProtocolError::Invalid(
+                "ranked order must contain every candidate exactly once".into(),
             ));
         }
         if self
-            .completed_stage_order
+            .ranked_order
             .iter()
-            .chain(self.blocked_stage_order.iter())
-            .any(|stage| !self.stage_order.iter().any(|expected| expected == stage))
+            .any(|candidate| !self.candidate_order.contains(candidate))
+            || self
+                .qualified_order
+                .iter()
+                .any(|candidate| !self.candidate_order.contains(candidate))
+            || self
+                .blocked_order
+                .iter()
+                .any(|candidate| !self.candidate_order.contains(candidate))
+            || self
+                .unknown_order
+                .iter()
+                .any(|candidate| !self.blocked_order.contains(candidate))
+        {
+            return Err(RetrievalProtocolError::Invalid(
+                "protocol state contains an identity outside its candidate set".into(),
+            ));
+        }
+        let qualified_keys = identity_keys(&self.qualified_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        if !qualified_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+            || qualified_keys
+                .union(&blocked_keys)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_keys
+        {
+            return Err(RetrievalProtocolError::Invalid(
+                "candidate states must partition candidates and keep unknown items blocked".into(),
+            ));
+        }
+        if self.completed_stage_order.len() > self.stage_order.len()
+            || self.completed_stage_order != self.stage_order[..self.completed_stage_order.len()]
+            || self.blocked_stage_order != self.stage_order[self.completed_stage_order.len()..]
             || self
                 .completed_stage_order
                 .iter()
                 .any(|stage| self.blocked_stage_order.contains(stage))
         {
             return Err(RetrievalProtocolError::Invalid(
-                "protocol stage transcript is not a disjoint subset of the declared protocol"
-                    .into(),
+                "protocol stage transcript is not a canonical prefix and suffix".into(),
+            ));
+        }
+        let expected_action_receipts = self
+            .completed_stage_order
+            .iter()
+            .map(|stage| format!("stage:completed:{stage}"))
+            .collect::<Vec<_>>();
+        let mut expected_action_receipts = expected_action_receipts;
+        expected_action_receipts.sort();
+        if self.action_receipts != expected_action_receipts {
+            return Err(RetrievalProtocolError::Invalid(
+                "protocol action receipts are not bound to completed stages".into(),
             ));
         }
         for digest in [
@@ -194,8 +260,98 @@ impl RetrievalProtocolReceipt {
                 "protocol effect is not read-only".into(),
             ));
         }
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            SynthesisDisposition::Qualified | SynthesisDisposition::Partial
+        ) {
+            vec![format!("read:local-retrieval-protocol:{}", self.session_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(RetrievalProtocolError::Invalid(
+                "protocol effect receipts do not match disposition".into(),
+            ));
+        }
+        if !self.raw_data_local
+            && (self.disposition != SynthesisDisposition::Blocked
+                || !self
+                    .omissions
+                    .iter()
+                    .any(|item| item == "protocol:raw-data-locality-failed"))
+        {
+            return Err(RetrievalProtocolError::Invalid(
+                "non-local protocols must be blocked and retain locality evidence".into(),
+            ));
+        }
+        let expected_negotiation_digest = ContentHash::of_value(&json!({
+            "protocol_id": self.protocol_id,
+            "offered": self.offered_capability_order,
+            "required": self.required_capability_order,
+            "negotiated": self.negotiated_capability_order,
+        }))
+        .map_err(|error| RetrievalProtocolError::Artifact(error.to_string()))?;
+        if self.negotiation_digest != expected_negotiation_digest {
+            return Err(RetrievalProtocolError::Invalid(
+                "negotiation digest is not bound to capabilities".into(),
+            ));
+        }
+        let expected_transcript_digest = ContentHash::of_value(&json!({
+            "session_id": self.session_id,
+            "stage_order": self.stage_order,
+            "completed": self.completed_stage_order,
+            "blocked": self.blocked_stage_order,
+            "negotiation_digest": self.negotiation_digest,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| RetrievalProtocolError::Artifact(error.to_string()))?;
+        if self.transcript_digest != expected_transcript_digest {
+            return Err(RetrievalProtocolError::Invalid(
+                "transcript digest is not bound to stage state".into(),
+            ));
+        }
+        let expected_protocol_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "protocol_id": self.protocol_id,
+            "session_id": self.session_id,
+            "disposition": self.disposition,
+            "negotiation_digest": self.negotiation_digest,
+            "transcript_digest": self.transcript_digest,
+            "synthesis_digest": self.synthesis_digest,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| RetrievalProtocolError::Artifact(error.to_string()))?;
+        if self.protocol_digest != expected_protocol_digest {
+            return Err(RetrievalProtocolError::Invalid(
+                "protocol digest is not bound to transport state".into(),
+            ));
+        }
+        if (self.disposition == SynthesisDisposition::Blocked
+            && self.completed_stage_order.len() != 2)
+            || (self.disposition != SynthesisDisposition::Blocked
+                && self.completed_stage_order.len() != self.stage_order.len())
+        {
+            return Err(RetrievalProtocolError::Invalid(
+                "protocol disposition does not match stage completion".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-retrieval-protocol:{}", self.session_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != PROTOCOL_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(RetrievalProtocolError::Invalid(
+                "protocol artifact identity or provenance is inconsistent".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| RetrievalProtocolError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| RetrievalProtocolError::Artifact(error.to_string()))
     }
 
@@ -252,7 +408,7 @@ pub fn compile_retrieval_protocol(
     let protocol_gate = request.policy_allow
         && request.protected_closure
         && request.raw_data_local
-        && request.budget_units >= STAGE_ORDER.len() as u32
+        && u64::from(request.budget_units) >= u64::try_from(STAGE_ORDER.len()).unwrap_or(u64::MAX)
         && missing_capabilities.is_empty();
     let disposition = if protocol_gate {
         synthesis.disposition
@@ -300,7 +456,7 @@ pub fn compile_retrieval_protocol(
     if !request.raw_data_local {
         omissions.insert("protocol:raw-data-locality-failed".into());
     }
-    if request.budget_units < STAGE_ORDER.len() as u32 {
+    if u64::from(request.budget_units) < u64::try_from(STAGE_ORDER.len()).unwrap_or(u64::MAX) {
         omissions.insert("protocol:budget-exhausted".into());
     }
     if disposition == SynthesisDisposition::Blocked {
@@ -336,8 +492,20 @@ pub fn compile_retrieval_protocol(
         "transcript_digest": transcript_digest,
         "synthesis_digest": synthesis.synthesis_digest,
         "replay_identity": request.replay_identity,
+        "raw_data_local": true,
     }))
     .map_err(|error| RetrievalProtocolError::Artifact(error.to_string()))?;
+    let effect_receipts = if matches!(
+        disposition,
+        SynthesisDisposition::Qualified | SynthesisDisposition::Partial
+    ) {
+        vec![format!(
+            "read:local-retrieval-protocol:{}",
+            request.session_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
     let payload = json!({
         "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
         "contract_version": CONTRACT_VERSION,
@@ -352,32 +520,33 @@ pub fn compile_retrieval_protocol(
         "stage_order": STAGE_ORDER,
         "completed_stage_order": completed_stage_order,
         "blocked_stage_order": blocked_stage_order,
+        "action_receipts": action_receipts,
+        "candidate_order": synthesis.candidate_order,
+        "ranked_order": synthesis.ranked_order,
+        "qualified_order": synthesis.qualified_order,
+        "blocked_order": synthesis.blocked_order,
+        "unknown_order": synthesis.unknown_order,
         "negotiation_digest": negotiation_digest,
         "transcript_digest": transcript_digest,
         "synthesis_digest": synthesis.synthesis_digest,
         "protocol_digest": protocol_digest,
         "replay_identity": request.replay_identity,
+        "budget_units": request.budget_units,
+        "omissions": omissions,
+        "uncertainty": uncertainty,
+        "negative_evidence": negative_evidence,
+        "effect_receipts": effect_receipts,
+        "raw_data_local": true,
         "boundary": PRECLINICAL_BOUNDARY,
     });
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-retrieval-protocol:{}", request.session_id),
-        "application/vnd.aurora.retrieval-protocol-receipt+json",
+        PROTOCOL_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
     )
     .map_err(|error| RetrievalProtocolError::Artifact(error.to_string()))?;
-    let effect_receipts = if matches!(
-        disposition,
-        SynthesisDisposition::Qualified | SynthesisDisposition::Partial
-    ) {
-        vec![format!(
-            "read:local-retrieval-protocol:{}",
-            request.session_id
-        )]
-    } else {
-        vec!["block:unsafe-release".into()]
-    };
     let receipt = RetrievalProtocolReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -417,9 +586,14 @@ pub fn compile_retrieval_protocol(
 }
 
 fn validate_request(request: &RetrievalProtocolRequest) -> Result<(), RetrievalProtocolError> {
-    if request.protocol_id.trim().is_empty()
-        || request.session_id.trim().is_empty()
-        || request.boundary != PRECLINICAL_BOUNDARY
+    for (value, field) in [
+        (&request.protocol_id, "protocol_id"),
+        (&request.session_id, "session_id"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    if request.boundary != PRECLINICAL_BOUNDARY
         || request.request.boundary != PRECLINICAL_BOUNDARY
         || request.offered_capability_order.is_empty()
         || request.required_capability_order.is_empty()
@@ -435,9 +609,29 @@ fn validate_request(request: &RetrievalProtocolRequest) -> Result<(), RetrievalP
             .required_capability_order
             .iter()
             .any(|capability| !CAPABILITY_ORDER.contains(&capability.as_str()))
+        || request.replay_identity != request.request.replay_identity
     {
         return Err(RetrievalProtocolError::Invalid(
             "protocol identity, capability declaration, stage order, budget, or boundary is invalid".into(),
+        ));
+    }
+    for (values, field) in [
+        (
+            &request.offered_capability_order,
+            "offered_capability_order",
+        ),
+        (
+            &request.required_capability_order,
+            "required_capability_order",
+        ),
+    ] {
+        for value in values {
+            validate_text(value, field)?;
+        }
+    }
+    if request.replay_identity.as_str().len() != 64 {
+        return Err(RetrievalProtocolError::Invalid(
+            "protocol replay identity digest is invalid".into(),
         ));
     }
     Ok(())
@@ -445,6 +639,85 @@ fn validate_request(request: &RetrievalProtocolRequest) -> Result<(), RetrievalP
 
 fn is_sorted_unique(values: &[String]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), RetrievalProtocolError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(RetrievalProtocolError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), RetrievalProtocolError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(RetrievalProtocolError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(values: &[String], field: &str) -> Result<(), RetrievalProtocolError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(RetrievalProtocolError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &RetrievalProtocolReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "protocol_id": receipt.protocol_id,
+        "session_id": receipt.session_id,
+        "disposition": receipt.disposition,
+        "offered_capability_order": receipt.offered_capability_order,
+        "required_capability_order": receipt.required_capability_order,
+        "negotiated_capability_order": receipt.negotiated_capability_order,
+        "stage_order": receipt.stage_order,
+        "completed_stage_order": receipt.completed_stage_order,
+        "blocked_stage_order": receipt.blocked_stage_order,
+        "action_receipts": receipt.action_receipts,
+        "candidate_order": receipt.candidate_order,
+        "ranked_order": receipt.ranked_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "negotiation_digest": receipt.negotiation_digest,
+        "transcript_digest": receipt.transcript_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "protocol_digest": receipt.protocol_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -539,6 +812,34 @@ mod tests {
         let receipt = compile_retrieval_protocol(&request).unwrap();
         assert_eq!(receipt.disposition, SynthesisDisposition::Blocked);
         assert!(receipt.digest().is_ok());
+    }
+
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut request = protocol_request();
+        request.raw_data_local = false;
+        let receipt = compile_retrieval_protocol(&request).unwrap();
+        assert_eq!(receipt.disposition, SynthesisDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|value| value == "protocol:raw-data-locality-failed"));
+        assert!(receipt.validate().is_ok());
+    }
+
+    #[test]
+    fn protocol_artifact_payload_is_bound() {
+        let mut receipt = compile_retrieval_protocol(&protocol_request()).unwrap();
+        receipt.session_id = "session:tampered".into();
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn case_mismatched_candidate_identity_is_rejected() {
+        let mut receipt = compile_retrieval_protocol(&protocol_request()).unwrap();
+        receipt.qualified_order[0] = receipt.qualified_order[0].to_ascii_uppercase();
+        assert!(receipt.validate().is_err());
     }
 
     #[test]

@@ -9,7 +9,7 @@
 
 use bioprism_ids::ContentHash;
 use serde_json::{json, Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const DOMAIN_REPORT_SCHEMA_VERSION: &str = "bioprism-devplat-domain-report/0.1";
@@ -122,13 +122,13 @@ pub fn project_domain_report(request: &Value) -> Result<Value, DomainReportError
         "readiness_claimed": false,
         "execution": "not_started",
         "guarantees": [
-            "the projection preserves caller-supplied report JSON under an explicit capability group and source tool",
             "claim posture and limitations remain adjacent to the report payload",
-            "the projection does not execute the source tool or infer scientific truth"
+            "the projection does not execute the source tool or infer scientific truth",
+            "the projection preserves caller-supplied report JSON under an explicit capability group and source tool"
         ],
         "does_not_claim": [
-            "report structure proves scientific, clinical, causal, publication, or release validity",
-            "artifact indexing proves external provenance or completeness"
+            "artifact indexing proves external provenance or completeness",
+            "report structure proves scientific, clinical, causal, publication, or release validity"
         ]
     });
     ensure_size(&result)?;
@@ -146,23 +146,39 @@ pub fn validate_domain_report(report: &Value) -> Result<(), DomainReportError> {
     if domains.is_empty() {
         return Err(DomainReportError::InvalidField("domains".into()));
     }
+    if object.get("domains") != Some(&json!(domains)) {
+        return Err(DomainReportError::InvalidField("domains".into()));
+    }
     required_text(object, "subject_id")?;
     required_text(object, "source_tool")?;
     if !object.get("report").is_some_and(Value::is_object) {
         return Err(DomainReportError::InvalidField("report".into()));
     }
-    let _ = claim_posture(object.get("claim_posture"))?;
-    let _ = digest_set(object, "parent_digests", MAX_DOMAIN_REPORT_PARENTS)?;
+    let canonical_claim_posture = claim_posture(object.get("claim_posture"))?;
+    if object.get("claim_posture") != Some(&canonical_claim_posture) {
+        return Err(DomainReportError::InvalidField("claim_posture".into()));
+    }
+    let parent_digests = digest_set(object, "parent_digests", MAX_DOMAIN_REPORT_PARENTS)?;
+    if object.get("parent_digests") != Some(&json!(parent_digests)) {
+        return Err(DomainReportError::InvalidField("parent_digests".into()));
+    }
     if object.get("readiness_claimed") != Some(&Value::Bool(false)) {
         return Err(DomainReportError::InvalidField("readiness_claimed".into()));
     }
     exact_text(object, "execution", "not_started")?;
-    required_text_set(object, "does_not_claim", MAX_DOMAIN_REPORT_NON_CLAIMS)?;
+    let does_not_claim = required_text_set(object, "does_not_claim", MAX_DOMAIN_REPORT_NON_CLAIMS)?;
+    if object.get("does_not_claim") != Some(&json!(does_not_claim)) {
+        return Err(DomainReportError::InvalidField("does_not_claim".into()));
+    }
     if object
         .get("guarantees")
         .and_then(Value::as_array)
         .is_none_or(|values| values.is_empty())
     {
+        return Err(DomainReportError::InvalidField("guarantees".into()));
+    }
+    let guarantees = required_text_set(object, "guarantees", 16)?;
+    if object.get("guarantees") != Some(&json!(guarantees)) {
         return Err(DomainReportError::InvalidField("guarantees".into()));
     }
     ensure_size(report)
@@ -183,11 +199,14 @@ fn claim_posture(value: Option<&Value>) -> Result<Value, DomainReportError> {
         ));
     }
     let limitations = optional_text_set(object, "limitations", MAX_DOMAIN_REPORT_LIMITATIONS)?;
-    Ok(json!({
+    let mut result = json!({
         "status": status,
-        "does_not_claim": does_not_claim,
-        "limitations": limitations
-    }))
+        "does_not_claim": does_not_claim
+    });
+    if object.contains_key("limitations") {
+        result["limitations"] = json!(limitations);
+    }
+    Ok(result)
 }
 
 fn required_text(object: &Map<String, Value>, field: &str) -> Result<String, DomainReportError> {
@@ -201,6 +220,9 @@ fn required_text(object: &Map<String, Value>, field: &str) -> Result<String, Dom
             field: field.into(),
             maximum: MAX_DOMAIN_REPORT_TEXT_BYTES,
         });
+    }
+    if value.chars().any(char::is_control) || value != value.trim() {
+        return Err(DomainReportError::InvalidField(field.into()));
     }
     Ok(value.to_string())
 }
@@ -254,6 +276,7 @@ fn text_set(
         });
     }
     let mut result = BTreeSet::new();
+    let mut identity_keys = BTreeMap::new();
     for value in values {
         let text = value
             .as_str()
@@ -264,6 +287,17 @@ fn text_set(
                 field: field.into(),
                 maximum: MAX_DOMAIN_REPORT_TEXT_BYTES,
             });
+        }
+        if text.chars().any(char::is_control) || text != text.trim() {
+            return Err(DomainReportError::InvalidField(field.into()));
+        }
+        let identity_key = text.to_ascii_lowercase();
+        if let Some(existing) = identity_keys.get(&identity_key) {
+            if existing != text {
+                return Err(DomainReportError::InvalidField(field.into()));
+            }
+        } else {
+            identity_keys.insert(identity_key, text.to_string());
         }
         result.insert(text.to_string());
     }
@@ -283,6 +317,15 @@ fn digest_set(
         .ok_or_else(|| DomainReportError::InvalidField(field.into()))?;
     let values = text_set(values, field, maximum)?;
     for value in &values {
+        if value.len() != 64
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(DomainReportError::InvalidDigest {
+                field: field.into(),
+            });
+        }
         ContentHash::parse(value.clone()).map_err(|_| DomainReportError::InvalidDigest {
             field: field.into(),
         })?;
@@ -356,6 +399,62 @@ mod tests {
         assert!(matches!(
             project_domain_report(&invalid),
             Err(DomainReportError::InvalidClaimStatus(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_case_aliases_control_metadata_and_noncanonical_digests() {
+        let mut invalid = request();
+        invalid["domains"] = json!(["Biology", "biology"]);
+        assert!(matches!(
+            project_domain_report(&invalid),
+            Err(DomainReportError::InvalidField(field)) if field == "domains"
+        ));
+
+        let mut invalid = request();
+        invalid["source_tool"] = json!("modality\n_catalog");
+        assert!(matches!(
+            project_domain_report(&invalid),
+            Err(DomainReportError::InvalidField(field)) if field == "source_tool"
+        ));
+
+        let mut invalid = request();
+        invalid["parent_digests"] = json!(["A".repeat(64)]);
+        assert!(matches!(
+            project_domain_report(&invalid),
+            Err(DomainReportError::InvalidDigest { field }) if field == "parent_digests"
+        ));
+    }
+
+    #[test]
+    fn validator_rejects_noncanonical_envelope_arrays_after_projection() {
+        let projected = project_domain_report(&json!({
+            "group_id": "biological_domains",
+            "domains": ["genomics", "biology"],
+            "subject_id": "subject-1",
+            "source_tool": "modality_catalog",
+            "report": {"observations": ["x"]},
+            "claim_posture": {
+                "status": "review_required",
+                "does_not_claim": ["clinical validity", "source truth"],
+                "limitations": ["caller supplied"]
+            },
+            "parent_digests": ["b".repeat(64), "a".repeat(64)]
+        }))
+        .unwrap();
+
+        let mut reordered = projected.clone();
+        reordered["domains"] = json!(["genomics", "biology"]);
+        assert!(matches!(
+            validate_domain_report(&reordered),
+            Err(DomainReportError::InvalidField(field)) if field == "domains"
+        ));
+
+        let mut duplicate_parent = projected;
+        duplicate_parent["parent_digests"] = json!(["a".repeat(64), "a".repeat(64)]);
+        assert!(matches!(
+            validate_domain_report(&duplicate_parent),
+            Err(DomainReportError::InvalidField(field)) if field == "parent_digests"
         ));
     }
 

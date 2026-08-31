@@ -20,6 +20,8 @@ pub const CONTRACT_VERSION: &str = "brain-federated-retrieval-contract-model/1.0
 pub const INPUT_SCHEMA: &str = "FederatedRetrievalQuery1@1";
 pub const OUTPUT_SCHEMA: &str = "FederatedEvidenceSynthesis1@1";
 pub const PERMITTED_ARTIFACT: &str = "qualified-evidence-summary";
+const CONTRACT_CONTENT_TYPE: &str = "application/vnd.aurora.federated-retrieval-contract+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedRetrievalContractRequest {
@@ -60,6 +62,7 @@ pub struct FederatedRetrievalContractReceipt {
     pub purpose: String,
     pub semantic_profile: String,
     pub endpoint: String,
+    pub allowed_artifact_order: Vec<String>,
     pub study_order: Vec<String>,
     pub modality_order: Vec<String>,
     pub disposition: ContractDisposition,
@@ -99,43 +102,132 @@ impl FederatedRetrievalContractReceipt {
             || self.input_schema != INPUT_SCHEMA
             || self.output_schema != OUTPUT_SCHEMA
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
-            || self.request_id.trim().is_empty()
-            || self.federation_id.trim().is_empty()
-            || self.institution_id.trim().is_empty()
-            || self.purpose.trim().is_empty()
-            || self.semantic_profile.trim().is_empty()
-            || self.endpoint.trim().is_empty()
             || self.study_order.len() < 2
             || self.modality_order.len() < 2
             || self.permitted_artifact != PERMITTED_ARTIFACT
-            || self.effect_receipts.is_empty()
         {
             return Err(FederatedRetrievalContractError::Invalid("federation identity, schemas, purpose, coverage, permitted artifact, locality, or effects are incomplete".into()));
         }
-        for values in [
-            &self.study_order,
-            &self.modality_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.federation_id, "federation_id"),
+            (&self.institution_id, "institution_id"),
+            (&self.purpose, "purpose"),
+            (&self.semantic_profile, "semantic_profile"),
+            (&self.endpoint, "endpoint"),
+            (&self.input_schema, "input_schema"),
+            (&self.output_schema, "output_schema"),
+            (&self.permitted_artifact, "permitted_artifact"),
+            (&self.boundary, "boundary"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+            validate_text(value, field)?;
+        }
+        validate_sorted_unique(&self.study_order, "study_order")?;
+        validate_sorted_unique(&self.modality_order, "modality_order")?;
+        validate_sorted_unique(&self.allowed_artifact_order, "allowed_artifact_order")?;
+        if self.disposition != ContractDisposition::Blocked
+            && !self
+                .allowed_artifact_order
+                .iter()
+                .any(|artifact| artifact == PERMITTED_ARTIFACT)
+        {
+            return Err(FederatedRetrievalContractError::Invalid(
+                "permitted artifact is not present in the allowed artifact declaration".into(),
+            ));
+        }
+        for (values, field) in [
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
+        if !self.raw_data_local && self.disposition != ContractDisposition::Blocked {
+            return Err(FederatedRetrievalContractError::Invalid(
+                "non-local federated contracts must be blocked".into(),
+            ));
+        }
+        if !self.raw_data_local
+            && !self
+                .omissions
+                .iter()
+                .any(|omission| omission == "request:raw-data-locality-failed")
+        {
+            return Err(FederatedRetrievalContractError::Invalid(
+                "non-local federated contracts must retain a locality omission".into(),
+            ));
+        }
+        let exchange_allowed = matches!(
+            self.disposition,
+            ContractDisposition::Qualified | ContractDisposition::Partial
+        ) && self.allowed_artifact_order
+            == vec![PERMITTED_ARTIFACT.to_string()];
+        let expected_effect_receipts = if exchange_allowed {
+            vec![format!("exchange:permitted-artifacts:{}", self.request_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(FederatedRetrievalContractError::Invalid(
+                "federated contract effect does not match artifact declaration and disposition"
+                    .into(),
+            ));
+        }
+        for digest in [
+            &self.comparability_digest,
+            &self.envelope_digest,
+            &self.semantic_digest,
+            &self.artifact_digest,
+            &self.provenance_digest,
+            &self.contract_digest,
+            &self.replay_identity,
+        ] {
+            if digest.as_str().len() != 64 {
                 return Err(FederatedRetrievalContractError::Invalid(
-                    "federated contract ordering is not canonical".into(),
+                    "federated contract digest is invalid".into(),
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("exchange:permitted-artifacts:") && effect != "block:unsafe-release"
-        }) {
+        let expected_contract_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "federation_id": self.federation_id,
+            "institution_id": self.institution_id,
+            "purpose": self.purpose,
+            "semantic_profile": self.semantic_profile,
+            "study_order": self.study_order,
+            "modality_order": self.modality_order,
+            "allowed_artifact_order": self.allowed_artifact_order,
+            "comparability_digest": self.comparability_digest,
+            "envelope_digest": self.envelope_digest,
+            "semantic_digest": self.semantic_digest,
+            "artifact_digest": self.artifact_digest,
+            "provenance_digest": self.provenance_digest,
+            "replay_identity": self.replay_identity,
+            "disposition": self.disposition,
+        }))
+        .map_err(|error| FederatedRetrievalContractError::Artifact(error.to_string()))?;
+        if self.contract_digest != expected_contract_digest {
             return Err(FederatedRetrievalContractError::Invalid(
-                "effect is outside federated contract gate".into(),
+                "federated contract digest is not bound to its declaration".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-federated-retrieval-contract:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != CONTRACT_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(FederatedRetrievalContractError::Invalid(
+                "federated contract artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedRetrievalContractError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedRetrievalContractError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, FederatedRetrievalContractError> {
@@ -145,6 +237,80 @@ impl FederatedRetrievalContractReceipt {
         ContentHash::of_value(&value)
             .map_err(|error| FederatedRetrievalContractError::Artifact(error.to_string()))
     }
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedRetrievalContractError> {
+    if value.trim() != value
+        || value.is_empty()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedRetrievalContractError::Invalid(format!(
+            "{field} is empty, padded, oversized, or contains control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), FederatedRetrievalContractError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedRetrievalContractError::Invalid(format!(
+                "{field} contains a duplicate or case-colliding identity"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), FederatedRetrievalContractError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedRetrievalContractError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &FederatedRetrievalContractReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "federation_id": receipt.federation_id,
+        "institution_id": receipt.institution_id,
+        "purpose": receipt.purpose,
+        "semantic_profile": receipt.semantic_profile,
+        "endpoint": receipt.endpoint,
+        "study_order": receipt.study_order,
+        "modality_order": receipt.modality_order,
+        "disposition": receipt.disposition,
+        "compatibility": receipt.compatibility,
+        "input_schema": receipt.input_schema,
+        "output_schema": receipt.output_schema,
+        "permitted_artifact": receipt.permitted_artifact,
+        "allowed_artifact_order": receipt.allowed_artifact_order,
+        "comparability_digest": receipt.comparability_digest,
+        "envelope_digest": receipt.envelope_digest,
+        "semantic_digest": receipt.semantic_digest,
+        "artifact_digest": receipt.artifact_digest,
+        "provenance_digest": receipt.provenance_digest,
+        "contract_digest": receipt.contract_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn federated_retrieval_contract_model_manifest() -> CapabilityManifest {
@@ -158,6 +324,11 @@ pub fn model_federated_retrieval_contract(
     let studies = request.study_ids.iter().cloned().collect::<BTreeSet<_>>();
     let modalities = request
         .required_modalities
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let allowed_artifacts = request
+        .allowed_artifacts
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
@@ -189,10 +360,14 @@ pub fn model_federated_retrieval_contract(
     if !request.approval_valid {
         omissions.insert("request:approval-required".into());
     }
+    if !request.raw_data_local {
+        omissions.insert("request:raw-data-locality-failed".into());
+    }
     let disposition = if !request.policy_allow
         || !request.protected_closure
         || !request.signer_valid
         || !request.approval_valid
+        || !request.raw_data_local
         || !request
             .allowed_artifacts
             .iter()
@@ -207,23 +382,29 @@ pub fn model_federated_retrieval_contract(
     } else {
         ContractDisposition::Qualified
     };
-    let contract_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "study_order": studies, "modality_order": modalities, "comparability_digest": request.comparability_digest, "envelope_digest": request.envelope_digest, "semantic_digest": request.semantic_digest, "artifact_digest": request.artifact_digest, "provenance_digest": request.provenance_digest, "replay_identity": request.replay_identity, "disposition": disposition})).map_err(|error| FederatedRetrievalContractError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "endpoint": request.endpoint, "study_order": studies, "modality_order": modalities, "disposition": disposition, "compatibility": request.compatibility, "input_schema": request.input_schema, "output_schema": request.output_schema, "permitted_artifact": PERMITTED_ARTIFACT, "comparability_digest": request.comparability_digest, "envelope_digest": request.envelope_digest, "semantic_digest": request.semantic_digest, "artifact_digest": request.artifact_digest, "provenance_digest": request.provenance_digest, "contract_digest": contract_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let contract_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "study_order": studies, "modality_order": modalities, "allowed_artifact_order": allowed_artifacts, "comparability_digest": request.comparability_digest, "envelope_digest": request.envelope_digest, "semantic_digest": request.semantic_digest, "artifact_digest": request.artifact_digest, "provenance_digest": request.provenance_digest, "replay_identity": request.replay_identity, "disposition": disposition})).map_err(|error| FederatedRetrievalContractError::Artifact(error.to_string()))?;
+    let exchange_allowed = matches!(
+        disposition,
+        ContractDisposition::Qualified | ContractDisposition::Partial
+    ) && allowed_artifacts.len() == 1
+        && allowed_artifacts.contains(PERMITTED_ARTIFACT);
+    let effect_receipts = if exchange_allowed {
+        vec![format!(
+            "exchange:permitted-artifacts:{}",
+            request.request_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "endpoint": request.endpoint, "study_order": studies, "modality_order": modalities, "disposition": disposition, "compatibility": request.compatibility, "input_schema": request.input_schema, "output_schema": request.output_schema, "permitted_artifact": PERMITTED_ARTIFACT, "allowed_artifact_order": allowed_artifacts, "comparability_digest": request.comparability_digest, "envelope_digest": request.envelope_digest, "semantic_digest": request.semantic_digest, "artifact_digest": request.artifact_digest, "provenance_digest": request.provenance_digest, "contract_digest": contract_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-federated-retrieval-contract:{}", request.request_id),
-        "application/vnd.aurora.federated-retrieval-contract+json",
+        CONTRACT_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
     )
     .map_err(|error| FederatedRetrievalContractError::Artifact(error.to_string()))?;
-    let exchange_allowed = matches!(
-        disposition,
-        ContractDisposition::Qualified | ContractDisposition::Partial
-    ) && !request
-        .allowed_artifacts
-        .iter()
-        .any(|value| value != PERMITTED_ARTIFACT);
     let receipt = FederatedRetrievalContractReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -234,6 +415,7 @@ pub fn model_federated_retrieval_contract(
         purpose: request.purpose.clone(),
         semantic_profile: request.semantic_profile.clone(),
         endpoint: request.endpoint.clone(),
+        allowed_artifact_order: allowed_artifacts.into_iter().collect(),
         study_order: studies.into_iter().collect(),
         modality_order: modalities.into_iter().collect(),
         disposition,
@@ -251,14 +433,7 @@ pub fn model_federated_retrieval_contract(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if exchange_allowed {
-            vec![format!(
-                "exchange:permitted-artifacts:{}",
-                request.request_id
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -270,13 +445,7 @@ pub fn model_federated_retrieval_contract(
 fn validate_request(
     request: &FederatedRetrievalContractRequest,
 ) -> Result<(), FederatedRetrievalContractError> {
-    if request.request_id.trim().is_empty()
-        || request.federation_id.trim().is_empty()
-        || request.institution_id.trim().is_empty()
-        || request.purpose.trim().is_empty()
-        || request.semantic_profile.trim().is_empty()
-        || request.endpoint.trim().is_empty()
-        || request.study_ids.len() < 2
+    if request.study_ids.len() < 2
         || request.required_modalities.len() < 2
         || request.input_schema != INPUT_SCHEMA
         || request.output_schema != OUTPUT_SCHEMA
@@ -286,6 +455,36 @@ fn validate_request(
             "federated contract identity, purpose, coverage, schemas, or boundary is incomplete"
                 .into(),
         ));
+    }
+    for (value, field) in [
+        (&request.request_id, "request_id"),
+        (&request.federation_id, "federation_id"),
+        (&request.institution_id, "institution_id"),
+        (&request.purpose, "purpose"),
+        (&request.semantic_profile, "semantic_profile"),
+        (&request.endpoint, "endpoint"),
+        (&request.input_schema, "input_schema"),
+        (&request.output_schema, "output_schema"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_unique(&request.study_ids, "study_ids")?;
+    validate_unique(&request.required_modalities, "required_modalities")?;
+    validate_unique(&request.allowed_artifacts, "allowed_artifacts")?;
+    for digest in [
+        &request.comparability_digest,
+        &request.envelope_digest,
+        &request.semantic_digest,
+        &request.artifact_digest,
+        &request.provenance_digest,
+        &request.replay_identity,
+    ] {
+        if digest.as_str().len() != 64 {
+            return Err(FederatedRetrievalContractError::Invalid(
+                "federated contract request digest is invalid".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -369,5 +568,36 @@ mod tests {
     fn digest_is_stable() {
         let r = model_federated_retrieval_contract(&request()).unwrap();
         assert_eq!(r.digest().unwrap(), r.digest().unwrap());
+    }
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut q = request();
+        q.raw_data_local = false;
+        let r = model_federated_retrieval_contract(&q).unwrap();
+        assert_eq!(r.disposition, ContractDisposition::Blocked);
+        assert!(r.raw_data_local);
+        assert!(r
+            .omissions
+            .iter()
+            .any(|value| value == "request:raw-data-locality-failed"));
+        r.validate().unwrap();
+    }
+    #[test]
+    fn contract_declaration_and_artifact_payload_are_bound() {
+        let mut declaration_drift = model_federated_retrieval_contract(&request()).unwrap();
+        declaration_drift
+            .allowed_artifact_order
+            .push("other-artifact".into());
+        assert!(declaration_drift.validate().is_err());
+
+        let mut payload_drift = model_federated_retrieval_contract(&request()).unwrap();
+        payload_drift.endpoint = "https://federation.invalid/other".into();
+        assert!(payload_drift.validate().is_err());
+    }
+    #[test]
+    fn identity_aliases_are_rejected() {
+        let mut q = request();
+        q.study_ids.push("STUDY:A".into());
+        assert!(model_federated_retrieval_contract(&q).is_err());
     }
 }

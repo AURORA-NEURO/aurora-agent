@@ -20,6 +20,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-brain-P02-F27";
 pub const CONTRACT_VERSION: &str = "brain-throughput-retrieval-assurance-harness/1.0";
+const ASSURANCE_CONTENT_TYPE: &str = "application/vnd.aurora.throughput-retrieval-assurance+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -74,7 +76,6 @@ impl ThroughputRetrievalAssuranceReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.batch_id.trim().is_empty()
             || self.partition.trim().is_empty()
@@ -85,34 +86,72 @@ impl ThroughputRetrievalAssuranceReceipt {
         {
             return Err(ThroughputRetrievalAssuranceError::Invalid("throughput assurance identity, queue, checkpoint, witnesses, locality, or effects are incomplete".into()));
         }
-        if self
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.batch_id, "batch_id"),
+            (&self.partition, "partition"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        validate_sorted_unique(&self.candidate_order, "candidate_order")?;
+        for (values, field) in [
+            (&self.qualified_order, "qualified_order"),
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
+        ] {
+            validate_unique(values, field)?;
+        }
+        for (values, field) in [
+            (&self.witness_order, "witness_order"),
+            (&self.counterexample_order, "counterexample_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
+        let candidate_values = self
+            .candidate_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let qualified_values = self
             .qualified_order
             .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let blocked_values = self.blocked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let unknown_values = self.unknown_order.iter().cloned().collect::<BTreeSet<_>>();
+        if !qualified_values.is_subset(&candidate_values)
+            || !blocked_values.is_subset(&candidate_values)
+            || !unknown_values.is_subset(&blocked_values)
+            || !qualified_values.is_disjoint(&blocked_values)
+            || qualified_values
+                .union(&blocked_values)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_values
         {
             return Err(ThroughputRetrievalAssuranceError::Invalid(
-                "throughput assurance state is not covered by candidates".into(),
+                "throughput assurance candidate states must partition candidates".into(),
             ));
         }
-        for values in [
-            &self.candidate_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.witness_order,
-            &self.counterexample_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(ThroughputRetrievalAssuranceError::Invalid(
-                    "throughput assurance ordering is not canonical".into(),
-                ));
-            }
+        let expected_verdict = if !self.counterexample_order.is_empty() {
+            ThroughputRetrievalAssuranceVerdict::Blocked
+        } else if qualified_values == candidate_values
+            && blocked_values.is_empty()
+            && unknown_values.is_empty()
+        {
+            ThroughputRetrievalAssuranceVerdict::Qualified
+        } else {
+            ThroughputRetrievalAssuranceVerdict::Unresolved
+        };
+        if self.verdict != expected_verdict {
+            return Err(ThroughputRetrievalAssuranceError::Invalid(
+                "throughput assurance verdict does not match witnesses and candidate state".into(),
+            ));
         }
         for digest in [
             &self.queue_digest,
@@ -126,16 +165,69 @@ impl ThroughputRetrievalAssuranceReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("assurance:local-throughput-retrieval:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_effect_receipts =
+            if self.verdict == ThroughputRetrievalAssuranceVerdict::Qualified {
+                vec![format!(
+                    "assurance:local-throughput-retrieval:{}",
+                    self.request_id
+                )]
+            } else {
+                vec!["block:unsafe-release".into()]
+            };
+        if self.effect_receipts != expected_effect_receipts {
             return Err(ThroughputRetrievalAssuranceError::Invalid(
-                "throughput assurance effect is outside the local gate".into(),
+                "throughput assurance effects do not match verdict".into(),
+            ));
+        }
+        if !self.raw_data_local
+            && (self.verdict != ThroughputRetrievalAssuranceVerdict::Blocked
+                || !self
+                    .omissions
+                    .iter()
+                    .any(|item| item == "assurance:raw-data-locality-failed"))
+        {
+            return Err(ThroughputRetrievalAssuranceError::Invalid(
+                "non-local throughput assurance must be blocked and retain locality evidence"
+                    .into(),
+            ));
+        }
+        let expected_verification_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "batch_id": self.batch_id,
+            "partition": self.partition,
+            "candidate_order": self.candidate_order,
+            "qualified_order": self.qualified_order,
+            "blocked_order": self.blocked_order,
+            "unknown_order": self.unknown_order,
+            "witness_order": self.witness_order,
+            "counterexample_order": self.counterexample_order,
+            "verdict": self.verdict,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| ThroughputRetrievalAssuranceError::Artifact(error.to_string()))?;
+        if self.verification_digest != expected_verification_digest {
+            return Err(ThroughputRetrievalAssuranceError::Invalid(
+                "throughput assurance digest is not bound to verification state".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-throughput-retrieval-assurance:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != ASSURANCE_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(ThroughputRetrievalAssuranceError::Invalid(
+                "throughput assurance artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| ThroughputRetrievalAssuranceError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| ThroughputRetrievalAssuranceError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, ThroughputRetrievalAssuranceError> {
@@ -207,14 +299,22 @@ pub fn verify_throughput_retrieval_assurance(
     } else {
         ThroughputRetrievalAssuranceVerdict::Unresolved
     };
-    let verification_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "candidate_order": synthesis.candidate_order, "witness_order": witnesses, "counterexample_order": counterexamples, "verdict": verdict, "replay_identity": request.replay_identity})).map_err(|error| ThroughputRetrievalAssuranceError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "checkpoint_seq": synthesis.checkpoint_seq, "verdict": verdict, "candidate_order": synthesis.candidate_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "witness_order": witnesses, "counterexample_order": counterexamples, "queue_digest": synthesis.queue_digest, "synthesis_digest": synthesis.synthesis_digest, "verification_digest": verification_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let verification_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "candidate_order": synthesis.candidate_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "witness_order": witnesses, "counterexample_order": counterexamples, "verdict": verdict, "replay_identity": request.replay_identity, "raw_data_local": true})).map_err(|error| ThroughputRetrievalAssuranceError::Artifact(error.to_string()))?;
+    let effect_receipts = if verdict == ThroughputRetrievalAssuranceVerdict::Qualified {
+        vec![format!(
+            "assurance:local-throughput-retrieval:{}",
+            request.request_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "batch_id": request.batch_id, "partition": request.partition, "checkpoint_seq": synthesis.checkpoint_seq, "verdict": verdict, "candidate_order": synthesis.candidate_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "witness_order": witnesses, "counterexample_order": counterexamples, "queue_digest": synthesis.queue_digest, "synthesis_digest": synthesis.synthesis_digest, "verification_digest": verification_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!(
             "brain-throughput-retrieval-assurance:{}",
             request.request_id
         ),
-        "application/vnd.aurora.throughput-retrieval-assurance+json",
+        ASSURANCE_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -242,20 +342,84 @@ pub fn verify_throughput_retrieval_assurance(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if verdict == ThroughputRetrievalAssuranceVerdict::Qualified {
-            vec![format!(
-                "assurance:local-throughput-retrieval:{}",
-                request.request_id
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), ThroughputRetrievalAssuranceError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(ThroughputRetrievalAssuranceError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), ThroughputRetrievalAssuranceError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(ThroughputRetrievalAssuranceError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), ThroughputRetrievalAssuranceError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(ThroughputRetrievalAssuranceError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &ThroughputRetrievalAssuranceReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "batch_id": receipt.batch_id,
+        "partition": receipt.partition,
+        "checkpoint_seq": receipt.checkpoint_seq,
+        "verdict": receipt.verdict,
+        "candidate_order": receipt.candidate_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "witness_order": receipt.witness_order,
+        "counterexample_order": receipt.counterexample_order,
+        "queue_digest": receipt.queue_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "verification_digest": receipt.verification_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -324,6 +488,40 @@ mod tests {
             ThroughputRetrievalAssuranceVerdict::Unresolved
         );
     }
+
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut value = request(EvidenceState::Supported);
+        value.raw_data_local = false;
+        let receipt = verify_throughput_retrieval_assurance(&value).unwrap();
+        assert_eq!(
+            receipt.verdict,
+            ThroughputRetrievalAssuranceVerdict::Blocked
+        );
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "assurance:raw-data-locality-failed"));
+        assert!(receipt.validate().is_ok());
+    }
+
+    #[test]
+    fn assurance_artifact_payload_is_bound() {
+        let mut receipt =
+            verify_throughput_retrieval_assurance(&request(EvidenceState::Supported)).unwrap();
+        receipt.partition = "partition:tampered".into();
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn case_mismatched_candidate_identity_is_rejected() {
+        let mut receipt =
+            verify_throughput_retrieval_assurance(&request(EvidenceState::Supported)).unwrap();
+        receipt.qualified_order[0] = receipt.qualified_order[0].to_ascii_uppercase();
+        assert!(receipt.validate().is_err());
+    }
+
     #[test]
     fn digest_is_stable() {
         let receipt =

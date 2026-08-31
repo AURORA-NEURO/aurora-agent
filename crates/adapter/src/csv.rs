@@ -27,6 +27,10 @@ use crate::location::SourceLocation;
 
 /// The default field delimiter. Tab-separated sources pass `b'\t'` to [`Table::parse_with`].
 pub const COMMA: u8 = b',';
+pub const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_COLUMNS: usize = 16_384;
+pub const MAX_RECORDS: usize = 1_000_000;
+pub const MAX_FIELD_BYTES: usize = 4 * 1024 * 1024;
 
 /// A parsed table: a header and zero or more equally wide records.
 ///
@@ -48,6 +52,18 @@ impl Table {
 
     /// Parses `bytes` with an explicit delimiter.
     pub fn parse_with(source_id: &str, bytes: &[u8], delimiter: u8) -> Result<Table, CsvError> {
+        if bytes.len() > MAX_SOURCE_BYTES {
+            return Err(CsvError::SourceTooLarge {
+                source_id: source_id.to_string(),
+                maximum: MAX_SOURCE_BYTES,
+            });
+        }
+        if delimiter == 0 || matches!(delimiter, b'"' | b'\r' | b'\n') {
+            return Err(CsvError::InvalidDelimiter {
+                source_id: source_id.to_string(),
+                found: delimiter,
+            });
+        }
         let text = std::str::from_utf8(bytes).map_err(|error| CsvError::NotUtf8 {
             source_id: source_id.to_string(),
             offset: error.valid_up_to(),
@@ -59,6 +75,12 @@ impl Table {
         let headers = raw.next().ok_or_else(|| CsvError::NoHeader {
             source_id: source_id.to_string(),
         })?;
+        if headers.len() > MAX_COLUMNS {
+            return Err(CsvError::TooManyColumns {
+                source_id: source_id.to_string(),
+                maximum: MAX_COLUMNS,
+            });
+        }
 
         for (position, name) in headers.iter().enumerate() {
             if name.trim().is_empty() {
@@ -79,6 +101,12 @@ impl Table {
 
         let mut records = Vec::new();
         for (index, fields) in raw.enumerate() {
+            if records.len() >= MAX_RECORDS {
+                return Err(CsvError::TooManyRecords {
+                    source_id: source_id.to_string(),
+                    maximum: MAX_RECORDS,
+                });
+            }
             let ordinal = index as u64 + 1;
             if fields.len() != headers.len() {
                 return Err(CsvError::ragged(
@@ -159,6 +187,27 @@ fn split_records(
     let mut chars = text.chars().peekable();
     let mut ordinal: u64 = 0;
 
+    let push_field = |fields: &mut Vec<String>, field: &mut String| {
+        if fields.len() >= MAX_COLUMNS {
+            return Err(CsvError::TooManyColumns {
+                source_id: source_id.to_string(),
+                maximum: MAX_COLUMNS,
+            });
+        }
+        fields.push(std::mem::take(field));
+        Ok(())
+    };
+    let push_record = |records: &mut Vec<Vec<String>>, fields: &mut Vec<String>| {
+        if records.len() >= MAX_RECORDS {
+            return Err(CsvError::TooManyRecords {
+                source_id: source_id.to_string(),
+                maximum: MAX_RECORDS,
+            });
+        }
+        records.push(std::mem::take(fields));
+        Ok(())
+    };
+
     let location = |ordinal: u64| -> SourceLocation {
         if ordinal == 0 {
             SourceLocation::source(source_id)
@@ -176,11 +225,15 @@ fn split_records(
                         if chars.peek() == Some(&'"') {
                             chars.next();
                             field.push('"');
+                            ensure_field_size(source_id, ordinal, &field)?;
                         } else {
                             break;
                         }
                     }
-                    Some(other) => field.push(other),
+                    Some(other) => {
+                        field.push(other);
+                        ensure_field_size(source_id, ordinal, &field)?;
+                    }
                 }
             }
             match chars.peek().copied() {
@@ -192,7 +245,7 @@ fn split_records(
         }
 
         if ch == delimiter {
-            fields.push(std::mem::take(&mut field));
+            push_field(&mut fields, &mut field)?;
             continue;
         }
 
@@ -201,15 +254,15 @@ fn split_records(
                 return Err(CsvError::lone_carriage_return(location(ordinal)));
             }
             chars.next();
-            fields.push(std::mem::take(&mut field));
-            records.push(std::mem::take(&mut fields));
+            push_field(&mut fields, &mut field)?;
+            push_record(&mut records, &mut fields)?;
             ordinal += 1;
             continue;
         }
 
         if ch == '\n' {
-            fields.push(std::mem::take(&mut field));
-            records.push(std::mem::take(&mut fields));
+            push_field(&mut fields, &mut field)?;
+            push_record(&mut records, &mut fields)?;
             ordinal += 1;
             continue;
         }
@@ -219,14 +272,29 @@ fn split_records(
         }
 
         field.push(ch);
+        ensure_field_size(source_id, ordinal, &field)?;
     }
 
     if !field.is_empty() || !fields.is_empty() {
-        fields.push(field);
-        records.push(fields);
+        push_field(&mut fields, &mut field)?;
+        push_record(&mut records, &mut fields)?;
     }
 
     Ok(records)
+}
+
+fn ensure_field_size(source_id: &str, ordinal: u64, field: &str) -> Result<(), CsvError> {
+    if field.len() > MAX_FIELD_BYTES {
+        return Err(CsvError::FieldTooLarge {
+            location: Box::new(if ordinal == 0 {
+                SourceLocation::source(source_id)
+            } else {
+                SourceLocation::record(source_id, ordinal)
+            }),
+            maximum: MAX_FIELD_BYTES,
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -378,5 +446,11 @@ mod tests {
         let table = Table::parse("s", b"a,b\n").unwrap();
         assert_eq!(table.headers().len(), 2);
         assert_eq!(table.record_count(), 0);
+    }
+
+    #[test]
+    fn a_record_separator_cannot_be_used_as_a_field_delimiter() {
+        let error = Table::parse_with("s", b"a\nb\n", b'\n').unwrap_err();
+        assert!(matches!(error, CsvError::InvalidDelimiter { .. }));
     }
 }

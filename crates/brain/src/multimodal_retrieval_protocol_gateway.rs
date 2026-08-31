@@ -33,6 +33,9 @@ pub const CAPABILITY_ORDER: [&str; 4] = [
     "capability:omission-receipt-v1",
     "capability:replay-v1",
 ];
+const PROTOCOL_CONTENT_TYPE: &str =
+    "application/vnd.aurora.multimodal-retrieval-protocol-receipt+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MultimodalRetrievalProtocolRequest {
@@ -105,10 +108,6 @@ impl MultimodalRetrievalProtocolReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
-            || self.request_id.trim().is_empty()
-            || self.protocol_id.trim().is_empty()
-            || self.session_id.trim().is_empty()
             || self.study_order.len() < 2
             || self.modality_order.len() < 2
             || self.offered_capability_order.is_empty()
@@ -118,55 +117,80 @@ impl MultimodalRetrievalProtocolReceipt {
             || self.action_receipts.is_empty()
             || self.candidate_order.is_empty()
             || self.effect_receipts.is_empty()
-            || self.budget_units < STAGE_ORDER.len() as u32
+            || self.budget_units == 0
         {
             return Err(MultimodalRetrievalProtocolError::Invalid(
                 "multimodal protocol identity, coverage, negotiation, stages, budget, locality, or effects are incomplete".into(),
             ));
         }
-        for values in [
-            &self.study_order,
-            &self.modality_order,
-            &self.offered_capability_order,
-            &self.required_capability_order,
-            &self.negotiated_capability_order,
-            &self.action_receipts,
-            &self.candidate_order,
-            &self.ranked_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        validate_text(&self.request_id, "request_id")?;
+        validate_text(&self.protocol_id, "protocol_id")?;
+        validate_text(&self.session_id, "session_id")?;
+        for (values, field) in [
+            (&self.study_order, "study_order"),
+            (&self.modality_order, "modality_order"),
+            (&self.offered_capability_order, "offered_capability_order"),
+            (&self.required_capability_order, "required_capability_order"),
+            (
+                &self.negotiated_capability_order,
+                "negotiated_capability_order",
+            ),
+            (&self.action_receipts, "action_receipts"),
+            (&self.candidate_order, "candidate_order"),
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
         ] {
-            if !is_sorted_unique(values) {
+            validate_sorted_unique(values, field)?;
+        }
+        validate_unique(&self.ranked_order, "ranked_order")?;
+        validate_unique(&self.qualified_order, "qualified_order")?;
+        for capability in self
+            .offered_capability_order
+            .iter()
+            .chain(self.required_capability_order.iter())
+            .chain(self.negotiated_capability_order.iter())
+        {
+            if !CAPABILITY_ORDER.contains(&capability.as_str()) {
                 return Err(MultimodalRetrievalProtocolError::Invalid(
-                    "multimodal protocol vectors are not canonical".into(),
+                    "multimodal protocol capability is not declared".into(),
                 ));
             }
         }
-        if (self.disposition != SynthesisDisposition::Blocked
-            && self
-                .required_capability_order
-                .iter()
-                .any(|capability| !self.offered_capability_order.contains(capability)))
-            || self
-                .negotiated_capability_order
-                .iter()
-                .any(|capability| !self.required_capability_order.contains(capability))
-            || self
-                .ranked_order
-                .iter()
-                .chain(self.qualified_order.iter())
-                .chain(self.blocked_order.iter())
-                .chain(self.unknown_order.iter())
-                .any(|id| !self.candidate_order.contains(id))
+        let expected_negotiated = self
+            .required_capability_order
+            .iter()
+            .filter(|capability| self.offered_capability_order.contains(capability))
+            .cloned()
+            .collect::<Vec<_>>();
+        if self.negotiated_capability_order != expected_negotiated {
+            return Err(MultimodalRetrievalProtocolError::Invalid(
+                "multimodal negotiated capabilities do not match the offered/required intersection"
+                    .into(),
+            ));
+        }
+        let candidate_keys = identity_keys(&self.candidate_order);
+        if identity_keys(&self.ranked_order) != candidate_keys {
+            return Err(MultimodalRetrievalProtocolError::Invalid(
+                "multimodal ranked order must contain every candidate exactly once".into(),
+            ));
+        }
+        let qualified_keys = identity_keys(&self.qualified_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        if !qualified_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+            || qualified_keys
+                .union(&blocked_keys)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_keys
         {
             return Err(MultimodalRetrievalProtocolError::Invalid(
-                "multimodal negotiation or synthesis state is not covered by its declaration"
-                    .into(),
+                "multimodal candidate states must partition candidates and keep unknown items blocked".into(),
             ));
         }
         if self
@@ -178,6 +202,9 @@ impl MultimodalRetrievalProtocolReceipt {
                 .completed_stage_order
                 .iter()
                 .any(|stage| self.blocked_stage_order.contains(stage))
+            || self.completed_stage_order.len() > self.stage_order.len()
+            || self.completed_stage_order != self.stage_order[..self.completed_stage_order.len()]
+            || self.blocked_stage_order != self.stage_order[self.completed_stage_order.len()..]
         {
             return Err(MultimodalRetrievalProtocolError::Invalid(
                 "multimodal protocol stage transcript is invalid".into(),
@@ -197,16 +224,104 @@ impl MultimodalRetrievalProtocolReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("read:local-multimodal-protocol:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            SynthesisDisposition::Qualified | SynthesisDisposition::Partial
+        ) {
+            vec![format!(
+                "read:local-multimodal-protocol:{}",
+                self.session_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
             return Err(MultimodalRetrievalProtocolError::Invalid(
-                "multimodal protocol effect is not read-only".into(),
+                "multimodal protocol effect receipts do not match disposition".into(),
+            ));
+        }
+        if (self.disposition == SynthesisDisposition::Blocked
+            && self.completed_stage_order.len() != 2)
+            || (self.disposition != SynthesisDisposition::Blocked
+                && self.completed_stage_order.len() != self.stage_order.len())
+        {
+            return Err(MultimodalRetrievalProtocolError::Invalid(
+                "multimodal protocol disposition does not match stage completion".into(),
+            ));
+        }
+        let mut expected_action_receipts = self
+            .completed_stage_order
+            .iter()
+            .map(|stage| format!("stage:completed:{stage}"))
+            .collect::<Vec<_>>();
+        expected_action_receipts.sort();
+        if self.action_receipts != expected_action_receipts {
+            return Err(MultimodalRetrievalProtocolError::Invalid(
+                "multimodal action receipts are not bound to completed stages".into(),
+            ));
+        }
+        let expected_negotiation_digest = ContentHash::of_value(&json!({
+            "protocol_id": self.protocol_id,
+            "offered": self.offered_capability_order,
+            "required": self.required_capability_order,
+            "negotiated": self.negotiated_capability_order,
+        }))
+        .map_err(|error| MultimodalRetrievalProtocolError::Artifact(error.to_string()))?;
+        if self.negotiation_digest != expected_negotiation_digest {
+            return Err(MultimodalRetrievalProtocolError::Invalid(
+                "multimodal negotiation digest is not bound to capabilities".into(),
+            ));
+        }
+        let expected_transcript_digest = ContentHash::of_value(&json!({
+            "session_id": self.session_id,
+            "stage_order": self.stage_order,
+            "completed": self.completed_stage_order,
+            "blocked": self.blocked_stage_order,
+            "negotiation_digest": self.negotiation_digest,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| MultimodalRetrievalProtocolError::Artifact(error.to_string()))?;
+        if self.transcript_digest != expected_transcript_digest {
+            return Err(MultimodalRetrievalProtocolError::Invalid(
+                "multimodal protocol transcript digest is not bound to stage state".into(),
+            ));
+        }
+        let expected_protocol_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "protocol_id": self.protocol_id,
+            "session_id": self.session_id,
+            "disposition": self.disposition,
+            "comparability_digest": self.comparability_digest,
+            "negotiation_digest": self.negotiation_digest,
+            "transcript_digest": self.transcript_digest,
+            "synthesis_digest": self.synthesis_digest,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| MultimodalRetrievalProtocolError::Artifact(error.to_string()))?;
+        if self.protocol_digest != expected_protocol_digest {
+            return Err(MultimodalRetrievalProtocolError::Invalid(
+                "multimodal protocol digest is not bound to negotiated state".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-multimodal-retrieval-protocol:{}", self.session_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != PROTOCOL_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(MultimodalRetrievalProtocolError::Invalid(
+                "multimodal protocol artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| MultimodalRetrievalProtocolError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| MultimodalRetrievalProtocolError::Artifact(error.to_string()))
     }
 
@@ -259,10 +374,11 @@ pub fn compile_multimodal_retrieval_protocol(
         .filter(|capability| !request.offered_capability_order.contains(capability))
         .cloned()
         .collect::<Vec<_>>();
+    let locality_gate = request.raw_data_local && request.request.raw_data_local;
     let gate = request.policy_allow
         && request.protected_closure
-        && request.raw_data_local
-        && request.budget_units >= STAGE_ORDER.len() as u32
+        && locality_gate
+        && u64::from(request.budget_units) >= u64::try_from(STAGE_ORDER.len()).unwrap_or(u64::MAX)
         && missing.is_empty();
     let disposition = if gate {
         synthesis.disposition
@@ -308,10 +424,11 @@ pub fn compile_multimodal_retrieval_protocol(
     if !request.protected_closure {
         omissions.insert("protocol:protected-closure-incomplete".into());
     }
-    if !request.raw_data_local {
+    if !locality_gate {
         omissions.insert("protocol:raw-data-locality-failed".into());
     }
-    if request.budget_units < STAGE_ORDER.len() as u32 {
+    let raw_data_local = true;
+    if u64::from(request.budget_units) < u64::try_from(STAGE_ORDER.len()).unwrap_or(u64::MAX) {
         omissions.insert("protocol:budget-exhausted".into());
     }
     if disposition == SynthesisDisposition::Blocked {
@@ -323,19 +440,10 @@ pub fn compile_multimodal_retrieval_protocol(
         .collect::<BTreeSet<_>>();
     let negotiation_digest = ContentHash::of_value(&json!({"protocol_id": request.protocol_id, "offered": request.offered_capability_order, "required": request.required_capability_order, "negotiated": negotiated}))
         .map_err(|error| MultimodalRetrievalProtocolError::Artifact(error.to_string()))?;
-    let transcript_digest = ContentHash::of_value(&json!({"session_id": request.session_id, "stage_order": STAGE_ORDER, "completed": completed, "blocked": blocked_stages, "negotiation_digest": negotiation_digest, "replay_identity": request.replay_identity}))
+    let transcript_digest = ContentHash::of_value(&json!({"session_id": request.session_id, "stage_order": STAGE_ORDER, "completed": completed, "blocked": blocked_stages, "negotiation_digest": negotiation_digest, "replay_identity": request.replay_identity, "raw_data_local": raw_data_local}))
         .map_err(|error| MultimodalRetrievalProtocolError::Artifact(error.to_string()))?;
-    let protocol_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request.request_id, "protocol_id": request.protocol_id, "session_id": request.session_id, "disposition": disposition, "comparability_digest": synthesis.comparability_digest, "negotiation_digest": negotiation_digest, "transcript_digest": transcript_digest, "synthesis_digest": synthesis.synthesis_digest, "replay_identity": request.replay_identity}))
+    let protocol_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request.request_id, "protocol_id": request.protocol_id, "session_id": request.session_id, "disposition": disposition, "comparability_digest": synthesis.comparability_digest, "negotiation_digest": negotiation_digest, "transcript_digest": transcript_digest, "synthesis_digest": synthesis.synthesis_digest, "replay_identity": request.replay_identity, "raw_data_local": raw_data_local}))
         .map_err(|error| MultimodalRetrievalProtocolError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "protocol_id": request.protocol_id, "session_id": request.session_id, "study_order": request.request.study_ids, "modality_order": request.request.required_modalities, "disposition": disposition, "stage_order": STAGE_ORDER, "completed_stage_order": completed, "blocked_stage_order": blocked_stages, "negotiation_digest": negotiation_digest, "transcript_digest": transcript_digest, "comparability_digest": synthesis.comparability_digest, "synthesis_digest": synthesis.synthesis_digest, "protocol_digest": protocol_digest, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
-    let artifact = TypedResearchArtifact::from_payload(
-        format!("brain-multimodal-retrieval-protocol:{}", request.session_id),
-        "application/vnd.aurora.multimodal-retrieval-protocol-receipt+json",
-        &payload,
-        Vec::new(),
-        Vec::new(),
-    )
-    .map_err(|error| MultimodalRetrievalProtocolError::Artifact(error.to_string()))?;
     let effect_receipts = if matches!(
         disposition,
         SynthesisDisposition::Qualified | SynthesisDisposition::Partial
@@ -347,6 +455,15 @@ pub fn compile_multimodal_retrieval_protocol(
     } else {
         vec!["block:unsafe-release".into()]
     };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "protocol_id": request.protocol_id, "session_id": request.session_id, "study_order": request.request.study_ids, "modality_order": request.request.required_modalities, "disposition": disposition, "offered_capability_order": request.offered_capability_order, "required_capability_order": request.required_capability_order, "negotiated_capability_order": negotiated, "stage_order": STAGE_ORDER, "completed_stage_order": completed, "blocked_stage_order": blocked_stages, "action_receipts": action_receipts, "candidate_order": synthesis.candidate_order, "ranked_order": synthesis.ranked_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "comparability_digest": synthesis.comparability_digest, "negotiation_digest": negotiation_digest, "transcript_digest": transcript_digest, "synthesis_digest": synthesis.synthesis_digest, "protocol_digest": protocol_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": raw_data_local, "boundary": PRECLINICAL_BOUNDARY});
+    let artifact = TypedResearchArtifact::from_payload(
+        format!("brain-multimodal-retrieval-protocol:{}", request.session_id),
+        PROTOCOL_CONTENT_TYPE,
+        &payload,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|error| MultimodalRetrievalProtocolError::Artifact(error.to_string()))?;
     let receipt = MultimodalRetrievalProtocolReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -381,7 +498,7 @@ pub fn compile_multimodal_retrieval_protocol(
         negative_evidence: negative.into_iter().collect(),
         effect_receipts,
         artifact,
-        raw_data_local: true,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
@@ -391,35 +508,133 @@ pub fn compile_multimodal_retrieval_protocol(
 fn validate_request(
     request: &MultimodalRetrievalProtocolRequest,
 ) -> Result<(), MultimodalRetrievalProtocolError> {
-    if request.protocol_id.trim().is_empty()
-        || request.session_id.trim().is_empty()
-        || request.boundary != PRECLINICAL_BOUNDARY
+    if request.boundary != PRECLINICAL_BOUNDARY
         || request.request.boundary != PRECLINICAL_BOUNDARY
         || request.offered_capability_order.is_empty()
         || request.required_capability_order.is_empty()
         || request.requested_stage_order != STAGE_ORDER
         || request.budget_units == 0
-        || !is_sorted_unique(&request.offered_capability_order)
-        || !is_sorted_unique(&request.required_capability_order)
-        || request
-            .offered_capability_order
-            .iter()
-            .any(|value| !CAPABILITY_ORDER.contains(&value.as_str()))
-        || request
-            .required_capability_order
-            .iter()
-            .any(|value| !CAPABILITY_ORDER.contains(&value.as_str()))
+        || request.request.replay_identity != request.replay_identity
     {
         return Err(MultimodalRetrievalProtocolError::Invalid(
             "multimodal protocol identity, capabilities, stages, budget, or boundary are invalid"
                 .into(),
         ));
     }
+    validate_text(&request.protocol_id, "protocol_id")?;
+    validate_text(&request.session_id, "session_id")?;
+    validate_text(&request.boundary, "boundary")?;
+    validate_sorted_unique(
+        &request.offered_capability_order,
+        "offered_capability_order",
+    )?;
+    validate_sorted_unique(
+        &request.required_capability_order,
+        "required_capability_order",
+    )?;
+    if request
+        .offered_capability_order
+        .iter()
+        .chain(request.required_capability_order.iter())
+        .any(|value| !CAPABILITY_ORDER.contains(&value.as_str()))
+    {
+        return Err(MultimodalRetrievalProtocolError::Invalid(
+            "multimodal protocol capability is not declared".into(),
+        ));
+    }
+    if request.replay_identity.as_str().len() != 64
+        || request.request.replay_identity.as_str().len() != 64
+    {
+        return Err(MultimodalRetrievalProtocolError::Invalid(
+            "multimodal protocol replay identity is invalid".into(),
+        ));
+    }
     Ok(())
 }
 
-fn is_sorted_unique(values: &[String]) -> bool {
-    values.windows(2).all(|pair| pair[0] < pair[1])
+fn receipt_payload(receipt: &MultimodalRetrievalProtocolReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "protocol_id": receipt.protocol_id,
+        "session_id": receipt.session_id,
+        "study_order": receipt.study_order,
+        "modality_order": receipt.modality_order,
+        "disposition": receipt.disposition,
+        "offered_capability_order": receipt.offered_capability_order,
+        "required_capability_order": receipt.required_capability_order,
+        "negotiated_capability_order": receipt.negotiated_capability_order,
+        "stage_order": receipt.stage_order,
+        "completed_stage_order": receipt.completed_stage_order,
+        "blocked_stage_order": receipt.blocked_stage_order,
+        "action_receipts": receipt.action_receipts,
+        "candidate_order": receipt.candidate_order,
+        "ranked_order": receipt.ranked_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "comparability_digest": receipt.comparability_digest,
+        "negotiation_digest": receipt.negotiation_digest,
+        "transcript_digest": receipt.transcript_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "protocol_digest": receipt.protocol_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), MultimodalRetrievalProtocolError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(MultimodalRetrievalProtocolError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), MultimodalRetrievalProtocolError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(MultimodalRetrievalProtocolError::Invalid(format!(
+            "{field} must use canonical sorted order"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), MultimodalRetrievalProtocolError> {
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !unique.insert(value.to_ascii_lowercase()) {
+            return Err(MultimodalRetrievalProtocolError::Invalid(format!(
+                "{field} contains duplicate or case-colliding identities"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
 }
 
 #[cfg(test)]
@@ -511,5 +726,35 @@ mod tests {
     fn digest_is_stable() {
         let receipt = compile_multimodal_retrieval_protocol(&request()).unwrap();
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+
+    #[test]
+    fn multimodal_protocol_preserves_rank_order_and_stage_partition() {
+        let mut input = request();
+        input.request.candidates[0].support_milli = 800;
+        input.request.candidates[1].support_milli = 950;
+        let receipt = compile_multimodal_retrieval_protocol(&input).unwrap();
+        assert_eq!(receipt.ranked_order, vec!["evidence:b", "evidence:a"]);
+        assert_eq!(receipt.completed_stage_order.len(), 5);
+        assert!(receipt.blocked_stage_order.is_empty());
+        receipt.validate().unwrap();
+    }
+
+    #[test]
+    fn blocked_low_budget_and_artifact_payload_drift_are_bound() {
+        let mut low_budget = request();
+        low_budget.budget_units = 1;
+        let receipt = compile_multimodal_retrieval_protocol(&low_budget).unwrap();
+        assert_eq!(receipt.disposition, SynthesisDisposition::Blocked);
+        assert_eq!(receipt.completed_stage_order.len(), 2);
+        assert_eq!(receipt.effect_receipts, vec!["block:unsafe-release"]);
+
+        let mut drifted = compile_multimodal_retrieval_protocol(&request()).unwrap();
+        drifted.transcript_digest = hash("drift");
+        assert!(drifted.validate().is_err());
+
+        let mut identity_drift = compile_multimodal_retrieval_protocol(&request()).unwrap();
+        identity_drift.artifact.artifact_id = "artifact:other".into();
+        assert!(identity_drift.validate().is_err());
     }
 }

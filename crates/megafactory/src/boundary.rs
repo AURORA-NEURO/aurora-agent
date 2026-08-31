@@ -436,17 +436,21 @@ pub fn compile_cell_spans(
     check_unique(boundaries, "compile")?;
     let complete = matches!(session.completeness(), Completeness::Complete { .. });
 
-    let last = session.spans().last().expect("session is non-empty").seq;
+    let Some(last) = session.spans().last().map(|span| span.seq) else {
+        return Ok(Vec::new());
+    };
     let mut sorted: Vec<Boundary> = boundaries.to_vec();
     sorted.sort();
 
     let mut spans = Vec::new();
     for (index, boundary) in sorted.iter().enumerate() {
         let start = boundary.seq;
-        let end = sorted
-            .get(index + 1)
-            .map(|next| next.seq)
-            .unwrap_or(last + 1);
+        let end = match sorted.get(index + 1) {
+            Some(next) => next.seq,
+            None => last
+                .checked_add(1)
+                .ok_or(BoundaryError::SequenceExhausted { seq: last })?,
+        };
         if end <= start {
             return Err(BoundaryError::EmptyCellSpan { start, end });
         }

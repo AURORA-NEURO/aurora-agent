@@ -169,7 +169,7 @@ pub enum CiEvidenceError {
 }
 
 fn bounded_text(field: &'static str, value: &str) -> Result<(), CiEvidenceError> {
-    if value.trim().is_empty() || value.len() > MAX_RUN_TEXT {
+    if value.trim().is_empty() || value.len() > MAX_RUN_TEXT || value != value.trim() {
         return Err(CiEvidenceError::InvalidText { field });
     }
     if value.chars().any(char::is_control) {
@@ -179,6 +179,16 @@ fn bounded_text(field: &'static str, value: &str) -> Result<(), CiEvidenceError>
 }
 
 fn validate_digest(field: &'static str, value: &str) -> Result<(), CiEvidenceError> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(CiEvidenceError::InvalidDigest {
+            field,
+            value: value.to_string(),
+        });
+    }
     ContentHash::parse(value.to_string())
         .map(|_| ())
         .map_err(|_| CiEvidenceError::InvalidDigest {
@@ -202,13 +212,30 @@ fn finding(
     });
 }
 
+fn canonicalize_evidence(evidence: &CiRunEvidence) -> Result<CiRunEvidence, CiEvidenceError> {
+    let mut keyed = evidence
+        .checks
+        .iter()
+        .map(|check| {
+            serde_json::to_string(check)
+                .map(|key| (key, check))
+                .map_err(|error| CiEvidenceError::Canonical(error.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    keyed.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut canonical = evidence.clone();
+    canonical.checks = keyed.into_iter().map(|(_, check)| check.clone()).collect();
+    Ok(canonical)
+}
+
 /// Reconcile a caller-supplied run against a freshly generated canonical CI plan.
 pub fn audit_ci_execution_evidence(
     request: &CiExecutionEvidenceRequest,
 ) -> Result<CiExecutionEvidenceAudit, CiEvidenceError> {
     let plan = plan_ci(&request.ci).map_err(|error| CiEvidenceError::Plan(error.to_string()))?;
-    request.evidence.validate()?;
-    let evidence_value = serde_json::to_value((&plan.digest, &request.evidence))
+    let evidence = canonicalize_evidence(&request.evidence)?;
+    evidence.validate()?;
+    let evidence_value = serde_json::to_value((&plan.digest, &evidence))
         .map_err(|error| CiEvidenceError::Canonical(error.to_string()))?;
     let evidence_digest = ContentHash::of_value(&evidence_value)
         .map_err(|error| CiEvidenceError::Canonical(error.to_string()))?
@@ -221,7 +248,7 @@ pub fn audit_ci_execution_evidence(
         .map(|check| (check.name.as_str(), check.required))
         .collect::<BTreeMap<_, _>>();
     let mut findings = Vec::new();
-    if request.evidence.plan_digest != plan.digest {
+    if evidence.plan_digest != plan.digest {
         finding(
             &mut findings,
             "plan_digest_mismatch",
@@ -233,14 +260,14 @@ pub fn audit_ci_execution_evidence(
 
     let mut seen = BTreeSet::new();
     let mut observed = BTreeMap::new();
-    for check in &request.evidence.checks {
-        if !seen.insert(check.name.as_str()) {
+    for check in &evidence.checks {
+        if !seen.insert(check.name.to_ascii_lowercase()) {
             finding(
                 &mut findings,
                 "duplicate_check_evidence",
                 "blocking",
                 check.name.clone(),
-                "each canonical CI check may have exactly one evidence row",
+                "each canonical CI check may have exactly one evidence row, case-insensitively",
             );
             continue;
         }
@@ -324,7 +351,7 @@ pub fn audit_ci_execution_evidence(
     });
     let release_candidate = structurally_valid
         && complete
-        && request.evidence.conclusion == CiRunConclusion::Success
+        && evidence.conclusion == CiRunConclusion::Success
         && passed_check_count == expected.len();
     required_missing.sort();
     required_failed.sort();
@@ -340,10 +367,10 @@ pub fn audit_ci_execution_evidence(
         workflow: request.ci.workflow.clone(),
         plan_digest: plan.digest,
         evidence_digest,
-        run_id: request.evidence.run_id.clone(),
-        provider: request.evidence.provider.clone(),
-        source: request.evidence.source,
-        conclusion: request.evidence.conclusion,
+        run_id: evidence.run_id,
+        provider: evidence.provider,
+        source: evidence.source,
+        conclusion: evidence.conclusion,
         expected_check_count: expected.len(),
         observed_check_count: observed.len(),
         passed_check_count,
@@ -452,6 +479,16 @@ mod tests {
     }
 
     #[test]
+    fn check_order_is_canonical_before_evidence_digesting() {
+        let mut request = request();
+        request.evidence.plan_digest = plan_ci(&request.ci).unwrap().digest;
+        let first = audit_ci_execution_evidence(&request).unwrap();
+        request.evidence.checks.reverse();
+        let reordered = audit_ci_execution_evidence(&request).unwrap();
+        assert_eq!(first, reordered);
+    }
+
+    #[test]
     fn missing_failed_and_unknown_evidence_remain_blocking_and_digest_bound() {
         let mut request = request();
         let plan = plan_ci(&request.ci).unwrap();
@@ -480,5 +517,35 @@ mod tests {
             .iter()
             .any(|finding| finding.code == "plan_digest_mismatch"));
         assert_ne!(audit.evidence_digest, mismatch.evidence_digest);
+    }
+
+    #[test]
+    fn evidence_rejects_noncanonical_digests_identity_whitespace_and_case_aliases() {
+        let mut invalid_digest = request();
+        invalid_digest.evidence.plan_digest = plan_ci(&invalid_digest.ci).unwrap().digest;
+        invalid_digest.evidence.checks[0].result_digest = "A".repeat(64);
+        assert!(matches!(
+            audit_ci_execution_evidence(&invalid_digest),
+            Err(CiEvidenceError::InvalidDigest {
+                field: "evidence result_digest",
+                ..
+            })
+        ));
+
+        let mut invalid_identity = request();
+        invalid_identity.evidence.run_id = " run-1".into();
+        assert!(matches!(
+            audit_ci_execution_evidence(&invalid_identity),
+            Err(CiEvidenceError::InvalidText { field: "run_id" })
+        ));
+
+        let mut ambiguous = request();
+        ambiguous.evidence.plan_digest = plan_ci(&ambiguous.ci).unwrap().digest;
+        ambiguous.evidence.checks[1].name = "UNIT".into();
+        let audit = audit_ci_execution_evidence(&ambiguous).unwrap();
+        assert!(audit
+            .findings
+            .iter()
+            .any(|finding| finding.code == "duplicate_check_evidence"));
     }
 }

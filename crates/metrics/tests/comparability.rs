@@ -43,6 +43,25 @@ fn identical_fully_recorded_conditions_are_comparable() {
 }
 
 #[test]
+fn malformed_condition_metadata_blocks_comparison_before_matching() {
+    let mut left = recorded("system-a");
+    left.scoring_rule.name = "  ".into();
+    match comparable(&left, &recorded("system-a")) {
+        Err(ScoreIncomparability::MalformedConditions { side, .. }) => {
+            assert_eq!(side, "left")
+        }
+        other => panic!("malformed scoring metadata must block, got {other:?}"),
+    }
+
+    let mut right = recorded("system-a");
+    right.budget = bioprism_metrics::Condition::recorded(bioprism_metrics::Budget::labelled(" "));
+    assert!(matches!(
+        comparable(&recorded("system-a"), &right),
+        Err(ScoreIncomparability::MalformedConditions { side, .. }) if side == "right"
+    ));
+}
+
+#[test]
 fn different_subjects_block_even_when_every_other_condition_matches() {
     let left = recorded("system-a");
     let mut right = recorded("system-a");
@@ -245,6 +264,32 @@ fn a_blocked_verdict_distinguishes_an_absence_from_a_disagreement() {
     let report = ComparisonReport::of_aggregates(&left, &right, &ComparabilityPolicy::strict());
     assert!(!report.verdict.is_comparable());
     assert!(report.verdict.blocked_by_absence());
+}
+
+#[test]
+fn a_comparison_report_discloses_missing_conditions_on_both_sides() {
+    let left_grid = grid_of(
+        "system-a",
+        unrecorded("system-a"),
+        vec![("verify.oracle", point_cell(0.9, 12))],
+    );
+    let right_grid = grid_of(
+        "system-a",
+        unrecorded("system-a"),
+        vec![("verify.oracle", point_cell(0.8, 12))],
+    );
+    let left = CoveredAggregate::mean(&left_grid).expect("measured");
+    let right = CoveredAggregate::mean(&right_grid).expect("measured");
+
+    let report = ComparisonReport::of_aggregates(&left, &right, &ComparabilityPolicy::strict());
+    assert!(report
+        .caveats
+        .iter()
+        .any(|caveat| caveat.starts_with("left conditions leave")));
+    assert!(report
+        .caveats
+        .iter()
+        .any(|caveat| caveat.starts_with("right conditions leave")));
 }
 
 #[test]

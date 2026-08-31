@@ -63,7 +63,6 @@ pub mod autonomy_batch;
 pub mod consent;
 pub mod decision;
 pub mod error;
-pub mod federated_commons_interoperability_gateway;
 pub mod flow;
 pub mod interoperability_control;
 pub mod label;
@@ -74,6 +73,7 @@ pub mod redaction;
 pub mod request;
 pub mod residency;
 pub mod trace;
+pub mod federated_continual_evidence_surveillance_contract_model;
 
 pub use autonomy::{
     admit_autonomy, AutonomyAdmissionReceipt, AutonomyAdmissionRequest, AutonomyError,
@@ -86,13 +86,19 @@ pub use autonomy_batch::{
 pub use consent::{Consent, ConsentStatus};
 pub use decision::{Admission, Decision, ExecutionMode, Obligation, Refusal};
 pub use error::PolicyError;
-pub use federated_commons_interoperability_gateway::{
-    admit as admit_policy_federation, admit_json as admit_policy_federation_json,
-    capability_manifest as federated_commons_manifest, FederationAdmission,
-    FederationArtifactCandidate, PolicyFederationEnvelope, PolicyFederationError,
-    PolicyFederationRequest, CONTRACT_VERSION as FEDERATED_COMMONS_CONTRACT_VERSION,
-    FEATURE_ID as FEDERATED_COMMONS_FEATURE_ID, INPUT_SCHEMA as FEDERATED_COMMONS_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as FEDERATED_COMMONS_OUTPUT_SCHEMA,
+pub use federated_continual_evidence_surveillance_contract_model::{
+    federated_continual_evidence_surveillance_contract_model_manifest,
+    model_federated_continual_evidence_surveillance_contract,
+    FederatedContinualContractClaim,
+    FederatedContinualContractCompatibility,
+    FederatedContinualContractDisposition,
+    FederatedContinualEvidenceSurveillanceContractError,
+    FederatedContinualEvidenceSurveillanceContractReceipt,
+    FederatedContinualEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+    INPUT_SCHEMA as POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as POLICY_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_OUTPUT_SCHEMA,
 };
 pub use flow::{
     check_flow, derive, DeclassificationReceipt, DeclassificationRegistry, DeclassificationRule,

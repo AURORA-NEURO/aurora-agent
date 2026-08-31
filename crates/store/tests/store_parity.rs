@@ -7,10 +7,10 @@
 use bioprism_fiber::{compile, Query};
 use bioprism_ids::to_canonical_string;
 use bioprism_section::CertificateProfile;
-use bioprism_store::{build, LazyWorld, StoreError, SortedIndexWriter, SortedIndex};
+use bioprism_store::{build, LazyWorld, SortedIndex, SortedIndexWriter, StoreError};
 use bioprism_world::{World, WorldSource};
 use bioprism_worldgen::{generate, WorldSpec};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -50,17 +50,27 @@ fn the_lazy_path_reproduces_the_reference_certificate_byte_for_byte() {
     let from_lazy = compile(&lazy, &query).expect("lazy compiles");
 
     let eager_certificate = to_canonical_string(
-        &from_eager.certificate.to_json(CertificateProfile::Reference).unwrap(),
+        &from_eager
+            .certificate
+            .to_json(CertificateProfile::Reference)
+            .unwrap(),
     )
     .unwrap();
     let lazy_certificate = to_canonical_string(
-        &from_lazy.certificate.to_json(CertificateProfile::Reference).unwrap(),
+        &from_lazy
+            .certificate
+            .to_json(CertificateProfile::Reference)
+            .unwrap(),
     )
     .unwrap();
 
     assert_eq!(eager_certificate, lazy_certificate, "backends disagree");
     assert_eq!(
-        from_lazy.certificate.digest(CertificateProfile::Reference).unwrap().as_str(),
+        from_lazy
+            .certificate
+            .digest(CertificateProfile::Reference)
+            .unwrap()
+            .as_str(),
         "c0da17ffc80465258345c8a538171bfd868100cd883e9a20780a0dc5477e7ea4",
         "the lazy path must reproduce the published CPython digest"
     );
@@ -88,8 +98,14 @@ fn the_two_backends_agree_on_generated_worlds_too() {
         let from_lazy = compile(&lazy, &query).expect("lazy compiles");
 
         assert_eq!(
-            from_eager.certificate.digest(CertificateProfile::Reference).unwrap(),
-            from_lazy.certificate.digest(CertificateProfile::Reference).unwrap(),
+            from_eager
+                .certificate
+                .digest(CertificateProfile::Reference)
+                .unwrap(),
+            from_lazy
+                .certificate
+                .digest(CertificateProfile::Reference)
+                .unwrap(),
             "{label}: backends disagree"
         );
     }
@@ -129,7 +145,8 @@ fn point_lookups_return_the_same_records() {
     }
 
     assert_eq!(
-        lazy.fact_providing("split_assignment").map(|f| f.id.as_str().to_string()),
+        lazy.fact_providing("split_assignment")
+            .map(|f| f.id.as_str().to_string()),
         Some("fact.split".to_string())
     );
     assert_eq!(
@@ -201,4 +218,39 @@ fn an_empty_index_is_openable_and_answers_nothing() {
     let index = SortedIndex::open(&directory, "nothing").expect("empty index opens");
     assert!(index.is_empty());
     assert_eq!(index.get("anything").unwrap(), None);
+}
+
+#[test]
+fn building_a_store_rejects_worlds_the_eager_parser_rejects() {
+    let mut world = reference_fixture("radiogenomic_world.json");
+    world["factors"][0]["inputs"] = json!(["variable-that-does-not-exist"]);
+
+    let directory = scratch("invalid-world");
+    assert!(matches!(
+        build(&world, &directory),
+        Err(StoreError::MalformedWorld)
+    ));
+}
+
+#[test]
+fn lazy_open_rejects_manifest_counts_that_do_not_match_the_indexes() {
+    let world = reference_fixture("radiogenomic_world.json");
+    let directory = scratch("tampered-manifest");
+    build(&world, &directory).expect("store builds");
+
+    let manifest_path = directory.join("manifest.json");
+    let mut manifest: Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path).expect("manifest readable"))
+            .expect("manifest is JSON");
+    manifest["total_facts"] = json!(0);
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).expect("manifest serializes"),
+    )
+    .expect("tampered manifest writes");
+
+    assert!(matches!(
+        LazyWorld::open(&directory),
+        Err(StoreError::CorruptIndex(_))
+    ));
 }

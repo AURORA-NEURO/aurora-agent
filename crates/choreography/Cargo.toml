@@ -8,10 +8,10 @@ repository.workspace = true
 description = "Multiparty choreography: session types with projection, bounded protocol model checking, adjudication, quorum with checked independence, and sagas with honest compensation"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-weave = { workspace = true }
-bioprism-foundation = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

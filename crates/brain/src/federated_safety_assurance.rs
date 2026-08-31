@@ -20,6 +20,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-brain-P01-F28";
 pub const CONTRACT_VERSION: &str = "brain-federated-evidence-assurance/1.0";
+const ASSURANCE_CONTENT_TYPE: &str = "application/vnd.aurora.federated-assurance+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -77,28 +79,22 @@ impl FederatedAssuranceReceipt {
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
             || !self.raw_data_local
-            || self.request_id.trim().is_empty()
-            || self.federation_id.trim().is_empty()
-            || self.institution_id.trim().is_empty()
-            || self.purpose.trim().is_empty()
-            || self.semantic_profile.trim().is_empty()
-            || self.endpoint.trim().is_empty()
             || self.candidate_order.is_empty()
             || self.witness_order.is_empty()
-            || self.effect_receipts.is_empty()
+            || self.effect_receipts.len() != 1
         {
             return Err(FederatedAssuranceError::Invalid("federated assurance identity, witness coverage, locality, or effects are incomplete".into()));
         }
-        if self
-            .admitted_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
-            return Err(FederatedAssuranceError::Invalid(
-                "federated assurance state is not covered by candidates".into(),
-            ));
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.federation_id, "federation_id"),
+            (&self.institution_id, "institution_id"),
+            (&self.purpose, "purpose"),
+            (&self.semantic_profile, "semantic_profile"),
+            (&self.endpoint, "endpoint"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
         }
         for values in [
             &self.candidate_order,
@@ -112,19 +108,74 @@ impl FederatedAssuranceReceipt {
             &self.negative_evidence,
             &self.effect_receipts,
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(FederatedAssuranceError::Invalid(
-                    "federated assurance ordering is not canonical".into(),
-                ));
-            }
+            validate_sorted_unique(values, "federated assurance collection")?;
+        }
+        let candidate_keys = identity_keys(&self.candidate_order);
+        let admitted_keys = identity_keys(&self.admitted_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        if admitted_keys
+            .union(&blocked_keys)
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            != candidate_keys
+            || !admitted_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+            || self.aggregate_order.len() != self.admitted_order.len()
+        {
+            return Err(FederatedAssuranceError::Invalid(
+                "federated assurance state is not a disjoint candidate partition".into(),
+            ));
         }
         if self
             .aggregate_order
             .windows(2)
             .any(|pair| pair[0] >= pair[1])
+            || self
+                .aggregate_order
+                .iter()
+                .any(|value| value.as_str().len() != 64)
         {
             return Err(FederatedAssuranceError::Invalid(
-                "federated aggregate ordering is not canonical".into(),
+                "federated aggregate ordering or digest is invalid".into(),
+            ));
+        }
+        let evidence_qualified = !self.admitted_order.is_empty()
+            && self.blocked_order.is_empty()
+            && self.unknown_order.is_empty()
+            && self.omissions.is_empty()
+            && self.uncertainty.is_empty()
+            && self.negative_evidence.is_empty();
+        let expected_verdict = if !self.counterexample_order.is_empty() {
+            FederatedAssuranceVerdict::Blocked
+        } else if evidence_qualified {
+            FederatedAssuranceVerdict::Qualified
+        } else {
+            FederatedAssuranceVerdict::Unresolved
+        };
+        if self.verdict != expected_verdict {
+            return Err(FederatedAssuranceError::Invalid(
+                "federated assurance verdict does not match witnesses and counterexamples".into(),
+            ));
+        }
+        if self
+            .omissions
+            .iter()
+            .any(|item| item == "assurance:raw-data-locality-failed")
+            && self.verdict != FederatedAssuranceVerdict::Blocked
+        {
+            return Err(FederatedAssuranceError::Invalid(
+                "non-local assurance must be blocked and retain locality evidence".into(),
+            ));
+        }
+        let expected_effect = if self.verdict == FederatedAssuranceVerdict::Qualified {
+            format!("assurance:federated:{}", self.request_id)
+        } else {
+            "block:unsafe-release".into()
+        };
+        if self.effect_receipts != [expected_effect] {
+            return Err(FederatedAssuranceError::Invalid(
+                "federated assurance effect does not match verdict".into(),
             ));
         }
         for value in [
@@ -138,15 +189,51 @@ impl FederatedAssuranceReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("assurance:federated:") && effect != "block:unsafe-release"
-        }) {
+        let expected_envelope_digest = ContentHash::of_value(&json!({
+            "federation_id": self.federation_id,
+            "institution_id": self.institution_id,
+            "purpose": self.purpose,
+            "semantic_profile": self.semantic_profile,
+            "candidate_order": self.candidate_order,
+            "aggregate_order": self.aggregate_order,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| FederatedAssuranceError::Artifact(error.to_string()))?;
+        if self.envelope_digest != expected_envelope_digest {
             return Err(FederatedAssuranceError::Invalid(
-                "federated assurance effect is outside the governed gate".into(),
+                "federated assurance envelope digest is not bound to evidence".into(),
+            ));
+        }
+        let expected_verification_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "witness_order": self.witness_order,
+            "counterexample_order": self.counterexample_order,
+            "verdict": self.verdict,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| FederatedAssuranceError::Artifact(error.to_string()))?;
+        if self.verification_digest != expected_verification_digest {
+            return Err(FederatedAssuranceError::Invalid(
+                "federated assurance verification digest is not bound to verdict".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-federated-assurance:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != ASSURANCE_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(FederatedAssuranceError::Invalid(
+                "federated assurance artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedAssuranceError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedAssuranceError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, FederatedAssuranceError> {
@@ -158,6 +245,80 @@ impl FederatedAssuranceReceipt {
     }
 }
 
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedAssuranceError> {
+    if value.trim() != value
+        || value.is_empty()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedAssuranceError::Invalid(format!(
+            "{field} is empty, padded, oversized, or contains control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), FederatedAssuranceError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedAssuranceError::Invalid(format!(
+                "{field} contains a duplicate or case-colliding identity"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(values: &[String], field: &str) -> Result<(), FederatedAssuranceError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedAssuranceError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn receipt_payload(receipt: &FederatedAssuranceReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "federation_id": receipt.federation_id,
+        "institution_id": receipt.institution_id,
+        "purpose": receipt.purpose,
+        "semantic_profile": receipt.semantic_profile,
+        "endpoint": receipt.endpoint,
+        "verdict": receipt.verdict,
+        "candidate_order": receipt.candidate_order,
+        "admitted_order": receipt.admitted_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "aggregate_order": receipt.aggregate_order,
+        "witness_order": receipt.witness_order,
+        "counterexample_order": receipt.counterexample_order,
+        "envelope_digest": receipt.envelope_digest,
+        "verification_digest": receipt.verification_digest,
+        "replay_identity": receipt.replay_identity,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
+}
+
 pub fn federated_safety_assurance_manifest() -> CapabilityManifest {
     CapabilityManifest { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), capability_id: FEATURE_ID.into(), version: CONTRACT_VERSION.into(), owner_crate: "brain".into(), consumers: ["platform reliability engineer".into(), "federation release gate".into()].into(), behavior: "verifies policy-separated evidence exchange with purpose, signer, permitted-artifact, aggregate-only, provenance, replay, and locality witnesses".into(), value: "prevents unauthorized data movement or incomplete evidence from being promoted across institutions".into(), inputs: vec![TypedPort { name: "federated_evidence_feed".into(), schema: "EvidenceFeed4@1".into(), required: true }], outputs: vec![TypedPort { name: "federated_assurance".into(), schema: "QualifiedEvidenceSet7@1".into(), required: true }], effects: [Effect::ReadLocalData, Effect::ExecuteLocalComputation, Effect::WriteLocalArtifact].into(), permissions: ["evaluate:capability-runs".into()].into(), determinism: Determinism::ByteStable, evidence: vec![EvidenceReference { source_id: "w3c-prov-o".into(), state: EvidenceState::Supported, locator: Some("https://www.w3.org/TR/prov-o/".into()) }], authority_requirements: Vec::new(), autonomy_tier: AutonomyTier::A1, surfaces: [ResearchSurface::Ui, ResearchSurface::Api, ResearchSurface::Sdk, ResearchSurface::Cli, ResearchSurface::McpTool, ResearchSurface::Policy, ResearchSurface::Operator].into(), boundary: PRECLINICAL_BOUNDARY.into() }
 }
@@ -165,6 +326,7 @@ pub fn federated_safety_assurance_manifest() -> CapabilityManifest {
 pub fn verify_federated_safety(
     request: &FederatedEvidenceFeedRequest,
 ) -> Result<FederatedAssuranceReceipt, FederatedAssuranceError> {
+    validate_request(request)?;
     let evidence = admit_federated_evidence(request)
         .map_err(|error| FederatedAssuranceError::Engine(error.to_string()))?;
     let mut omissions = evidence.omissions.iter().cloned().collect::<BTreeSet<_>>();
@@ -249,14 +411,20 @@ pub fn verify_federated_safety(
     } else {
         FederatedAssuranceVerdict::Unresolved
     };
-    let envelope_digest = ContentHash::of_value(&json!({"federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "candidate_order": evidence.candidate_order, "aggregate_order": evidence.aggregate_order, "replay_identity": request.replay_identity}))
+    let raw_data_local = true;
+    let envelope_digest = ContentHash::of_value(&json!({"federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "candidate_order": evidence.candidate_order, "aggregate_order": evidence.aggregate_order, "replay_identity": request.replay_identity, "raw_data_local": raw_data_local}))
         .map_err(|error| FederatedAssuranceError::Artifact(error.to_string()))?;
-    let verification_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "witness_order": witnesses, "counterexample_order": counterexamples, "verdict": verdict}))
+    let verification_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "witness_order": witnesses, "counterexample_order": counterexamples, "verdict": verdict, "raw_data_local": raw_data_local}))
         .map_err(|error| FederatedAssuranceError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "endpoint": request.endpoint, "verdict": verdict, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "aggregate_order": evidence.aggregate_order, "witness_order": witnesses, "counterexample_order": counterexamples, "envelope_digest": envelope_digest, "verification_digest": verification_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let effect_receipts = if verdict == FederatedAssuranceVerdict::Qualified {
+        vec![format!("assurance:federated:{}", request.request_id)]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "endpoint": request.endpoint, "verdict": verdict, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "aggregate_order": evidence.aggregate_order, "witness_order": witnesses, "counterexample_order": counterexamples, "envelope_digest": envelope_digest, "verification_digest": verification_digest, "replay_identity": request.replay_identity, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": raw_data_local, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-federated-assurance:{}", request.request_id),
-        "application/vnd.aurora.federated-assurance+json",
+        ASSURANCE_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -286,17 +454,40 @@ pub fn verify_federated_safety(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if verdict == FederatedAssuranceVerdict::Qualified {
-            vec![format!("assurance:federated:{}", request.request_id)]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
-        raw_data_local: true,
+        raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn validate_request(request: &FederatedEvidenceFeedRequest) -> Result<(), FederatedAssuranceError> {
+    if request.observations.is_empty() || request.boundary != PRECLINICAL_BOUNDARY {
+        return Err(FederatedAssuranceError::Invalid(
+            "federated assurance feed must contain observations within the declared boundary"
+                .into(),
+        ));
+    }
+    for (value, field) in [
+        (&request.request_id, "request_id"),
+        (&request.federation_id, "federation_id"),
+        (&request.institution_id, "institution_id"),
+        (&request.purpose, "purpose"),
+        (&request.semantic_profile, "semantic_profile"),
+        (&request.endpoint, "endpoint"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_unique(&request.allowed_artifacts, "allowed_artifacts")?;
+    if request.replay_identity.as_str().len() != 64 {
+        return Err(FederatedAssuranceError::Invalid(
+            "federated assurance replay digest is invalid".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -370,6 +561,36 @@ mod tests {
         q.allowed_artifacts = vec!["raw-data".into()];
         let r = verify_federated_safety(&q).unwrap();
         assert_eq!(r.verdict, FederatedAssuranceVerdict::Blocked);
+    }
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut q = request(EvidenceState::Supported);
+        q.raw_data_local = false;
+        let r = verify_federated_safety(&q).unwrap();
+        assert_eq!(r.verdict, FederatedAssuranceVerdict::Blocked);
+        assert!(r.raw_data_local);
+        assert!(r
+            .omissions
+            .iter()
+            .any(|item| item == "assurance:raw-data-locality-failed"));
+        r.validate().unwrap();
+    }
+    #[test]
+    fn verdict_and_payload_drift_are_rejected() {
+        let r = verify_federated_safety(&request(EvidenceState::Supported)).unwrap();
+        let mut verdict_drift = r.clone();
+        verdict_drift.verdict = FederatedAssuranceVerdict::Blocked;
+        assert!(verdict_drift.validate().is_err());
+
+        let mut payload_drift = r;
+        payload_drift.endpoint = "https://other.example/research".into();
+        assert!(payload_drift.validate().is_err());
+    }
+    #[test]
+    fn padded_assurance_identity_is_rejected() {
+        let mut q = request(EvidenceState::Supported);
+        q.request_id = " request:federated-assurance".into();
+        assert!(verify_federated_safety(&q).is_err());
     }
     #[test]
     fn digest_is_stable() {

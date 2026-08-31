@@ -8,6 +8,7 @@ use bioprism_foundation::{
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-fiber-P08-F24";
@@ -73,8 +74,52 @@ impl MechanismGatewayReceipt {
                 "mechanism gateway identity, profiles, boundary, or checks are incomplete".into(),
             ));
         }
+        if self
+            .projected_candidate_ids
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+            || self
+                .projected_candidate_ids
+                .iter()
+                .any(|candidate| candidate.trim().is_empty())
+        {
+            return Err(MechanismGatewayError::InvalidField(
+                "projected candidate identities are not canonical".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("mechanism-interoperability-gateway:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type
+                != "application/vnd.aurora.mechanism-interoperability-gateway+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(MechanismGatewayError::Artifact(
+                "mechanism gateway artifact identity or provenance is invalid".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| MechanismGatewayError::Artifact(error.to_string()))?;
+        let payload = json!({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "contract_version": self.contract_version,
+            "request_id": self.request_id,
+            "federation_id": self.federation_id,
+            "source_profile": self.source_profile,
+            "target_profile": self.target_profile,
+            "projected_candidate_ids": self.projected_candidate_ids,
+            "interoperability_profile": self.interoperability_profile,
+            "disposition": self.disposition,
+            "projection_digest": self.projection_digest,
+            "checks": self.checks,
+            "omissions": self.omissions,
+            "boundary": self.boundary,
+        });
+        self.artifact
+            .verify_payload(&payload)
             .map_err(|error| MechanismGatewayError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, MechanismGatewayError> {
@@ -185,6 +230,26 @@ fn validate_request(request: &MechanismGatewayRequest) -> Result<(), MechanismGa
             "mechanism gateway identity, profiles, candidates, and boundary are required".into(),
         ));
     }
+    let mut required = BTreeSet::new();
+    if request
+        .required_candidate_ids
+        .iter()
+        .any(|candidate| candidate.trim().is_empty() || !required.insert(candidate))
+    {
+        return Err(MechanismGatewayError::InvalidField(
+            "required candidate identities must be non-empty and unique".into(),
+        ));
+    }
+    let mut projected = BTreeSet::new();
+    if request
+        .projected_candidate_ids
+        .iter()
+        .any(|candidate| candidate.trim().is_empty() || !projected.insert(candidate))
+    {
+        return Err(MechanismGatewayError::InvalidField(
+            "projected candidate identities must be non-empty and unique".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -210,5 +275,48 @@ mod tests {
         .unwrap();
         assert_eq!(receipt.disposition, MechanismGatewayDisposition::Unknown);
         assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
+
+    #[test]
+    fn duplicate_gateway_candidates_are_rejected() {
+        let mut request = MechanismGatewayRequest {
+            request_id: "request:gateway".into(),
+            federation_id: "federation:mechanism".into(),
+            source_profile: "mechanism-v1".into(),
+            target_profile: "mechanism-v2".into(),
+            required_candidate_ids: vec!["candidate:a".into(), "candidate:a".into()],
+            projected_candidate_ids: vec![],
+            projection_digest: None,
+            interoperability_profile: "ro-crate+prov-o:1".into(),
+            policy_decision: PolicyDecision::Allow,
+            protected_closure_satisfied: true,
+            raw_data_local: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        assert!(admit_mechanism_gateway(&request).is_err());
+        request.required_candidate_ids = vec!["candidate:a".into()];
+        request.projected_candidate_ids = vec!["candidate:a".into(), "candidate:a".into()];
+        assert!(admit_mechanism_gateway(&request).is_err());
+    }
+
+    #[test]
+    fn tampered_gateway_artifact_is_rejected() {
+        let request = MechanismGatewayRequest {
+            request_id: "request:gateway".into(),
+            federation_id: "federation:mechanism".into(),
+            source_profile: "mechanism-v1".into(),
+            target_profile: "mechanism-v2".into(),
+            required_candidate_ids: vec!["candidate:a".into()],
+            projected_candidate_ids: vec!["candidate:a".into()],
+            projection_digest: Some(ContentHash::of_bytes(b"projection")),
+            interoperability_profile: "ro-crate+prov-o:1".into(),
+            policy_decision: PolicyDecision::Allow,
+            protected_closure_satisfied: true,
+            raw_data_local: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+        let mut receipt = admit_mechanism_gateway(&request).unwrap();
+        receipt.projected_candidate_ids.clear();
+        assert!(receipt.validate().is_err());
     }
 }

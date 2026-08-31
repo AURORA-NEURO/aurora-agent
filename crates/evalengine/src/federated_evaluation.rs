@@ -247,7 +247,12 @@ pub fn evaluate_federated_evaluation(
                 card_digest: None,
                 reasons: vec![error],
             }),
-            (None, None, _) => unreachable!(),
+            (None, None, _) => entries.push(FederatedEvaluationSiteEntry {
+                site_id,
+                disposition: FederatedEvaluationSiteDisposition::Blocked,
+                card_digest: None,
+                reasons: vec!["site produced neither a valid card digest nor a refusal".into()],
+            }),
         }
     }
     let agreeing_sites = entries

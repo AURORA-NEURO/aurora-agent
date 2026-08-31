@@ -20,6 +20,7 @@ const MAX_RUNBOOKS: usize = 4_096;
 const MAX_INCIDENTS: usize = 4_096;
 const MAX_CONTROLS: usize = 256;
 const MAX_LIST: usize = 16_384;
+const MAX_TEXT_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OperationalReadinessManifest {
@@ -246,6 +247,7 @@ pub struct OperationalIndicatorAudit {
     pub contract_valid: bool,
     pub source_valid: bool,
     pub observed: bool,
+    pub measurement_valid: bool,
     pub evidence_valid: bool,
     pub ready: bool,
 }
@@ -253,6 +255,8 @@ pub struct OperationalIndicatorAudit {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OperationalDependencyAudit {
     pub dependency_id: String,
+    pub id_valid: bool,
+    pub name_valid: bool,
     pub owner_valid: bool,
     pub failure_mode_valid: bool,
     pub fallback_present: bool,
@@ -265,6 +269,7 @@ pub struct OperationalRunbookAudit {
     pub runbook_id: String,
     pub valid: bool,
     pub review_current: bool,
+    pub steps_valid: bool,
     pub step_count: usize,
     pub referenced_incidents: usize,
 }
@@ -273,8 +278,11 @@ pub struct OperationalRunbookAudit {
 pub struct OperationalIncidentAudit {
     pub incident_id: String,
     pub valid: bool,
+    pub owner_valid: bool,
     pub runbook_valid: bool,
+    pub timeline_valid: bool,
     pub timeline_present: bool,
+    pub postmortem_valid: bool,
     pub postmortem_present: bool,
     pub closed: bool,
 }
@@ -386,13 +394,15 @@ impl OperationalReadinessManifest {
             ("service.version", &self.service.version),
             ("service.owner", &self.service.owner),
         ] {
-            if value.trim().is_empty() {
+            if !valid_text(value) {
                 blocking(
                     &mut issues,
-                    "required_field_empty",
+                    "field_invalid",
                     field,
-                    format!("{field} is empty"),
-                    "declare the service identity and accountable owner",
+                    format!(
+                        "{field} must be non-empty, at most {MAX_TEXT_BYTES} bytes, and contain no control characters"
+                    ),
+                    "supply bounded visible metadata for the operational service",
                 );
             }
         }
@@ -402,15 +412,15 @@ impl OperationalReadinessManifest {
                 continue;
             }
             contracts.insert(contract.id.clone(), contract);
-            if contract.id.trim().is_empty()
-                || contract.objective.trim().is_empty()
-                || contract.target.trim().is_empty()
+            if !valid_identifier(&contract.id)
+                || !valid_text(&contract.objective)
+                || !valid_text(&contract.target)
             {
                 blocking(
                     &mut issues,
                     "contract_incomplete",
                     &contract.id,
-                    "contract id, objective, and target are required",
+                    "contract id, objective, and target must be canonical bounded visible text",
                     "state a measurable operational objective and target",
                 );
             }
@@ -424,21 +434,31 @@ impl OperationalReadinessManifest {
                 "declare at least one objective with a target and an indicator",
             );
         }
+        if self.indicators.is_empty() && self.policies.require_observability {
+            blocking(
+                &mut issues,
+                "indicators_missing",
+                "indicators",
+                "observability is required but the service declares no indicators",
+                "declare at least one indicator for the service's operational objectives",
+            );
+        }
 
         for indicator in &self.indicators {
             if !insert_unique(&mut indicators, &indicator.id, "indicator", &mut issues) {
                 continue;
             }
             indicators.insert(indicator.id.clone(), indicator);
-            if indicator.id.trim().is_empty()
-                || indicator.metric.trim().is_empty()
-                || indicator.source.trim().is_empty()
+            if !valid_identifier(&indicator.id)
+                || !valid_identifier(&indicator.contract)
+                || !valid_text(&indicator.metric)
+                || !valid_text(&indicator.source)
             {
                 blocking(
                     &mut issues,
                     "indicator_incomplete",
                     &indicator.id,
-                    "indicator id, metric, and source are required",
+                    "indicator id, contract, metric, and source must be bounded visible text",
                     "bind the indicator to a named measurement source",
                 );
             }
@@ -460,6 +480,42 @@ impl OperationalReadinessManifest {
                     &indicator.id,
                     "an observed indicator needs a 64-character evidence digest",
                     "bind observed telemetry to a content-addressed evidence record",
+                );
+            }
+            if let Some(measurement) = indicator.measurement.as_deref() {
+                if !valid_text(measurement) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("indicator.{}.measurement", indicator.id),
+                        "indicator measurement contains invalid control or oversized text",
+                        "supply bounded visible measurement text or omit it",
+                    );
+                }
+            }
+            if let Some(evidence_digest) = indicator.evidence_digest.as_deref() {
+                if !valid_digest(evidence_digest) {
+                    blocking(
+                        &mut issues,
+                        "indicator_evidence_noncanonical",
+                        &indicator.id,
+                        "indicator evidence digest is not a canonical lowercase content hash",
+                        "store a lowercase 64-character content-addressed evidence digest",
+                    );
+                }
+            }
+            if indicator.status == IndicatorStatus::Observed
+                && indicator
+                    .measurement
+                    .as_deref()
+                    .is_none_or(|value| !valid_text(value))
+            {
+                blocking(
+                    &mut issues,
+                    "observed_indicator_measurement_missing",
+                    &indicator.id,
+                    "an observed indicator needs a non-empty measurement",
+                    "retain the observed value alongside its content-addressed evidence record",
                 );
             }
             if self.policies.require_observability
@@ -498,27 +554,36 @@ impl OperationalReadinessManifest {
                 continue;
             }
             dependencies.insert(dependency.id.clone(), dependency);
-            if dependency.id.trim().is_empty()
-                || dependency.name.trim().is_empty()
-                || dependency.owner.trim().is_empty()
-                || dependency.failure_mode.trim().is_empty()
+            if !valid_identifier(&dependency.id)
+                || !valid_text(&dependency.name)
+                || !valid_text(&dependency.owner)
+                || !valid_text(&dependency.failure_mode)
             {
                 blocking(
                     &mut issues,
                     "dependency_incomplete",
                     &dependency.id,
-                    "dependency id, name, owner, and failure mode are required",
+                    "dependency id, name, owner, and failure mode must be bounded visible text",
                     "declare who owns the dependency and how its failure appears",
                 );
+            }
+            if let Some(fallback) = dependency.fallback.as_deref() {
+                if !valid_text(fallback) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("dependency.{}.fallback", dependency.id),
+                        "dependency fallback contains invalid control or oversized text",
+                        "supply bounded visible degraded-mode text or omit it",
+                    );
+                }
             }
             if dependency.criticality == DependencyCriticality::Critical
                 && self.policies.require_dependency_fallback
                 && dependency
                     .fallback
                     .as_deref()
-                    .map(str::trim)
-                    .unwrap_or_default()
-                    .is_empty()
+                    .is_none_or(|value| !valid_text(value))
             {
                 blocking(
                     &mut issues,
@@ -535,9 +600,9 @@ impl OperationalReadinessManifest {
                 continue;
             }
             runbooks.insert(runbook.id.clone(), runbook);
-            if runbook.id.trim().is_empty()
-                || runbook.trigger.trim().is_empty()
-                || runbook.owner.trim().is_empty()
+            if !valid_identifier(&runbook.id)
+                || !valid_text(&runbook.trigger)
+                || !valid_text(&runbook.owner)
                 || runbook.steps.is_empty()
             {
                 blocking(
@@ -556,6 +621,54 @@ impl OperationalReadinessManifest {
                     MAX_LIST,
                 );
             }
+            if runbook.steps.iter().any(|step| step.trim().is_empty()) {
+                blocking(
+                    &mut issues,
+                    "runbook_step_empty",
+                    &runbook.id,
+                    "runbook steps must contain executable non-empty instructions",
+                    "replace empty steps with explicit operator actions",
+                );
+            }
+            if runbook
+                .steps
+                .iter()
+                .any(|step| !step.trim().is_empty() && !valid_text(step))
+            {
+                blocking(
+                    &mut issues,
+                    "runbook_step_invalid",
+                    &runbook.id,
+                    "runbook steps contain control characters or oversized text",
+                    "keep each operator action bounded and visibly encoded",
+                );
+            }
+            if runbook
+                .incident_classes
+                .iter()
+                .any(|class| class.trim().is_empty())
+            {
+                blocking(
+                    &mut issues,
+                    "runbook_incident_class_empty",
+                    &runbook.id,
+                    "runbook incident classes must be non-empty when declared",
+                    "remove empty classes or name the incident class explicitly",
+                );
+            }
+            if runbook
+                .incident_classes
+                .iter()
+                .any(|class| !class.trim().is_empty() && !valid_identifier(class))
+            {
+                blocking(
+                    &mut issues,
+                    "runbook_incident_class_invalid",
+                    &runbook.id,
+                    "runbook incident classes must be bounded visible identifiers",
+                    "use stable incident-class identifiers without control characters",
+                );
+            }
             if self.policies.require_runbooks
                 && runbook.review_status != RunbookReviewStatus::Reviewed
             {
@@ -569,19 +682,65 @@ impl OperationalReadinessManifest {
             }
         }
 
+        if self.runbooks.is_empty() && self.policies.require_runbooks {
+            blocking(
+                &mut issues,
+                "runbooks_missing",
+                "runbooks",
+                "runbooks are required but the service declares none",
+                "declare at least one reviewed runbook for the service's operational triggers",
+            );
+        }
+
         for incident in &self.incidents {
             if !insert_unique(&mut incidents, &incident.id, "incident", &mut issues) {
                 continue;
             }
             incidents.insert(incident.id.clone(), incident);
+            if incident.timeline.len() > MAX_LIST {
+                bound(
+                    &mut issues,
+                    "incident.timeline",
+                    incident.timeline.len(),
+                    MAX_LIST,
+                );
+            }
             let runbook_valid = runbooks.contains_key(&incident.runbook);
             let timeline_present = !incident.timeline.is_empty();
+            let timeline_valid =
+                timeline_present && incident.timeline.iter().all(|entry| valid_text(entry));
             let closed = incident.state == IncidentState::Closed;
-            let postmortem_present = incident
-                .postmortem
-                .as_deref()
-                .map(str::trim)
-                .is_some_and(|value| !value.is_empty());
+            let owner_valid = valid_text(&incident.owner);
+            let postmortem_present = incident.postmortem.as_deref().is_some_and(valid_text);
+            if !valid_identifier(&incident.id) || !valid_identifier(&incident.runbook) {
+                blocking(
+                    &mut issues,
+                    "field_invalid",
+                    format!("incident.{}", incident.id),
+                    "incident id and runbook reference must be canonical bounded identifiers",
+                    "bind the incident to stable visible identifiers",
+                );
+            }
+            if let Some(postmortem) = incident.postmortem.as_deref() {
+                if !valid_text(postmortem) {
+                    blocking(
+                        &mut issues,
+                        "field_invalid",
+                        format!("incident.{}.postmortem", incident.id),
+                        "incident postmortem contains invalid control or oversized text",
+                        "supply bounded visible learning text or omit it",
+                    );
+                }
+            }
+            if !owner_valid {
+                blocking(
+                    &mut issues,
+                    "incident_owner_missing",
+                    &incident.id,
+                    "incident owner is empty",
+                    "assign an accountable owner for incident follow-up",
+                );
+            }
             if !runbook_valid {
                 blocking(
                     &mut issues,
@@ -598,6 +757,36 @@ impl OperationalReadinessManifest {
                     &incident.id,
                     "incident has no timeline entries",
                     "retain ordered response observations instead of only a terminal label",
+                );
+            } else if !timeline_valid {
+                blocking(
+                    &mut issues,
+                    "incident_timeline_entry_empty",
+                    &incident.id,
+                    "incident timeline contains an empty entry",
+                    "retain a non-empty ordered response observation for every timeline entry",
+                );
+                if incident
+                    .timeline
+                    .iter()
+                    .any(|entry| !entry.trim().is_empty() && !valid_text(entry))
+                {
+                    blocking(
+                        &mut issues,
+                        "incident_timeline_entry_invalid",
+                        &incident.id,
+                        "incident timeline contains control characters or oversized text",
+                        "retain bounded visible response observations",
+                    );
+                }
+            }
+            if self.policies.require_incident_closure && !closed {
+                blocking(
+                    &mut issues,
+                    "incident_not_closed",
+                    &incident.id,
+                    "an incident remains open or unresolved while closure is required",
+                    "resolve the incident and retain its closure learning record",
                 );
             }
             if self.policies.require_incident_closure && closed && !postmortem_present {
@@ -664,8 +853,10 @@ impl OperationalReadinessManifest {
             .iter()
             .map(|indicator| {
                 let contract_valid = contracts.contains_key(&indicator.contract);
-                let source_valid = !indicator.source.trim().is_empty();
+                let source_valid = valid_text(&indicator.source);
                 let observed = indicator.status == IndicatorStatus::Observed;
+                let measurement_valid =
+                    !observed || indicator.measurement.as_deref().is_some_and(valid_text);
                 let evidence_valid = !observed
                     || indicator.evidence_digest.as_deref().map(valid_digest) == Some(true);
                 OperationalIndicatorAudit {
@@ -673,9 +864,11 @@ impl OperationalReadinessManifest {
                     contract_valid,
                     source_valid,
                     observed,
+                    measurement_valid,
                     evidence_valid,
                     ready: contract_valid
                         && source_valid
+                        && measurement_valid
                         && evidence_valid
                         && (observed || indicator.status == IndicatorStatus::NotApplicable),
                 }
@@ -685,21 +878,23 @@ impl OperationalReadinessManifest {
             .dependencies
             .iter()
             .map(|dependency| {
-                let owner_valid = !dependency.owner.trim().is_empty();
-                let failure_mode_valid = !dependency.failure_mode.trim().is_empty();
-                let fallback_present = dependency
-                    .fallback
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|value| !value.is_empty());
+                let id_valid = valid_identifier(&dependency.id);
+                let name_valid = valid_text(&dependency.name);
+                let owner_valid = valid_text(&dependency.owner);
+                let failure_mode_valid = valid_text(&dependency.failure_mode);
+                let fallback_present = dependency.fallback.as_deref().is_some_and(valid_text);
                 let critical = dependency.criticality == DependencyCriticality::Critical;
                 OperationalDependencyAudit {
                     dependency_id: dependency.id.clone(),
+                    id_valid,
+                    name_valid,
                     owner_valid,
                     failure_mode_valid,
                     fallback_present,
                     critical,
-                    ready: owner_valid
+                    ready: id_valid
+                        && name_valid
+                        && owner_valid
                         && failure_mode_valid
                         && (!critical
                             || !self.policies.require_dependency_fallback
@@ -712,11 +907,18 @@ impl OperationalReadinessManifest {
             .iter()
             .map(|runbook| OperationalRunbookAudit {
                 runbook_id: runbook.id.clone(),
-                valid: !runbook.id.trim().is_empty()
-                    && !runbook.trigger.trim().is_empty()
-                    && !runbook.owner.trim().is_empty()
-                    && !runbook.steps.is_empty(),
+                valid: valid_identifier(&runbook.id)
+                    && valid_text(&runbook.trigger)
+                    && valid_text(&runbook.owner)
+                    && !runbook.steps.is_empty()
+                    && runbook.steps.iter().all(|step| valid_text(step))
+                    && runbook
+                        .incident_classes
+                        .iter()
+                        .all(|class| valid_identifier(class)),
                 review_current: runbook.review_status == RunbookReviewStatus::Reviewed,
+                steps_valid: !runbook.steps.is_empty()
+                    && runbook.steps.iter().all(|step| valid_text(step)),
                 step_count: runbook.steps.len(),
                 referenced_incidents: self
                     .incidents
@@ -730,14 +932,22 @@ impl OperationalReadinessManifest {
             .iter()
             .map(|incident| OperationalIncidentAudit {
                 incident_id: incident.id.clone(),
-                valid: runbooks.contains_key(&incident.runbook) && !incident.timeline.is_empty(),
+                valid: valid_identifier(&incident.id)
+                    && valid_identifier(&incident.runbook)
+                    && valid_text(&incident.owner)
+                    && runbooks.contains_key(&incident.runbook)
+                    && !incident.timeline.is_empty()
+                    && incident.timeline.iter().all(|entry| valid_text(entry))
+                    && (incident.state != IncidentState::Closed
+                        || incident.postmortem.as_deref().is_some_and(valid_text)),
+                owner_valid: valid_text(&incident.owner),
                 runbook_valid: runbooks.contains_key(&incident.runbook),
+                timeline_valid: !incident.timeline.is_empty()
+                    && incident.timeline.iter().all(|entry| valid_text(entry)),
                 timeline_present: !incident.timeline.is_empty(),
-                postmortem_present: incident
-                    .postmortem
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|value| !value.is_empty()),
+                postmortem_valid: incident.state != IncidentState::Closed
+                    || incident.postmortem.as_deref().is_some_and(valid_text),
+                postmortem_present: incident.postmortem.as_deref().is_some_and(valid_text),
                 closed: incident.state == IncidentState::Closed,
             })
             .collect::<Vec<_>>();
@@ -815,7 +1025,10 @@ fn insert_unique<T>(
     kind: &'static str,
     issues: &mut Vec<OperationalReadinessIssue>,
 ) -> bool {
-    if map.contains_key(id) {
+    if map
+        .keys()
+        .any(|existing| existing == id || existing.eq_ignore_ascii_case(id))
+    {
         blocking(
             issues,
             &format!("duplicate_{kind}_id"),
@@ -842,7 +1055,23 @@ fn bound(issues: &mut Vec<OperationalReadinessIssue>, subject: &str, count: usiz
 }
 
 fn valid_digest(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
+}
+
+fn valid_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && value == trimmed
+        && value.len() <= MAX_TEXT_BYTES
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_identifier(value: &str) -> bool {
+    valid_text(value) && value == value.trim()
 }
 
 fn blocking(
@@ -991,5 +1220,131 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == "closed_incident_postmortem_missing"));
+    }
+
+    #[test]
+    fn observed_indicator_requires_measurement_as_well_as_evidence() {
+        let mut value = manifest();
+        value.indicators[0].measurement = None;
+        let report = value.audit().unwrap();
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "observed_indicator_measurement_missing"));
+        assert!(!report.indicator_audits[0].measurement_valid);
+        assert!(!report.indicator_audits[0].ready);
+    }
+
+    #[test]
+    fn required_observability_and_runbooks_cannot_be_satisfied_by_empty_sections() {
+        let mut value = manifest();
+        value.indicators.clear();
+        value.runbooks.clear();
+        let report = value.audit().unwrap();
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "indicators_missing"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "runbooks_missing"));
+    }
+
+    #[test]
+    fn incident_and_runbook_rows_require_non_empty_operational_detail() {
+        let mut value = manifest();
+        value.runbooks[0].steps[0] = "  ".into();
+        value.incidents[0].state = IncidentState::Open;
+        value.incidents[0].owner = "".into();
+        value.incidents[0].timeline[1] = " ".into();
+        let report = value.audit().unwrap();
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "runbook_step_empty"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "incident_owner_missing"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "incident_timeline_entry_empty"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "incident_not_closed"));
+        assert!(!report.incident_audits[0].valid);
+        assert!(!report.incident_audits[0].timeline_valid);
+    }
+
+    #[test]
+    fn dependency_audit_does_not_report_a_malformed_name_as_ready() {
+        let mut value = manifest();
+        value.dependencies[0].name = " ".into();
+        let report = value.audit().unwrap();
+        assert!(!report.valid);
+        assert!(!report.dependency_audits[0].name_valid);
+        assert!(!report.dependency_audits[0].ready);
+    }
+
+    #[test]
+    fn operational_readiness_rejects_noncanonical_evidence_and_control_metadata() {
+        let mut value = manifest();
+        value.service.owner = "platform\noncall".into();
+        value.indicators[0].evidence_digest = Some("A".repeat(64));
+        value.indicators[0].measurement = Some("0.999\u{0000}".into());
+        value.dependencies[0].fallback = Some("offline\u{0007}mirror".into());
+        value.incidents[0].timeline[1] = "contained\u{000b}".into();
+
+        let report = value.audit().expect("audit");
+        assert!(!report.valid);
+        for code in [
+            "field_invalid",
+            "indicator_evidence_noncanonical",
+            "incident_timeline_entry_invalid",
+        ] {
+            assert!(
+                report.issues.iter().any(|issue| issue.code == code),
+                "missing {code}"
+            );
+        }
+        assert!(!valid_digest(&"A".repeat(64)));
+        assert!(valid_digest(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn operational_readiness_rejects_case_colliding_contracts_and_bounds_timelines() {
+        let mut value = manifest();
+        let mut duplicate = value.contracts[0].clone();
+        duplicate.id = "AVAILABILITY".into();
+        value.contracts.push(duplicate);
+        value.incidents[0].timeline = vec!["observed".into(); MAX_LIST + 1];
+
+        let report = value.audit().expect("audit");
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "duplicate_contract_id"));
+        assert!(report.issues.iter().any(|issue| {
+            issue.code == "input_bound_exceeded" && issue.subject == "incident.timeline"
+        }));
+    }
+
+    #[test]
+    fn operational_readiness_rejects_padded_measurement_text() {
+        let mut value = manifest();
+        value.contracts[0].objective = " availability".into();
+        let report = value.audit().expect("audit");
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "contract_incomplete"));
     }
 }

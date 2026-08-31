@@ -239,8 +239,39 @@ impl FederatedPublicationReleaseInferenceReceipt {
                 "inference effect is outside the recommendation gate",
             ));
         }
+        self.artifact.validate_metadata().map_err(|error| {
+            FederatedPublicationReleaseInferenceError::Artifact(error.to_string())
+        })?;
+        if self.artifact.artifact_id != format!("{}:publication-release-inference", self.request_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.publication-release-inference+json"
+        {
+            return Err(FederatedPublicationReleaseInferenceError::Artifact(
+                "artifact identity or content type does not match the inference receipt".into(),
+            ));
+        }
+        let payload = json!({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "request_id": self.request_id,
+            "federation_id": self.federation_id,
+            "purpose": self.purpose,
+            "semantic_profile": self.semantic_profile,
+            "admission": self.admission,
+            "candidate_order": self.candidate_order,
+            "rank_order": self.rank_order,
+            "decisions": self.decisions,
+            "checkpoint_digest": self.checkpoint_digest,
+            "inference_digest": self.inference_digest,
+            "replay_identity": self.replay_identity,
+            "semantic_loss": self.semantic_loss,
+            "omissions": self.omissions,
+            "uncertainty": self.uncertainty,
+            "negative_evidence": self.negative_evidence,
+            "boundary": self.boundary,
+        });
         self.artifact
-            .validate_metadata()
+            .verify_payload(&payload)
             .map_err(|error| FederatedPublicationReleaseInferenceError::Artifact(error.to_string()))
     }
 
@@ -724,5 +755,19 @@ mod tests {
         assert!(receipt
             .effect_receipts
             .contains(&"block:unsafe-release".into()));
+    }
+
+    #[test]
+    fn tampered_artifact_payload_identity_is_rejected() {
+        let mut receipt = infer_federated_publication_release(&request(vec![
+            candidate("r1", "site-a", EvidenceState::Supported),
+            candidate("r2", "site-b", EvidenceState::Supported),
+        ]))
+        .unwrap();
+        receipt.artifact.content_hash = ContentHash::of_bytes(b"tampered");
+        assert!(matches!(
+            receipt.validate(),
+            Err(FederatedPublicationReleaseInferenceError::Artifact(_))
+        ));
     }
 }

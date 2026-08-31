@@ -145,5 +145,3 @@ def operate_context_compilation_federated_control(*, request: Mapping[str, Any])
 
 
 __all__ = ["FEATURE_ID", "CONTRACT_VERSION", "INPUT_SCHEMA", "OUTPUT_SCHEMA", "ContextCompilationFederatedControlReceipt", "operate_context_compilation_federated_control"]
-
-

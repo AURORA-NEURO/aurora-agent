@@ -241,9 +241,7 @@ pub fn operate_knowledge_gateway(
     let disposition =
         if !request.policy_allow || !request.endpoint_allow || !request.signed_approval {
             KnowledgeGatewayDisposition::Blocked
-        } else if !request.protected_closure {
-            KnowledgeGatewayDisposition::Unknown
-        } else if claim_order.is_empty() {
+        } else if !request.protected_closure || claim_order.is_empty() {
             KnowledgeGatewayDisposition::Unknown
         } else if blocked_order.is_empty() {
             KnowledgeGatewayDisposition::Shared

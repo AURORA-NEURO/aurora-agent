@@ -51,6 +51,9 @@ pub enum FiberError {
     #[error("invalid adaptive-acquisition contract: {0}")]
     InvalidAdaptiveAcquisitionContract(String),
 
+    #[error("compiler invariant violated: {0}")]
+    InvariantViolation(String),
+
     #[error("missing required query field {0:?}")]
     MissingQueryField(&'static str),
 
@@ -62,6 +65,9 @@ pub enum FiberError {
 
     #[error("invalid query identifier: {0}")]
     InvalidIdentifier(String),
+
+    #[error("invalid query budget: {0}")]
+    InvalidBudget(String),
 
     #[error("invalid decision_time: {0}")]
     InvalidDecisionTime(String),

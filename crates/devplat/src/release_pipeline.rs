@@ -21,6 +21,7 @@ const MAX_ARTIFACTS: usize = 8_192;
 const MAX_ATTESTATIONS: usize = 16_384;
 const MAX_PROMOTIONS: usize = 4_096;
 const MAX_LIST: usize = 16_384;
+const MAX_TEXT_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReleasePipelineManifest {
@@ -362,12 +363,12 @@ impl ReleasePipelineManifest {
             ("source.commit_digest", &self.source.commit_digest),
             ("source.workflow", &self.source.workflow),
         ] {
-            if value.trim().is_empty() {
+            if !valid_text(value) {
                 blocking(
                     &mut issues,
                     "required_field_empty",
                     field,
-                    format!("{field} is empty"),
+                    format!("{field} is empty, padded, bounded incorrectly, or contains controls"),
                     "supply the pinned project or source identity",
                 );
             }
@@ -392,12 +393,12 @@ impl ReleasePipelineManifest {
                 continue;
             }
             environments.insert(environment.id.clone(), environment);
-            if environment.id.trim().is_empty() {
+            if !valid_text(&environment.id) {
                 blocking(
                     &mut issues,
                     "environment_id_empty",
                     "environment",
-                    "environment id is empty",
+                    "environment id is empty, padded, bounded incorrectly, or contains controls",
                     "name each deployment environment",
                 );
             }
@@ -442,12 +443,12 @@ impl ReleasePipelineManifest {
                 continue;
             }
             stages.insert(stage.id.clone(), stage);
-            if stage.id.trim().is_empty() || stage.environment.trim().is_empty() {
+            if !valid_text(&stage.id) || !valid_text(&stage.environment) {
                 blocking(
                     &mut issues,
                     "stage_identity_incomplete",
                     &stage.id,
-                    "stage id and environment are required",
+                    "stage id and environment must be bounded visible identifiers",
                     "name the stage and bind it to an environment",
                 );
             }
@@ -524,12 +525,12 @@ impl ReleasePipelineManifest {
                 continue;
             }
             artifacts.insert(artifact.id.clone(), artifact);
-            if artifact.id.trim().is_empty() || artifact.produced_by.trim().is_empty() {
+            if !valid_text(&artifact.id) || !valid_text(&artifact.produced_by) {
                 blocking(
                     &mut issues,
                     "artifact_identity_incomplete",
                     &artifact.id,
-                    "artifact id and producing stage are required",
+                    "artifact id and producing stage must be bounded visible identifiers",
                     "name an artifact and the stage that produced it",
                 );
             }
@@ -586,6 +587,20 @@ impl ReleasePipelineManifest {
                 }
             }
         }
+        let artifact_graph = artifacts
+            .iter()
+            .map(|(id, artifact)| (id.clone(), artifact.inputs.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let (_, cyclic_artifacts) = topo_order(&artifact_graph);
+        for cycle in &cyclic_artifacts {
+            blocking(
+                &mut issues,
+                "artifact_lineage_cycle",
+                cycle.join(","),
+                "artifact input lineage contains a cycle",
+                "retain an acyclic source-to-derived artifact graph",
+            );
+        }
 
         for attestation in &self.attestations {
             if !insert_unique(
@@ -597,15 +612,15 @@ impl ReleasePipelineManifest {
                 continue;
             }
             attestations.insert(attestation.id.clone(), attestation);
-            if attestation.id.trim().is_empty()
-                || attestation.issuer.trim().is_empty()
-                || attestation.statement.trim().is_empty()
+            if !valid_text(&attestation.id)
+                || !valid_text(&attestation.issuer)
+                || !valid_text(&attestation.statement)
             {
                 blocking(
                     &mut issues,
                     "attestation_incomplete",
                     &attestation.id,
-                    "attestation id, issuer, and statement are required",
+                    "attestation id, issuer, and statement must be bounded visible text",
                     "retain a human-auditable issuer and statement",
                 );
             }
@@ -723,7 +738,10 @@ impl ReleasePipelineManifest {
                     artifact_id: artifact.id.clone(),
                     digest_valid: valid_digest(&artifact.digest),
                     producer_valid: stages.contains_key(&artifact.produced_by),
-                    inputs_valid: artifact.inputs.iter().all(|id| artifacts.contains_key(id)),
+                    inputs_valid: artifact.inputs.iter().all(|id| artifacts.contains_key(id))
+                        && !cyclic_artifacts
+                            .iter()
+                            .any(|cycle| cycle.contains(&artifact.id)),
                     attestations_valid,
                     provenance_present,
                     signature_present,
@@ -929,6 +947,21 @@ impl ReleasePipelineManifest {
         attestations: &BTreeMap<String, &PipelineAttestation>,
         issues: &mut Vec<ReleasePipelineIssue>,
     ) {
+        for (field, value) in [
+            ("promotion.id", promotion.id.as_str()),
+            ("promotion.from", promotion.from.as_str()),
+            ("promotion.to", promotion.to.as_str()),
+        ] {
+            if !valid_text(value) {
+                blocking(
+                    issues,
+                    "promotion_identity_invalid",
+                    &promotion.id,
+                    format!("{field} must be bounded visible text"),
+                    "supply canonical promotion and environment identifiers",
+                );
+            }
+        }
         let Some(from) = environments.get(&promotion.from) else {
             blocking(
                 issues,
@@ -1042,7 +1075,7 @@ fn insert_unique<T>(
     kind: &'static str,
     issues: &mut Vec<ReleasePipelineIssue>,
 ) -> bool {
-    if map.contains_key(id) {
+    if map.keys().any(|existing| existing.eq_ignore_ascii_case(id)) {
         blocking(
             issues,
             &format!("duplicate_{kind}_id"),
@@ -1069,7 +1102,18 @@ fn bound(issues: &mut Vec<ReleasePipelineIssue>, subject: &str, count: usize, ma
 }
 
 fn valid_digest(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && ContentHash::parse(value.to_owned()).is_ok()
+}
+
+fn valid_text(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value == value.trim()
+        && value.len() <= MAX_TEXT_BYTES
+        && !value.chars().any(char::is_control)
 }
 
 fn blocking(
@@ -1133,10 +1177,11 @@ fn topo_order(graph: &BTreeMap<String, Vec<String>>) -> (Vec<String>, Vec<Vec<St
     while let Some(node) = ready.pop_first() {
         order.push(node.clone());
         for dependent in outgoing.get(&node).into_iter().flatten() {
-            let degree = incoming.get_mut(dependent).expect("outgoing target exists");
-            *degree -= 1;
-            if *degree == 0 {
-                ready.insert(dependent.clone());
+            if let Some(degree) = incoming.get_mut(dependent) {
+                *degree = degree.saturating_sub(1);
+                if *degree == 0 {
+                    ready.insert(dependent.clone());
+                }
             }
         }
     }
@@ -1148,10 +1193,14 @@ fn topo_order(graph: &BTreeMap<String, Vec<String>>) -> (Vec<String>, Vec<Vec<St
     if remaining.is_empty() {
         return (order, Vec::new());
     }
+    let cycle_nodes = directed_cycle_nodes(graph, &remaining);
+    if cycle_nodes.is_empty() {
+        return (order, Vec::new());
+    }
     let mut undirected = BTreeMap::<String, BTreeSet<String>>::new();
-    for node in &remaining {
+    for node in &cycle_nodes {
         for dependency in graph.get(node).into_iter().flatten() {
-            if remaining.contains(dependency) {
+            if cycle_nodes.contains(dependency) {
                 undirected
                     .entry(node.clone())
                     .or_default()
@@ -1165,7 +1214,7 @@ fn topo_order(graph: &BTreeMap<String, Vec<String>>) -> (Vec<String>, Vec<Vec<St
     }
     let mut seen = BTreeSet::new();
     let mut cycles = Vec::new();
-    for node in &remaining {
+    for node in &cycle_nodes {
         if !seen.insert(node.clone()) {
             continue;
         }
@@ -1183,6 +1232,70 @@ fn topo_order(graph: &BTreeMap<String, Vec<String>>) -> (Vec<String>, Vec<Vec<St
         cycles.push(component);
     }
     (order, cycles)
+}
+
+fn directed_cycle_nodes(
+    graph: &BTreeMap<String, Vec<String>>,
+    remaining: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    fn visit(
+        current: &str,
+        graph: &BTreeMap<String, Vec<String>>,
+        remaining: &BTreeSet<String>,
+        colors: &mut BTreeMap<String, u8>,
+        stack: &mut Vec<String>,
+        positions: &mut BTreeMap<String, usize>,
+        cycle_nodes: &mut BTreeSet<String>,
+    ) {
+        match colors.get(current).copied() {
+            Some(1) => {
+                if let Some(start) = positions.get(current).copied() {
+                    cycle_nodes.extend(stack[start..].iter().cloned());
+                }
+                return;
+            }
+            Some(2) => return,
+            _ => {}
+        }
+        colors.insert(current.to_string(), 1);
+        positions.insert(current.to_string(), stack.len());
+        stack.push(current.to_string());
+        if let Some(dependencies) = graph.get(current) {
+            for dependency in dependencies {
+                if remaining.contains(dependency) {
+                    visit(
+                        dependency,
+                        graph,
+                        remaining,
+                        colors,
+                        stack,
+                        positions,
+                        cycle_nodes,
+                    );
+                }
+            }
+        }
+        stack.pop();
+        positions.remove(current);
+        colors.insert(current.to_string(), 2);
+    }
+
+    let mut colors = BTreeMap::new();
+    let mut stack = Vec::new();
+    let mut positions = BTreeMap::new();
+    let mut cycle_nodes = BTreeSet::new();
+    for node in remaining {
+        visit(
+            node,
+            graph,
+            remaining,
+            &mut colors,
+            &mut stack,
+            &mut positions,
+            &mut cycle_nodes,
+        );
+    }
+    cycle_nodes
 }
 
 #[cfg(test)]
@@ -1329,6 +1442,20 @@ mod tests {
     }
 
     #[test]
+    fn cycle_detection_does_not_mark_a_downstream_tail_as_cyclic() {
+        let graph = BTreeMap::from([
+            ("cycle-a".into(), vec!["cycle-b".into()]),
+            ("cycle-b".into(), vec!["cycle-a".into()]),
+            ("tail".into(), vec!["cycle-a".into()]),
+        ]);
+        let (_, cycles) = topo_order(&graph);
+        assert_eq!(
+            cycles,
+            vec![vec![String::from("cycle-a"), String::from("cycle-b")]]
+        );
+    }
+
+    #[test]
     fn production_signature_digest_mismatch_is_not_a_release_pass() {
         let mut value = manifest();
         value.attestations[1].digest = "b".repeat(64);
@@ -1338,6 +1465,44 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == "attestation_digest_mismatch"));
+    }
+
+    #[test]
+    fn uppercase_digest_is_not_a_canonical_release_identity() {
+        let mut value = manifest();
+        value.source.commit_digest = "A".repeat(64);
+        let report = value.audit().unwrap();
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "invalid_source_digest"));
+    }
+
+    #[test]
+    fn release_identifiers_reject_padding_controls_and_case_collisions() {
+        let mut padded = manifest();
+        padded.environments[0].id = " staging".into();
+        let report = padded.audit().unwrap();
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "environment_id_empty"));
+
+        let mut colliding = manifest();
+        colliding.environments.push(PipelineEnvironment {
+            id: "PRODUCTION".into(),
+            class: EnvironmentClass::Production,
+            protected: true,
+            required_approvals: 1,
+            secrets_allowed: true,
+            immutable_artifacts: true,
+        });
+        let report = colliding.audit().unwrap();
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "duplicate_environment_id"));
     }
 
     #[test]
@@ -1366,5 +1531,33 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == "stage_output_missing"));
+    }
+
+    #[test]
+    fn artifact_lineage_cycles_are_blocking_and_not_input_valid() {
+        let mut value = manifest();
+        value.policies.require_provenance = false;
+        value.stages[0].produces.push("derived".into());
+        value.artifacts[0].inputs = vec!["derived".into()];
+        value.artifacts.push(PipelineArtifact {
+            id: "derived".into(),
+            kind: PipelineArtifactKind::Package,
+            digest: "c".repeat(64),
+            produced_by: "build".into(),
+            inputs: vec!["binary".into()],
+            attestations: vec![],
+            immutable: true,
+        });
+
+        let report = value.audit().unwrap();
+        assert!(!report.valid);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "artifact_lineage_cycle"));
+        assert!(report
+            .artifact_audits
+            .iter()
+            .all(|audit| !audit.inputs_valid));
     }
 }

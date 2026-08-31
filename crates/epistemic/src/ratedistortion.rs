@@ -110,8 +110,10 @@ pub fn evaluate_context(
     criterion: DistortionCriterion,
     compatibility_floor: f64,
 ) -> Result<ContextEvaluation, EpistemicError> {
+    problem.validate()?;
     prior.check_against(problem)?;
     pool.check_against(problem)?;
+    validate_compatibility_floor(compatibility_floor)?;
 
     let full = pool.full_posterior(prior)?;
     let reference_action = problem.bayes_action(&full);
@@ -192,13 +194,15 @@ pub fn frontier(
     compatibility_floor: f64,
 ) -> Result<Frontier, EpistemicError> {
     let n = pool.len();
-    let needed = 1u64
-        .checked_shl(n as u32)
-        .ok_or(EpistemicError::ExhaustiveCapExceeded {
-            ground: n,
-            needed: u64::MAX,
-            cap: MAX_ENUMERATED_SUBSETS,
-        })?;
+    problem.validate()?;
+    prior.check_against(problem)?;
+    pool.check_against(problem)?;
+    validate_compatibility_floor(compatibility_floor)?;
+    let needed = if n >= u64::BITS as usize {
+        u64::MAX
+    } else {
+        1u64 << n
+    };
     if needed > MAX_ENUMERATED_SUBSETS {
         return Err(EpistemicError::ExhaustiveCapExceeded {
             ground: n,
@@ -301,6 +305,10 @@ pub fn identification(
     if !tolerance.is_finite() || tolerance < 0.0 {
         return Err(EpistemicError::InadmissibleTolerance { value: tolerance });
     }
+    problem.validate()?;
+    prior.check_against(problem)?;
+    pool.check_against(problem)?;
+    validate_compatibility_floor(compatibility_floor)?;
     let full = pool.full_posterior(prior)?;
     let compatible = full.support_above(compatibility_floor);
     if problem.actions_agree(&compatible) {
@@ -423,4 +431,11 @@ pub fn minimal_sufficient_context(
             tolerance,
         }),
     }
+}
+
+fn validate_compatibility_floor(value: f64) -> Result<(), EpistemicError> {
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(EpistemicError::InadmissibleCompatibilityFloor { value });
+    }
+    Ok(())
 }

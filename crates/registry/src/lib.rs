@@ -52,11 +52,9 @@
 pub mod context_assurance;
 pub mod gate;
 pub mod index;
-pub mod knowledge_representation_assurance;
 pub mod pack;
 pub mod promote;
 pub mod resource_assurance;
-pub mod scale_frontier_assurance;
 pub mod tier;
 
 pub use context_assurance::{
@@ -69,15 +67,6 @@ pub use context_assurance::{
 };
 pub use gate::{gate, gate_document, GateFinding, GateOutcome, Policy};
 pub use index::{PackStatus, PublicationEvent, RegistryError, RegistryIndex};
-pub use knowledge_representation_assurance::{
-    assure_knowledge_representation, assure_knowledge_representation_json,
-    knowledge_representation_assurance_manifest, validate_knowledge_representation_json,
-    KnowledgeAssuranceError, KnowledgeDisposition, KnowledgePeer, ScopedClaim,
-    ScopedResearchClaims, TypedKnowledgeWorld,
-    CONTRACT_VERSION as KNOWLEDGE_REPRESENTATION_ASSURANCE_CONTRACT_VERSION,
-    FEATURE_ID as KNOWLEDGE_REPRESENTATION_ASSURANCE_FEATURE_ID,
-    TOOL_NAME as KNOWLEDGE_REPRESENTATION_ASSURANCE_TOOL,
-};
 pub use pack::{
     BenchmarkPack, OracleDisagreement, PackBuilder, PackError, PackInstance, ParentRef,
     PostconditionEvidence, Provenance, RebuildAttestation, Resolution, ReviewFinding, ReviewRecord,
@@ -90,15 +79,6 @@ pub use resource_assurance::{
     ResourceDiscoveryAssuranceReceipt, ResourceDiscoveryAssuranceRequest, ResourceState,
     CONTRACT_VERSION as RESOURCE_DISCOVERY_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as RESOURCE_DISCOVERY_ASSURANCE_FEATURE_ID,
-};
-pub use scale_frontier_assurance::{
-    assure_registry_scale_frontier, assure_registry_scale_frontier_json,
-    registry_scale_frontier_manifest, validate_registry_scale_frontier_json,
-    CapacityDisposition, RegistryCapacityReport, RegistryScaleAssuranceError,
-    RegistryScaleWorkload, RegistryStudyWorkload, WorkloadState,
-    CONTRACT_VERSION as REGISTRY_SCALE_FRONTIER_CONTRACT_VERSION,
-    FEATURE_ID as REGISTRY_SCALE_FRONTIER_FEATURE_ID,
-    TOOL_NAME as REGISTRY_SCALE_FRONTIER_TOOL,
 };
 pub use tier::{
     assess, evaluate_tier, evaluate_tier_with, reassess, Requirement, RungAssessment,

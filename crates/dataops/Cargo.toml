@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Section 12 remainder: storage topology, relational catalog, SLOs, compute placement and federated deployment, each answer carrying the basis it was known from"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-infra = { workspace = true }
 bioprism-ledger = { workspace = true }

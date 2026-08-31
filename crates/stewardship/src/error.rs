@@ -294,6 +294,11 @@ pub enum AccessError {
         until: Epoch,
         epoch: Epoch,
     },
+
+    /// A retention policy contradicted its own permission predicate while an access was being
+    /// recorded. This is a fail-closed implementation invariant, not a permission grant.
+    #[error("retention policy became inconsistent while recording access: {detail}")]
+    InvariantViolation { detail: &'static str },
 }
 
 /// One return type for callers that span modules.

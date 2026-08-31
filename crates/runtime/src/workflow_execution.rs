@@ -131,11 +131,35 @@ impl WorkflowExecutionReceipt {
                 "completed nodes are not a subset of the ordered plan".into(),
             ));
         }
+        let mut unique_nodes = BTreeSet::new();
+        if self
+            .ordered_nodes
+            .iter()
+            .any(|node| node.trim().is_empty() || !unique_nodes.insert(node))
+        {
+            return Err(WorkflowExecutionError::InvalidRequest(
+                "ordered workflow nodes must be non-empty and unique".into(),
+            ));
+        }
+        match self.status {
+            WorkflowExecutionStatus::DryRun if !self.completed_nodes.is_empty() => {
+                return Err(WorkflowExecutionError::InvalidRequest(
+                    "dry-run workflow receipts cannot contain completed nodes".into(),
+                ));
+            }
+            WorkflowExecutionStatus::Succeeded if self.completed_nodes != self.ordered_nodes => {
+                return Err(WorkflowExecutionError::InvalidRequest(
+                    "successful workflow receipts must complete the ordered plan".into(),
+                ));
+            }
+            _ => {}
+        }
         if self.run.workflow_id != self.workflow_id {
             return Err(WorkflowExecutionError::InvalidRequest(
                 "execution run and receipt workflow ids differ".into(),
             ));
         }
+        self.run.validate()?;
         let expected_status = match self.status {
             WorkflowExecutionStatus::DryRun => ExecutionStatus::Planned,
             WorkflowExecutionStatus::Succeeded => ExecutionStatus::Succeeded,
@@ -143,6 +167,26 @@ impl WorkflowExecutionReceipt {
         if self.run.status != expected_status {
             return Err(WorkflowExecutionError::InvalidRequest(
                 "receipt status and execution run status differ".into(),
+            ));
+        }
+        if self.run.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.run.boundary != PRECLINICAL_BOUNDARY
+            || self.run.events.len()
+                != match self.status {
+                    WorkflowExecutionStatus::DryRun => 0,
+                    WorkflowExecutionStatus::Succeeded => self.ordered_nodes.len(),
+                }
+            || self
+                .run
+                .events
+                .iter()
+                .enumerate()
+                .any(|(sequence, event)| event.sequence != sequence as u64)
+            || self.run_digest == ContentHash::of_bytes(b"")
+        {
+            return Err(WorkflowExecutionError::InvalidRequest(
+                "workflow execution run evidence is incomplete or inconsistent with its status"
+                    .into(),
             ));
         }
         if self.reasons.is_empty() {
@@ -157,7 +201,36 @@ impl WorkflowExecutionReceipt {
                 },
             ));
         }
+        if self.artifact.artifact_id != format!("{}:{}", FEATURE_ID, self.workflow_id)
+            || self.artifact.content_type != "application/vnd.aurora.workflow-execution+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || self.artifact.provenance
+                != vec![ProvenanceLink {
+                    source_id: "execution-run".into(),
+                    relation: "derived-from".into(),
+                    digest: self.run_digest.clone(),
+                }]
+        {
+            return Err(WorkflowExecutionError::InvalidRequest(
+                "workflow execution artifact is not bound to its run".into(),
+            ));
+        }
         self.artifact.validate_metadata()?;
+        let payload = json!({
+            "feature_id": FEATURE_ID,
+            "workflow_id": self.workflow_id,
+            "mode": self.mode,
+            "status": self.status,
+            "ordered_nodes": self.ordered_nodes,
+            "completed_nodes": self.completed_nodes,
+            "run_digest": self.run_digest,
+            "remaining_budget": self.remaining_budget,
+            "reasons": self.reasons,
+            "boundary": PRECLINICAL_BOUNDARY,
+        });
+        self.artifact
+            .verify_payload(&payload)
+            .map_err(WorkflowExecutionError::Contract)?;
         Ok(())
     }
 }
@@ -274,9 +347,9 @@ pub fn execute_workflow(
             let mut completed = Vec::new();
             let mut checkpointed = BTreeSet::new();
             for node_id in &ordered_nodes {
-                let action = actions
-                    .get(node_id)
-                    .expect("preflight guarantees every node action");
+                let Some(action) = actions.get(node_id) else {
+                    return Err(WorkflowExecutionError::MissingAction(node_id.clone()));
+                };
                 if let Some(available) = remaining_budget.get_mut(&action.resource) {
                     *available -= action.cost;
                     if available.abs() < 1e-12 {
@@ -375,16 +448,13 @@ pub fn execute_workflow(
     Ok(receipt)
 }
 
-fn preflight(
-    request: &WorkflowExecutionRequest,
-) -> Result<
-    (
-        Vec<String>,
-        BTreeMap<String, WorkflowAction>,
-        BTreeMap<String, f64>,
-    ),
-    WorkflowExecutionError,
-> {
+type PreflightState = (
+    Vec<String>,
+    BTreeMap<String, WorkflowAction>,
+    BTreeMap<String, f64>,
+);
+
+fn preflight(request: &WorkflowExecutionRequest) -> Result<PreflightState, WorkflowExecutionError> {
     if request.manifest.capability_id != FEATURE_ID {
         return Err(WorkflowExecutionError::InvalidRequest(
             "manifest capability id must match workflow execution feature".into(),
@@ -459,14 +529,23 @@ fn preflight(
                 node: action.node_id.clone(),
             });
         }
-        *requested.entry(action.resource.clone()).or_default() += action.cost;
+        let requested_amount = requested.entry(action.resource.clone()).or_default();
+        *requested_amount += action.cost;
+        if !requested_amount.is_finite() {
+            return Err(WorkflowExecutionError::InvalidRequest(format!(
+                "workflow action costs overflow for resource {}",
+                action.resource
+            )));
+        }
     }
     for node in &request.workflow.nodes {
         if !actions.contains_key(&node.node_id) {
             return Err(WorkflowExecutionError::MissingAction(node.node_id.clone()));
         }
         if node.requires_approval {
-            let action = actions.get(&node.node_id).expect("checked above");
+            let Some(action) = actions.get(&node.node_id) else {
+                return Err(WorkflowExecutionError::MissingAction(node.node_id.clone()));
+            };
             if !request.workflow.approvals.iter().any(|approval| {
                 approval.actor == node.actor && approval.action == action.event_type
             }) {
@@ -489,7 +568,7 @@ fn preflight(
                 resource: resource.clone(),
             }
         })?;
-        if amount > declared + 1e-12 {
+        if amount > declared {
             return Err(WorkflowExecutionError::BudgetExceeded {
                 resource: resource.clone(),
                 requested: amount,
@@ -501,7 +580,7 @@ fn preflight(
                 resource: resource.clone(),
             }
         })?;
-        if amount > available + 1e-12 {
+        if amount > available {
             return Err(WorkflowExecutionError::BudgetExceeded {
                 resource,
                 requested: amount,
@@ -558,7 +637,9 @@ fn topological_order(
         order.push(node.clone());
         if let Some(successors) = adjacency.get(&node) {
             for successor in successors {
-                let degree = indegree.get_mut(successor).expect("edge node validated");
+                let Some(degree) = indegree.get_mut(successor) else {
+                    return Err(WorkflowExecutionError::CyclicGraph);
+                };
                 *degree -= 1;
                 if *degree == 0 {
                     ready.insert(successor.clone());
@@ -720,6 +801,34 @@ mod tests {
     }
 
     #[test]
+    fn budget_preflight_does_not_allow_tolerance_based_overspend() {
+        let mut request = request(WorkflowExecutionMode::Execute);
+        request.workflow.budgets[0].amount = 4.0;
+        request
+            .grant
+            .resource_budget
+            .insert("cpu_seconds".into(), 4.0);
+        request.actions[1].cost = 2.0000000000001;
+
+        assert!(matches!(
+            execute_workflow(&request).unwrap_err(),
+            WorkflowExecutionError::BudgetExceeded { .. }
+        ));
+    }
+
+    #[test]
+    fn overflowing_budget_totals_are_rejected_before_execution() {
+        let mut request = request(WorkflowExecutionMode::DryRun);
+        request.actions[0].cost = f64::MAX;
+        request.actions[1].cost = f64::MAX;
+
+        assert!(matches!(
+            execute_workflow(&request).unwrap_err(),
+            WorkflowExecutionError::InvalidRequest(_)
+        ));
+    }
+
+    #[test]
     fn missing_node_action_and_approval_are_fail_closed() {
         let mut missing = request(WorkflowExecutionMode::Execute);
         missing.actions.pop();
@@ -750,5 +859,19 @@ mod tests {
             execute_workflow(&request).unwrap_err(),
             WorkflowExecutionError::MissingEvidence { .. }
         ));
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_artifact_payload() {
+        let mut receipt = execute_workflow(&request(WorkflowExecutionMode::Execute)).unwrap();
+        receipt.artifact.content_hash = ContentHash::of_bytes(b"tampered");
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_execution_run() {
+        let mut receipt = execute_workflow(&request(WorkflowExecutionMode::Execute)).unwrap();
+        receipt.run.events[0].event_type.clear();
+        assert!(receipt.validate().is_err());
     }
 }

@@ -79,6 +79,23 @@
 //! | A hindsight-sourced option cannot be shown to an agent | [`actions::CandidateActionSet::visible_to_agent`] filters on [`actions::Provenance`], and a false provenance is [`error::ActionError::HindsightLeak`] |
 
 pub mod actions;
+pub mod benchmark_compilation_integrity_support;
+pub mod local_benchmark_compilation_integrity_inference;
+pub mod multimodal_benchmark_compilation_integrity_inference;
+pub mod throughput_benchmark_compilation_integrity_inference;
+pub mod federated_continual_benchmark_compilation_integrity_inference;
+pub mod local_benchmark_compilation_integrity_contract_model;
+pub mod multimodal_benchmark_compilation_integrity_contract_model;
+pub mod throughput_benchmark_compilation_integrity_contract_model;
+pub mod federated_continual_benchmark_compilation_integrity_contract_model;
+pub mod local_benchmark_compilation_integrity_research_copilot;
+pub mod multimodal_benchmark_compilation_integrity_research_copilot;
+pub mod throughput_benchmark_compilation_integrity_research_copilot;
+pub mod federated_continual_benchmark_compilation_integrity_research_copilot;
+pub mod local_benchmark_compilation_integrity_workflow_fabric;
+pub mod multimodal_benchmark_compilation_integrity_workflow_fabric;
+pub mod throughput_benchmark_compilation_integrity_workflow_fabric;
+pub mod federated_continual_benchmark_compilation_integrity_workflow_fabric;
 pub mod attribute;
 pub mod boundary;
 pub mod calibrate;
@@ -91,6 +108,10 @@ pub mod mechanism_control;
 pub mod oracle;
 pub mod pipeline;
 
+pub use benchmark_compilation_integrity_support::{
+    BenchmarkArtifact4, BenchmarkCase4, BenchmarkCard7, BenchmarkCompilationIntegrityError,
+    BenchmarkCompileRequest4,
+};
 pub use actions::{
     why_not_decision_bearing, CandidateAction, CandidateActionSet, Coverage, Feasibility,
     Provenance,

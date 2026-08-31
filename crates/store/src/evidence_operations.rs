@@ -299,26 +299,20 @@ pub fn operate_evidence_stream(
             && complete
             && capacity_ok;
         if gate {
+            let (Some(source_digest), Some(provenance_digest), Some(evidence_digest)) = (
+                candidate.source_digest.clone(),
+                candidate.provenance_digest.clone(),
+                candidate.evidence_digest.clone(),
+            ) else {
+                return Err(EvidenceOperationsError::Invalid(
+                    "qualified evidence alert is missing a required digest".into(),
+                ));
+            };
             spent = spent.saturating_add(cost);
             qualified.insert(candidate.alert_id.clone());
-            sources.insert(
-                candidate
-                    .source_digest
-                    .clone()
-                    .expect("complete source digest"),
-            );
-            provenance.insert(
-                candidate
-                    .provenance_digest
-                    .clone()
-                    .expect("complete provenance digest"),
-            );
-            evidence.insert(
-                candidate
-                    .evidence_digest
-                    .clone()
-                    .expect("complete evidence digest"),
-            );
+            sources.insert(source_digest);
+            provenance.insert(provenance_digest);
+            evidence.insert(evidence_digest);
             if candidate.negative_result {
                 negative.insert(format!(
                     "alert:{}:negative-result-retained",

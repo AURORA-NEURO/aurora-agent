@@ -9,6 +9,23 @@
 //! shared unchanged across queries, roles and policies.
 
 pub mod error;
+pub mod causal_integrity_support;
+pub mod local_causal_integrity_inference;
+pub mod multimodal_causal_integrity_inference;
+pub mod throughput_causal_integrity_inference;
+pub mod federated_continual_causal_integrity_inference;
+pub mod local_causal_integrity_contract_model;
+pub mod multimodal_causal_integrity_contract_model;
+pub mod throughput_causal_integrity_contract_model;
+pub mod federated_continual_causal_integrity_contract_model;
+pub mod local_causal_integrity_research_copilot;
+pub mod multimodal_causal_integrity_research_copilot;
+pub mod throughput_causal_integrity_research_copilot;
+pub mod federated_continual_causal_integrity_research_copilot;
+pub mod local_causal_integrity_workflow_fabric;
+pub mod multimodal_causal_integrity_workflow_fabric;
+pub mod throughput_causal_integrity_workflow_fabric;
+pub mod federated_continual_causal_integrity_workflow_fabric;
 pub mod event;
 pub mod fact;
 pub mod factor;
@@ -19,6 +36,23 @@ pub mod validate;
 pub mod world;
 
 pub use error::WorldError;
+pub use causal_integrity_support::{qualify as qualify_causal_integrity, manifest as causal_integrity_manifest, CausalEdge4, CausalIntegrityArtifact4, CausalIntegrityCard7, CausalIntegrityError, CausalIntegrityRequest4, BOUNDARY as CAUSAL_INTEGRITY_BOUNDARY, CONTENT_TYPE as CAUSAL_INTEGRITY_CONTENT_TYPE};
+pub use local_causal_integrity_inference::*;
+pub use multimodal_causal_integrity_inference::*;
+pub use throughput_causal_integrity_inference::*;
+pub use federated_continual_causal_integrity_inference::*;
+pub use local_causal_integrity_contract_model::*;
+pub use multimodal_causal_integrity_contract_model::*;
+pub use throughput_causal_integrity_contract_model::*;
+pub use federated_continual_causal_integrity_contract_model::*;
+pub use local_causal_integrity_research_copilot::*;
+pub use multimodal_causal_integrity_research_copilot::*;
+pub use throughput_causal_integrity_research_copilot::*;
+pub use federated_continual_causal_integrity_research_copilot::*;
+pub use local_causal_integrity_workflow_fabric::*;
+pub use multimodal_causal_integrity_workflow_fabric::*;
+pub use throughput_causal_integrity_workflow_fabric::*;
+pub use federated_continual_causal_integrity_workflow_fabric::*;
 pub use event::CausalEvent;
 pub use fact::Fact;
 pub use factor::Factor;

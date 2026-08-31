@@ -153,6 +153,28 @@ pub mod semisynthetic;
 pub mod trajectory;
 pub mod twin;
 pub mod mechanism_exploration_federated_control_plane;
+pub mod factory_lineage_integrity_support;
+pub mod local_factory_lineage_integrity_inference;
+pub mod multimodal_factory_lineage_integrity_inference;
+pub mod throughput_factory_lineage_integrity_inference;
+pub mod federated_continual_factory_lineage_integrity_inference;
+pub mod local_factory_lineage_integrity_contract_model;
+pub mod multimodal_factory_lineage_integrity_contract_model;
+pub mod throughput_factory_lineage_integrity_contract_model;
+pub mod federated_continual_factory_lineage_integrity_contract_model;
+pub mod local_factory_lineage_integrity_research_copilot;
+pub mod multimodal_factory_lineage_integrity_research_copilot;
+pub mod throughput_factory_lineage_integrity_research_copilot;
+pub mod federated_continual_factory_lineage_integrity_research_copilot;
+pub mod local_factory_lineage_integrity_workflow_fabric;
+pub mod multimodal_factory_lineage_integrity_workflow_fabric;
+pub mod throughput_factory_lineage_integrity_workflow_fabric;
+pub mod federated_continual_factory_lineage_integrity_workflow_fabric;
+
+pub use factory_lineage_integrity_support::{
+    FactoryLineageArtifact4, FactoryLineageCard7, FactoryLineageIntegrityError,
+    FactoryLineageRequest4, FactoryStage4,
+};
 
 pub use mechanism_exploration_federated_control_plane::{
     capability_manifest as mechanism_exploration_control_manifest,
@@ -197,7 +219,7 @@ pub use twin::{
 /// The tests that read this scan for hardcoded constants, for clock and random-source access, and
 /// for blueprint ids outside this crate's scope. Each scanner has a companion test that plants a
 /// violation and asserts the scanner sees it.
-pub const SOURCES: [(&str, &str); 9] = [
+pub const SOURCES: [(&str, &str); 27] = [
     ("authoring.rs", include_str!("authoring.rs")),
     ("boundary.rs", include_str!("boundary.rs")),
     ("error.rs", include_str!("error.rs")),
@@ -207,6 +229,24 @@ pub const SOURCES: [(&str, &str); 9] = [
     ("semisynthetic.rs", include_str!("semisynthetic.rs")),
     ("trajectory.rs", include_str!("trajectory.rs")),
     ("twin.rs", include_str!("twin.rs")),
+    ("mechanism_exploration_federated_control_plane.rs", include_str!("mechanism_exploration_federated_control_plane.rs")),
+    ("factory_lineage_integrity_support.rs", include_str!("factory_lineage_integrity_support.rs")),
+    ("local_factory_lineage_integrity_inference.rs", include_str!("local_factory_lineage_integrity_inference.rs")),
+    ("multimodal_factory_lineage_integrity_inference.rs", include_str!("multimodal_factory_lineage_integrity_inference.rs")),
+    ("throughput_factory_lineage_integrity_inference.rs", include_str!("throughput_factory_lineage_integrity_inference.rs")),
+    ("federated_continual_factory_lineage_integrity_inference.rs", include_str!("federated_continual_factory_lineage_integrity_inference.rs")),
+    ("local_factory_lineage_integrity_contract_model.rs", include_str!("local_factory_lineage_integrity_contract_model.rs")),
+    ("multimodal_factory_lineage_integrity_contract_model.rs", include_str!("multimodal_factory_lineage_integrity_contract_model.rs")),
+    ("throughput_factory_lineage_integrity_contract_model.rs", include_str!("throughput_factory_lineage_integrity_contract_model.rs")),
+    ("federated_continual_factory_lineage_integrity_contract_model.rs", include_str!("federated_continual_factory_lineage_integrity_contract_model.rs")),
+    ("local_factory_lineage_integrity_research_copilot.rs", include_str!("local_factory_lineage_integrity_research_copilot.rs")),
+    ("multimodal_factory_lineage_integrity_research_copilot.rs", include_str!("multimodal_factory_lineage_integrity_research_copilot.rs")),
+    ("throughput_factory_lineage_integrity_research_copilot.rs", include_str!("throughput_factory_lineage_integrity_research_copilot.rs")),
+    ("federated_continual_factory_lineage_integrity_research_copilot.rs", include_str!("federated_continual_factory_lineage_integrity_research_copilot.rs")),
+    ("local_factory_lineage_integrity_workflow_fabric.rs", include_str!("local_factory_lineage_integrity_workflow_fabric.rs")),
+    ("multimodal_factory_lineage_integrity_workflow_fabric.rs", include_str!("multimodal_factory_lineage_integrity_workflow_fabric.rs")),
+    ("throughput_factory_lineage_integrity_workflow_fabric.rs", include_str!("throughput_factory_lineage_integrity_workflow_fabric.rs")),
+    ("federated_continual_factory_lineage_integrity_workflow_fabric.rs", include_str!("federated_continual_factory_lineage_integrity_workflow_fabric.rs")),
 ];
 
 /// The six blueprint modules this crate implements. Nothing else may be cited anywhere in it.

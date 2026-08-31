@@ -78,8 +78,6 @@
 //! # let _ = ColumnRole::Provenance;
 //! ```
 
-#![recursion_limit = "256"]
-
 pub mod adapter;
 pub mod adversarial_recovery;
 pub mod analysis_portfolio;
@@ -93,30 +91,15 @@ pub mod determinism_gateway;
 pub mod error;
 pub mod evaluation_assurance;
 pub mod evidence_surveillance;
-pub mod local_evidence_surveillance_inference_engine;
-pub mod multimodal_evidence_surveillance_inference_engine;
-pub mod throughput_evidence_surveillance_inference_engine;
-pub mod federated_evidence_surveillance_inference_engine;
-pub mod local_evidence_surveillance_contract_model;
-pub mod multimodal_evidence_surveillance_contract_model;
-pub mod throughput_evidence_surveillance_contract_model;
-pub mod federated_continual_evidence_surveillance_contract_model;
-pub mod local_evidence_surveillance_research_copilot;
-pub mod local_evidence_surveillance_research_workbench;
-pub mod multimodal_evidence_surveillance_research_workbench;
-pub mod multimodal_evidence_surveillance_research_copilot;
-pub mod throughput_evidence_surveillance_research_copilot;
-pub mod throughput_evidence_surveillance_research_workbench;
-pub mod federated_continual_evidence_surveillance_research_copilot;
-pub mod federated_continual_evidence_surveillance_research_workbench;
-pub mod local_evidence_surveillance_workflow_fabric;
-pub mod multimodal_evidence_surveillance_workflow_fabric;
-pub mod throughput_evidence_surveillance_workflow_fabric;
-pub mod federated_continual_evidence_surveillance_workflow_fabric;
 pub mod execution_control;
 pub mod experiment_design_control;
 pub mod fact;
 pub mod federated_commons;
+pub mod federated_continual_evidence_surveillance_contract_model;
+pub mod federated_continual_evidence_surveillance_research_copilot;
+pub mod federated_continual_evidence_surveillance_research_workbench;
+pub mod federated_continual_evidence_surveillance_workflow_fabric;
+pub mod federated_evidence_surveillance_inference_engine;
 pub mod federation_workflow;
 pub mod ingestion;
 pub mod ingestion_gateway;
@@ -126,9 +109,19 @@ pub mod interpretation_assurance;
 pub mod inventory;
 pub mod knowledge_workflow;
 pub mod limitation_closure;
+pub mod local_evidence_surveillance_contract_model;
+pub mod local_evidence_surveillance_inference_engine;
+pub mod local_evidence_surveillance_research_copilot;
+pub mod local_evidence_surveillance_research_workbench;
+pub mod local_evidence_surveillance_workflow_fabric;
 pub mod location;
 pub mod loss;
 pub mod mechanism_control_plane;
+pub mod multimodal_evidence_surveillance_contract_model;
+pub mod multimodal_evidence_surveillance_inference_engine;
+pub mod multimodal_evidence_surveillance_research_copilot;
+pub mod multimodal_evidence_surveillance_research_workbench;
+pub mod multimodal_evidence_surveillance_workflow_fabric;
 pub mod multimodal_harmonization;
 pub mod policy_gateway;
 pub mod probe;
@@ -145,41 +138,32 @@ pub mod research_ingest;
 pub mod research_workbench;
 pub mod resource_workbench;
 pub mod retrieval_synthesis;
-pub mod local_retrieval_synthesis_inference_engine;
-pub mod local_retrieval_synthesis_contract_model;
-pub mod local_retrieval_synthesis_research_copilot;
-pub mod multimodal_retrieval_synthesis_research_copilot;
-pub mod throughput_retrieval_synthesis_research_copilot;
-pub mod federated_continual_retrieval_synthesis_research_copilot;
-pub mod local_retrieval_synthesis_workflow_fabric;
-pub mod multimodal_retrieval_synthesis_workflow_fabric;
-pub mod throughput_retrieval_synthesis_workflow_fabric;
-pub mod federated_continual_retrieval_synthesis_workflow_fabric;
-pub mod local_retrieval_synthesis_research_workbench;
-pub mod multimodal_retrieval_synthesis_research_workbench;
-pub mod throughput_retrieval_synthesis_research_workbench;
-pub mod federated_continual_retrieval_synthesis_research_workbench;
-pub mod local_retrieval_synthesis_interoperability_gateway;
-pub mod multimodal_retrieval_synthesis_interoperability_gateway;
-pub mod throughput_retrieval_synthesis_interoperability_gateway;
-pub mod federated_continual_retrieval_synthesis_interoperability_gateway;
-pub mod local_retrieval_synthesis_assurance_harness;
-pub mod multimodal_retrieval_synthesis_assurance_harness;
-pub mod throughput_retrieval_synthesis_assurance_harness;
-pub mod federated_continual_retrieval_synthesis_assurance_harness;
-pub mod local_retrieval_synthesis_federated_control_plane;
-pub mod multimodal_retrieval_synthesis_federated_control_plane;
-pub mod throughput_retrieval_synthesis_federated_control_plane;
-pub mod federated_continual_retrieval_synthesis_federated_control_plane;
-pub mod multimodal_retrieval_synthesis_inference_engine;
-pub mod throughput_retrieval_synthesis_inference_engine;
-pub mod throughput_retrieval_synthesis_contract_model;
-pub mod federated_retrieval_synthesis_inference_engine;
-pub mod federated_retrieval_synthesis_contract_model;
 pub mod scale_frontier;
 pub mod semantic_parity;
 pub mod source;
 pub mod tabular;
+pub mod throughput_evidence_surveillance_contract_model;
+pub mod throughput_evidence_surveillance_inference_engine;
+pub mod throughput_evidence_surveillance_research_copilot;
+pub mod throughput_evidence_surveillance_research_workbench;
+pub mod throughput_evidence_surveillance_workflow_fabric;
+pub mod gateway_integrity_support;
+pub mod local_gateway_integrity_inference;
+pub mod multimodal_gateway_integrity_inference;
+pub mod throughput_gateway_integrity_inference;
+pub mod federated_continual_gateway_integrity_inference;
+pub mod local_gateway_integrity_contract_model;
+pub mod multimodal_gateway_integrity_contract_model;
+pub mod throughput_gateway_integrity_contract_model;
+pub mod federated_continual_gateway_integrity_contract_model;
+pub mod local_gateway_integrity_research_copilot;
+pub mod multimodal_gateway_integrity_research_copilot;
+pub mod throughput_gateway_integrity_research_copilot;
+pub mod federated_continual_gateway_integrity_research_copilot;
+pub mod local_gateway_integrity_workflow_fabric;
+pub mod multimodal_gateway_integrity_workflow_fabric;
+pub mod throughput_gateway_integrity_workflow_fabric;
+pub mod federated_continual_gateway_integrity_workflow_fabric;
 
 pub use adapter::{Adapter, AdapterManifest, ConformanceLevel};
 pub use adversarial_recovery::{
@@ -241,144 +225,11 @@ pub use evidence_surveillance::{
     QualifiedEvidenceSet, CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
     FEATURE_ID as EVIDENCE_SURVEILLANCE_FEATURE_ID,
 };
-pub use local_evidence_surveillance_inference_engine::{
-    local_evidence_surveillance_inference_engine_manifest,
-    run_local_evidence_surveillance, LocalEvidenceObservation,
-    LocalEvidenceSurveillanceDisposition, LocalEvidenceSurveillanceError,
-    LocalEvidenceSurveillanceReceipt, LocalEvidenceSurveillanceRequest,
-    LocalQualifiedEvidenceSet,
-    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
-};
-pub use multimodal_evidence_surveillance_inference_engine::{
-    multimodal_evidence_surveillance_inference_engine_manifest,
-    run_multimodal_evidence_surveillance, MultimodalEvidenceObservation,
-    MultimodalEvidenceSurveillanceDisposition, MultimodalEvidenceSurveillanceError,
-    MultimodalEvidenceSurveillanceReceipt, MultimodalEvidenceSurveillanceRequest,
-    MultimodalQualifiedEvidenceSet,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
-};
-pub use throughput_evidence_surveillance_inference_engine::{
-    run_throughput_evidence_surveillance,
-    throughput_evidence_surveillance_inference_engine_manifest,
-    ThroughputEvidenceObservation, ThroughputEvidenceSurveillanceDisposition,
-    ThroughputEvidenceSurveillanceError, ThroughputEvidenceSurveillanceReceipt,
-    ThroughputEvidenceSurveillanceRequest, ThroughputQualifiedEvidenceSet,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
-};
-pub use federated_evidence_surveillance_inference_engine::{
-    federated_evidence_surveillance_inference_engine_manifest,
-    run_federated_evidence_surveillance, FederatedEvidenceObservation,
-    FederatedEvidenceSurveillanceDisposition, FederatedEvidenceSurveillanceError,
-    FederatedEvidenceSurveillanceReceipt, FederatedEvidenceSurveillanceRequest,
-    FederatedQualifiedEvidenceSet,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
-};
-pub use local_evidence_surveillance_contract_model::{
-    local_evidence_surveillance_contract_model_manifest,
-    model_local_evidence_surveillance_contract, ContractCompatibilityDisposition,
-    ContractModelClaim, ContractModelDisposition, LocalEvidenceSurveillanceContractError,
-    LocalEvidenceSurveillanceContractReceipt, LocalEvidenceSurveillanceContractRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
-};
-pub use multimodal_evidence_surveillance_contract_model::{
-    model_multimodal_evidence_surveillance_contract,
-    multimodal_evidence_surveillance_contract_model_manifest,
-    MultimodalContractCompatibility, MultimodalContractDisposition,
-    MultimodalContractClaim, MultimodalEvidenceSurveillanceContractError,
-    MultimodalEvidenceSurveillanceContractReceipt,
-    MultimodalEvidenceSurveillanceContractRequest,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
-};
-pub use throughput_evidence_surveillance_contract_model::{
-    model_throughput_evidence_surveillance_contract,
-    throughput_evidence_surveillance_contract_model_manifest,
-    ThroughputContractClaim, ThroughputContractCompatibility,
-    ThroughputContractDisposition, ThroughputEvidenceSurveillanceContractError,
-    ThroughputEvidenceSurveillanceContractReceipt,
-    ThroughputEvidenceSurveillanceContractRequest,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
-};
-pub use federated_continual_evidence_surveillance_contract_model::{
-    federated_continual_evidence_surveillance_contract_model_manifest,
-    model_federated_continual_evidence_surveillance_contract,
-    FederatedContinualContractClaim, FederatedContinualContractCompatibility,
-    FederatedContinualContractDisposition,
-    FederatedContinualEvidenceSurveillanceContractError,
-    FederatedContinualEvidenceSurveillanceContractReceipt,
-    FederatedContinualEvidenceSurveillanceContractRequest,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
-};
-pub use local_evidence_surveillance_research_copilot::{
-    local_evidence_surveillance_research_copilot_manifest,
-    run_local_evidence_surveillance_research_copilot,
-    CopilotEvidenceObservation, CopilotQualifiedEvidenceSet,
-    LocalEvidenceSurveillanceResearchCopilotError,
-    LocalEvidenceSurveillanceResearchCopilotReceipt,
-    LocalEvidenceSurveillanceResearchCopilotRequest, ResearchCopilotDisposition,
-    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
-};
-pub use local_evidence_surveillance_research_workbench::{
-    local_evidence_surveillance_research_workbench_manifest,
-    render_local_evidence_surveillance_research_workbench,
-    LocalEvidenceSurveillanceResearchWorkbenchError,
-    LocalEvidenceSurveillanceResearchWorkbenchReceipt,
-    LocalEvidenceSurveillanceResearchWorkbenchRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
-};
-pub use multimodal_evidence_surveillance_research_workbench::{
-    multimodal_evidence_surveillance_research_workbench_manifest,
-    render_multimodal_evidence_surveillance_research_workbench,
-    MultimodalEvidenceSurveillanceResearchWorkbenchError,
-    MultimodalEvidenceSurveillanceResearchWorkbenchReceipt,
-    MultimodalEvidenceSurveillanceResearchWorkbenchRequest,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
-};
-pub use throughput_evidence_surveillance_research_workbench::{
-    throughput_evidence_surveillance_research_workbench_manifest,
-    render_throughput_evidence_surveillance_research_workbench,
-    ThroughputEvidenceSurveillanceResearchWorkbenchError,
-    ThroughputEvidenceSurveillanceResearchWorkbenchReceipt,
-    ThroughputEvidenceSurveillanceResearchWorkbenchRequest,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
-};
-pub use multimodal_evidence_surveillance_research_copilot::{
-    multimodal_evidence_surveillance_research_copilot_manifest,
-    run_multimodal_evidence_surveillance_research_copilot,
-    MultimodalCopilotEvidenceObservation, MultimodalCopilotQualifiedEvidenceSet,
-    MultimodalEvidenceSurveillanceResearchCopilotError,
-    MultimodalEvidenceSurveillanceResearchCopilotReceipt,
-    MultimodalEvidenceSurveillanceResearchCopilotRequest,
-    MultimodalResearchCopilotDisposition,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
-};
 pub use execution_control::{
     admit_computational_execution, AuthorizedExecutionEffect, ComputationalExecutionReceipt,
     ComputationalExecutionRequest, ExecutionAdmissionMode, ExecutionControlDecision,
     ExecutionControlError, CONTRACT_VERSION as EXECUTION_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as EXECUTION_CONTROL_FEATURE_ID,
-};
-pub use throughput_evidence_surveillance_research_copilot::{
-    run_throughput_evidence_surveillance_research_copilot,
-    throughput_evidence_surveillance_research_copilot_manifest,
-    ThroughputCopilotEvidenceObservation, ThroughputCopilotQualifiedEvidenceSet,
-    ThroughputEvidenceSurveillanceResearchCopilotError,
-    ThroughputEvidenceSurveillanceResearchCopilotReceipt,
-    ThroughputEvidenceSurveillanceResearchCopilotRequest, ThroughputResearchCopilotDisposition,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
 };
 pub use experiment_design_control::{
     compile_experiment_design, DesignDecision, DesignSite, ExperimentAssignment,
@@ -387,16 +238,22 @@ pub use experiment_design_control::{
     CONTRACT_VERSION as EXPERIMENT_DESIGN_CONTROL_CONTRACT_VERSION,
     FEATURE_ID as EXPERIMENT_DESIGN_CONTROL_FEATURE_ID,
 };
-pub use federated_continual_evidence_surveillance_research_copilot::{
-    federated_continual_evidence_surveillance_research_copilot_manifest,
-    run_federated_continual_evidence_surveillance_research_copilot,
-    FederatedContinualEvidenceSurveillanceResearchCopilotError,
-    FederatedContinualEvidenceSurveillanceResearchCopilotReceipt,
-    FederatedContinualEvidenceSurveillanceResearchCopilotRequest,
-    FederatedContinualResearchCopilotDisposition, FederatedCopilotEvidenceContribution,
-    FederatedCopilotQualifiedEvidenceSet,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_COPILOT_FEATURE_ID,
+pub use fact::{FactDraft, ValueQualifiers};
+pub use federated_commons::{
+    admit_federated_commons, CommonsContribution, CommonsDisposition, FederatedCommonsError,
+    FederatedCommonsReceipt, FederatedCommonsRequest,
+    CONTRACT_VERSION as FEDERATED_COMMONS_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_COMMONS_FEATURE_ID,
+};
+pub use federated_continual_evidence_surveillance_contract_model::{
+    federated_continual_evidence_surveillance_contract_model_manifest,
+    model_federated_continual_evidence_surveillance_contract, FederatedContinualContractClaim,
+    FederatedContinualContractCompatibility, FederatedContinualContractDisposition,
+    FederatedContinualEvidenceSurveillanceContractError,
+    FederatedContinualEvidenceSurveillanceContractReceipt,
+    FederatedContinualEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
 };
 pub use federated_continual_evidence_surveillance_research_workbench::{
     federated_continual_evidence_surveillance_research_workbench_manifest,
@@ -407,37 +264,6 @@ pub use federated_continual_evidence_surveillance_research_workbench::{
     CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
 };
-pub use fact::{FactDraft, ValueQualifiers};
-pub use federated_commons::{
-    admit_federated_commons, CommonsContribution, CommonsDisposition, FederatedCommonsError,
-    FederatedCommonsReceipt, FederatedCommonsRequest,
-    CONTRACT_VERSION as FEDERATED_COMMONS_CONTRACT_VERSION,
-    FEATURE_ID as FEDERATED_COMMONS_FEATURE_ID,
-};
-pub use local_evidence_surveillance_workflow_fabric::{
-    local_evidence_surveillance_workflow_fabric_manifest,
-    schedule_local_evidence_surveillance_workflow,
-    LocalEvidenceSurveillanceWorkflowError, LocalEvidenceSurveillanceWorkflowReceipt,
-    LocalEvidenceSurveillanceWorkflowRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
-};
-pub use multimodal_evidence_surveillance_workflow_fabric::{
-    multimodal_evidence_surveillance_workflow_fabric_manifest,
-    schedule_multimodal_evidence_surveillance_workflow,
-    MultimodalEvidenceSurveillanceWorkflowError,
-    MultimodalEvidenceSurveillanceWorkflowReceipt,
-    MultimodalEvidenceSurveillanceWorkflowRequest,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
-};
-pub use throughput_evidence_surveillance_workflow_fabric::{
-    schedule_throughput_evidence_surveillance_workflow,
-    throughput_evidence_surveillance_workflow_fabric_manifest,
-    ThroughputEvidenceSurveillanceWorkflowError,
-    ThroughputEvidenceSurveillanceWorkflowReceipt,
-    ThroughputEvidenceSurveillanceWorkflowRequest,
-};
 pub use federated_continual_evidence_surveillance_workflow_fabric::{
     federated_continual_evidence_surveillance_workflow_fabric_manifest,
     schedule_federated_continual_evidence_surveillance_workflow,
@@ -446,6 +272,14 @@ pub use federated_continual_evidence_surveillance_workflow_fabric::{
     FederatedContinualEvidenceSurveillanceWorkflowRequest,
     CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
     FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use federated_evidence_surveillance_inference_engine::{
+    federated_evidence_surveillance_inference_engine_manifest, run_federated_evidence_surveillance,
+    FederatedEvidenceObservation, FederatedEvidenceSurveillanceDisposition,
+    FederatedEvidenceSurveillanceError, FederatedEvidenceSurveillanceReceipt,
+    FederatedEvidenceSurveillanceRequest, FederatedQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_FEDERATED_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
 };
 pub use federation_workflow::{
     schedule_federation_workflow, FederationRequest, FederationTask, FederationWorkflowDecision,
@@ -492,6 +326,37 @@ pub use limitation_closure::{
     CONTRACT_VERSION as LIMITATION_CLOSURE_CONTRACT_VERSION,
     FEATURE_ID as LIMITATION_CLOSURE_FEATURE_ID,
 };
+pub use local_evidence_surveillance_contract_model::{
+    local_evidence_surveillance_contract_model_manifest,
+    model_local_evidence_surveillance_contract, ContractCompatibilityDisposition,
+    ContractModelClaim, ContractModelDisposition, LocalEvidenceSurveillanceContractError,
+    LocalEvidenceSurveillanceContractReceipt, LocalEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use local_evidence_surveillance_inference_engine::{
+    local_evidence_surveillance_inference_engine_manifest, run_local_evidence_surveillance,
+    LocalEvidenceObservation, LocalEvidenceSurveillanceDisposition, LocalEvidenceSurveillanceError,
+    LocalEvidenceSurveillanceReceipt, LocalEvidenceSurveillanceRequest, LocalQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use local_evidence_surveillance_research_workbench::{
+    local_evidence_surveillance_research_workbench_manifest,
+    render_local_evidence_surveillance_research_workbench,
+    LocalEvidenceSurveillanceResearchWorkbenchError,
+    LocalEvidenceSurveillanceResearchWorkbenchReceipt,
+    LocalEvidenceSurveillanceResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use local_evidence_surveillance_workflow_fabric::{
+    local_evidence_surveillance_workflow_fabric_manifest,
+    schedule_local_evidence_surveillance_workflow, LocalEvidenceSurveillanceWorkflowError,
+    LocalEvidenceSurveillanceWorkflowReceipt, LocalEvidenceSurveillanceWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_LOCAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
 pub use location::{LocationSet, SourceLocation};
 pub use loss::{LossAudit, LossEntry, LossKind, LossReport, LossSeverity, SemanticLoss};
 pub use mechanism_control_plane::{
@@ -499,6 +364,41 @@ pub use mechanism_control_plane::{
     MechanismControlPlaneReceipt, MechanismControlPlaneRequest,
     CONTRACT_VERSION as MECHANISM_CONTROL_PLANE_CONTRACT_VERSION,
     FEATURE_ID as MECHANISM_CONTROL_PLANE_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_contract_model::{
+    model_multimodal_evidence_surveillance_contract,
+    multimodal_evidence_surveillance_contract_model_manifest, MultimodalContractClaim,
+    MultimodalContractCompatibility, MultimodalContractDisposition,
+    MultimodalEvidenceSurveillanceContractError, MultimodalEvidenceSurveillanceContractReceipt,
+    MultimodalEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_inference_engine::{
+    multimodal_evidence_surveillance_inference_engine_manifest,
+    run_multimodal_evidence_surveillance, MultimodalEvidenceObservation,
+    MultimodalEvidenceSurveillanceDisposition, MultimodalEvidenceSurveillanceError,
+    MultimodalEvidenceSurveillanceReceipt, MultimodalEvidenceSurveillanceRequest,
+    MultimodalQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_research_workbench::{
+    multimodal_evidence_surveillance_research_workbench_manifest,
+    render_multimodal_evidence_surveillance_research_workbench,
+    MultimodalEvidenceSurveillanceResearchWorkbenchError,
+    MultimodalEvidenceSurveillanceResearchWorkbenchReceipt,
+    MultimodalEvidenceSurveillanceResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use multimodal_evidence_surveillance_workflow_fabric::{
+    multimodal_evidence_surveillance_workflow_fabric_manifest,
+    schedule_multimodal_evidence_surveillance_workflow,
+    MultimodalEvidenceSurveillanceWorkflowError, MultimodalEvidenceSurveillanceWorkflowReceipt,
+    MultimodalEvidenceSurveillanceWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_MULTIMODAL_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
 };
 pub use multimodal_harmonization::{
     harmonize_multimodal, HarmonizationDecision, HarmonizationError, HarmonizedResearchObject,
@@ -586,285 +486,6 @@ pub use retrieval_synthesis::{
     CONTRACT_VERSION as RETRIEVAL_SYNTHESIS_CONTRACT_VERSION,
     FEATURE_ID as RETRIEVAL_SYNTHESIS_FEATURE_ID,
 };
-pub use local_retrieval_synthesis_inference_engine::{
-    local_retrieval_synthesis_inference_engine_manifest,
-    run_local_retrieval_synthesis_inference_engine,
-    LocalRetrievalSynthesisInferenceEngineError,
-    LocalRetrievalSynthesisInferenceEngineReceipt,
-    LocalRetrievalSynthesisInferenceEngineRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
-};
-pub use local_retrieval_synthesis_contract_model::{
-    local_retrieval_synthesis_contract_model_manifest,
-    run_local_retrieval_synthesis_contract_model,
-    LocalRetrievalSynthesisContractModelError,
-    LocalRetrievalSynthesisContractModelReceipt,
-    LocalRetrievalSynthesisContractModelRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
-};
-pub use local_retrieval_synthesis_research_copilot::{
-    local_retrieval_synthesis_research_copilot_manifest,
-    run_local_retrieval_synthesis_research_copilot,
-    LocalRetrievalSynthesisResearchCopilotError,
-    LocalRetrievalSynthesisResearchCopilotReceipt,
-    LocalRetrievalSynthesisResearchCopilotRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
-};
-pub use multimodal_retrieval_synthesis_research_copilot::{
-    multimodal_retrieval_synthesis_research_copilot_manifest,
-    run_multimodal_retrieval_synthesis_research_copilot,
-    MultimodalRetrievalSynthesisResearchCopilotError,
-    MultimodalRetrievalSynthesisResearchCopilotReceipt,
-    MultimodalRetrievalSynthesisResearchCopilotRequest,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
-};
-pub use throughput_retrieval_synthesis_research_copilot::{
-    throughput_retrieval_synthesis_research_copilot_manifest,
-    run_throughput_retrieval_synthesis_research_copilot,
-    ThroughputRetrievalSynthesisResearchCopilotError,
-    ThroughputRetrievalSynthesisResearchCopilotReceipt,
-    ThroughputRetrievalSynthesisResearchCopilotRequest,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
-};
-pub use federated_continual_retrieval_synthesis_research_copilot::{
-    federated_continual_retrieval_synthesis_research_copilot_manifest,
-    run_federated_continual_retrieval_synthesis_research_copilot,
-    FederatedContinualRetrievalSynthesisResearchCopilotError,
-    FederatedContinualRetrievalSynthesisResearchCopilotReceipt,
-    FederatedContinualRetrievalSynthesisResearchCopilotRequest,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_COPILOT_FEATURE_ID,
-};
-pub use local_retrieval_synthesis_workflow_fabric::{
-    local_retrieval_synthesis_workflow_fabric_manifest,
-    schedule_local_retrieval_synthesis_workflow,
-    LocalRetrievalSynthesisWorkflowError,
-    LocalRetrievalSynthesisWorkflowReceipt,
-    LocalRetrievalSynthesisWorkflowRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
-};
-pub use multimodal_retrieval_synthesis_workflow_fabric::{
-    multimodal_retrieval_synthesis_workflow_fabric_manifest,
-    schedule_multimodal_retrieval_synthesis_workflow,
-    MultimodalRetrievalSynthesisWorkflowError,
-    MultimodalRetrievalSynthesisWorkflowReceipt,
-    MultimodalRetrievalSynthesisWorkflowRequest,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
-};
-pub use throughput_retrieval_synthesis_workflow_fabric::{
-    schedule_throughput_retrieval_synthesis_workflow,
-    throughput_retrieval_synthesis_workflow_fabric_manifest,
-    ThroughputRetrievalSynthesisWorkflowError,
-    ThroughputRetrievalSynthesisWorkflowReceipt,
-    ThroughputRetrievalSynthesisWorkflowRequest,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
-};
-pub use federated_continual_retrieval_synthesis_workflow_fabric::{
-    federated_continual_retrieval_synthesis_workflow_fabric_manifest,
-    schedule_federated_continual_retrieval_synthesis_workflow,
-    FederatedContinualRetrievalSynthesisWorkflowError,
-    FederatedContinualRetrievalSynthesisWorkflowReceipt,
-    FederatedContinualRetrievalSynthesisWorkflowRequest,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_WORKFLOW_FABRIC_FEATURE_ID,
-};
-pub use local_retrieval_synthesis_research_workbench::{
-    local_retrieval_synthesis_research_workbench_manifest,
-    render_local_retrieval_synthesis_research_workbench,
-    LocalRetrievalSynthesisResearchWorkbenchError,
-    LocalRetrievalSynthesisResearchWorkbenchReceipt,
-    LocalRetrievalSynthesisResearchWorkbenchRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
-};
-pub use multimodal_retrieval_synthesis_research_workbench::{
-    multimodal_retrieval_synthesis_research_workbench_manifest,
-    render_multimodal_retrieval_synthesis_research_workbench,
-    MultimodalRetrievalSynthesisResearchWorkbenchError,
-    MultimodalRetrievalSynthesisResearchWorkbenchReceipt,
-    MultimodalRetrievalSynthesisResearchWorkbenchRequest,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
-};
-pub use throughput_retrieval_synthesis_research_workbench::{
-    throughput_retrieval_synthesis_research_workbench_manifest,
-    render_throughput_retrieval_synthesis_research_workbench,
-    ThroughputRetrievalSynthesisResearchWorkbenchError,
-    ThroughputRetrievalSynthesisResearchWorkbenchReceipt,
-    ThroughputRetrievalSynthesisResearchWorkbenchRequest,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
-};
-pub use federated_continual_retrieval_synthesis_research_workbench::{
-    federated_continual_retrieval_synthesis_research_workbench_manifest,
-    render_federated_continual_retrieval_synthesis_research_workbench,
-    FederatedContinualRetrievalSynthesisResearchWorkbenchError,
-    FederatedContinualRetrievalSynthesisResearchWorkbenchReceipt,
-    FederatedContinualRetrievalSynthesisResearchWorkbenchRequest,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_RESEARCH_WORKBENCH_FEATURE_ID,
-};
-pub use local_retrieval_synthesis_interoperability_gateway::{
-    local_retrieval_synthesis_interoperability_gateway_manifest,
-    render_local_retrieval_synthesis_interoperability_gateway,
-    LocalRetrievalSynthesisInteroperabilityGatewayError,
-    LocalRetrievalSynthesisInteroperabilityGatewayReceipt,
-    LocalRetrievalSynthesisInteroperabilityGatewayRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
-};
-pub use multimodal_retrieval_synthesis_interoperability_gateway::{
-    multimodal_retrieval_synthesis_interoperability_gateway_manifest,
-    render_multimodal_retrieval_synthesis_interoperability_gateway,
-    MultimodalRetrievalSynthesisInteroperabilityGatewayError,
-    MultimodalRetrievalSynthesisInteroperabilityGatewayReceipt,
-    MultimodalRetrievalSynthesisInteroperabilityGatewayRequest,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
-};
-pub use throughput_retrieval_synthesis_interoperability_gateway::{
-    throughput_retrieval_synthesis_interoperability_gateway_manifest,
-    render_throughput_retrieval_synthesis_interoperability_gateway,
-    ThroughputRetrievalSynthesisInteroperabilityGatewayError,
-    ThroughputRetrievalSynthesisInteroperabilityGatewayReceipt,
-    ThroughputRetrievalSynthesisInteroperabilityGatewayRequest,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
-};
-pub use federated_continual_retrieval_synthesis_interoperability_gateway::{
-    federated_continual_retrieval_synthesis_interoperability_gateway_manifest,
-    render_federated_continual_retrieval_synthesis_interoperability_gateway,
-    FederatedContinualRetrievalSynthesisInteroperabilityGatewayError,
-    FederatedContinualRetrievalSynthesisInteroperabilityGatewayReceipt,
-    FederatedContinualRetrievalSynthesisInteroperabilityGatewayRequest,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_INTEROPERABILITY_GATEWAY_FEATURE_ID,
-};
-pub use local_retrieval_synthesis_assurance_harness::{
-    local_retrieval_synthesis_assurance_harness_manifest,
-    assure_local_retrieval_synthesis,
-    LocalRetrievalSynthesisAssuranceHarnessError,
-    LocalRetrievalSynthesisAssuranceHarnessReceipt,
-    LocalRetrievalSynthesisAssuranceHarnessRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
-};
-pub use multimodal_retrieval_synthesis_assurance_harness::{
-    multimodal_retrieval_synthesis_assurance_harness_manifest,
-    assure_multimodal_retrieval_synthesis,
-    MultimodalRetrievalSynthesisAssuranceHarnessError,
-    MultimodalRetrievalSynthesisAssuranceHarnessReceipt,
-    MultimodalRetrievalSynthesisAssuranceHarnessRequest,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
-};
-pub use throughput_retrieval_synthesis_assurance_harness::{
-    throughput_retrieval_synthesis_assurance_harness_manifest,
-    assure_throughput_retrieval_synthesis,
-    ThroughputRetrievalSynthesisAssuranceHarnessError,
-    ThroughputRetrievalSynthesisAssuranceHarnessReceipt,
-    ThroughputRetrievalSynthesisAssuranceHarnessRequest,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
-};
-pub use federated_continual_retrieval_synthesis_assurance_harness::{
-    federated_continual_retrieval_synthesis_assurance_harness_manifest,
-    assure_federated_continual_retrieval_synthesis,
-    FederatedContinualRetrievalSynthesisAssuranceHarnessError,
-    FederatedContinualRetrievalSynthesisAssuranceHarnessReceipt,
-    FederatedContinualRetrievalSynthesisAssuranceHarnessRequest,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_ASSURANCE_HARNESS_FEATURE_ID,
-};
-pub use local_retrieval_synthesis_federated_control_plane::{
-    local_retrieval_synthesis_federated_control_plane_manifest,
-    operate_local_retrieval_synthesis_federated_control_plane,
-    LocalRetrievalSynthesisFederatedControlPlaneError,
-    LocalRetrievalSynthesisFederatedControlPlaneReceipt,
-    LocalRetrievalSynthesisFederatedControlPlaneRequest,
-    CONTRACT_VERSION as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_LOCAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
-};
-pub use multimodal_retrieval_synthesis_federated_control_plane::{
-    multimodal_retrieval_synthesis_federated_control_plane_manifest,
-    operate_multimodal_retrieval_synthesis_federated_control_plane,
-    MultimodalRetrievalSynthesisFederatedControlPlaneError,
-    MultimodalRetrievalSynthesisFederatedControlPlaneReceipt,
-    MultimodalRetrievalSynthesisFederatedControlPlaneRequest,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
-};
-pub use throughput_retrieval_synthesis_federated_control_plane::{
-    throughput_retrieval_synthesis_federated_control_plane_manifest,
-    operate_throughput_retrieval_synthesis_federated_control_plane,
-    ThroughputRetrievalSynthesisFederatedControlPlaneError,
-    ThroughputRetrievalSynthesisFederatedControlPlaneReceipt,
-    ThroughputRetrievalSynthesisFederatedControlPlaneRequest,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
-};
-pub use federated_continual_retrieval_synthesis_federated_control_plane::{
-    federated_continual_retrieval_synthesis_federated_control_plane_manifest,
-    operate_federated_continual_retrieval_synthesis_federated_control_plane,
-    FederatedContinualRetrievalSynthesisFederatedControlPlaneError,
-    FederatedContinualRetrievalSynthesisFederatedControlPlaneReceipt,
-    FederatedContinualRetrievalSynthesisFederatedControlPlaneRequest,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_CONTINUAL_RETRIEVAL_SYNTHESIS_FEDERATED_CONTROL_PLANE_FEATURE_ID,
-};
-pub use multimodal_retrieval_synthesis_inference_engine::{
-    multimodal_retrieval_synthesis_inference_engine_manifest,
-    run_multimodal_retrieval_synthesis_inference_engine,
-    MultimodalRetrievalSynthesisInferenceEngineError,
-    MultimodalRetrievalSynthesisInferenceEngineReceipt,
-    MultimodalRetrievalSynthesisInferenceEngineRequest,
-    CONTRACT_VERSION as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_MULTIMODAL_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
-};
-pub use throughput_retrieval_synthesis_inference_engine::{
-    throughput_retrieval_synthesis_inference_engine_manifest,
-    run_throughput_retrieval_synthesis_inference_engine,
-    ThroughputRetrievalSynthesisInferenceEngineError,
-    ThroughputRetrievalSynthesisInferenceEngineReceipt,
-    ThroughputRetrievalSynthesisInferenceEngineRequest,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
-};
-pub use throughput_retrieval_synthesis_contract_model::{
-    throughput_retrieval_synthesis_contract_model_manifest,
-    run_throughput_retrieval_synthesis_contract_model,
-    ThroughputRetrievalSynthesisContractModelError,
-    ThroughputRetrievalSynthesisContractModelReceipt,
-    ThroughputRetrievalSynthesisContractModelRequest,
-    CONTRACT_VERSION as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_THROUGHPUT_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
-};
-pub use federated_retrieval_synthesis_inference_engine::{
-    federated_retrieval_synthesis_inference_engine_manifest,
-    run_federated_retrieval_synthesis_inference_engine,
-    FederatedRetrievalSynthesisInferenceEngineError,
-    FederatedRetrievalSynthesisInferenceEngineReceipt,
-    FederatedRetrievalSynthesisInferenceEngineRequest,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_INFERENCE_ENGINE_FEATURE_ID,
-};
-pub use federated_retrieval_synthesis_contract_model::{
-    federated_retrieval_synthesis_contract_model_manifest,
-    run_federated_retrieval_synthesis_contract_model,
-    FederatedRetrievalSynthesisContractModelError,
-    FederatedRetrievalSynthesisContractModelReceipt,
-    FederatedRetrievalSynthesisContractModelRequest,
-    CONTRACT_VERSION as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_CONTRACT_VERSION,
-    FEATURE_ID as ADAPTER_FEDERATED_RETRIEVAL_SYNTHESIS_CONTRACT_MODEL_FEATURE_ID,
-};
 pub use scale_frontier::{
     plan_adapter_scale_frontier, ScaleDisposition, ScaleFrontierError, ScaleFrontierReceipt,
     ScaleFrontierRequest, ScaleScenario,
@@ -882,3 +503,55 @@ pub use tabular::{
     ColumnRole, FramePolicy, OntologyPolicy, TabularAdapter, TabularProfile, TypePolicy,
     UnitPolicy, ValueType, VariableMapping,
 };
+pub use throughput_evidence_surveillance_contract_model::{
+    model_throughput_evidence_surveillance_contract,
+    throughput_evidence_surveillance_contract_model_manifest, ThroughputContractClaim,
+    ThroughputContractCompatibility, ThroughputContractDisposition,
+    ThroughputEvidenceSurveillanceContractError, ThroughputEvidenceSurveillanceContractReceipt,
+    ThroughputEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_inference_engine::{
+    run_throughput_evidence_surveillance,
+    throughput_evidence_surveillance_inference_engine_manifest, ThroughputEvidenceObservation,
+    ThroughputEvidenceSurveillanceDisposition, ThroughputEvidenceSurveillanceError,
+    ThroughputEvidenceSurveillanceReceipt, ThroughputEvidenceSurveillanceRequest,
+    ThroughputQualifiedEvidenceSet,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_INFERENCE_ENGINE_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_research_workbench::{
+    render_throughput_evidence_surveillance_research_workbench,
+    throughput_evidence_surveillance_research_workbench_manifest,
+    ThroughputEvidenceSurveillanceResearchWorkbenchError,
+    ThroughputEvidenceSurveillanceResearchWorkbenchReceipt,
+    ThroughputEvidenceSurveillanceResearchWorkbenchRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_RESEARCH_WORKBENCH_FEATURE_ID,
+};
+pub use throughput_evidence_surveillance_workflow_fabric::{
+    schedule_throughput_evidence_surveillance_workflow,
+    throughput_evidence_surveillance_workflow_fabric_manifest,
+    ThroughputEvidenceSurveillanceWorkflowError, ThroughputEvidenceSurveillanceWorkflowReceipt,
+    ThroughputEvidenceSurveillanceWorkflowRequest,
+    CONTRACT_VERSION as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_CONTRACT_VERSION,
+    FEATURE_ID as ADAPTER_THROUGHPUT_EVIDENCE_SURVEILLANCE_WORKFLOW_FABRIC_FEATURE_ID,
+};
+pub use gateway_integrity_support::*;
+pub use local_gateway_integrity_inference::*;
+pub use multimodal_gateway_integrity_inference::*;
+pub use throughput_gateway_integrity_inference::*;
+pub use federated_continual_gateway_integrity_inference::*;
+pub use local_gateway_integrity_contract_model::*;
+pub use multimodal_gateway_integrity_contract_model::*;
+pub use throughput_gateway_integrity_contract_model::*;
+pub use federated_continual_gateway_integrity_contract_model::*;
+pub use local_gateway_integrity_research_copilot::*;
+pub use multimodal_gateway_integrity_research_copilot::*;
+pub use throughput_gateway_integrity_research_copilot::*;
+pub use federated_continual_gateway_integrity_research_copilot::*;
+pub use local_gateway_integrity_workflow_fabric::*;
+pub use multimodal_gateway_integrity_workflow_fabric::*;
+pub use throughput_gateway_integrity_workflow_fabric::*;
+pub use federated_continual_gateway_integrity_workflow_fabric::*;

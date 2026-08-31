@@ -1,7 +1,7 @@
 //! Lexer and parser behaviour: what BioQL reads, and what it refuses to read.
 
 use bioprism_biolang::bioql::{
-    lex, parse, BinaryOp, Expr, ExpansionPolicy, Literal, Projection, ProvenanceMode, TokenKind,
+    lex, parse, BinaryOp, ExpansionPolicy, Expr, Literal, Projection, ProvenanceMode, TokenKind,
 };
 use bioprism_biolang::error::{LexError, ParseError, QueryError};
 use bioprism_biolang::Canonical;
@@ -21,8 +21,8 @@ fn a_lexed_query_always_ends_with_exactly_one_end_token() {
 
 #[test]
 fn a_comment_runs_to_end_of_line_and_never_swallows_the_next_clause() {
-    let tokens = lex("select a -- everything after this is a comment\nfrom lesions")
-        .expect("lexes");
+    let tokens =
+        lex("select a -- everything after this is a comment\nfrom lesions").expect("lexes");
     let keywords: Vec<&TokenKind> = tokens.iter().map(|token| &token.kind).collect();
     assert!(
         keywords
@@ -54,7 +54,10 @@ fn an_unterminated_string_is_reported_at_its_opening_quote() {
 #[test]
 fn a_parse_error_names_the_token_that_broke_the_parse() {
     let error = parse("select tumor_volume from 42").unwrap_err();
-    let QueryError::Parse(ParseError::UnexpectedToken { found, expected, .. }) = error else {
+    let QueryError::Parse(ParseError::UnexpectedToken {
+        found, expected, ..
+    }) = error
+    else {
         panic!("expected an unexpected token");
     };
     assert_eq!(found, "number `42`");
@@ -106,7 +109,9 @@ fn a_slash_unit_is_taken_only_when_the_joined_symbol_is_in_the_table() {
         panic!("expected a comparison");
     };
     let Expr::Literal {
-        value: Literal::Number { unit: Some(unit), .. },
+        value: Literal::Number {
+            unit: Some(unit), ..
+        },
         ..
     } = right.as_ref()
     else {
@@ -123,7 +128,13 @@ fn a_slash_after_a_unit_that_does_not_join_stays_a_division() {
         panic!("expected a comparison");
     };
     assert!(
-        matches!(right.as_ref(), Expr::Binary { op: BinaryOp::Divide, .. }),
+        matches!(
+            right.as_ref(),
+            Expr::Binary {
+                op: BinaryOp::Divide,
+                ..
+            }
+        ),
         "mg/weight is not a unit, so the slash is the division operator"
     );
 }
@@ -141,7 +152,12 @@ fn comparison_does_not_chain() {
 fn not_binds_looser_than_comparison_and_tighter_than_and() {
     let query = parse("select a from b where not x == 1 and y == 2 labels {} cost limit 5")
         .expect("parses");
-    let Some(Expr::Binary { op: BinaryOp::And, left, .. }) = query.filter.as_ref() else {
+    let Some(Expr::Binary {
+        op: BinaryOp::And,
+        left,
+        ..
+    }) = query.filter.as_ref()
+    else {
         panic!("the top of the tree is the conjunction");
     };
     assert!(
@@ -214,9 +230,18 @@ fn a_cost_limit_must_be_a_whole_number() {
 }
 
 #[test]
+fn a_cost_limit_outside_u64_is_rejected_instead_of_saturating() {
+    let error = parse("select a from b labels {} cost limit 18446744073709551616").unwrap_err();
+    assert!(matches!(
+        error,
+        QueryError::Parse(ParseError::UnexpectedToken { .. })
+    ));
+}
+
+#[test]
 fn a_malformed_timestamp_literal_is_a_parse_error_carrying_the_text() {
-    let error =
-        parse(r#"select a from b where t > instant "not-a-time" labels {} cost limit 5"#).unwrap_err();
+    let error = parse(r#"select a from b where t > instant "not-a-time" labels {} cost limit 5"#)
+        .unwrap_err();
     let QueryError::Parse(ParseError::MalformedTimestamp { text, .. }) = error else {
         panic!("expected a malformed timestamp");
     };

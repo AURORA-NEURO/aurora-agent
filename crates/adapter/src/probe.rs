@@ -19,6 +19,9 @@ use std::path::{Path, PathBuf};
 
 /// Media types the probe can enumerate fields for.
 pub const CSV_FORMATS: [&str; 2] = ["text/csv", "text/tab-separated-values"];
+pub const MAX_DIRECTORY_ENTRIES: usize = 1_000_000;
+pub const MAX_WALK_DEPTH: usize = 1024;
+pub const MAX_RELATIVE_PATH_BYTES: usize = 4096;
 
 /// An independent reading of what a source contains.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +50,7 @@ impl Inventory {
 /// about what the source even is, and conformance would report a loss-completeness failure
 /// that is really a disagreement between two guesses.
 pub fn field_inventory(source: &Source) -> Result<Inventory, AdapterError> {
+    source.validate()?;
     match &source.locator {
         Locator::Directory(root) => {
             let mut locations = LocationSet::new();
@@ -105,9 +109,15 @@ pub struct FileEntry {
 /// their omissions as loss.
 pub fn walk(root: &Path) -> Result<Vec<FileEntry>, AdapterError> {
     let mut entries = Vec::new();
-    let mut stack = vec![(root.to_path_buf(), String::new())];
+    let mut stack = vec![(root.to_path_buf(), String::new(), 0usize)];
 
-    while let Some((directory, prefix)) = stack.pop() {
+    while let Some((directory, prefix, depth)) = stack.pop() {
+        if depth > MAX_WALK_DEPTH {
+            return Err(AdapterError::TraversalLimit {
+                path: display_path(&directory),
+                maximum: MAX_WALK_DEPTH,
+            });
+        }
         let read = std::fs::read_dir(&directory)
             .map_err(|error| AdapterError::io(display_path(&directory), &error))?;
         for item in read {
@@ -118,11 +128,23 @@ pub fn walk(root: &Path) -> Result<Vec<FileEntry>, AdapterError> {
             } else {
                 format!("{prefix}/{name}")
             };
+            if relative.len() > MAX_RELATIVE_PATH_BYTES {
+                return Err(AdapterError::TraversalLimit {
+                    path: relative,
+                    maximum: MAX_RELATIVE_PATH_BYTES,
+                });
+            }
             let file_type = item
                 .file_type()
                 .map_err(|error| AdapterError::io(relative.clone(), &error))?;
 
             if file_type.is_symlink() {
+                if entries.len() >= MAX_DIRECTORY_ENTRIES {
+                    return Err(AdapterError::TraversalLimit {
+                        path: display_path(root),
+                        maximum: MAX_DIRECTORY_ENTRIES,
+                    });
+                }
                 entries.push(FileEntry {
                     relative,
                     absolute: item.path(),
@@ -130,11 +152,17 @@ pub fn walk(root: &Path) -> Result<Vec<FileEntry>, AdapterError> {
                     is_symlink: true,
                 });
             } else if file_type.is_dir() {
-                stack.push((item.path(), relative));
+                stack.push((item.path(), relative, depth + 1));
             } else {
                 let metadata = item
                     .metadata()
                     .map_err(|error| AdapterError::io(relative.clone(), &error))?;
+                if entries.len() >= MAX_DIRECTORY_ENTRIES {
+                    return Err(AdapterError::TraversalLimit {
+                        path: display_path(root),
+                        maximum: MAX_DIRECTORY_ENTRIES,
+                    });
+                }
                 entries.push(FileEntry {
                     relative,
                     absolute: item.path(),
@@ -183,5 +211,14 @@ mod tests {
             Inventory::Unverifiable { reason } => assert!(reason.contains("application/dicom")),
             other => panic!("expected an unverifiable inventory, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn source_metadata_is_validated_before_independent_probing() {
+        let source = Source::bytes("", b"a,b\n1,2\n".to_vec()).with_format("text/csv");
+        assert!(matches!(
+            field_inventory(&source),
+            Err(AdapterError::InvalidSource(_))
+        ));
     }
 }

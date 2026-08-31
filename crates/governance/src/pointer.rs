@@ -27,18 +27,22 @@ pub(crate) fn insert(
     path: &str,
     value: Value,
 ) -> Result<Option<Value>, String> {
+    if path.is_empty() {
+        return Err("a dotted path must contain a field name".into());
+    }
     let segments = splits(path);
-    let (last, parents) = segments
-        .split_last()
-        .expect("split never yields an empty vec");
+    let Some((last, parents)) = segments.split_last() else {
+        return Err("a dotted path must contain a field name".into());
+    };
     let mut cursor = document;
     for segment in parents {
         if !cursor.is_object() {
             return Err(format!("{segment:?} in {path:?} is not an object"));
         }
-        cursor = cursor
-            .as_object_mut()
-            .expect("checked above")
+        let Some(object) = cursor.as_object_mut() else {
+            return Err(format!("{segment:?} in {path:?} is not an object"));
+        };
+        cursor = object
             .entry((*segment).to_string())
             .or_insert_with(|| Value::Object(Map::new()));
     }
@@ -50,10 +54,11 @@ pub(crate) fn insert(
 
 /// Removes a value. Returns what was there, or `None` if the path was absent.
 pub(crate) fn remove(document: &mut Value, path: &str) -> Option<Value> {
+    if path.is_empty() {
+        return None;
+    }
     let segments = splits(path);
-    let (last, parents) = segments
-        .split_last()
-        .expect("split never yields an empty vec");
+    let (last, parents) = segments.split_last()?;
     let mut cursor = document;
     for segment in parents {
         cursor = cursor.as_object_mut()?.get_mut(*segment)?;

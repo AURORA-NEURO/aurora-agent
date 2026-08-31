@@ -93,9 +93,9 @@ pub fn maximum_influence(
     let mut evaluated = 0usize;
 
     let evaluate = |candidate: &[Vec<f64>],
-                        best: &mut f64,
-                        best_witness: &mut Vec<Vec<f64>>,
-                        evaluated: &mut usize|
+                    best: &mut f64,
+                    best_witness: &mut Vec<Vec<f64>>,
+                    evaluated: &mut usize|
      -> Result<(), InfluenceError> {
         let mut altered = region.clone();
         for (id, table) in factor_ids.iter().zip(candidate) {
@@ -120,11 +120,13 @@ pub fn maximum_influence(
             let candidate: Vec<Vec<f64>> = originals
                 .iter()
                 .map(|table| {
-                    perturbation
-                        .single_realisation(table)
-                        .expect("removal has exactly one realisation")
+                    perturbation.single_realisation(table).ok_or_else(|| {
+                        InfluenceError::BruteForceDeclined {
+                            detail: "the selected perturbation has no single realisation".into(),
+                        }
+                    })
                 })
-                .collect();
+                .collect::<Result<_, _>>()?;
             evaluate(&candidate, &mut best, &mut best_witness, &mut evaluated)?;
             true
         }

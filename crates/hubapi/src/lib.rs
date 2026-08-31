@@ -113,6 +113,7 @@
 
 pub mod catalog;
 pub mod context_compilation_assurance;
+pub mod experiment_design_assurance;
 pub mod deps;
 pub mod federation;
 pub mod interpretation_assurance;
@@ -132,6 +133,16 @@ pub use context_compilation_assurance::{
     FEATURE_ID as CONTEXT_ASSURANCE_FEATURE_ID,
     INPUT_SCHEMA as CONTEXT_ASSURANCE_INPUT_SCHEMA,
     OUTPUT_SCHEMA as CONTEXT_ASSURANCE_OUTPUT_SCHEMA,
+};
+pub use experiment_design_assurance::{
+    assure_federated_experiment_design, experiment_design_assurance_manifest,
+    ExecutableExperimentDesign7, ExecutableExperimentDesignArtifact7,
+    ExperimentDesignAssuranceError, ExperimentDesignCandidate4, ExperimentDesignPeer4,
+    ExperimentObjective4,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_ASSURANCE_FEATURE_ID,
+    INPUT_SCHEMA as EXPERIMENT_DESIGN_ASSURANCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EXPERIMENT_DESIGN_ASSURANCE_OUTPUT_SCHEMA,
 };
 pub use deps::{
     resolve_dependencies, Collision, DependencyError, Lock, Locked, Requirement, Source,

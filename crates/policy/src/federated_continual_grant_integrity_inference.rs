@@ -1,0 +1,5 @@
+//! Policy P32 federated continual autonomous inference grant-integrity feature F13.
+use super::grant_integrity_support::{qualify,manifest,GrantIntegrityCard7,GrantIntegrityRequest4};
+const FEATURE_ID:&str="AFA-policy-P32-F13";const CONTRACT_VERSION:&str="policy-federated_continual-grant-integrity-inference/1.0";
+pub fn policy_federated_continual_grant_integrity_inference_manifest()->serde_json::Value{manifest(FEATURE_ID,CONTRACT_VERSION,"federated continual autonomous","inference")}
+pub fn qualify_policy_federated_continual_grant_integrity_inference(request:&GrantIntegrityRequest4)->Result<GrantIntegrityCard7,super::grant_integrity_support::GrantIntegrityError>{qualify(request,FEATURE_ID,CONTRACT_VERSION,"federated continual autonomous","inference")}

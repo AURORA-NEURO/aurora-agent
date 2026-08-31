@@ -192,6 +192,33 @@ impl QualityWorkbenchReceipt {
                 ));
             }
         }
+        let classified_ids = self
+            .summary
+            .qualified_order
+            .iter()
+            .chain(self.summary.warning_order.iter())
+            .chain(self.summary.quarantined_order.iter())
+            .chain(self.summary.unknown_order.iter())
+            .collect::<BTreeSet<_>>();
+        let observation_ids = self
+            .summary
+            .observation_order
+            .iter()
+            .collect::<BTreeSet<_>>();
+        let counts_match = u64::from(self.summary.passed_count)
+            == u64::try_from(self.summary.qualified_order.len()).unwrap_or(u64::MAX)
+            && u64::from(self.summary.warning_count)
+                == u64::try_from(self.summary.warning_order.len()).unwrap_or(u64::MAX)
+            && u64::from(self.summary.quarantined_count)
+                == u64::try_from(self.summary.quarantined_order.len()).unwrap_or(u64::MAX)
+            && u64::from(self.summary.unknown_count)
+                == u64::try_from(self.summary.unknown_order.len()).unwrap_or(u64::MAX);
+        if classified_ids != observation_ids || !counts_match {
+            return Err(QualityWorkbenchError::Invalid(
+                "quality workbench observations are not completely and consistently classified"
+                    .into(),
+            ));
+        }
         Ok(())
     }
 
@@ -237,7 +264,9 @@ pub fn operate_quality_workbench(
         observation_order.insert(observation.observation_id.clone());
         batches.insert(observation.batch_id.clone());
         samples.insert(observation.sample_id.clone());
-        let cost = observation.observation_id.len() as u64 + 1;
+        let cost = u64::try_from(observation.observation_id.len())
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
         let budget_ok = cost <= request.budget.saturating_sub(spent);
         let value_passes =
             observation
@@ -274,8 +303,12 @@ pub fn operate_quality_workbench(
                 "observation:{}:optional-metric-below-threshold",
                 observation.observation_id
             ));
-        } else if !complete || !budget_ok || (gate && !value_passes) {
-            if observation.value_milli.is_none()
+        } else {
+            if !request.policy_allow
+                || !request.protected_closure
+                || !request.signed_approval
+                || !request.raw_data_local
+                || observation.value_milli.is_none()
                 || matches!(
                     observation.state,
                     QualityState::Unknown | QualityState::Unmeasured
@@ -349,9 +382,12 @@ pub fn operate_quality_workbench(
     if !request.signed_approval {
         omissions.insert("request:signed-approval-required".into());
     }
-    let passed_total = observations.len().max(1) as u64;
+    if !request.raw_data_local {
+        omissions.insert("request:raw-data-locality-required".into());
+    }
+    let passed_total = u64::try_from(observations.len()).unwrap_or(u64::MAX).max(1);
     let release_fraction = (passed_count as u64 * 1000) / passed_total;
-    if release_fraction < request.minimum_release_fraction_milli as u64 {
+    if release_fraction < u64::from(request.minimum_release_fraction_milli) {
         uncertainty.insert(format!(
             "release-fraction:{}-below-required-{}",
             release_fraction, request.minimum_release_fraction_milli
@@ -361,14 +397,14 @@ pub fn operate_quality_workbench(
     let warning_order = warning.into_iter().collect::<Vec<_>>();
     let quarantined_order = quarantined.into_iter().collect::<Vec<_>>();
     let unknown_order = unknown.into_iter().collect::<Vec<_>>();
-    let disposition = if !request.policy_allow {
+    let disposition = if !request.policy_allow || !request.raw_data_local {
         QualityDisposition::Blocked
     } else if !request.protected_closure || qualified_order.is_empty() && warning_order.is_empty() {
         QualityDisposition::Unknown
     } else if !quarantined_order.is_empty()
         || !unknown_order.is_empty()
         || !omissions.is_empty()
-        || release_fraction < request.minimum_release_fraction_milli as u64
+        || release_fraction < u64::from(request.minimum_release_fraction_milli)
         || !warning_order.is_empty()
     {
         QualityDisposition::Conditional
@@ -475,6 +511,8 @@ fn validate_request(request: &QualityWorkbenchRequest) -> Result<(), QualityWork
         || request.observations.is_empty()
         || request.budget == 0
         || request.minimum_release_fraction_milli > 1000
+        || u64::try_from(request.observations.len())
+            .map_or(true, |count| count > u64::from(u32::MAX))
         || request.boundary != PRECLINICAL_BOUNDARY
         || request
             .required_metric_ids
@@ -686,5 +724,24 @@ mod tests {
             ),
         ]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn non_local_raw_data_blocks_release_without_emitting_raw_data() {
+        let mut request = request(vec![observation(
+            "observation:a",
+            "metric:focus",
+            Some(950),
+            true,
+            QualityState::Supported,
+        )]);
+        request.raw_data_local = false;
+        let receipt = operate_quality_workbench(&request).unwrap();
+        assert_eq!(receipt.disposition, QualityDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "request:raw-data-locality-required"));
     }
 }

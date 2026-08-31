@@ -233,6 +233,11 @@ pub enum IdentityProgramRefusal {
 #[derive(Debug, Clone, PartialEq, Eq, Error, Serialize, Deserialize)]
 #[serde(tag = "refusal", rename_all = "snake_case")]
 pub enum ContradictionRefusal {
+    /// The reading's public representation could not be reconciled with the value accessor. This
+    /// is a malformed reading, not a scientific disagreement, and must not be turned into one.
+    #[error("modality `{modality}` carries an inconsistent reading: {detail}")]
+    InvalidReading { modality: String, detail: String },
+
     /// The readings are about different quantities, so there is no shared subject for them to
     /// disagree about. This is 27.14's "assay scope" axis showing up before a contradiction is even
     /// posed, and it is a different situation from two readings of one quantity.
@@ -262,7 +267,9 @@ pub enum ContradictionRefusal {
     /// 27.14 failure "discordance impossible biologically". If no explanation in the vocabulary can
     /// account for the disagreement, the program has constructed something that does not happen,
     /// and an agent that cannot solve it has not failed.
-    #[error("no admissible explanation accounts for the disagreement between `{left}` and `{right}`")]
+    #[error(
+        "no admissible explanation accounts for the disagreement between `{left}` and `{right}`"
+    )]
     NoAdmissibleExplanation { left: String, right: String },
     /// 27.14 failure "one modality arbitrarily labeled correct". Narrowing requires a
     /// discriminator that names what it refutes. Preferring a modality is not evidence.
@@ -279,7 +286,9 @@ pub enum ContradictionRefusal {
     NoReferenceDistribution { left: String, right: String },
     /// 27.14 validation "answer-cue scan". If the seeded explanation is the unique reading with
     /// some surface property, the program is solvable without reasoning about biology at all.
-    #[error("the seeded explanation is recoverable from surface cue `{cue}` without examining evidence")]
+    #[error(
+        "the seeded explanation is recoverable from surface cue `{cue}` without examining evidence"
+    )]
     TrivialCue { cue: String },
 }
 
@@ -309,7 +318,10 @@ pub enum ClaimRefusal {
         "`{quantity}` is an assumption of the construction ({assumed_by}), so the world cannot be \
          evidence for it"
     )]
-    AssumedByConstruction { quantity: String, assumed_by: String },
+    AssumedByConstruction {
+        quantity: String,
+        assumed_by: String,
+    },
     /// 27.02 workflow step 5, "declare what counterfactuals are unsupported". An observed world is
     /// weakest exactly where it is most often used: the question of what would have happened
     /// instead.

@@ -138,12 +138,30 @@
 //! remains a plan and not an execution engine.
 
 pub mod adaptive;
+pub mod evidence_closure_support;
+pub mod local_evidence_closure_inference;
+pub mod multimodal_evidence_closure_inference;
+pub mod throughput_evidence_closure_inference;
+pub mod federated_continual_evidence_closure_inference;
+pub mod local_evidence_closure_contract_model;
+pub mod multimodal_evidence_closure_contract_model;
+pub mod throughput_evidence_closure_contract_model;
+pub mod federated_continual_evidence_closure_contract_model;
+pub mod local_evidence_closure_research_copilot;
+pub mod multimodal_evidence_closure_research_copilot;
+pub mod throughput_evidence_closure_research_copilot;
+pub mod federated_continual_evidence_closure_research_copilot;
+pub mod local_evidence_closure_workflow_fabric;
+pub mod multimodal_evidence_closure_workflow_fabric;
+pub mod throughput_evidence_closure_workflow_fabric;
+pub mod federated_continual_evidence_closure_workflow_fabric;
 pub mod adaptive_execution;
 pub mod continuation;
 pub mod cost;
 pub mod decision;
 pub mod error;
 pub mod evidence;
+pub mod experiment_design_research_workbench;
 pub mod greedy;
 pub mod lens;
 pub mod library;
@@ -160,6 +178,23 @@ pub mod theorem;
 pub mod voi;
 
 pub use adaptive::{adaptive_policy, AdaptiveNode, AdaptiveOutcome, AdaptivePolicy};
+pub use evidence_closure_support::{qualify as qualify_evidence_closure, manifest as evidence_closure_manifest, EpistemicAssertion4, EvidenceClosureArtifact4, EvidenceClosureCard7, EvidenceClosureError, EvidenceClosureRequest4, BOUNDARY as EVIDENCE_CLOSURE_BOUNDARY, CONTENT_TYPE as EVIDENCE_CLOSURE_CONTENT_TYPE};
+pub use local_evidence_closure_inference::*;
+pub use multimodal_evidence_closure_inference::*;
+pub use throughput_evidence_closure_inference::*;
+pub use federated_continual_evidence_closure_inference::*;
+pub use local_evidence_closure_contract_model::*;
+pub use multimodal_evidence_closure_contract_model::*;
+pub use throughput_evidence_closure_contract_model::*;
+pub use federated_continual_evidence_closure_contract_model::*;
+pub use local_evidence_closure_research_copilot::*;
+pub use multimodal_evidence_closure_research_copilot::*;
+pub use throughput_evidence_closure_research_copilot::*;
+pub use federated_continual_evidence_closure_research_copilot::*;
+pub use local_evidence_closure_workflow_fabric::*;
+pub use multimodal_evidence_closure_workflow_fabric::*;
+pub use throughput_evidence_closure_workflow_fabric::*;
+pub use federated_continual_evidence_closure_workflow_fabric::*;
 pub use adaptive_execution::{
     AcquisitionExecutor, AcquisitionObservation, AcquisitionRequest, AdaptiveExecutionError,
     AdaptiveExecutionReceipt, AdaptivePlan, AuthorizationSummary, ExecutionGrant, ExecutionRefusal,
@@ -174,6 +209,13 @@ pub use cost::{
 pub use decision::{Belief, DecisionProblem};
 pub use error::EpistemicError;
 pub use evidence::{Acquisition, EvidenceItem, EvidencePool, Outcome};
+pub use experiment_design_research_workbench::{
+    compile_experiment_design_workbench, experiment_design_research_workbench_manifest,
+    ExecutableExperimentDesign5, ExperimentDesignWorkbenchError, ExperimentObjective3,
+    PowerDesignCandidate5,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_RESEARCH_WORKBENCH_FEATURE_ID,
+};
 pub use greedy::{greedy, lazy_greedy, Constraint, Selection};
 pub use objective::{Coverage, HypothesisElimination, RegretReduction, SetFunction, Tabulated};
 pub use optimal::{brute_force_optimum, measure_ratio, RatioMeasurement};

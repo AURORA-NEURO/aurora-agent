@@ -320,9 +320,7 @@ pub fn evaluate_multimodal_replication(
     let effect_consistent = request
         .policy
         .max_effect_disagreement
-        .map_or(true, |threshold| {
-            disagreement.map_or(true, |delta| delta <= threshold)
-        });
+        .is_none_or(|threshold| disagreement.is_none_or(|delta| delta <= threshold));
     let preregistration_ok = !request.policy.require_preregistered
         || studies.iter().all(|study| {
             study.comparable

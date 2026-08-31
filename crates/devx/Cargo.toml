@@ -5,6 +5,7 @@ edition = "2021"
 description = "Developer platform: machine-actionable diagnostics, compile introspection, the local-loop invalidation contract and the 23.32 debugger surface model"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-section = { workspace = true }
 bioprism-sdk = { workspace = true }

@@ -441,9 +441,11 @@ impl PluginRegistry {
     fn availability_of(&self, kind: CapabilityKind) -> Availability {
         match self.best(kind, |_| true) {
             Some(entry) => {
-                let capability = entry
-                    .capability(kind)
-                    .expect("the winning entry declares the kind it won");
+                let Some(capability) = entry.capability(kind) else {
+                    return Availability::Unavailable {
+                        reason: format!("registry capability index is inconsistent for {}", kind),
+                    };
+                };
                 Availability::Available(Box::new(ProviderCard {
                     plugin: entry.id(),
                     digest: entry.digest.clone(),

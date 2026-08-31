@@ -68,7 +68,7 @@ impl CapabilityDashboardQuery {
                 if value.len() > 512 {
                     return Err(CapabilityDashboardError::FilterTooLong { field });
                 }
-                if value.chars().any(char::is_control) {
+                if value != value.trim() || value.chars().any(char::is_control) {
                     return Err(CapabilityDashboardError::ControlCharacter { field });
                 }
             }
@@ -130,6 +130,7 @@ pub struct CapabilityDashboardAudit {
     pub warnings: Vec<String>,
     pub guarantees: Vec<String>,
     pub limitations: Vec<String>,
+    pub truncated: bool,
     pub ready: bool,
 }
 
@@ -160,15 +161,15 @@ pub fn build_dashboard(
     let group_filter = query
         .group_id
         .as_ref()
-        .map(|value| value.to_ascii_lowercase());
+        .map(|value| value.trim().to_ascii_lowercase());
     let domain_filter = query
         .domain
         .as_ref()
-        .map(|value| value.to_ascii_lowercase());
+        .map(|value| value.trim().to_ascii_lowercase());
     let status_filter = query
         .status
         .as_ref()
-        .map(|value| value.to_ascii_lowercase());
+        .map(|value| value.trim().to_ascii_lowercase());
     let mut groups = Vec::new();
     let mut total_available = 0;
     let mut gap_counts = BTreeMap::new();
@@ -226,7 +227,7 @@ pub fn build_dashboard(
             .count();
         let schema_backed_tool_count = tools
             .iter()
-            .filter(|tool| tool_schema_quality.get(*tool) == Some(&true))
+            .filter(|tool| tool_schema_quality.contains_key(*tool))
             .count();
         let readiness = if tools.is_empty() {
             "declared_only"
@@ -307,6 +308,7 @@ pub fn build_dashboard(
         &groups,
         &readiness_counts,
         &gap_counts,
+        truncated,
     ))
     .map_err(|error| CapabilityDashboardError::Canonical(error.to_string()))?;
     let dashboard_digest = ContentHash::of_value(&dashboard_value)
@@ -340,6 +342,7 @@ pub fn build_dashboard(
             "catalogue labels and surface declarations remain caller-maintained workspace metadata".into(),
             "a bounded dashboard must not be read as a complete domain inventory without checking warnings and max_groups".into(),
         ],
+        truncated,
         ready,
     })
 }
@@ -367,10 +370,11 @@ mod tests {
         assert_eq!(report.groups[0].id, "alpha");
         assert_eq!(report.groups[0].readiness, "partial");
         assert_eq!(report.groups[0].callable_tool_count, 1);
-        assert_eq!(report.groups[0].schema_backed_tool_count, 1);
+        assert_eq!(report.groups[0].schema_backed_tool_count, 2);
         assert_eq!(report.groups[0].invalid_transport_schemas, vec!["invalid"]);
         assert_eq!(report.groups[1].readiness, "declared_only");
         assert_eq!(report.gap_counts["missing_transport_schema"], 1);
+        assert!(!report.truncated);
         assert!(!report.ready);
     }
 
@@ -412,8 +416,15 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("bounded")));
+        assert!(bounded.truncated);
         assert!(CapabilityDashboardQuery {
             max_groups: 0,
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
+        assert!(CapabilityDashboardQuery {
+            domain: Some(" science".into()),
             ..Default::default()
         }
         .validate()

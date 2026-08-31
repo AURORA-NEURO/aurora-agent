@@ -289,15 +289,141 @@ pub mod contract_frontier_assurance;
 pub mod dependency_composition_assurance;
 pub mod dualuse;
 pub mod error;
+pub mod evidence_surveillance_assurance;
+pub mod prospective_computational_execution_assurance;
+pub mod multimodal_context_compilation_assurance;
+pub mod statistical_analysis_assurance;
 pub mod humansubject;
 pub mod register;
 pub mod representation;
 pub mod safeguard;
+pub mod scale_frontier_contract;
 pub mod validation;
+pub mod experiment_design_workflow_fabric;
+pub mod multimodal_bounded_evolution_assurance;
+pub mod boundary_integrity_support;
+pub mod local_boundary_integrity_inference;
+pub mod multimodal_boundary_integrity_inference;
+pub mod throughput_boundary_integrity_inference;
+pub mod federated_continual_boundary_integrity_inference;
+pub mod local_boundary_integrity_contract_model;
+pub mod multimodal_boundary_integrity_contract_model;
+pub mod throughput_boundary_integrity_contract_model;
+pub mod federated_continual_boundary_integrity_contract_model;
+pub mod local_boundary_integrity_research_copilot;
+pub mod multimodal_boundary_integrity_research_copilot;
+pub mod throughput_boundary_integrity_research_copilot;
+pub mod federated_continual_boundary_integrity_research_copilot;
+pub mod local_boundary_integrity_workflow_fabric;
+pub mod multimodal_boundary_integrity_workflow_fabric;
+pub mod throughput_boundary_integrity_workflow_fabric;
+pub mod federated_continual_boundary_integrity_workflow_fabric;
+pub mod federated_continual_evidence_surveillance_contract_model;
+
+pub use prospective_computational_execution_assurance::{
+    capability_manifest as prospective_computational_execution_assurance_manifest,
+    verify as assure_prospective_computational_execution,
+    verify_json as assure_prospective_computational_execution_json,
+    ExecutionAssuranceError, ExecutionNode, ExecutionRun, ResearchWorkflowSpec,
+    CONTRACT_VERSION as PROSPECTIVE_COMPUTATIONAL_EXECUTION_CONTRACT_VERSION,
+    FEATURE_ID as PROSPECTIVE_COMPUTATIONAL_EXECUTION_FEATURE_ID,
+    INPUT_SCHEMA as PROSPECTIVE_COMPUTATIONAL_EXECUTION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as PROSPECTIVE_COMPUTATIONAL_EXECUTION_OUTPUT_SCHEMA,
+};
+pub use multimodal_context_compilation_assurance::{
+    assure_multimodal_context_compilation,
+    multimodal_context_compilation_assurance_manifest,
+    CertifiedDecisionSection7, CertifiedDecisionSectionArtifact7, ContextCompilationAssuranceError,
+    ContextFact4, DecisionQuery2,
+    CONTRACT_VERSION as MULTIMODAL_CONTEXT_COMPILATION_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_CONTEXT_COMPILATION_FEATURE_ID,
+    INPUT_SCHEMA as MULTIMODAL_CONTEXT_COMPILATION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as MULTIMODAL_CONTEXT_COMPILATION_OUTPUT_SCHEMA,
+};
+pub use statistical_analysis_assurance::{
+    assure_statistical_analysis, statistical_analysis_assurance_manifest,
+    AnalysisCandidate4, AnalysisQuestion3, QualifiedAnalysisArtifact7, QualifiedAnalysisResult7,
+    StatisticalAnalysisAssuranceError,
+    CONTRACT_VERSION as STATISTICAL_ANALYSIS_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as STATISTICAL_ANALYSIS_ASSURANCE_FEATURE_ID,
+    INPUT_SCHEMA as STATISTICAL_ANALYSIS_ASSURANCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as STATISTICAL_ANALYSIS_ASSURANCE_OUTPUT_SCHEMA,
+};
+pub use experiment_design_workflow_fabric::{
+    compile_experiment_design_workflow, compile_experiment_design_workflow_json,
+    experiment_design_workflow_fabric_manifest, validate_experiment_design_workflow_json,
+    ExecutableExperimentDesign4, ExperimentDesignWorkflowError,
+    ExperimentDesignWorkflowRequest1, ExperimentObjective1, WorkflowStep1,
+    CONTRACT_VERSION as EXPERIMENT_DESIGN_WORKFLOW_CONTRACT_VERSION,
+    FEATURE_ID as EXPERIMENT_DESIGN_WORKFLOW_FEATURE_ID,
+    INPUT_SCHEMA as EXPERIMENT_DESIGN_WORKFLOW_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as EXPERIMENT_DESIGN_WORKFLOW_OUTPUT_SCHEMA,
+};
+pub use multimodal_bounded_evolution_assurance::{
+    assure_multimodal_bounded_evolution,
+    assure_multimodal_bounded_evolution_json,
+    multimodal_bounded_evolution_assurance_manifest,
+    validate_bioethics_evolution_json,
+    BioethicsEvolutionCandidate2,
+    BioethicsEvolutionDecision7,
+    BioethicsEvolutionError,
+    BioethicsEvolutionRequest3,
+    CONTRACT_VERSION as MULTIMODAL_BOUNDED_EVOLUTION_CONTRACT_VERSION,
+    FEATURE_ID as MULTIMODAL_BOUNDED_EVOLUTION_FEATURE_ID,
+    INPUT_SCHEMA as MULTIMODAL_BOUNDED_EVOLUTION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as MULTIMODAL_BOUNDED_EVOLUTION_OUTPUT_SCHEMA,
+};
+
+pub use scale_frontier_contract::{
+    capability_manifest as scale_frontier_contract_manifest, evaluate_capacity,
+    BioethicsCapacityReport2, BioethicsScaleFrontierError, BioethicsScaleFrontierRequest,
+    BioethicsScaleWorkload4, CONTENT_TYPE as BIOETHICS_CAPACITY_CONTENT_TYPE,
+    CONTRACT_VERSION as BIOETHICS_CAPACITY_CONTRACT_VERSION,
+    FEATURE_ID as BIOETHICS_CAPACITY_FEATURE_ID, INPUT_SCHEMA as BIOETHICS_CAPACITY_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as BIOETHICS_CAPACITY_OUTPUT_SCHEMA,
+};
 
 pub use error::BioethicsError;
+pub use evidence_surveillance_assurance::{
+    assure_evidence_surveillance, evidence_surveillance_assurance_manifest,
+    BioethicsEvidenceDisposition, BioethicsEvidenceReceipt, BioethicsEvidenceRequest,
+    EvidenceSurveillanceAssuranceError,
+    CONTRACT_VERSION as EVIDENCE_SURVEILLANCE_ASSURANCE_CONTRACT_VERSION,
+    FEATURE_ID as EVIDENCE_SURVEILLANCE_ASSURANCE_FEATURE_ID,
+};
+pub use federated_continual_evidence_surveillance_contract_model::{
+    federated_continual_evidence_surveillance_contract_model_manifest,
+    model_federated_continual_evidence_surveillance_contract,
+    FederatedContinualContractClaim,
+    FederatedContinualContractCompatibility,
+    FederatedContinualContractDisposition,
+    FederatedContinualEvidenceSurveillanceContractError,
+    FederatedContinualEvidenceSurveillanceContractReceipt,
+    FederatedContinualEvidenceSurveillanceContractRequest,
+    CONTRACT_VERSION as BIOETHICS_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_CONTRACT_VERSION,
+    FEATURE_ID as BIOETHICS_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_FEATURE_ID,
+    INPUT_SCHEMA as BIOETHICS_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as BIOETHICS_FEDERATED_CONTINUAL_EVIDENCE_SURVEILLANCE_CONTRACT_MODEL_OUTPUT_SCHEMA,
+};
 pub use register::{section_36_remainder, RegisterCounts, SafeguardRegister};
 pub use safeguard::{
     BlueprintModule, ControlSurface, DeclaredSafeguard, EnforcedSafeguard, Impossibility,
     Safeguard, SafeguardDocument,
 };
+pub use boundary_integrity_support::*;
+pub use local_boundary_integrity_inference::*;
+pub use multimodal_boundary_integrity_inference::*;
+pub use throughput_boundary_integrity_inference::*;
+pub use federated_continual_boundary_integrity_inference::*;
+pub use local_boundary_integrity_contract_model::*;
+pub use multimodal_boundary_integrity_contract_model::*;
+pub use throughput_boundary_integrity_contract_model::*;
+pub use federated_continual_boundary_integrity_contract_model::*;
+pub use local_boundary_integrity_research_copilot::*;
+pub use multimodal_boundary_integrity_research_copilot::*;
+pub use throughput_boundary_integrity_research_copilot::*;
+pub use federated_continual_boundary_integrity_research_copilot::*;
+pub use local_boundary_integrity_workflow_fabric::*;
+pub use multimodal_boundary_integrity_workflow_fabric::*;
+pub use throughput_boundary_integrity_workflow_fabric::*;
+pub use federated_continual_boundary_integrity_workflow_fabric::*;

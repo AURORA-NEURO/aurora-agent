@@ -1,0 +1,6 @@
+"""Backends P32 multimodal research_copilot capability-negotiation integrity feature."""
+from .capability_negotiation_integrity_support import BackendCard7,BackendRequest4,CapabilityNegotiationIntegrityError,manifest,negotiate
+FEATURE_ID="AFA-backends-P32-F10";CONTRACT_VERSION="backends-multimodal_capability_negotiation_integrity_research_copilot/1.0"
+def multimodal_capability_negotiation_integrity_research_copilot_manifest():return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="multimodal",mode="research_copilot")
+def negotiate_multimodal_capability_negotiation_integrity_research_copilot(request:BackendRequest4)->BackendCard7:return negotiate(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="multimodal",mode="research_copilot")
+__all__=["FEATURE_ID","CONTRACT_VERSION","multimodal_capability_negotiation_integrity_research_copilot_manifest","negotiate_multimodal_capability_negotiation_integrity_research_copilot"]

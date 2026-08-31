@@ -171,13 +171,18 @@ impl DecisionSection {
         }
 
         if layer >= Layer::L3 {
-            map.insert("factors".into(), Value::Array(self.selected_factors.clone()));
+            map.insert(
+                "factors".into(),
+                Value::Array(self.selected_factors.clone()),
+            );
             map.insert(
                 "provenance".into(),
                 Value::Array(
                     self.selected_evidence
                         .iter()
-                        .map(|capsule| json!({ "id": capsule.id, "provenance": capsule.provenance }))
+                        .map(
+                            |capsule| json!({ "id": capsule.id, "provenance": capsule.provenance }),
+                        )
                         .collect(),
                 ),
             );
@@ -212,6 +217,9 @@ impl DecisionSection {
     /// it is reported, so nobody mistakes it for a measurement.
     pub fn estimated_tokens(&self, layer: Layer, context: &RenderContext) -> usize {
         let rendered = self.render(layer, context);
-        serde_json::to_string(&rendered).map(|s| s.len()).unwrap_or(0) / 4
+        serde_json::to_string(&rendered)
+            .map(|s| s.len())
+            .unwrap_or(0)
+            / 4
     }
 }

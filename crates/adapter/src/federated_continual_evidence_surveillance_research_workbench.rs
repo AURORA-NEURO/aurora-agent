@@ -3,6 +3,7 @@
 //! permitted aggregate contributions; raw observations never enter the view artifact.
 
 use crate::federated_continual_evidence_surveillance_research_copilot::{
+    canonical_federated_continual_evidence_surveillance_research_copilot_request,
     run_federated_continual_evidence_surveillance_research_copilot,
     FederatedContinualEvidenceSurveillanceResearchCopilotRequest,
     FederatedContinualResearchCopilotDisposition,
@@ -35,6 +36,8 @@ const PANELS: [&str; 4] = [
     "panel:qualified",
     "panel:unknown",
 ];
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_ITEMS: usize = 16_384;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest {
     pub copilot_request: FederatedContinualEvidenceSurveillanceResearchCopilotRequest,
@@ -51,12 +54,20 @@ pub struct FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt {
     pub schema_version: String,
     pub contract_version: String,
     pub feature_id: String,
+    pub input: FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest,
+    pub input_digest: ContentHash,
     pub request_id: String,
     pub workbench_id: String,
     pub scope: String,
     pub federation_id: String,
     pub purpose: String,
     pub endpoint: String,
+    pub semantic_profile: String,
+    pub allowed_artifacts: Vec<String>,
+    pub min_peer_quorum: usize,
+    pub budget_units: u32,
+    pub policy_allow: bool,
+    pub protected_closure: bool,
     pub disposition: FederatedContinualResearchCopilotDisposition,
     pub view_order: Vec<String>,
     pub panel_order: Vec<String>,
@@ -88,6 +99,110 @@ pub enum FederatedContinualEvidenceSurveillanceResearchWorkbenchError {
     #[error("federated workbench copilot failed: {0}")]
     Copilot(String),
 }
+
+fn validate_text(
+    field: &str,
+    value: &str,
+) -> Result<(), FederatedContinualEvidenceSurveillanceResearchWorkbenchError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(format!(
+                "{field} must be non-empty and trimmed"
+            )),
+        );
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(format!(
+                "{field} is outside its bounded text contract"
+            )),
+        );
+    }
+    Ok(())
+}
+
+fn validate_unique_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), FederatedContinualEvidenceSurveillanceResearchWorkbenchError> {
+    if values.len() > MAX_ITEMS {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(format!(
+                "{field} exceeds its item bound"
+            )),
+        );
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(format!(
+                    "{field} contains duplicate values"
+                )),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), FederatedContinualEvidenceSurveillanceResearchWorkbenchError> {
+    validate_unique_strings(field, values)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(format!(
+                "{field} ordering is not canonical"
+            )),
+        );
+    }
+    Ok(())
+}
+
+fn validate_digest(
+    field: &str,
+    digest: &ContentHash,
+) -> Result<(), FederatedContinualEvidenceSurveillanceResearchWorkbenchError> {
+    if digest.as_str().len() != 64
+        || !digest
+            .as_str()
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(format!(
+                "{field} must be a 64-character hex digest"
+            )),
+        );
+    }
+    Ok(())
+}
+
+fn federated_workbench_input_digest(
+    request: &FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest,
+) -> Result<ContentHash, FederatedContinualEvidenceSurveillanceResearchWorkbenchError> {
+    let canonical =
+        canonical_federated_continual_evidence_surveillance_research_workbench_request(request);
+    let value = serde_json::to_value(canonical).map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string())
+    })?;
+    ContentHash::of_value(&value).map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string())
+    })
+}
+
+fn canonical_federated_continual_evidence_surveillance_research_workbench_request(
+    request: &FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest,
+) -> FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest {
+    let mut canonical = request.clone();
+    canonical.copilot_request =
+        canonical_federated_continual_evidence_surveillance_research_copilot_request(
+            &canonical.copilot_request,
+        );
+    canonical
+}
 impl FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt {
     pub fn validate(
         &self,
@@ -103,6 +218,10 @@ impl FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt {
             || self.federation_id.trim().is_empty()
             || self.purpose.trim().is_empty()
             || self.endpoint.trim().is_empty()
+            || self.semantic_profile.trim().is_empty()
+            || self.allowed_artifacts.is_empty()
+            || self.min_peer_quorum == 0
+            || self.budget_units == 0
             || self.view_order != VIEWS.iter().map(|v| (*v).to_string()).collect::<Vec<_>>()
             || self.panel_order != PANELS.iter().map(|v| (*v).to_string()).collect::<Vec<_>>()
             || self.candidate_order.is_empty()
@@ -110,26 +229,24 @@ impl FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt {
         {
             return Err(FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid("federated workbench identity, canonical views, locality, candidates, or effects are incomplete".into()));
         }
-        for values in [
-            &self.peer_order,
-            &self.candidate_order,
-            &self.qualified_order,
-            &self.unknown_order,
-            &self.blocked_order,
-            &self.aggregate_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
-        ] {
-            if values.windows(2).any(|p| p[0] >= p[1]) {
-                return Err(
-                    FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
-                        "federated workbench ordering is not canonical".into(),
-                    ),
-                );
-            }
-        }
+        validate_text("request_id", &self.request_id)?;
+        validate_text("workbench_id", &self.workbench_id)?;
+        validate_text("scope", &self.scope)?;
+        validate_text("federation_id", &self.federation_id)?;
+        validate_text("purpose", &self.purpose)?;
+        validate_text("endpoint", &self.endpoint)?;
+        validate_text("semantic_profile", &self.semantic_profile)?;
+        validate_sorted_strings("allowed_artifacts", &self.allowed_artifacts)?;
+        validate_sorted_strings("peer_order", &self.peer_order)?;
+        validate_sorted_strings("candidate_order", &self.candidate_order)?;
+        validate_sorted_strings("qualified_order", &self.qualified_order)?;
+        validate_sorted_strings("unknown_order", &self.unknown_order)?;
+        validate_sorted_strings("blocked_order", &self.blocked_order)?;
+        validate_sorted_strings("aggregate_order", &self.aggregate_order)?;
+        validate_sorted_strings("omissions", &self.omissions)?;
+        validate_sorted_strings("uncertainty", &self.uncertainty)?;
+        validate_sorted_strings("negative_evidence", &self.negative_evidence)?;
+        validate_sorted_strings("effect_receipts", &self.effect_receipts)?;
         let classified = self
             .qualified_order
             .iter()
@@ -144,6 +261,13 @@ impl FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt {
                 ),
             );
         }
+        if self.aggregate_order != self.qualified_order {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                    "federated workbench aggregate view must equal qualified view".into(),
+                ),
+            );
+        }
         for value in [
             &self.replay_identity,
             &self.copilot_run_digest,
@@ -152,26 +276,161 @@ impl FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt {
             &self.envelope_digest,
             &self.artifact.content_hash,
         ] {
-            if value.as_str().len() != 64 {
-                return Err(
-                    FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
-                        "federated workbench digest is invalid".into(),
-                    ),
-                );
-            }
+            validate_digest("federated workbench receipt digest", value)?;
         }
-        if self.effect_receipts.iter().any(|e| {
-            !e.starts_with("view:federated-evidence-workbench:") && e != "block:unsafe-release"
-        }) {
+        let expected_effect = format!("view:federated-evidence-workbench:{}", self.workbench_id);
+        if self.effect_receipts != vec![expected_effect] {
             return Err(
                 FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
-                    "federated workbench effect is outside read-only gate".into(),
+                    "federated workbench effect is not the declared read-only view".into(),
                 ),
             );
         }
+        let expected_federation = ContentHash::of_value(&json!({
+            "federation_id": self.federation_id,
+            "purpose": self.purpose,
+            "endpoint": self.endpoint,
+            "peer_order": self.peer_order,
+            "min_peer_quorum": self.min_peer_quorum,
+        }))
+        .map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(
+                error.to_string(),
+            )
+        })?;
+        if self.federation_digest != expected_federation {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                    "federated workbench federation digest does not match peer scope".into(),
+                ),
+            );
+        }
+        let expected_envelope = ContentHash::of_value(&json!({
+            "allowed_artifacts": self.allowed_artifacts,
+            "semantic_profile": self.semantic_profile,
+            "aggregate_order": self.aggregate_order,
+            "raw_data_local": self.raw_data_local,
+            "policy_allow": self.policy_allow,
+            "protected_closure": self.protected_closure,
+        }))
+        .map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(
+                error.to_string(),
+            )
+        })?;
+        if self.envelope_digest != expected_envelope {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                    "federated workbench envelope digest does not match aggregate policy scope"
+                        .into(),
+                ),
+            );
+        }
+        let expected_workbench = ContentHash::of_value(&json!({
+            "workbench_id": self.workbench_id,
+            "scope": self.scope,
+            "federation_id": self.federation_id,
+            "purpose": self.purpose,
+            "endpoint": self.endpoint,
+            "semantic_profile": self.semantic_profile,
+            "views": self.view_order,
+            "panels": self.panel_order,
+            "peer_order": self.peer_order,
+            "candidate": self.candidate_order,
+            "qualified": self.qualified_order,
+            "unknown": self.unknown_order,
+            "blocked": self.blocked_order,
+            "aggregate": self.aggregate_order,
+            "replay_identity": self.replay_identity,
+            "copilot_run_digest": self.copilot_run_digest,
+        }))
+        .map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(
+                error.to_string(),
+            )
+        })?;
+        if self.workbench_digest != expected_workbench {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                    "federated workbench digest does not match its rendered state".into(),
+                ),
+            );
+        }
+        if self.artifact.artifact_id
+            != format!("adapter-federated-evidence-workbench:{}", self.workbench_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.federated-evidence-workbench+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(
+                    "federated workbench artifact is not bound to its rendered state".into(),
+                ),
+            );
+        }
+        let payload = json!({
+            "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+            "contract_version": CONTRACT_VERSION,
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "workbench_id": self.workbench_id,
+            "scope": self.scope,
+            "federation_id": self.federation_id,
+            "purpose": self.purpose,
+            "endpoint": self.endpoint,
+            "semantic_profile": self.semantic_profile,
+            "allowed_artifacts": self.allowed_artifacts,
+            "min_peer_quorum": self.min_peer_quorum,
+            "budget_units": self.budget_units,
+            "policy_allow": self.policy_allow,
+            "protected_closure": self.protected_closure,
+            "disposition": self.disposition,
+            "view_order": self.view_order,
+            "panel_order": self.panel_order,
+            "peer_order": self.peer_order,
+            "candidate_order": self.candidate_order,
+            "qualified_order": self.qualified_order,
+            "unknown_order": self.unknown_order,
+            "blocked_order": self.blocked_order,
+            "aggregate_order": self.aggregate_order,
+            "replay_identity": self.replay_identity,
+            "copilot_run_digest": self.copilot_run_digest,
+            "workbench_digest": self.workbench_digest,
+            "federation_digest": self.federation_digest,
+            "envelope_digest": self.envelope_digest,
+            "omissions": self.omissions,
+            "uncertainty": self.uncertainty,
+            "negative_evidence": self.negative_evidence,
+            "effect_receipts": self.effect_receipts,
+            "boundary": PRECLINICAL_BOUNDARY,
+            "raw_data_local": self.raw_data_local,
+        });
+        self.artifact.verify_payload(&payload).map_err(|error| {
+            FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(
+                error.to_string(),
+            )
+        })?;
         self.artifact.validate_metadata().map_err(|e| {
             FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string())
-        })
+        })?;
+        if self.input_digest != federated_workbench_input_digest(&self.input)? {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                    "federated workbench retained input digest mismatch".into(),
+                ),
+            );
+        }
+        let expected =
+            build_federated_continual_evidence_surveillance_research_workbench(&self.input)?;
+        if self != &expected {
+            return Err(
+                FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                    "federated workbench receipt does not match its retained input".into(),
+                ),
+            );
+        }
+        Ok(())
     }
 }
 pub fn federated_continual_evidence_surveillance_research_workbench_manifest() -> CapabilityManifest
@@ -184,7 +443,21 @@ pub fn render_federated_continual_evidence_surveillance_research_workbench(
     FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
     FederatedContinualEvidenceSurveillanceResearchWorkbenchError,
 > {
+    let receipt = build_federated_continual_evidence_surveillance_research_workbench(request)?;
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+fn build_federated_continual_evidence_surveillance_research_workbench(
+    request: &FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest,
+) -> Result<
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt,
+    FederatedContinualEvidenceSurveillanceResearchWorkbenchError,
+> {
     validate_request(request)?;
+    let canonical_request =
+        canonical_federated_continual_evidence_surveillance_research_workbench_request(request);
+    let request = &canonical_request;
     let c =
         run_federated_continual_evidence_surveillance_research_copilot(&request.copilot_request)
             .map_err(|e| {
@@ -197,18 +470,73 @@ pub fn render_federated_continual_evidence_surveillance_research_workbench(
     let unknown = c.unresolved_order.clone();
     let blocked = c.denied_order.clone();
     let aggregate = c.aggregate_order.clone();
-    let cv = serde_json::to_value(&c).map_err(|e| {
-        FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string())
+    let copilot_run_digest = c.run_digest.clone();
+    let workbench_digest = ContentHash::of_value(&json!({
+        "workbench_id": request.workbench_id,
+        "scope": request.scope,
+        "federation_id": request.copilot_request.federation_id,
+        "purpose": request.copilot_request.purpose,
+        "endpoint": request.copilot_request.endpoint,
+        "semantic_profile": request.copilot_request.semantic_profile,
+        "views": views,
+        "panels": panels,
+        "peer_order": c.peer_order,
+        "candidate": candidate,
+        "qualified": qualified,
+        "unknown": unknown,
+        "blocked": blocked,
+        "aggregate": aggregate,
+        "replay_identity": request.replay_identity,
+        "copilot_run_digest": copilot_run_digest,
+    }))
+    .map_err(|error| {
+        FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(error.to_string())
     })?;
-    let copilot_run_digest = ContentHash::of_value(&cv).map_err(|e| {
-        FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string())
-    })?;
-    let workbench_digest=ContentHash::of_value(&json!({"workbench_id":request.workbench_id,"scope":request.scope,"federation_id":request.copilot_request.federation_id,"purpose":request.copilot_request.purpose,"views":views,"panels":panels,"candidate":candidate,"qualified":qualified,"unknown":unknown,"blocked":blocked,"aggregate":aggregate,"replay_identity":request.replay_identity,"copilot_run_digest":copilot_run_digest})).map_err(|e|FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string()))?;
     let mut omissions = c.omissions.clone();
     omissions.push("workbench:read-only-federated-view".into());
     omissions.sort();
     omissions.dedup();
-    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":request.copilot_request.request_id,"workbench_id":request.workbench_id,"scope":request.scope,"federation_id":request.copilot_request.federation_id,"purpose":request.copilot_request.purpose,"endpoint":request.copilot_request.endpoint,"disposition":c.disposition,"view_order":views,"panel_order":panels,"peer_order":c.peer_order,"candidate_order":candidate,"qualified_order":qualified,"unknown_order":unknown,"blocked_order":blocked,"aggregate_order":aggregate,"replay_identity":request.replay_identity,"copilot_run_digest":copilot_run_digest,"workbench_digest":workbench_digest,"federation_digest":c.federation_digest,"envelope_digest":c.envelope_digest,"omissions":omissions,"uncertainty":c.uncertainty,"negative_evidence":c.negative_evidence,"boundary":PRECLINICAL_BOUNDARY,"raw_data_local":true});
+    let effect_receipts = vec![format!(
+        "view:federated-evidence-workbench:{}",
+        request.workbench_id
+    )];
+    let payload = json!({
+        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "feature_id": FEATURE_ID,
+        "request_id": request.copilot_request.request_id,
+        "workbench_id": request.workbench_id,
+        "scope": request.scope,
+        "federation_id": request.copilot_request.federation_id,
+        "purpose": request.copilot_request.purpose,
+        "endpoint": request.copilot_request.endpoint,
+        "semantic_profile": request.copilot_request.semantic_profile,
+        "allowed_artifacts": request.copilot_request.allowed_artifacts,
+        "min_peer_quorum": request.copilot_request.min_peer_quorum,
+        "budget_units": request.budget_units,
+        "policy_allow": request.copilot_request.policy_allow,
+        "protected_closure": request.copilot_request.protected_closure,
+        "disposition": c.disposition,
+        "view_order": views,
+        "panel_order": panels,
+        "peer_order": c.peer_order,
+        "candidate_order": candidate,
+        "qualified_order": qualified,
+        "unknown_order": unknown,
+        "blocked_order": blocked,
+        "aggregate_order": aggregate,
+        "replay_identity": request.replay_identity,
+        "copilot_run_digest": copilot_run_digest,
+        "workbench_digest": workbench_digest,
+        "federation_digest": c.federation_digest,
+        "envelope_digest": c.envelope_digest,
+        "omissions": omissions,
+        "uncertainty": c.uncertainty,
+        "negative_evidence": c.negative_evidence,
+        "effect_receipts": effect_receipts,
+        "boundary": PRECLINICAL_BOUNDARY,
+        "raw_data_local": true,
+    });
     let artifact = TypedResearchArtifact::from_payload(
         format!(
             "adapter-federated-evidence-workbench:{}",
@@ -222,16 +550,25 @@ pub fn render_federated_continual_evidence_surveillance_research_workbench(
     .map_err(|e| {
         FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Artifact(e.to_string())
     })?;
+    let input_digest = federated_workbench_input_digest(request)?;
     let receipt = FederatedContinualEvidenceSurveillanceResearchWorkbenchReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
+        input: canonical_request.clone(),
+        input_digest,
         request_id: request.copilot_request.request_id.clone(),
         workbench_id: request.workbench_id.clone(),
         scope: request.scope.clone(),
         federation_id: request.copilot_request.federation_id.clone(),
         purpose: request.copilot_request.purpose.clone(),
         endpoint: request.copilot_request.endpoint.clone(),
+        semantic_profile: request.copilot_request.semantic_profile.clone(),
+        allowed_artifacts: request.copilot_request.allowed_artifacts.clone(),
+        min_peer_quorum: request.copilot_request.min_peer_quorum,
+        budget_units: request.budget_units,
+        policy_allow: request.copilot_request.policy_allow,
+        protected_closure: request.copilot_request.protected_closure,
         disposition: c.disposition,
         view_order: views,
         panel_order: panels,
@@ -249,23 +586,18 @@ pub fn render_federated_continual_evidence_surveillance_research_workbench(
         omissions,
         uncertainty: c.uncertainty.clone(),
         negative_evidence: c.negative_evidence.clone(),
-        effect_receipts: vec![format!(
-            "view:federated-evidence-workbench:{}",
-            request.workbench_id
-        )],
+        effect_receipts,
         artifact,
         raw_data_local: true,
         boundary: request.boundary.clone(),
     };
-    receipt.validate()?;
     Ok(receipt)
 }
 fn validate_request(
     r: &FederatedContinualEvidenceSurveillanceResearchWorkbenchRequest,
 ) -> Result<(), FederatedContinualEvidenceSurveillanceResearchWorkbenchError> {
-    if r.workbench_id.trim().is_empty()
-        || r.scope.trim().is_empty()
-        || r.budget_units == 0
+    if r.budget_units == 0
+        || u64::from(r.budget_units) > MAX_ITEMS as u64
         || r.boundary != PRECLINICAL_BOUNDARY
         || r.copilot_request.boundary != PRECLINICAL_BOUNDARY
         || !r.copilot_request.raw_data_local
@@ -278,10 +610,26 @@ fn validate_request(
             ),
         );
     }
+    validate_text("workbench_id", &r.workbench_id)?;
+    validate_text("scope", &r.scope)?;
+    validate_text("boundary", &r.boundary)?;
+    validate_text("copilot request_id", &r.copilot_request.request_id)?;
+    validate_text("copilot federation_id", &r.copilot_request.federation_id)?;
+    validate_text("copilot purpose", &r.copilot_request.purpose)?;
+    validate_text("copilot endpoint", &r.copilot_request.endpoint)?;
+    validate_text(
+        "copilot semantic_profile",
+        &r.copilot_request.semantic_profile,
+    )?;
+    if r.scope != format!("federation:{}", r.copilot_request.federation_id) {
+        return Err(
+            FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
+                "federated workbench scope must bind to its federation".into(),
+            ),
+        );
+    }
     if r.requested_view_order != VIEWS.iter().map(|v| (*v).to_string()).collect::<Vec<_>>()
         || r.requested_panel_order != PANELS.iter().map(|v| (*v).to_string()).collect::<Vec<_>>()
-        || r.replay_identity.as_str().len() != 64
-        || r.copilot_request.replay_identity.as_str().len() != 64
     {
         return Err(
             FederatedContinualEvidenceSurveillanceResearchWorkbenchError::Invalid(
@@ -289,6 +637,11 @@ fn validate_request(
             ),
         );
     }
+    validate_digest("workbench replay identity", &r.replay_identity)?;
+    validate_digest(
+        "copilot replay identity",
+        &r.copilot_request.replay_identity,
+    )?;
     Ok(())
 }
 
@@ -374,7 +727,14 @@ mod tests {
     fn policy_denial_visible() {
         let mut r = request();
         r.copilot_request.policy_allow = false;
-        assert!(render_federated_continual_evidence_surveillance_research_workbench(&r).is_ok())
+        let receipt =
+            render_federated_continual_evidence_surveillance_research_workbench(&r).unwrap();
+        assert!(receipt.qualified_order.is_empty());
+        assert_eq!(receipt.blocked_order, receipt.candidate_order);
+        assert_eq!(
+            receipt.effect_receipts,
+            vec!["view:federated-evidence-workbench:wb-20"]
+        );
     }
     #[test]
     fn rejects_non_dry_run() {
@@ -389,11 +749,56 @@ mod tests {
         assert!(render_federated_continual_evidence_surveillance_research_workbench(&r).is_err())
     }
     #[test]
+    fn scope_must_bind_to_federation() {
+        let mut r = request();
+        r.scope = "federation:other".into();
+        assert!(render_federated_continual_evidence_surveillance_research_workbench(&r).is_err())
+    }
+    #[test]
+    fn tampered_workbench_digest_is_rejected() {
+        let mut receipt =
+            render_federated_continual_evidence_surveillance_research_workbench(&request())
+                .unwrap();
+        receipt.workbench_digest = ContentHash::of_bytes(b"tampered-workbench");
+        assert!(receipt.validate().is_err())
+    }
+    #[test]
+    fn tampered_envelope_digest_is_rejected() {
+        let mut receipt =
+            render_federated_continual_evidence_surveillance_research_workbench(&request())
+                .unwrap();
+        receipt.envelope_digest = ContentHash::of_bytes(b"tampered-envelope");
+        assert!(receipt.validate().is_err())
+    }
+    #[test]
+    fn tampered_retained_request_is_rejected() {
+        let mut receipt =
+            render_federated_continual_evidence_surveillance_research_workbench(&request())
+                .unwrap();
+        receipt.input.scope = "federation:tampered".into();
+        assert!(receipt.validate().is_err())
+    }
+    #[test]
     fn replay_stable() {
         let r = request();
         assert_eq!(
             render_federated_continual_evidence_surveillance_research_workbench(&r).unwrap(),
             render_federated_continual_evidence_surveillance_research_workbench(&r).unwrap()
         )
+    }
+
+    #[test]
+    fn reordered_nested_copilot_input_has_stable_identity() {
+        let mut reordered = request();
+        reordered.copilot_request.allowed_artifacts.reverse();
+        reordered.copilot_request.declared_tools.reverse();
+        reordered.copilot_request.contributions.reverse();
+        let first = render_federated_continual_evidence_surveillance_research_workbench(&request())
+            .unwrap();
+        let second =
+            render_federated_continual_evidence_surveillance_research_workbench(&reordered)
+                .unwrap();
+        assert_eq!(first.input_digest, second.input_digest);
+        assert_eq!(first.workbench_digest, second.workbench_digest);
     }
 }

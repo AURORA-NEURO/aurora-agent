@@ -3,7 +3,11 @@
 //! Atlas feature: `AFA-brain-P03-F26`. The harness checks the complete study ×
 //! modality closure and semantic comparability before a context can qualify.
 
-use bioprism_foundation::{AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference, EvidenceState, ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION};
+use bioprism_foundation::{
+    AutonomyTier, CapabilityManifest, Determinism, Effect, EvidenceReference, EvidenceState,
+    ResearchSurface, TypedPort, TypedResearchArtifact, PRECLINICAL_BOUNDARY,
+    RESEARCH_CONTRACT_SCHEMA_VERSION,
+};
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -14,21 +18,435 @@ pub const FEATURE_ID: &str = "AFA-brain-P03-F26";
 pub const CONTRACT_VERSION: &str = "brain-multimodal-context-compilation-assurance/1.0";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MultimodalContextAssuranceCell { pub study_id: String, pub modality: String, pub context_digest: ContentHash, pub section_digest: ContentHash, pub evidence_digest: Option<ContentHash>, pub provenance_digest: Option<ContentHash>, pub replay_identity: ContentHash, pub state: EvidenceState, pub comparable: bool, pub raw_data_local: bool, pub boundary: String }
+pub struct MultimodalContextAssuranceCell {
+    pub study_id: String,
+    pub modality: String,
+    pub context_digest: ContentHash,
+    pub section_digest: ContentHash,
+    pub evidence_digest: Option<ContentHash>,
+    pub provenance_digest: Option<ContentHash>,
+    pub replay_identity: ContentHash,
+    pub state: EvidenceState,
+    pub comparable: bool,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MultimodalContextAssuranceRequest { pub request_id: String, pub scope: String, pub study_order: Vec<String>, pub modality_order: Vec<String>, pub cells: Vec<MultimodalContextAssuranceCell>, pub replay_identity: ContentHash, pub policy_allow: bool, pub protected_closure: bool, pub raw_data_local: bool, pub boundary: String }
+pub struct MultimodalContextAssuranceRequest {
+    pub request_id: String,
+    pub scope: String,
+    pub study_order: Vec<String>,
+    pub modality_order: Vec<String>,
+    pub cells: Vec<MultimodalContextAssuranceCell>,
+    pub replay_identity: ContentHash,
+    pub policy_allow: bool,
+    pub protected_closure: bool,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MultimodalContextAssuranceVerdict { Qualified, Unresolved, Blocked }
+pub enum MultimodalContextAssuranceVerdict {
+    Qualified,
+    Unresolved,
+    Blocked,
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MultimodalContextAssuranceReceipt { pub schema_version: String, pub contract_version: String, pub feature_id: String, pub request_id: String, pub scope: String, pub verdict: MultimodalContextAssuranceVerdict, pub study_order: Vec<String>, pub modality_order: Vec<String>, pub candidate_order: Vec<String>, pub qualified_order: Vec<String>, pub blocked_order: Vec<String>, pub unknown_order: Vec<String>, pub missing_order: Vec<String>, pub incomparable_order: Vec<String>, pub witness_order: Vec<String>, pub counterexample_order: Vec<String>, pub verification_digest: ContentHash, pub replay_identity: ContentHash, pub omissions: Vec<String>, pub uncertainty: Vec<String>, pub negative_evidence: Vec<String>, pub effect_receipts: Vec<String>, pub artifact: TypedResearchArtifact, pub raw_data_local: bool, pub boundary: String }
+pub struct MultimodalContextAssuranceReceipt {
+    pub schema_version: String,
+    pub contract_version: String,
+    pub feature_id: String,
+    pub request_id: String,
+    pub scope: String,
+    pub verdict: MultimodalContextAssuranceVerdict,
+    pub study_order: Vec<String>,
+    pub modality_order: Vec<String>,
+    pub candidate_order: Vec<String>,
+    pub qualified_order: Vec<String>,
+    pub blocked_order: Vec<String>,
+    pub unknown_order: Vec<String>,
+    pub missing_order: Vec<String>,
+    pub incomparable_order: Vec<String>,
+    pub witness_order: Vec<String>,
+    pub counterexample_order: Vec<String>,
+    pub verification_digest: ContentHash,
+    pub replay_identity: ContentHash,
+    pub omissions: Vec<String>,
+    pub uncertainty: Vec<String>,
+    pub negative_evidence: Vec<String>,
+    pub effect_receipts: Vec<String>,
+    pub artifact: TypedResearchArtifact,
+    pub raw_data_local: bool,
+    pub boundary: String,
+}
 #[derive(Debug, Error, PartialEq, Eq)]
-pub enum MultimodalContextAssuranceError { #[error("invalid multimodal context assurance request: {0}")] Invalid(String), #[error("multimodal context assurance artifact failed: {0}")] Artifact(String) }
+pub enum MultimodalContextAssuranceError {
+    #[error("invalid multimodal context assurance request: {0}")]
+    Invalid(String),
+    #[error("multimodal context assurance artifact failed: {0}")]
+    Artifact(String),
+}
 
-impl MultimodalContextAssuranceReceipt { pub fn validate(&self) -> Result<(), MultimodalContextAssuranceError> { if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION || self.contract_version != CONTRACT_VERSION || self.feature_id != FEATURE_ID || self.boundary != PRECLINICAL_BOUNDARY || !self.raw_data_local || self.request_id.trim().is_empty() || self.scope.trim().is_empty() || self.study_order.len() < 2 || self.modality_order.len() < 2 || self.candidate_order.is_empty() || self.witness_order.is_empty() || self.effect_receipts.is_empty() { return Err(MultimodalContextAssuranceError::Invalid("multimodal assurance identity, closure, witnesses, locality, or effects are incomplete".into())); } for values in [&self.study_order,&self.modality_order,&self.candidate_order,&self.qualified_order,&self.blocked_order,&self.unknown_order,&self.missing_order,&self.incomparable_order,&self.witness_order,&self.counterexample_order,&self.omissions,&self.uncertainty,&self.negative_evidence,&self.effect_receipts] { if values.windows(2).any(|p| p[0] >= p[1]) { return Err(MultimodalContextAssuranceError::Invalid("multimodal assurance ordering is not canonical".into())); } } let classified=self.qualified_order.iter().chain(self.blocked_order.iter()).chain(self.unknown_order.iter()).cloned().collect::<BTreeSet<_>>(); if classified.len()!=self.candidate_order.len()||classified.iter().any(|v|!self.candidate_order.contains(v)){return Err(MultimodalContextAssuranceError::Invalid("multimodal assurance outcomes do not partition candidates".into()));} for digest in [&self.verification_digest,&self.replay_identity] { if digest.as_str().len()!=64{return Err(MultimodalContextAssuranceError::Invalid("multimodal assurance digest is invalid".into()));} } if self.effect_receipts.iter().any(|e|!e.starts_with("assurance:local-multimodal-context:")&&e!="block:unsafe-release"){return Err(MultimodalContextAssuranceError::Invalid("multimodal assurance effect is outside the local release gate".into()));} self.artifact.validate_metadata().map_err(|e|MultimodalContextAssuranceError::Artifact(e.to_string())) } pub fn digest(&self)->Result<ContentHash,MultimodalContextAssuranceError>{self.validate()?;let value=serde_json::to_value(self).map_err(|e|MultimodalContextAssuranceError::Artifact(e.to_string()))?;ContentHash::of_value(&value).map_err(|e|MultimodalContextAssuranceError::Artifact(e.to_string()))} }
+impl MultimodalContextAssuranceReceipt {
+    pub fn validate(&self) -> Result<(), MultimodalContextAssuranceError> {
+        if self.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.contract_version != CONTRACT_VERSION
+            || self.feature_id != FEATURE_ID
+            || self.boundary != PRECLINICAL_BOUNDARY
+            || !self.raw_data_local
+            || self.request_id.trim().is_empty()
+            || self.scope.trim().is_empty()
+            || self.study_order.len() < 2
+            || self.modality_order.len() < 2
+            || self.candidate_order.is_empty()
+            || self.witness_order.is_empty()
+            || self.effect_receipts.is_empty()
+        {
+            return Err(MultimodalContextAssuranceError::Invalid("multimodal assurance identity, closure, witnesses, locality, or effects are incomplete".into()));
+        }
+        for values in [
+            &self.study_order,
+            &self.modality_order,
+            &self.candidate_order,
+            &self.qualified_order,
+            &self.blocked_order,
+            &self.unknown_order,
+            &self.missing_order,
+            &self.incomparable_order,
+            &self.witness_order,
+            &self.counterexample_order,
+            &self.omissions,
+            &self.uncertainty,
+            &self.negative_evidence,
+            &self.effect_receipts,
+        ] {
+            if values.windows(2).any(|p| p[0] >= p[1]) {
+                return Err(MultimodalContextAssuranceError::Invalid(
+                    "multimodal assurance ordering is not canonical".into(),
+                ));
+            }
+        }
+        let classified = self
+            .qualified_order
+            .iter()
+            .chain(self.blocked_order.iter())
+            .chain(self.unknown_order.iter())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if classified.len() != self.candidate_order.len()
+            || classified.iter().any(|v| !self.candidate_order.contains(v))
+        {
+            return Err(MultimodalContextAssuranceError::Invalid(
+                "multimodal assurance outcomes do not partition candidates".into(),
+            ));
+        }
+        for digest in [&self.verification_digest, &self.replay_identity] {
+            if digest.as_str().len() != 64 {
+                return Err(MultimodalContextAssuranceError::Invalid(
+                    "multimodal assurance digest is invalid".into(),
+                ));
+            }
+        }
+        if self.effect_receipts.iter().any(|e| {
+            !e.starts_with("assurance:local-multimodal-context:") && e != "block:unsafe-release"
+        }) {
+            return Err(MultimodalContextAssuranceError::Invalid(
+                "multimodal assurance effect is outside the local release gate".into(),
+            ));
+        }
+        self.artifact
+            .validate_metadata()
+            .map_err(|e| MultimodalContextAssuranceError::Artifact(e.to_string()))
+    }
+    pub fn digest(&self) -> Result<ContentHash, MultimodalContextAssuranceError> {
+        self.validate()?;
+        let value = serde_json::to_value(self)
+            .map_err(|e| MultimodalContextAssuranceError::Artifact(e.to_string()))?;
+        ContentHash::of_value(&value)
+            .map_err(|e| MultimodalContextAssuranceError::Artifact(e.to_string()))
+    }
+}
 
-pub fn multimodal_context_compilation_assurance_manifest()->CapabilityManifest{CapabilityManifest{schema_version:RESEARCH_CONTRACT_SCHEMA_VERSION.into(),capability_id:FEATURE_ID.into(),version:CONTRACT_VERSION.into(),owner_crate:"brain".into(),consumers:["platform reliability engineer".into(),"multimodal context compiler".into(),"research workbench".into()].into(),behavior:"verifies complete study-by-modality context closure, comparability, provenance, replay, and locality before qualification".into(),value:"prevents missing or semantically incomparable imaging and omics context from being promoted as a certified section".into(),inputs:vec![TypedPort{name:"multimodal_context_assurance_request".into(),schema:"MultimodalContextAssuranceRequest1@1".into(),required:true}],outputs:vec![TypedPort{name:"multimodal_context_assurance_receipt".into(),schema:"MultimodalContextAssuranceResponse1@1".into(),required:true}],effects:[Effect::ReadLocalData,Effect::ExecuteLocalComputation,Effect::WriteLocalArtifact].into(),permissions:["evaluate:multimodal-context-compilation".into()].into(),determinism:Determinism::ByteStable,evidence:vec![EvidenceReference{source_id:"slsa-provenance-1.2".into(),state:EvidenceState::Supported,locator:Some("https://slsa.dev/spec/v1.2/provenance".into())}],authority_requirements:Vec::new(),autonomy_tier:AutonomyTier::A1,surfaces:[ResearchSurface::Ui,ResearchSurface::Api,ResearchSurface::Sdk,ResearchSurface::Cli,ResearchSurface::McpTool,ResearchSurface::Policy,ResearchSurface::Operator].into(),boundary:PRECLINICAL_BOUNDARY.into()}}
+pub fn multimodal_context_compilation_assurance_manifest() -> CapabilityManifest {
+    CapabilityManifest{schema_version:RESEARCH_CONTRACT_SCHEMA_VERSION.into(),capability_id:FEATURE_ID.into(),version:CONTRACT_VERSION.into(),owner_crate:"brain".into(),consumers:["platform reliability engineer".into(),"multimodal context compiler".into(),"research workbench".into()].into(),behavior:"verifies complete study-by-modality context closure, comparability, provenance, replay, and locality before qualification".into(),value:"prevents missing or semantically incomparable imaging and omics context from being promoted as a certified section".into(),inputs:vec![TypedPort{name:"multimodal_context_assurance_request".into(),schema:"MultimodalContextAssuranceRequest1@1".into(),required:true}],outputs:vec![TypedPort{name:"multimodal_context_assurance_receipt".into(),schema:"MultimodalContextAssuranceResponse1@1".into(),required:true}],effects:[Effect::ReadLocalData,Effect::ExecuteLocalComputation,Effect::WriteLocalArtifact].into(),permissions:["evaluate:multimodal-context-compilation".into()].into(),determinism:Determinism::ByteStable,evidence:vec![EvidenceReference{source_id:"slsa-provenance-1.2".into(),state:EvidenceState::Supported,locator:Some("https://slsa.dev/spec/v1.2/provenance".into())}],authority_requirements:Vec::new(),autonomy_tier:AutonomyTier::A1,surfaces:[ResearchSurface::Ui,ResearchSurface::Api,ResearchSurface::Sdk,ResearchSurface::Cli,ResearchSurface::McpTool,ResearchSurface::Policy,ResearchSurface::Operator].into(),boundary:PRECLINICAL_BOUNDARY.into()}
+}
 
-pub fn assure_multimodal_context_compilation(request:&MultimodalContextAssuranceRequest)->Result<MultimodalContextAssuranceReceipt,MultimodalContextAssuranceError>{if request.request_id.trim().is_empty()||request.scope.trim().is_empty()||request.study_order.len()<2||request.modality_order.len()<2||request.boundary!=PRECLINICAL_BOUNDARY||request.replay_identity.as_str().len()!=64{return Err(MultimodalContextAssuranceError::Invalid("multimodal assurance identity, closure, replay, or boundary is invalid".into()));}let studies=request.study_order.iter().cloned().collect::<BTreeSet<_>>();let modalities=request.modality_order.iter().cloned().collect::<BTreeSet<_>>();if studies.len()!=request.study_order.len()||modalities.len()!=request.modality_order.len()||studies.iter().any(|v|v.trim().is_empty())||modalities.iter().any(|v|v.trim().is_empty()){return Err(MultimodalContextAssuranceError::Invalid("study and modality identifiers must be unique and non-empty".into()));}let candidate_order=studies.iter().flat_map(|s|modalities.iter().map(move|m|format!("{}|{}",s,m))).collect::<Vec<_>>();let mut cells=std::collections::BTreeMap::new();for cell in &request.cells{let key=format!("{}|{}",cell.study_id,cell.modality);if cells.insert(key,cell).is_some(){return Err(MultimodalContextAssuranceError::Invalid("multimodal assurance cells must be unique".into()));}}let mut qualified=BTreeSet::new();let mut blocked=BTreeSet::new();let mut unknown=BTreeSet::new();let mut missing=BTreeSet::new();let mut incomparable=BTreeSet::new();let mut witnesses=BTreeSet::from(["gate:typed-multimodal-contract".to_string(),"gate:study-modality-closure".to_string(),"gate:comparability".to_string(),"gate:provenance".to_string(),"gate:replay-identity".to_string(),"gate:locality".to_string()]);let mut counterexamples=BTreeSet::new();let mut omissions=BTreeSet::new();let mut uncertainty=BTreeSet::new();let mut negative=BTreeSet::new();let global_open=request.policy_allow&&request.protected_closure&&request.raw_data_local;for key in &candidate_order{let Some(cell)=cells.get(key)else{unknown.insert(key.clone());missing.insert(key.clone());omissions.insert(format!("cell:{}:missing",key));continue;};if !global_open||!cell.raw_data_local||cell.boundary!=PRECLINICAL_BOUNDARY{blocked.insert(key.clone());counterexamples.insert(format!("counterexample:{}:policy-protected-closure-locality",key));}else if !cell.comparable{blocked.insert(key.clone());incomparable.insert(key.clone());negative.insert(format!("cell:{}:incomparable",key));}else if cell.replay_identity!=request.replay_identity{unknown.insert(key.clone());uncertainty.insert(format!("cell:{}:replay-mismatch",key));}else if cell.evidence_digest.is_none()||cell.provenance_digest.is_none(){unknown.insert(key.clone());omissions.insert(format!("cell:{}:evidence-or-provenance-missing",key));}else if matches!(cell.state,EvidenceState::Unknown|EvidenceState::Speculative){unknown.insert(key.clone());uncertainty.insert(format!("cell:{}:evidence-uncertain",key));}else if matches!(cell.state,EvidenceState::Contradicted){blocked.insert(key.clone());negative.insert(format!("cell:{}:contradicted",key));}else{qualified.insert(key.clone());}}if !request.policy_allow{counterexamples.insert("counterexample:policy-denied".into());omissions.insert("assurance:policy-denied".into());}if !request.protected_closure{counterexamples.insert("counterexample:protected-closure-incomplete".into());omissions.insert("assurance:protected-closure-incomplete".into());}if !request.raw_data_local{counterexamples.insert("counterexample:raw-data-locality-failed".into());omissions.insert("assurance:raw-data-locality-failed".into());}if !missing.is_empty(){witnesses.insert("gate:missing-modality-retained".into());}let verdict=if !global_open||!blocked.is_empty(){MultimodalContextAssuranceVerdict::Blocked}else if !unknown.is_empty(){MultimodalContextAssuranceVerdict::Unresolved}else{MultimodalContextAssuranceVerdict::Qualified};let verification_digest=ContentHash::of_value(&json!({"feature_id":FEATURE_ID,"request_id":request.request_id,"candidate_order":candidate_order,"qualified_order":qualified,"blocked_order":blocked,"unknown_order":unknown,"missing_order":missing,"incomparable_order":incomparable,"witness_order":witnesses,"counterexample_order":counterexamples,"verdict":verdict,"replay_identity":request.replay_identity})).map_err(|e|MultimodalContextAssuranceError::Artifact(e.to_string()))?;let payload=json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":request.request_id,"scope":request.scope,"verdict":verdict,"study_order":request.study_order,"modality_order":request.modality_order,"candidate_order":candidate_order,"qualified_order":qualified,"blocked_order":blocked,"unknown_order":unknown,"missing_order":missing,"incomparable_order":incomparable,"witness_order":witnesses,"counterexample_order":counterexamples,"verification_digest":verification_digest,"replay_identity":request.replay_identity,"omissions":omissions,"uncertainty":uncertainty,"negative_evidence":negative,"boundary":PRECLINICAL_BOUNDARY});let artifact=TypedResearchArtifact::from_payload(format!("brain-multimodal-context-compilation-assurance:{}",request.request_id),"application/vnd.aurora.multimodal-context-compilation-assurance+json",&payload,Vec::new(),Vec::new()).map_err(|e|MultimodalContextAssuranceError::Artifact(e.to_string()))?;let receipt=MultimodalContextAssuranceReceipt{schema_version:RESEARCH_CONTRACT_SCHEMA_VERSION.into(),contract_version:CONTRACT_VERSION.into(),feature_id:FEATURE_ID.into(),request_id:request.request_id.clone(),scope:request.scope.clone(),verdict,study_order:studies.into_iter().collect(),modality_order:modalities.into_iter().collect(),candidate_order,qualified_order:qualified.into_iter().collect(),blocked_order:blocked.into_iter().collect(),unknown_order:unknown.into_iter().collect(),missing_order:missing.into_iter().collect(),incomparable_order:incomparable.into_iter().collect(),witness_order:witnesses.into_iter().collect(),counterexample_order:counterexamples.into_iter().collect(),verification_digest,replay_identity:request.replay_identity.clone(),omissions:omissions.into_iter().collect(),uncertainty:uncertainty.into_iter().collect(),negative_evidence:negative.into_iter().collect(),effect_receipts:if matches!(verdict,MultimodalContextAssuranceVerdict::Qualified){vec![format!("assurance:local-multimodal-context:{}",request.request_id)]}else{vec!["block:unsafe-release".into()]},artifact,raw_data_local:request.raw_data_local,boundary:PRECLINICAL_BOUNDARY.into()};receipt.validate()?;Ok(receipt)}
+pub fn assure_multimodal_context_compilation(
+    request: &MultimodalContextAssuranceRequest,
+) -> Result<MultimodalContextAssuranceReceipt, MultimodalContextAssuranceError> {
+    if request.request_id.trim().is_empty()
+        || request.scope.trim().is_empty()
+        || request.study_order.len() < 2
+        || request.modality_order.len() < 2
+        || request.boundary != PRECLINICAL_BOUNDARY
+        || request.replay_identity.as_str().len() != 64
+    {
+        return Err(MultimodalContextAssuranceError::Invalid(
+            "multimodal assurance identity, closure, replay, or boundary is invalid".into(),
+        ));
+    }
+    let studies = request.study_order.iter().cloned().collect::<BTreeSet<_>>();
+    let modalities = request
+        .modality_order
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if studies.len() != request.study_order.len()
+        || modalities.len() != request.modality_order.len()
+        || studies.iter().any(|v| v.trim().is_empty())
+        || modalities.iter().any(|v| v.trim().is_empty())
+    {
+        return Err(MultimodalContextAssuranceError::Invalid(
+            "study and modality identifiers must be unique and non-empty".into(),
+        ));
+    }
+    let candidate_order = studies
+        .iter()
+        .flat_map(|s| modalities.iter().map(move |m| format!("{}|{}", s, m)))
+        .collect::<Vec<_>>();
+    let mut cells = std::collections::BTreeMap::new();
+    for cell in &request.cells {
+        let key = format!("{}|{}", cell.study_id, cell.modality);
+        if cells.insert(key, cell).is_some() {
+            return Err(MultimodalContextAssuranceError::Invalid(
+                "multimodal assurance cells must be unique".into(),
+            ));
+        }
+    }
+    let mut qualified = BTreeSet::new();
+    let mut blocked = BTreeSet::new();
+    let mut unknown = BTreeSet::new();
+    let mut missing = BTreeSet::new();
+    let mut incomparable = BTreeSet::new();
+    let mut witnesses = BTreeSet::from([
+        "gate:typed-multimodal-contract".to_string(),
+        "gate:study-modality-closure".to_string(),
+        "gate:comparability".to_string(),
+        "gate:provenance".to_string(),
+        "gate:replay-identity".to_string(),
+        "gate:locality".to_string(),
+    ]);
+    let mut counterexamples = BTreeSet::new();
+    let mut omissions = BTreeSet::new();
+    let mut uncertainty = BTreeSet::new();
+    let mut negative = BTreeSet::new();
+    let global_open = request.policy_allow && request.protected_closure && request.raw_data_local;
+    for key in &candidate_order {
+        let Some(cell) = cells.get(key) else {
+            unknown.insert(key.clone());
+            missing.insert(key.clone());
+            omissions.insert(format!("cell:{}:missing", key));
+            continue;
+        };
+        if !global_open || !cell.raw_data_local || cell.boundary != PRECLINICAL_BOUNDARY {
+            blocked.insert(key.clone());
+            counterexamples.insert(format!(
+                "counterexample:{}:policy-protected-closure-locality",
+                key
+            ));
+        } else if !cell.comparable {
+            blocked.insert(key.clone());
+            incomparable.insert(key.clone());
+            negative.insert(format!("cell:{}:incomparable", key));
+        } else if cell.replay_identity != request.replay_identity {
+            unknown.insert(key.clone());
+            uncertainty.insert(format!("cell:{}:replay-mismatch", key));
+        } else if cell.evidence_digest.is_none() || cell.provenance_digest.is_none() {
+            unknown.insert(key.clone());
+            omissions.insert(format!("cell:{}:evidence-or-provenance-missing", key));
+        } else if matches!(
+            cell.state,
+            EvidenceState::Unknown | EvidenceState::Speculative
+        ) {
+            unknown.insert(key.clone());
+            uncertainty.insert(format!("cell:{}:evidence-uncertain", key));
+        } else if matches!(cell.state, EvidenceState::Contradicted) {
+            blocked.insert(key.clone());
+            negative.insert(format!("cell:{}:contradicted", key));
+        } else {
+            qualified.insert(key.clone());
+        }
+    }
+    if !request.policy_allow {
+        counterexamples.insert("counterexample:policy-denied".into());
+        omissions.insert("assurance:policy-denied".into());
+    }
+    if !request.protected_closure {
+        counterexamples.insert("counterexample:protected-closure-incomplete".into());
+        omissions.insert("assurance:protected-closure-incomplete".into());
+    }
+    if !request.raw_data_local {
+        counterexamples.insert("counterexample:raw-data-locality-failed".into());
+        omissions.insert("assurance:raw-data-locality-failed".into());
+    }
+    if !missing.is_empty() {
+        witnesses.insert("gate:missing-modality-retained".into());
+    }
+    let verdict = if !global_open || !blocked.is_empty() {
+        MultimodalContextAssuranceVerdict::Blocked
+    } else if !unknown.is_empty() {
+        MultimodalContextAssuranceVerdict::Unresolved
+    } else {
+        MultimodalContextAssuranceVerdict::Qualified
+    };
+    let verification_digest=ContentHash::of_value(&json!({"feature_id":FEATURE_ID,"request_id":request.request_id,"candidate_order":candidate_order,"qualified_order":qualified,"blocked_order":blocked,"unknown_order":unknown,"missing_order":missing,"incomparable_order":incomparable,"witness_order":witnesses,"counterexample_order":counterexamples,"verdict":verdict,"replay_identity":request.replay_identity})).map_err(|e|MultimodalContextAssuranceError::Artifact(e.to_string()))?;
+    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":request.request_id,"scope":request.scope,"verdict":verdict,"study_order":request.study_order,"modality_order":request.modality_order,"candidate_order":candidate_order,"qualified_order":qualified,"blocked_order":blocked,"unknown_order":unknown,"missing_order":missing,"incomparable_order":incomparable,"witness_order":witnesses,"counterexample_order":counterexamples,"verification_digest":verification_digest,"replay_identity":request.replay_identity,"omissions":omissions,"uncertainty":uncertainty,"negative_evidence":negative,"boundary":PRECLINICAL_BOUNDARY});
+    let artifact = TypedResearchArtifact::from_payload(
+        format!(
+            "brain-multimodal-context-compilation-assurance:{}",
+            request.request_id
+        ),
+        "application/vnd.aurora.multimodal-context-compilation-assurance+json",
+        &payload,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|e| MultimodalContextAssuranceError::Artifact(e.to_string()))?;
+    let receipt = MultimodalContextAssuranceReceipt {
+        schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+        contract_version: CONTRACT_VERSION.into(),
+        feature_id: FEATURE_ID.into(),
+        request_id: request.request_id.clone(),
+        scope: request.scope.clone(),
+        verdict,
+        study_order: studies.into_iter().collect(),
+        modality_order: modalities.into_iter().collect(),
+        candidate_order,
+        qualified_order: qualified.into_iter().collect(),
+        blocked_order: blocked.into_iter().collect(),
+        unknown_order: unknown.into_iter().collect(),
+        missing_order: missing.into_iter().collect(),
+        incomparable_order: incomparable.into_iter().collect(),
+        witness_order: witnesses.into_iter().collect(),
+        counterexample_order: counterexamples.into_iter().collect(),
+        verification_digest,
+        replay_identity: request.replay_identity.clone(),
+        omissions: omissions.into_iter().collect(),
+        uncertainty: uncertainty.into_iter().collect(),
+        negative_evidence: negative.into_iter().collect(),
+        effect_receipts: if matches!(verdict, MultimodalContextAssuranceVerdict::Qualified) {
+            vec![format!(
+                "assurance:local-multimodal-context:{}",
+                request.request_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        },
+        artifact,
+        raw_data_local: true,
+        boundary: PRECLINICAL_BOUNDARY.into(),
+    };
+    receipt.validate()?;
+    Ok(receipt)
+}
 
-#[cfg(test)]mod tests{use super::*;fn h(v:&str)->ContentHash{ContentHash::of_bytes(v.as_bytes())}fn request(state:EvidenceState)->MultimodalContextAssuranceRequest{let r=h("multimodal-context-assurance");let cells=vec!["study:a|imaging","study:a|omics","study:b|imaging","study:b|omics"].into_iter().map(|key|{let mut parts=key.split('|');MultimodalContextAssuranceCell{study_id:parts.next().unwrap().into(),modality:parts.next().unwrap().into(),context_digest:r.clone(),section_digest:r.clone(),evidence_digest:Some(r.clone()),provenance_digest:Some(r.clone()),replay_identity:r.clone(),state:state.clone(),comparable:true,raw_data_local:true,boundary:PRECLINICAL_BOUNDARY.into()}}).collect();MultimodalContextAssuranceRequest{request_id:"request:multimodal-assurance".into(),scope:"preclinical:organoid".into(),study_order:vec!["study:a".into(),"study:b".into()],modality_order:vec!["imaging".into(),"omics".into()],cells,replay_identity:r,policy_allow:true,protected_closure:true,raw_data_local:true,boundary:PRECLINICAL_BOUNDARY.into()}}#[test]fn manifest_is_a1(){assert_eq!(multimodal_context_compilation_assurance_manifest().autonomy_tier,AutonomyTier::A1)}#[test]fn complete_is_qualified(){assert_eq!(assure_multimodal_context_compilation(&request(EvidenceState::Supported)).unwrap().verdict,MultimodalContextAssuranceVerdict::Qualified)}#[test]fn missing_cell_is_unresolved(){let mut x=request(EvidenceState::Supported);x.cells.pop();let r=assure_multimodal_context_compilation(&x).unwrap();assert_eq!(r.verdict,MultimodalContextAssuranceVerdict::Unresolved);assert!(!r.missing_order.is_empty())}#[test]fn incomparable_is_blocked(){let mut x=request(EvidenceState::Supported);x.cells[0].comparable=false;assert_eq!(assure_multimodal_context_compilation(&x).unwrap().verdict,MultimodalContextAssuranceVerdict::Blocked)}#[test]fn unknown_is_unresolved(){assert_eq!(assure_multimodal_context_compilation(&request(EvidenceState::Unknown)).unwrap().verdict,MultimodalContextAssuranceVerdict::Unresolved)}#[test]fn policy_is_blocked(){let mut x=request(EvidenceState::Supported);x.policy_allow=false;assert_eq!(assure_multimodal_context_compilation(&x).unwrap().verdict,MultimodalContextAssuranceVerdict::Blocked)}#[test]fn digest_is_stable(){let r=assure_multimodal_context_compilation(&request(EvidenceState::Supported)).unwrap();assert_eq!(r.digest().unwrap(),r.digest().unwrap())}}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn h(v: &str) -> ContentHash {
+        ContentHash::of_bytes(v.as_bytes())
+    }
+    fn request(state: EvidenceState) -> MultimodalContextAssuranceRequest {
+        let r = h("multimodal-context-assurance");
+        let cells = vec![
+            "study:a|imaging",
+            "study:a|omics",
+            "study:b|imaging",
+            "study:b|omics",
+        ]
+        .into_iter()
+        .map(|key| {
+            let mut parts = key.split('|');
+            MultimodalContextAssuranceCell {
+                study_id: parts.next().unwrap().into(),
+                modality: parts.next().unwrap().into(),
+                context_digest: r.clone(),
+                section_digest: r.clone(),
+                evidence_digest: Some(r.clone()),
+                provenance_digest: Some(r.clone()),
+                replay_identity: r.clone(),
+                state: state.clone(),
+                comparable: true,
+                raw_data_local: true,
+                boundary: PRECLINICAL_BOUNDARY.into(),
+            }
+        })
+        .collect();
+        MultimodalContextAssuranceRequest {
+            request_id: "request:multimodal-assurance".into(),
+            scope: "preclinical:organoid".into(),
+            study_order: vec!["study:a".into(), "study:b".into()],
+            modality_order: vec!["imaging".into(), "omics".into()],
+            cells,
+            replay_identity: r,
+            policy_allow: true,
+            protected_closure: true,
+            raw_data_local: true,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        }
+    }
+    #[test]
+    fn manifest_is_a1() {
+        assert_eq!(
+            multimodal_context_compilation_assurance_manifest().autonomy_tier,
+            AutonomyTier::A1
+        )
+    }
+    #[test]
+    fn complete_is_qualified() {
+        assert_eq!(
+            assure_multimodal_context_compilation(&request(EvidenceState::Supported))
+                .unwrap()
+                .verdict,
+            MultimodalContextAssuranceVerdict::Qualified
+        )
+    }
+    #[test]
+    fn missing_cell_is_unresolved() {
+        let mut x = request(EvidenceState::Supported);
+        x.cells.pop();
+        let r = assure_multimodal_context_compilation(&x).unwrap();
+        assert_eq!(r.verdict, MultimodalContextAssuranceVerdict::Unresolved);
+        assert!(!r.missing_order.is_empty())
+    }
+    #[test]
+    fn incomparable_is_blocked() {
+        let mut x = request(EvidenceState::Supported);
+        x.cells[0].comparable = false;
+        assert_eq!(
+            assure_multimodal_context_compilation(&x).unwrap().verdict,
+            MultimodalContextAssuranceVerdict::Blocked
+        )
+    }
+    #[test]
+    fn unknown_is_unresolved() {
+        assert_eq!(
+            assure_multimodal_context_compilation(&request(EvidenceState::Unknown))
+                .unwrap()
+                .verdict,
+            MultimodalContextAssuranceVerdict::Unresolved
+        )
+    }
+    #[test]
+    fn policy_is_blocked() {
+        let mut x = request(EvidenceState::Supported);
+        x.policy_allow = false;
+        assert_eq!(
+            assure_multimodal_context_compilation(&x).unwrap().verdict,
+            MultimodalContextAssuranceVerdict::Blocked
+        )
+    }
+    #[test]
+    fn non_local_input_returns_blocked_metadata_receipt() {
+        let mut value = request(EvidenceState::Supported);
+        value.raw_data_local = false;
+        let receipt = assure_multimodal_context_compilation(&value).unwrap();
+        assert_eq!(receipt.verdict, MultimodalContextAssuranceVerdict::Blocked);
+        assert!(receipt.raw_data_local);
+    }
+    #[test]
+    fn digest_is_stable() {
+        let r = assure_multimodal_context_compilation(&request(EvidenceState::Supported)).unwrap();
+        assert_eq!(r.digest().unwrap(), r.digest().unwrap())
+    }
+}

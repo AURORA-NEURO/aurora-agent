@@ -246,9 +246,7 @@ pub fn operate_oracle_assurance(
     let blocked_order = blocked.into_iter().collect::<Vec<_>>();
     let disposition = if !request.policy_allow || !request.signed_approval || !request.local_only {
         OracleAssuranceDisposition::Blocked
-    } else if !request.protected_closure {
-        OracleAssuranceDisposition::Unknown
-    } else if admitted_order.is_empty() {
+    } else if !request.protected_closure || admitted_order.is_empty() {
         OracleAssuranceDisposition::Unknown
     } else if blocked_order.is_empty() {
         OracleAssuranceDisposition::Admitted

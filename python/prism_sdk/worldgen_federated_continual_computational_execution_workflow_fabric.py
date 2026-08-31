@@ -1,0 +1,4 @@
+from .worldgen_computational_execution_workflow_support import ExecutionWorkflowRequest, ExecutionWorkflowReceipt, schedule, manifest
+FEATURE_ID="AFA-worldgen-P12-F16"; CONTRACT_VERSION="worldgen-federated_continual-computational_execution-workflow/1.0"
+def worldgen_federated_continual_computational_execution_workflow_fabric_manifest(): return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,input_schema="ExecutionWorkflowRequest1@1",scale="federated continual autonomous",autonomy_tier="A1")
+def schedule_worldgen_federated_continual_computational_execution_workflow(request:ExecutionWorkflowRequest)->ExecutionWorkflowReceipt: return schedule(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated continual autonomous",require_approval=False,require_federation=True)

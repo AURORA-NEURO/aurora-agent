@@ -20,6 +20,8 @@ use thiserror::Error;
 pub const FEATURE_ID: &str = "AFA-brain-P02-F09";
 pub const CONTRACT_VERSION: &str = "brain-retrieval-research-copilot/1.0";
 pub const OUTPUT_SCHEMA: &str = "EvidenceSynthesisCopilot1@1";
+const COPILOT_CONTENT_TYPE: &str = "application/vnd.aurora.evidence-synthesis-copilot+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetrievalCopilotRequest {
@@ -48,6 +50,7 @@ pub struct RetrievalCopilotReceipt {
     pub plan_order: Vec<String>,
     pub action_order: Vec<String>,
     pub candidate_order: Vec<String>,
+    pub ranked_order: Vec<String>,
     pub qualified_order: Vec<String>,
     pub blocked_order: Vec<String>,
     pub unknown_order: Vec<String>,
@@ -80,15 +83,10 @@ impl RetrievalCopilotReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
-            || self.request_id.trim().is_empty()
-            || self.operator_id.trim().is_empty()
-            || self.study_id.trim().is_empty()
-            || self.scope.trim().is_empty()
             || self.plan_order.is_empty()
             || self.action_order.is_empty()
             || self.plan_order.len() != self.action_order.len()
-            || self.effect_receipts.is_empty()
+            || self.effect_receipts.len() != 1
             || self.budget_units == 0
         {
             return Err(RetrievalCopilotError::Invalid(
@@ -96,21 +94,30 @@ impl RetrievalCopilotReceipt {
                     .into(),
             ));
         }
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.operator_id, "operator_id"),
+            (&self.study_id, "study_id"),
+            (&self.scope, "scope"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
         if self
-            .qualified_order
+            .plan_order
             .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
+            .zip(&self.action_order)
+            .any(|(plan, action)| plan.strip_prefix("plan:") != action.strip_prefix("action:"))
         {
             return Err(RetrievalCopilotError::Invalid(
-                "copilot evidence state is not covered".into(),
+                "copilot plan and action orders are not paired".into(),
             ));
         }
         for values in [
             &self.plan_order,
             &self.action_order,
             &self.candidate_order,
+            &self.ranked_order,
             &self.qualified_order,
             &self.blocked_order,
             &self.unknown_order,
@@ -119,22 +126,111 @@ impl RetrievalCopilotReceipt {
             &self.negative_evidence,
             &self.effect_receipts,
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+            validate_sorted_unique(values, "retrieval copilot collection")?;
+        }
+        let candidate_values = self
+            .candidate_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let ranked_values = self.ranked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let qualified_values = self
+            .qualified_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let blocked_values = self.blocked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let unknown_values = self.unknown_order.iter().cloned().collect::<BTreeSet<_>>();
+        if ranked_values != candidate_values
+            || !qualified_values.is_subset(&candidate_values)
+            || !blocked_values.is_subset(&candidate_values)
+            || !unknown_values.is_subset(&blocked_values)
+            || !qualified_values.is_disjoint(&blocked_values)
+            || qualified_values
+                .union(&blocked_values)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_values
+        {
+            return Err(RetrievalCopilotError::Invalid(
+                "copilot evidence states are not a disjoint ranked partition".into(),
+            ));
+        }
+        if !self.raw_data_local
+            && (self.disposition != SynthesisDisposition::Blocked
+                || !self
+                    .negative_evidence
+                    .iter()
+                    .any(|item| item == "request:raw-data-locality-failed"))
+        {
+            return Err(RetrievalCopilotError::Invalid(
+                "non-local retrieval copilots must be blocked and retain locality evidence".into(),
+            ));
+        }
+        let expected_effect = if self.disposition != SynthesisDisposition::Blocked {
+            format!("read:local-research-artifacts:{}", self.request_id)
+        } else {
+            "block:unsafe-release".into()
+        };
+        if self.effect_receipts != [expected_effect] {
+            return Err(RetrievalCopilotError::Invalid(
+                "copilot effect does not match disposition".into(),
+            ));
+        }
+        for digest in [
+            &self.synthesis_digest,
+            &self.plan_digest,
+            &self.replay_identity,
+        ] {
+            if digest.as_str().len() != 64 {
                 return Err(RetrievalCopilotError::Invalid(
-                    "copilot ordering is not canonical".into(),
+                    "retrieval copilot digest is invalid".into(),
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("read:local-research-artifacts:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_synthesis_digest = ContentHash::of_value(&json!({
+            "feature_id": crate::retrieval_synthesis::FEATURE_ID,
+            "request_id": self.request_id,
+            "candidate_order": self.candidate_order,
+            "ranked_order": self.ranked_order,
+            "qualified_order": self.qualified_order,
+            "replay_identity": self.replay_identity,
+            "disposition": self.disposition,
+        }))
+        .map_err(|error| RetrievalCopilotError::Artifact(error.to_string()))?;
+        if self.synthesis_digest != expected_synthesis_digest {
             return Err(RetrievalCopilotError::Invalid(
-                "copilot effect is outside local gate".into(),
+                "copilot synthesis digest is not bound to ranked evidence".into(),
+            ));
+        }
+        let expected_plan_digest = ContentHash::of_value(&json!({
+            "request_id": self.request_id,
+            "plan_order": self.plan_order,
+            "action_order": self.action_order,
+            "budget_units": self.budget_units,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| RetrievalCopilotError::Artifact(error.to_string()))?;
+        if self.plan_digest != expected_plan_digest {
+            return Err(RetrievalCopilotError::Invalid(
+                "copilot plan digest is not bound to plan".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-retrieval-copilot:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != COPILOT_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(RetrievalCopilotError::Invalid(
+                "copilot artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| RetrievalCopilotError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| RetrievalCopilotError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, RetrievalCopilotError> {
@@ -144,6 +240,72 @@ impl RetrievalCopilotReceipt {
         ContentHash::of_value(&value)
             .map_err(|error| RetrievalCopilotError::Artifact(error.to_string()))
     }
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), RetrievalCopilotError> {
+    if value.trim() != value
+        || value.is_empty()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(RetrievalCopilotError::Invalid(format!(
+            "{field} is empty, padded, oversized, or contains control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), RetrievalCopilotError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(RetrievalCopilotError::Invalid(format!(
+                "{field} contains a duplicate or case-colliding identity"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(values: &[String], field: &str) -> Result<(), RetrievalCopilotError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(RetrievalCopilotError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &RetrievalCopilotReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "operator_id": receipt.operator_id,
+        "study_id": receipt.study_id,
+        "scope": receipt.scope,
+        "disposition": receipt.disposition,
+        "plan_order": receipt.plan_order,
+        "action_order": receipt.action_order,
+        "candidate_order": receipt.candidate_order,
+        "ranked_order": receipt.ranked_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "synthesis_digest": receipt.synthesis_digest,
+        "plan_digest": receipt.plan_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn retrieval_research_copilot_manifest() -> CapabilityManifest {
@@ -184,7 +346,9 @@ pub fn compile_retrieval_copilot(
     {
         negative.insert("copilot:inspect-local-evidence-not-allowed".into());
     }
-    if request.budget_units < actions.len() as u32 || actions.len() > request.max_actions {
+    if u64::from(request.budget_units) < u64::try_from(actions.len()).unwrap_or(u64::MAX)
+        || actions.len() > request.max_actions
+    {
         omissions.insert("copilot:action-budget-exhausted".into());
     }
     if !request.policy_allow {
@@ -200,7 +364,7 @@ pub fn compile_retrieval_copilot(
         .action_allow_list
         .iter()
         .any(|item| item == "inspect-local-evidence")
-        && request.budget_units >= actions.len() as u32
+        && u64::from(request.budget_units) >= u64::try_from(actions.len()).unwrap_or(u64::MAX)
         && actions.len() <= request.max_actions
         && request.policy_allow
         && request.protected_closure
@@ -212,14 +376,29 @@ pub fn compile_retrieval_copilot(
     };
     let plan_order = plans.into_iter().collect::<Vec<_>>();
     let action_order = actions.into_iter().collect::<Vec<_>>();
-    let synthesis_digest = synthesis
-        .digest()
-        .map_err(|error| RetrievalCopilotError::Engine(error.to_string()))?;
+    let effect_receipts = if disposition != SynthesisDisposition::Blocked {
+        vec![format!(
+            "read:local-research-artifacts:{}",
+            request.request.request_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let synthesis_digest = ContentHash::of_value(&json!({
+        "feature_id": crate::retrieval_synthesis::FEATURE_ID,
+        "request_id": request.request.request_id,
+        "candidate_order": synthesis.candidate_order,
+        "ranked_order": synthesis.ranked_order,
+        "qualified_order": synthesis.qualified_order,
+        "replay_identity": request.replay_identity,
+        "disposition": disposition,
+    }))
+    .map_err(|error| RetrievalCopilotError::Artifact(error.to_string()))?;
     let plan_digest = ContentHash::of_value(&json!({"request_id": request.request.request_id, "plan_order": plan_order, "action_order": action_order, "budget_units": request.budget_units, "replay_identity": request.replay_identity})).map_err(|error| RetrievalCopilotError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "operator_id": request.operator_id, "study_id": request.request.study_id, "scope": request.request.scope, "disposition": disposition, "plan_order": plan_order, "action_order": action_order, "candidate_order": synthesis.candidate_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "synthesis_digest": synthesis_digest, "plan_digest": plan_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "operator_id": request.operator_id, "study_id": request.request.study_id, "scope": request.request.scope, "disposition": disposition, "plan_order": plan_order, "action_order": action_order, "candidate_order": synthesis.candidate_order, "ranked_order": synthesis.ranked_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "synthesis_digest": synthesis_digest, "plan_digest": plan_digest, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-retrieval-copilot:{}", request.request.request_id),
-        "application/vnd.aurora.evidence-synthesis-copilot+json",
+        COPILOT_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
@@ -237,6 +416,7 @@ pub fn compile_retrieval_copilot(
         plan_order,
         action_order,
         candidate_order: synthesis.candidate_order,
+        ranked_order: synthesis.ranked_order,
         qualified_order: synthesis.qualified_order,
         blocked_order: synthesis.blocked_order,
         unknown_order: synthesis.unknown_order,
@@ -247,14 +427,7 @@ pub fn compile_retrieval_copilot(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if actionable {
-            vec![format!(
-                "read:local-research-artifacts:{}",
-                request.request.request_id
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -264,16 +437,35 @@ pub fn compile_retrieval_copilot(
 }
 
 fn validate_request(request: &RetrievalCopilotRequest) -> Result<(), RetrievalCopilotError> {
-    if request.operator_id.trim().is_empty()
-        || request.max_actions == 0
+    if request.max_actions == 0
         || request.max_actions > 64
         || request.budget_units == 0
         || request.boundary != PRECLINICAL_BOUNDARY
         || request.request.boundary != PRECLINICAL_BOUNDARY
+        || request.request.replay_identity != request.replay_identity
+        || request.request.policy_allow != request.policy_allow
+        || request.request.protected_closure != request.protected_closure
+        || request.request.raw_data_local != request.raw_data_local
         || request.request.candidates.is_empty()
     {
         return Err(RetrievalCopilotError::Invalid(
             "copilot operator, capacity, budget, candidates, or boundary is incomplete".into(),
+        ));
+    }
+    for (value, field) in [
+        (&request.request.request_id, "request_id"),
+        (&request.request.study_id, "study_id"),
+        (&request.request.scope, "scope"),
+        (&request.request.query, "query"),
+        (&request.operator_id, "operator_id"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_sorted_unique(&request.action_allow_list, "action_allow_list")?;
+    if request.replay_identity.as_str().len() != 64 {
+        return Err(RetrievalCopilotError::Invalid(
+            "retrieval copilot replay digest is invalid".into(),
         ));
     }
     Ok(())
@@ -356,8 +548,47 @@ mod tests {
     fn protected_closure_blocks() {
         let mut q = request();
         q.protected_closure = false;
+        q.request.protected_closure = false;
         let r = compile_retrieval_copilot(&q).unwrap();
         assert_eq!(r.disposition, SynthesisDisposition::Blocked);
+    }
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut q = request();
+        q.raw_data_local = false;
+        q.request.raw_data_local = false;
+        let r = compile_retrieval_copilot(&q).unwrap();
+        assert_eq!(r.disposition, SynthesisDisposition::Blocked);
+        assert!(r.raw_data_local);
+        assert!(r
+            .negative_evidence
+            .iter()
+            .any(|item| item == "request:raw-data-locality-failed"));
+        r.validate().unwrap();
+    }
+    #[test]
+    fn plan_and_payload_drift_are_rejected() {
+        let r = compile_retrieval_copilot(&request()).unwrap();
+        let mut plan_drift = r.clone();
+        plan_drift.action_order.pop();
+        assert!(plan_drift.validate().is_err());
+
+        let mut payload_drift = r;
+        payload_drift.scope = "organoid:other".into();
+        assert!(payload_drift.validate().is_err());
+    }
+
+    #[test]
+    fn case_mismatched_candidate_identity_is_rejected() {
+        let mut receipt = compile_retrieval_copilot(&request()).unwrap();
+        receipt.ranked_order[0] = receipt.ranked_order[0].to_ascii_uppercase();
+        assert!(receipt.validate().is_err());
+    }
+    #[test]
+    fn padded_operator_identity_is_rejected() {
+        let mut q = request();
+        q.operator_id = " operator:research".into();
+        assert!(compile_retrieval_copilot(&q).is_err());
     }
     #[test]
     fn digest_is_stable() {

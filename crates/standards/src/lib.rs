@@ -76,9 +76,27 @@
 pub mod comparability;
 pub mod error;
 pub mod frame;
+pub mod mechanism_exploration_inference_engine;
 pub mod ontology;
 pub mod reference;
 pub mod unit;
+pub mod migration_integrity_support;
+pub mod local_migration_integrity_inference;
+pub mod multimodal_migration_integrity_inference;
+pub mod throughput_migration_integrity_inference;
+pub mod federated_continual_migration_integrity_inference;
+pub mod local_migration_integrity_contract_model;
+pub mod multimodal_migration_integrity_contract_model;
+pub mod throughput_migration_integrity_contract_model;
+pub mod federated_continual_migration_integrity_contract_model;
+pub mod local_migration_integrity_research_copilot;
+pub mod multimodal_migration_integrity_research_copilot;
+pub mod throughput_migration_integrity_research_copilot;
+pub mod federated_continual_migration_integrity_research_copilot;
+pub mod local_migration_integrity_workflow_fabric;
+pub mod multimodal_migration_integrity_workflow_fabric;
+pub mod throughput_migration_integrity_workflow_fabric;
+pub mod federated_continual_migration_integrity_workflow_fabric;
 
 pub use comparability::{
     comparable, comparable_under, reconcile, report, ComparabilityPolicy, ComparabilityReport,
@@ -91,6 +109,21 @@ pub use frame::{
     AnatomicalAxis, AxisDirection, CoordinateSpace, Extent, Frame, FrameBinding, Handedness,
     Orientation, Position,
 };
+pub use mechanism_exploration_inference_engine::{
+    infer_standards_mechanisms,
+    standards_mechanism_exploration_inference_manifest,
+    StandardsMechanismCandidate6,
+    StandardsMechanismInferenceArtifact8,
+    StandardsMechanismInferenceError,
+    StandardsMechanismInferenceReceipt8,
+    StandardsMechanismPeer5,
+    StandardsMechanismQuestion6,
+    CONTENT_TYPE as STANDARDS_MECHANISM_INFERENCE_CONTENT_TYPE,
+    CONTRACT_VERSION as STANDARDS_MECHANISM_INFERENCE_CONTRACT_VERSION,
+    FEATURE_ID as STANDARDS_MECHANISM_INFERENCE_FEATURE_ID,
+    INPUT_SCHEMA as STANDARDS_MECHANISM_INFERENCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as STANDARDS_MECHANISM_INFERENCE_OUTPUT_SCHEMA,
+};
 pub use ontology::{Binding, MappingPrecision, OntologyId, TermBinding, TermCatalog};
 pub use reference::{
     BuildBinding, BuildTransport, CoordinateConvention, GenomeBuild, GenomicInterval,
@@ -99,3 +132,20 @@ pub use reference::{
 pub use unit::{
     BaseDimension, ConversionRecord, Converted, Dimension, Exactness, Quantity, Unit, UnitKind,
 };
+pub use migration_integrity_support::*;
+pub use local_migration_integrity_inference::*;
+pub use multimodal_migration_integrity_inference::*;
+pub use throughput_migration_integrity_inference::*;
+pub use federated_continual_migration_integrity_inference::*;
+pub use local_migration_integrity_contract_model::*;
+pub use multimodal_migration_integrity_contract_model::*;
+pub use throughput_migration_integrity_contract_model::*;
+pub use federated_continual_migration_integrity_contract_model::*;
+pub use local_migration_integrity_research_copilot::*;
+pub use multimodal_migration_integrity_research_copilot::*;
+pub use throughput_migration_integrity_research_copilot::*;
+pub use federated_continual_migration_integrity_research_copilot::*;
+pub use local_migration_integrity_workflow_fabric::*;
+pub use multimodal_migration_integrity_workflow_fabric::*;
+pub use throughput_migration_integrity_workflow_fabric::*;
+pub use federated_continual_migration_integrity_workflow_fabric::*;

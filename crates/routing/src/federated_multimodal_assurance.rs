@@ -14,10 +14,15 @@ use bioprism_foundation::{
 use bioprism_ids::ContentHash;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-routing-P06-F28";
 pub const CONTRACT_VERSION: &str = "federated-multimodal-assurance/1.0";
+const ASSURANCE_CONTENT_TYPE: &str = "application/vnd.aurora.federated-multimodal-assurance+json";
+const MAX_INSTITUTIONS: usize = 4096;
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_LIST_ENTRIES: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedMultimodalAssuranceRequest {
@@ -64,23 +69,62 @@ impl FederatedMultimodalAssuranceReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.boundary != PRECLINICAL_BOUNDARY
             || !self.raw_data_local
-            || self.request_id.trim().is_empty()
-            || self.federation_id.trim().is_empty()
-            || self.benchmark_id.trim().is_empty()
             || self.institution_ids.len() < 2
-            || self.institution_ids.iter().any(|id| id.trim().is_empty())
-            || self
-                .institution_ids
-                .windows(2)
-                .any(|pair| pair[0] == pair[1])
+            || self.institution_ids.len() > MAX_INSTITUTIONS
             || self.checks.is_empty()
+            || self.checks.len() > MAX_LIST_ENTRIES
+            || self.omissions.len() > MAX_LIST_ENTRIES
         {
             return Err(FederatedAssuranceError::InvalidField(
                 "identity, consortium, locality, or checks are incomplete".into(),
             ));
         }
+        validate_text(&self.request_id, "request_id")?;
+        validate_text(&self.federation_id, "federation_id")?;
+        validate_text(&self.benchmark_id, "benchmark_id")?;
+        validate_institution_ids(&self.institution_ids)?;
+        let mut canonical_institution_ids = self.institution_ids.clone();
+        canonical_institution_ids.sort();
+        if canonical_institution_ids != self.institution_ids {
+            return Err(FederatedAssuranceError::InvalidField(
+                "institution_ids must use canonical sorted order".into(),
+            ));
+        }
+        validate_text_list(&self.checks, "checks")?;
+        validate_text_list(&self.omissions, "omissions")?;
+        match self.disposition {
+            FederatedAssuranceDisposition::Passed if !self.omissions.is_empty() => {
+                return Err(FederatedAssuranceError::InvalidField(
+                    "passed assurance cannot contain omissions".into(),
+                ));
+            }
+            FederatedAssuranceDisposition::Blocked if !self.omissions.is_empty() => {
+                return Err(FederatedAssuranceError::InvalidField(
+                    "blocked assurance cannot contain harmonization omissions".into(),
+                ));
+            }
+            FederatedAssuranceDisposition::Unknown if self.omissions.is_empty() => {
+                return Err(FederatedAssuranceError::InvalidField(
+                    "unknown assurance requires an omission".into(),
+                ));
+            }
+            _ => {}
+        }
+        let expected_artifact_id = format!("federated-multimodal-assurance:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != ASSURANCE_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(FederatedAssuranceError::InvalidField(
+                "assurance artifact identity or provenance is inconsistent".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedAssuranceError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedAssuranceError::Artifact(error.to_string()))
     }
 
@@ -109,6 +153,8 @@ pub fn assure_federated_multimodal(
     request: &FederatedMultimodalAssuranceRequest,
 ) -> Result<FederatedMultimodalAssuranceReceipt, FederatedAssuranceError> {
     validate_request(request)?;
+    let mut institution_ids = request.institution_ids.clone();
+    institution_ids.sort();
     let harmonized = harmonize_multimodal(&request.harmonization)
         .map_err(|error| FederatedAssuranceError::Harmonization(error.to_string()))?;
     let harmonized_digest = harmonized
@@ -144,6 +190,7 @@ pub fn assure_federated_multimodal(
         checks.push("all federated harmonization and policy gates passed".into());
         FederatedAssuranceDisposition::Passed
     };
+    omissions.sort();
     let payload = json!({
         "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
         "feature_id": FEATURE_ID,
@@ -151,7 +198,7 @@ pub fn assure_federated_multimodal(
         "request_id": request.request_id,
         "federation_id": request.federation_id,
         "benchmark_id": request.benchmark_id,
-        "institution_ids": request.institution_ids,
+        "institution_ids": institution_ids,
         "disposition": disposition,
         "harmonized_digest": harmonized_digest,
         "checks": checks,
@@ -161,7 +208,7 @@ pub fn assure_federated_multimodal(
     });
     let artifact = TypedResearchArtifact::from_payload(
         format!("federated-multimodal-assurance:{}", request.request_id),
-        "application/vnd.aurora.federated-multimodal-assurance+json",
+        ASSURANCE_CONTENT_TYPE,
         &payload,
         Vec::new(),
         vec![],
@@ -174,7 +221,7 @@ pub fn assure_federated_multimodal(
         request_id: request.request_id.clone(),
         federation_id: request.federation_id.clone(),
         benchmark_id: request.benchmark_id.clone(),
-        institution_ids: request.institution_ids.clone(),
+        institution_ids,
         disposition,
         harmonized_digest,
         checks,
@@ -190,24 +237,76 @@ pub fn assure_federated_multimodal(
 fn validate_request(
     request: &FederatedMultimodalAssuranceRequest,
 ) -> Result<(), FederatedAssuranceError> {
-    if request.request_id.trim().is_empty()
-        || request.federation_id.trim().is_empty()
-        || request.benchmark_id.trim().is_empty()
-        || request.boundary != PRECLINICAL_BOUNDARY
-        || request.institution_ids.len() < 2
-        || request
-            .institution_ids
-            .iter()
-            .any(|id| id.trim().is_empty())
-        || request
-            .institution_ids
-            .windows(2)
-            .any(|pair| pair[0] == pair[1])
-        || request.harmonization.raw_data_local != true
-    {
+    if request.boundary != PRECLINICAL_BOUNDARY || !request.harmonization.raw_data_local {
         return Err(FederatedAssuranceError::InvalidField(
             "federation identity, institutions, locality, and boundary are required".into(),
         ));
+    }
+    validate_text(&request.request_id, "request_id")?;
+    validate_text(&request.federation_id, "federation_id")?;
+    validate_text(&request.benchmark_id, "benchmark_id")?;
+    if request.institution_ids.len() < 2 || request.institution_ids.len() > MAX_INSTITUTIONS {
+        return Err(FederatedAssuranceError::InvalidField(
+            "institution_ids must contain between two and 4096 institutions".into(),
+        ));
+    }
+    validate_institution_ids(&request.institution_ids)?;
+    Ok(())
+}
+
+fn receipt_payload(receipt: &FederatedMultimodalAssuranceReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "feature_id": receipt.feature_id,
+        "contract_version": receipt.contract_version,
+        "request_id": receipt.request_id,
+        "federation_id": receipt.federation_id,
+        "benchmark_id": receipt.benchmark_id,
+        "institution_ids": receipt.institution_ids,
+        "disposition": receipt.disposition,
+        "harmonized_digest": receipt.harmonized_digest,
+        "checks": receipt.checks,
+        "omissions": receipt.omissions,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedAssuranceError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedAssuranceError::InvalidField(format!(
+            "{field} must be bounded, non-empty text without surrounding whitespace or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_institution_ids(values: &[String]) -> Result<(), FederatedAssuranceError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, "institution_ids")?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedAssuranceError::InvalidField(
+                "institution_ids must not contain duplicate or case-colliding values".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_text_list(values: &[String], field: &str) -> Result<(), FederatedAssuranceError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedAssuranceError::InvalidField(format!(
+                "{field} must not contain duplicate or case-colliding values"
+            )));
+        }
     }
     Ok(())
 }
@@ -260,5 +359,39 @@ mod tests {
         input.policy_decision = PolicyDecision::Deny;
         let receipt = assure_federated_multimodal(&input).unwrap();
         assert_eq!(receipt.disposition, FederatedAssuranceDisposition::Blocked);
+    }
+
+    #[test]
+    fn assurance_canonicalizes_institutions_and_binds_artifact_payload() {
+        let mut input = request(vec!["imaging".into()]);
+        input.institution_ids = vec!["site:b".into(), "site:a".into()];
+        let receipt = assure_federated_multimodal(&input).unwrap();
+        assert_eq!(receipt.institution_ids, vec!["site:a", "site:b"]);
+        receipt.validate().unwrap();
+
+        let mut reordered = receipt.clone();
+        reordered.institution_ids.reverse();
+        assert!(reordered.validate().is_err());
+
+        let mut payload_drift = receipt;
+        payload_drift.checks.push("unbound check".into());
+        assert!(payload_drift.validate().is_err());
+    }
+
+    #[test]
+    fn assurance_rejects_case_collisions_padding_and_disposition_omission_drift() {
+        let mut input = request(vec!["imaging".into()]);
+        input.institution_ids = vec!["site:a".into(), "SITE:A".into()];
+        assert!(assure_federated_multimodal(&input).is_err());
+
+        let mut receipt =
+            assure_federated_multimodal(&request(vec!["imaging".into(), "rna".into()])).unwrap();
+        receipt.request_id = " request:federated".into();
+        assert!(receipt.validate().is_err());
+
+        let mut receipt =
+            assure_federated_multimodal(&request(vec!["imaging".into(), "rna".into()])).unwrap();
+        receipt.disposition = FederatedAssuranceDisposition::Passed;
+        assert!(receipt.validate().is_err());
     }
 }

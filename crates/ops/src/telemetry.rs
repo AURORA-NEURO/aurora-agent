@@ -314,27 +314,37 @@ impl MetricDefinition {
             });
         }
 
-        let read = |signal: &SignalId| observations.observed(signal).expect("checked above");
+        let read = |signal: &SignalId| {
+            observations
+                .observed(signal)
+                .ok_or_else(|| OpsError::UnsupportedMetric {
+                    metric: self.name.clone(),
+                    missing: vec![signal.to_string()],
+                })
+        };
         let value = match &self.derivation {
-            Derivation::Passthrough { signal } => read(signal),
+            Derivation::Passthrough { signal } => read(signal)?,
             Derivation::Ratio {
                 numerator,
                 denominator,
             } => {
-                let bottom = read(denominator);
+                let bottom = read(denominator)?;
                 if bottom == 0.0 {
                     return Err(OpsError::IndeterminateMetric {
                         metric: self.name.clone(),
                         reason: format!("{denominator} was observed as zero"),
                     });
                 }
-                read(numerator) / bottom
+                read(numerator)? / bottom
             }
-            Derivation::Sum { signals } => signals.iter().map(read).sum(),
+            Derivation::Sum { signals } => signals
+                .iter()
+                .map(read)
+                .try_fold(0.0, |total, value| Ok::<f64, OpsError>(total + value?))?,
             Derivation::Difference {
                 minuend,
                 subtrahend,
-            } => read(minuend) - read(subtrahend),
+            } => read(minuend)? - read(subtrahend)?,
         };
 
         Ok(MetricValue {

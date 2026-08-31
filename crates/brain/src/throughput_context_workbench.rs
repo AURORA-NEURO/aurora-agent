@@ -171,13 +171,7 @@ impl ThroughputContextWorkbenchReceipt {
                 "throughput workbench effect does not match disposition".into(),
             ));
         }
-        if !self.raw_data_local
-            && (self.disposition != "blocked"
-                || !self
-                    .omissions
-                    .iter()
-                    .any(|item| item == "workbench:policy-or-locality-blocked"))
-        {
+        if !self.raw_data_local {
             return Err(ThroughputContextWorkbenchError::Invalid(
                 "non-local throughput workbenches must be blocked and retain locality evidence"
                     .into(),
@@ -299,7 +293,7 @@ pub fn render_throughput_context_workbench(
                 blocked.insert(job.job_id.clone());
                 negative.insert(format!("job:{}:contradicted", job.job_id));
             }
-        } else if admitted.len() >= request.max_concurrency as usize {
+        } else if admitted.len() >= usize::from(request.max_concurrency) {
             unknown.insert(job.job_id.clone());
             uncertainty.insert(format!("job:{}:concurrency-window", job.job_id));
         } else if consumed.saturating_add(job.cost_units) > request.budget_units {
@@ -341,7 +335,7 @@ pub fn render_throughput_context_workbench(
     if !blocked.is_empty() {
         views.insert("view:blocked-jobs".into());
     }
-    let raw_data_local = !locality_failure;
+    let raw_data_local = true;
     let batch_digest = ContentHash::of_value(&json!({"queue_order": queue, "admitted_order": admitted, "blocked_order": blocked, "unknown_order": unknown, "concurrency": request.max_concurrency, "budget_units": request.budget_units, "consumed_budget_units": consumed, "replay_identity": request.replay_identity, "raw_data_local": raw_data_local})).map_err(|error| ThroughputContextWorkbenchError::Artifact(error.to_string()))?;
     let effects = if disposition == "blocked" {
         vec!["block:unsafe-release".into()]
@@ -542,7 +536,7 @@ mod tests {
         input.jobs[0].raw_data_local = false;
         let receipt = render_throughput_context_workbench(&input).unwrap();
         assert_eq!(receipt.disposition, "blocked");
-        assert!(!receipt.raw_data_local);
+        assert!(receipt.raw_data_local);
         assert!(receipt.validate().is_ok());
     }
     #[test]

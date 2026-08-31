@@ -18,6 +18,11 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-runtime-P12-F11";
 pub const FEATURE_VERSION: &str = "0.1.0";
+/// Maximum number of complete workflow graphs admitted by one batch request.
+///
+/// A batch retains every request and produces one receipt entry per workflow, so this bound is
+/// part of the transport contract rather than an implementation-only allocation hint.
+pub const MAX_WORKFLOW_BATCH_SIZE: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -72,21 +77,89 @@ impl WorkflowBatchReceipt {
                 "schema, feature, or boundary".into(),
             ));
         }
-        if self.total_workflows == 0
-            || self.total_workflows != self.entries.len()
-            || self.succeeded_workflows + self.dry_run_workflows + self.blocked_workflows
-                != self.total_workflows
-            || self
-                .entries
-                .iter()
-                .any(|entry| entry.workflow_id.trim().is_empty() || entry.reasons.is_empty())
+        if self.total_workflows > MAX_WORKFLOW_BATCH_SIZE
+            || self.entries.len() > MAX_WORKFLOW_BATCH_SIZE
         {
             return Err(WorkflowBatchError::InvalidField(
-                "workflow counts, identity, or reasons".into(),
+                "workflow batch exceeds its maximum size".into(),
             ));
+        }
+        let counted_workflows = self
+            .succeeded_workflows
+            .checked_add(self.dry_run_workflows)
+            .and_then(|count| count.checked_add(self.blocked_workflows));
+        if self.total_workflows == 0
+            || self.total_workflows != self.entries.len()
+            || counted_workflows != Some(self.total_workflows)
+        {
+            return Err(WorkflowBatchError::InvalidField(
+                "workflow counts are inconsistent".into(),
+            ));
+        }
+        let mut workflow_ids = BTreeSet::new();
+        for (index, entry) in self.entries.iter().enumerate() {
+            if entry.workflow_id.trim().is_empty()
+                || !workflow_ids.insert(entry.workflow_id.clone())
+                || (index > 0 && self.entries[index - 1].workflow_id >= entry.workflow_id)
+                || entry.reasons.is_empty()
+                || entry.reasons.iter().any(|reason| reason.trim().is_empty())
+            {
+                return Err(WorkflowBatchError::InvalidField(
+                    "workflow entries must have unique sorted identities and reasons".into(),
+                ));
+            }
+            let mut node_ids = BTreeSet::new();
+            if entry
+                .ordered_nodes
+                .iter()
+                .any(|node| node.trim().is_empty() || !node_ids.insert(node))
+            {
+                return Err(WorkflowBatchError::InvalidField(
+                    "workflow entry nodes must be non-empty and unique".into(),
+                ));
+            }
+            match entry.disposition {
+                WorkflowBatchDisposition::Blocked
+                    if entry.receipt_digest.is_some() || !entry.ordered_nodes.is_empty() =>
+                {
+                    return Err(WorkflowBatchError::InvalidField(
+                        "blocked workflow entries cannot contain a receipt or ordered nodes".into(),
+                    ));
+                }
+                WorkflowBatchDisposition::Succeeded | WorkflowBatchDisposition::DryRun
+                    if entry.receipt_digest.is_none() || entry.ordered_nodes.is_empty() =>
+                {
+                    return Err(WorkflowBatchError::InvalidField(
+                        "admitted workflow entries require a receipt and ordered nodes".into(),
+                    ));
+                }
+                _ => {}
+            }
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| WorkflowBatchError::Artifact(error.to_string()))?;
+        if self.artifact.artifact_id != "workflow-batch"
+            || self.artifact.content_type != "application/vnd.aurora.workflow-batch+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(WorkflowBatchError::Artifact(
+                "workflow batch artifact is not bound to its receipt".into(),
+            ));
+        }
+        let payload = json!({
+            "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+            "feature_id": FEATURE_ID,
+            "total_workflows": self.total_workflows,
+            "succeeded_workflows": self.succeeded_workflows,
+            "dry_run_workflows": self.dry_run_workflows,
+            "blocked_workflows": self.blocked_workflows,
+            "entries": self.entries,
+            "boundary": PRECLINICAL_BOUNDARY,
+        });
+        self.artifact
+            .verify_payload(&payload)
             .map_err(|error| WorkflowBatchError::Artifact(error.to_string()))
     }
 
@@ -217,6 +290,11 @@ fn validate_request(request: &WorkflowBatchRequest) -> Result<(), WorkflowBatchE
             "at least one workflow is required".into(),
         ));
     }
+    if request.workflows.len() > MAX_WORKFLOW_BATCH_SIZE {
+        return Err(WorkflowBatchError::InvalidField(
+            "workflow batch exceeds its maximum size".into(),
+        ));
+    }
     let mut ids = BTreeSet::new();
     for workflow in &request.workflows {
         if workflow.workflow.workflow_id.trim().is_empty()
@@ -240,5 +318,43 @@ mod tests {
             mode: WorkflowBatchMode::DryRun
         })
         .is_err());
+    }
+
+    #[test]
+    fn oversized_receipt_is_rejected_before_entry_processing() {
+        let entry = WorkflowBatchEntry {
+            workflow_id: "workflow:oversized".into(),
+            disposition: WorkflowBatchDisposition::Blocked,
+            receipt_digest: None,
+            ordered_nodes: Vec::new(),
+            reasons: vec!["blocked".into()],
+        };
+        let entries = vec![entry; MAX_WORKFLOW_BATCH_SIZE + 1];
+        let payload = json!({"fixture": "oversized-batch"});
+        let artifact = TypedResearchArtifact::from_payload(
+            "workflow-batch",
+            "application/vnd.aurora.workflow-batch+json",
+            &payload,
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let receipt = WorkflowBatchReceipt {
+            schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+            feature_id: FEATURE_ID.into(),
+            total_workflows: entries.len(),
+            succeeded_workflows: 0,
+            dry_run_workflows: 0,
+            blocked_workflows: entries.len(),
+            entries,
+            artifact,
+            boundary: PRECLINICAL_BOUNDARY.into(),
+        };
+
+        assert!(matches!(
+            receipt.validate(),
+            Err(WorkflowBatchError::InvalidField(message))
+                if message == "workflow batch exceeds its maximum size"
+        ));
     }
 }

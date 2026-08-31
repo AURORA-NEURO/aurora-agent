@@ -158,40 +158,11 @@ pub mod component;
 pub mod conformance;
 pub mod credit;
 pub mod human;
-pub mod interweave_contract_frontier_federated_control_plane;
-pub mod federated_dependency_contract_model;
-pub mod laboratory_integration_workflow_fabric;
 pub mod microbench;
 pub mod packs;
-pub mod semantic_parity_copilot;
 pub mod threat;
 pub mod workflow;
 pub mod workflow_execution;
-
-pub use laboratory_integration_workflow_fabric::{
-    capability_manifest as laboratory_integration_capability_manifest,
-    orchestrate as orchestrate_laboratory_workflow, InstrumentAction, InstrumentActionReceipt,
-    InstrumentActionRequest, LaboratoryWorkflowError, StudyBinding,
-    CONTRACT_VERSION as LABORATORY_WORKFLOW_CONTRACT_VERSION,
-    FEATURE_ID as LABORATORY_WORKFLOW_FEATURE_ID, INPUT_SCHEMA as LABORATORY_WORKFLOW_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as LABORATORY_WORKFLOW_OUTPUT_SCHEMA,
-};
-pub use semantic_parity_copilot::{
-    capability_manifest as semantic_parity_capability_manifest, compare as compare_semantic_parity,
-    InterweaveParityFixture, InterweaveParityWitness, SemanticParityError,
-    CONTRACT_VERSION as SEMANTIC_PARITY_CONTRACT_VERSION, FEATURE_ID as SEMANTIC_PARITY_FEATURE_ID,
-    INPUT_SCHEMA as SEMANTIC_PARITY_INPUT_SCHEMA, OUTPUT_SCHEMA as SEMANTIC_PARITY_OUTPUT_SCHEMA,
-};
-pub use federated_dependency_contract_model::{
-    assure as assure_federated_dependency_composition,
-    capability_manifest as federated_dependency_composition_manifest,
-    CapabilityCompositionReceipt, CapabilityDeclaration, DependencyCompositionError,
-    DependencyCompositionRequest,
-    CONTRACT_VERSION as FEDERATED_DEPENDENCY_COMPOSITION_CONTRACT_VERSION,
-    FEATURE_ID as FEDERATED_DEPENDENCY_COMPOSITION_FEATURE_ID,
-    INPUT_SCHEMA as FEDERATED_DEPENDENCY_COMPOSITION_INPUT_SCHEMA,
-    OUTPUT_SCHEMA as FEDERATED_DEPENDENCY_COMPOSITION_OUTPUT_SCHEMA,
-};
 
 /// The blueprint section this crate completes.
 pub const BLUEPRINT_SECTION: &str = "23_AGENT_INTERWEAVE_FABRIC";

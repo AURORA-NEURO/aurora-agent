@@ -173,17 +173,35 @@ impl RetrievalAssuranceReceipt {
                 ));
             }
         }
-        if self.summary.ranked_order.len()
-            != self
-                .summary
-                .ranked_order
-                .iter()
-                .collect::<BTreeSet<_>>()
-                .len()
-        {
+        let candidate_ids = self.summary.candidate_order.iter().collect::<BTreeSet<_>>();
+        let ranked_ids = self.summary.ranked_order.iter().collect::<BTreeSet<_>>();
+        if candidate_ids != ranked_ids {
             return Err(RetrievalAssuranceError::Invalid(
-                "retrieval assurance ranked order contains duplicates".into(),
+                "retrieval assurance candidate and ranked orders disagree".into(),
             ));
+        }
+        let mut classified_ids = BTreeSet::new();
+        for values in [
+            &self.summary.selected_order,
+            &self.summary.blocked_order,
+            &self.summary.unknown_order,
+        ] {
+            for id in values {
+                if !candidate_ids.contains(id) {
+                    if !id.starts_with("request:") {
+                        return Err(RetrievalAssuranceError::Invalid(
+                            "retrieval assurance classification is outside the candidate set"
+                                .into(),
+                        ));
+                    }
+                    continue;
+                }
+                if !classified_ids.insert(id) {
+                    return Err(RetrievalAssuranceError::Invalid(
+                        "retrieval assurance candidate classification is duplicated".into(),
+                    ));
+                }
+            }
         }
         for values in [&self.summary.artifact_order, &self.summary.provenance_order] {
             if values.windows(2).any(|pair| pair[0] >= pair[1]) {
@@ -200,9 +218,12 @@ impl RetrievalAssuranceReceipt {
                     .into(),
             ));
         }
-        if self.summary.selected_count as usize != self.summary.selected_order.len()
-            || self.summary.blocked_count as usize != self.summary.blocked_order.len()
-            || self.summary.unknown_count as usize != self.summary.unknown_order.len()
+        if u64::from(self.summary.selected_count)
+            != u64::try_from(self.summary.selected_order.len()).unwrap_or(u64::MAX)
+            || u64::from(self.summary.blocked_count)
+                != u64::try_from(self.summary.blocked_order.len()).unwrap_or(u64::MAX)
+            || u64::from(self.summary.unknown_count)
+                != u64::try_from(self.summary.unknown_order.len()).unwrap_or(u64::MAX)
         {
             return Err(RetrievalAssuranceError::Invalid(
                 "retrieval assurance summary counts do not match canonical orders".into(),
@@ -262,7 +283,9 @@ pub fn assure_retrieval_synthesis(
     let mut spent = 0_u64;
     let mut selected_modalities = BTreeSet::new();
     for candidate in &candidates {
-        let cost = candidate.evidence_id.len() as u64 + 1;
+        let cost = u64::try_from(candidate.evidence_id.len())
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
         let within_scope = studies.contains(&candidate.study_id);
         let profile_ok = candidate.comparability_profile == request.comparability_profile;
         let modality_required = modalities.contains(&candidate.modality);
@@ -358,8 +381,20 @@ pub fn assure_retrieval_synthesis(
         }
         selected.insert(candidate.evidence_id.clone());
         selected_modalities.insert(candidate.modality.clone());
-        artifacts.insert(candidate.artifact_digest.clone().expect("checked above"));
-        provenance.insert(candidate.provenance_digest.clone().expect("checked above"));
+        let (Some(artifact_digest), Some(provenance_digest)) = (
+            candidate.artifact_digest.clone(),
+            candidate.provenance_digest.clone(),
+        ) else {
+            selected.remove(&candidate.evidence_id);
+            unknown.insert(candidate.evidence_id.clone());
+            omissions.insert(format!(
+                "evidence:{}:artifact-or-provenance-digest-missing",
+                candidate.evidence_id
+            ));
+            continue;
+        };
+        artifacts.insert(artifact_digest);
+        provenance.insert(provenance_digest);
         spent = spent.saturating_add(cost);
         if candidate.negative_result {
             negative.insert(format!(
@@ -467,9 +502,12 @@ pub fn assure_retrieval_synthesis(
         modality_order,
         artifact_order,
         provenance_order,
-        selected_count: selected_order.len() as u32,
-        blocked_count: blocked_order.len() as u32,
-        unknown_count: unknown_order.len() as u32,
+        selected_count: u32::try_from(selected_order.len())
+            .map_err(|_| RetrievalAssuranceError::Invalid("selected count exceeds u32".into()))?,
+        blocked_count: u32::try_from(blocked_order.len())
+            .map_err(|_| RetrievalAssuranceError::Invalid("blocked count exceeds u32".into()))?,
+        unknown_count: u32::try_from(unknown_order.len())
+            .map_err(|_| RetrievalAssuranceError::Invalid("unknown count exceeds u32".into()))?,
         omissions: omissions.clone(),
         uncertainty: uncertainty.clone(),
         negative_evidence: negative_evidence.clone(),
@@ -510,6 +548,7 @@ fn validate_request(request: &RetrievalAssuranceRequest) -> Result<(), Retrieval
         || request.max_results == 0
         || request.candidates.is_empty()
         || request.budget == 0
+        || u64::try_from(request.candidates.len()).map_or(true, |count| count > u64::from(u32::MAX))
         || request.boundary != PRECLINICAL_BOUNDARY
         || request
             .study_order
@@ -731,5 +770,24 @@ mod tests {
             ),
         ]));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn non_local_raw_data_blocks_release_without_emitting_raw_data() {
+        let mut request = request(vec![candidate(
+            "evidence:imaging",
+            "study:a",
+            "imaging",
+            RetrievalEvidenceState::Supported,
+            false,
+        )]);
+        request.raw_data_local = false;
+        let receipt = assure_retrieval_synthesis(&request).unwrap();
+        assert_eq!(receipt.disposition, RetrievalAssuranceDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "request:raw-data-locality-required"));
     }
 }

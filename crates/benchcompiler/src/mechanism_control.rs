@@ -320,9 +320,7 @@ pub fn operate_mechanism_control(
     let disposition =
         if !request.policy_allow || !request.signed_approval || !request.federation_allow {
             MechanismDisposition::Blocked
-        } else if !request.protected_closure {
-            MechanismDisposition::Unknown
-        } else if ranked_order.is_empty() {
+        } else if !request.protected_closure || ranked_order.is_empty() {
             MechanismDisposition::Unknown
         } else if blocked_order.is_empty() {
             MechanismDisposition::Ranked

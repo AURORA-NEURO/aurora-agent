@@ -49,6 +49,7 @@ pub struct ResearchContextReceipt {
     pub feature_id: String,
     pub context_id: String,
     pub intent: String,
+    pub query_id: String,
     pub section_digest: ContentHash,
     pub certificate_digest: ContentHash,
     pub protected_closure_satisfied: bool,
@@ -71,6 +72,7 @@ impl ResearchContextReceipt {
         if self.feature_id != FEATURE_ID
             || self.context_id.trim().is_empty()
             || self.intent.trim().is_empty()
+            || self.query_id.trim().is_empty()
         {
             return Err(ResearchContextError::InvalidRequest(
                 "context receipt identity is incomplete".into(),
@@ -86,9 +88,52 @@ impl ResearchContextReceipt {
         if !self.protected_closure_satisfied {
             return Err(ResearchContextError::ProtectedClosure);
         }
+        if self.artifact.artifact_id != format!("research-context:{}", self.context_id)
+            || self.artifact.content_type != "application/vnd.aurora.research-context+json"
+            || self.artifact.semantic_loss
+                != vec![SemanticLoss {
+                    field: "world_and_evidence_values".into(),
+                    reason: "raw local context remains at origin; portable receipt exports hashes and omission state".into(),
+                    severity: LossSeverity::Bounded,
+                }]
+            || self.artifact.provenance
+                != vec![
+                    ProvenanceLink {
+                        source_id: "decision-section".into(),
+                        relation: "compiled-section-digest".into(),
+                        digest: self.section_digest.clone(),
+                    },
+                    ProvenanceLink {
+                        source_id: "context-certificate".into(),
+                        relation: "compiled-certificate-digest".into(),
+                        digest: self.certificate_digest.clone(),
+                    },
+                ]
+        {
+            return Err(ResearchContextError::InvalidRequest(
+                "research context artifact identity or provenance is invalid".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
-            .map_err(ResearchContextError::Contract)
+            .map_err(ResearchContextError::Contract)?;
+        let payload = json!({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "context_id": self.context_id,
+            "intent": self.intent,
+            "query_id": self.query_id,
+            "section_digest": self.section_digest,
+            "certificate_digest": self.certificate_digest,
+            "protected_closure_satisfied": self.protected_closure_satisfied,
+            "supports_sufficiency_claim": self.supports_sufficiency_claim,
+            "unresolved_obligations": self.unresolved_obligations,
+            "boundary": self.boundary,
+        });
+        self.artifact
+            .verify_payload(&payload)
+            .map_err(ResearchContextError::Contract)?;
+        Ok(())
     }
 
     pub fn verify_payload(&self, payload: &Value) -> Result<(), ResearchContextError> {
@@ -218,6 +263,7 @@ pub fn compile_research_context(
         feature_id: FEATURE_ID.into(),
         context_id: request.context_id.clone(),
         intent: request.intent.clone(),
+        query_id: query.query_id.to_string(),
         section_digest,
         certificate_digest,
         protected_closure_satisfied: output.protected_closure_satisfied(),
@@ -291,5 +337,14 @@ mod tests {
             compile_research_context(&world, &query, &invalid),
             Err(ResearchContextError::InvalidRequest(_))
         ));
+    }
+
+    #[test]
+    fn restored_receipt_cannot_change_query_identity_without_rebinding_artifact() {
+        let world = World::from_json(fixture("radiogenomic_world.json")).unwrap();
+        let query = Query::from_json(fixture("leakage_query.json")).unwrap();
+        let mut receipt = compile_research_context(&world, &query, &request()).unwrap();
+        receipt.query_id = "query:tampered".into();
+        assert!(receipt.validate().is_err());
     }
 }

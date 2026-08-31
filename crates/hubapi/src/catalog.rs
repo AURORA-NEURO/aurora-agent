@@ -35,12 +35,13 @@
 //! this crate's. No content-addressed store either: a digest here is a string that came from
 //! somewhere else, and nothing in this crate hashes an artifact.
 
-use crate::lifecycle::PackLifecycle;
+use crate::lifecycle::{LifecycleError, PackLifecycle};
 use crate::mirror::Replication;
 use crate::name::{PackName, Version, VersionReq};
 use crate::registry::{Authority, AuthorityError, NameAuthority, RegistryId};
 use bioprism_registry::TrustTier;
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -120,12 +121,39 @@ impl PackRelease {
 }
 
 /// A registry's holdings, its standing, and the currency of its copy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Catalog {
     authority: Authority,
     sync: Replication,
     releases: BTreeMap<String, PackRelease>,
     lifecycle: PackLifecycle,
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogFields {
+    authority: Authority,
+    sync: Replication,
+    releases: BTreeMap<String, PackRelease>,
+    lifecycle: PackLifecycle,
+}
+
+impl<'de> Deserialize<'de> for Catalog {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let fields = CatalogFields::deserialize(deserializer)?;
+        let catalog = Catalog {
+            authority: fields.authority,
+            sync: fields.sync,
+            releases: fields.releases,
+            lifecycle: fields.lifecycle,
+        };
+        catalog
+            .validate()
+            .map(|()| catalog)
+            .map_err(D::Error::custom)
+    }
 }
 
 impl Catalog {
@@ -180,6 +208,7 @@ impl Catalog {
     /// Re-recording the identical binding succeeds and changes nothing, because replication
     /// re-delivering a record it already delivered is normal and is not an error.
     pub fn record(&mut self, release: PackRelease) -> Result<(), CatalogError> {
+        self.validate()?;
         self.authority.standing_for(&release.name)?;
         if release.digest.trim().is_empty() {
             return Err(CatalogError::DigestMissing {
@@ -239,6 +268,43 @@ impl Catalog {
         self.releases.is_empty()
     }
 
+    /// Checks the invariants normally maintained by [`Catalog::record`].
+    ///
+    /// A catalog is a serialized boundary object, so validating only during mutation is not
+    /// sufficient: a restored map can contain a key that disagrees with the release it names, a
+    /// release outside the registry's standing, or a release that bypassed digest/self-dependency
+    /// checks. Resolution and deserialization both use this predicate.
+    pub fn validate(&self) -> Result<(), CatalogError> {
+        self.authority.validate()?;
+        self.lifecycle.validate()?;
+        for (key, release) in &self.releases {
+            let expected = Catalog::key(&release.name, &release.version);
+            if key != &expected {
+                return Err(CatalogError::ReleaseKeyMismatch {
+                    key: key.clone(),
+                    expected,
+                });
+            }
+            self.authority.standing_for(&release.name)?;
+            if release.digest.trim().is_empty() {
+                return Err(CatalogError::DigestMissing {
+                    subject: key.clone(),
+                });
+            }
+            if let Some(dependency) = release
+                .dependencies
+                .iter()
+                .find(|dependency| dependency.name == release.name)
+            {
+                return Err(CatalogError::SelfDependency {
+                    subject: key.clone(),
+                    req: dependency.req.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub fn holds(&self, name: &PackName) -> bool {
         self.releases.values().any(|release| &release.name == name)
     }
@@ -256,6 +322,9 @@ pub enum CatalogError {
     #[error(transparent)]
     Authority(#[from] AuthorityError),
 
+    #[error(transparent)]
+    Lifecycle(#[from] LifecycleError),
+
     #[error("{subject} was offered with no digest; a name with no content behind it resolves to nothing")]
     DigestMissing { subject: String },
 
@@ -271,6 +340,9 @@ pub enum CatalogError {
 
     #[error("{subject} declares a dependency on itself ({req})")]
     SelfDependency { subject: String, req: String },
+
+    #[error("catalog release key {key} does not match the release subject {expected}")]
+    ReleaseKeyMismatch { key: String, expected: String },
 }
 
 #[cfg(test)]
@@ -423,5 +495,23 @@ mod tests {
         let text = serde_json::to_string(&catalog).expect("serialises");
         let back: Catalog = serde_json::from_str(&text).expect("deserialises");
         assert_eq!(back, catalog);
+    }
+
+    #[test]
+    fn catalog_deserialization_rejects_a_release_map_key_that_does_not_bind_its_subject() {
+        let mut catalog = Catalog::origin(origin_authority());
+        catalog
+            .record(release(Version::new(1, 0, 0), "sha256:aa"))
+            .expect("records");
+        let mut value = serde_json::to_value(&catalog).expect("serialises");
+        let releases = value
+            .get_mut("releases")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("release object");
+        let release = releases
+            .remove("bioprism/onco-tp53@1.0.0")
+            .expect("release");
+        releases.insert("bioprism/onco-tp53@9.9.9".into(), release);
+        assert!(serde_json::from_value::<Catalog>(value).is_err());
     }
 }

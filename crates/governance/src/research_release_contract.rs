@@ -221,7 +221,6 @@ fn validate_run(run: &ValidatedResearchRun) -> Result<(), GovernanceReleaseError
             .localization_statement
             .to_ascii_lowercase()
             .contains("local")
-            == false
         || !run.raw_data_local
         || !run.provenance_complete
         || run.artifact_ids.len() > MAX_ID_COUNT

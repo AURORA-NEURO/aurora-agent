@@ -5,6 +5,7 @@ edition = "2021"
 description = "The remaining FIBER calculus: coverage-aware selection, separator protocol, rate-distortion and value of information"
 
 [dependencies]
+bioprism-foundation = { workspace = true }
 bioprism-ids = { workspace = true }
 bioprism-scope = { workspace = true }
 serde = { workspace = true }

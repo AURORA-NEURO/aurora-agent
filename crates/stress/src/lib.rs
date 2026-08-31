@@ -39,6 +39,8 @@ pub mod conclusion;
 pub mod coverage;
 pub mod error;
 pub mod family;
+pub mod publication_research_object_workbench;
+pub mod federated_multimodal_ingestion_contract_model;
 pub mod invariant;
 pub mod perturb;
 pub mod profile;
@@ -50,6 +52,33 @@ pub use conclusion::{Character, Conclusion, ConclusionValue, Procedure};
 pub use coverage::{coverage, Coverage, FamilyOwner, ReferenceFamily};
 pub use error::StressError;
 pub use family::{Knob, Magnitude, Stress, StressFamily};
+pub use publication_research_object_workbench::{
+    compile_publication_research_object,
+    compile_publication_research_object_json,
+    publication_research_object_workbench_manifest,
+    validate_publication_research_object_json,
+    PublicationWorkbenchError,
+    PublicationWorkbenchRequest5,
+    SignedResearchObject5,
+    ValidatedResearchRun4,
+    CONTRACT_VERSION as PUBLICATION_RESEARCH_OBJECT_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as PUBLICATION_RESEARCH_OBJECT_WORKBENCH_FEATURE_ID,
+    INPUT_SCHEMA as PUBLICATION_RESEARCH_OBJECT_WORKBENCH_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as PUBLICATION_RESEARCH_OBJECT_WORKBENCH_OUTPUT_SCHEMA,
+};
+pub use federated_multimodal_ingestion_contract_model::{
+    federated_multimodal_ingestion_contract_manifest,
+    harmonize_federated_multimodal,
+    harmonize_federated_multimodal_json,
+    HarmonizedResearchObject2,
+    ModalityManifest4,
+    MultimodalIngestionContractError,
+    RawModalityBundle4,
+    CONTRACT_VERSION as FEDERATED_MULTIMODAL_INGESTION_CONTRACT_VERSION,
+    FEATURE_ID as FEDERATED_MULTIMODAL_INGESTION_FEATURE_ID,
+    INPUT_SCHEMA as FEDERATED_MULTIMODAL_INGESTION_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as FEDERATED_MULTIMODAL_INGESTION_OUTPUT_SCHEMA,
+};
 pub use invariant::{CohortInvariant, InvariantCheck, PostconditionResult};
 pub use perturb::{apply, perturb, postconditions, validate, Perturbed};
 pub use profile::{

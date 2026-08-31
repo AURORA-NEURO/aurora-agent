@@ -18,6 +18,8 @@ use thiserror::Error;
 pub const FEATURE_ID: &str = "AFA-brain-P02-F04";
 pub const CONTRACT_VERSION: &str = "brain-federated-retrieval-synthesis/1.0";
 pub const PERMITTED_ARTIFACT: &str = "qualified-evidence-summary";
+const SYNTHESIS_CONTENT_TYPE: &str = "application/vnd.aurora.federated-evidence-synthesis+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedRetrievalQuery {
@@ -101,61 +103,88 @@ impl FederatedEvidenceSynthesis {
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
             || !self.raw_data_local
-            || self.request_id.trim().is_empty()
-            || self.federation_id.trim().is_empty()
-            || self.institution_id.trim().is_empty()
-            || self.purpose.trim().is_empty()
-            || self.semantic_profile.trim().is_empty()
-            || self.endpoint.trim().is_empty()
             || self.study_order.len() < 2
             || self.modality_order.len() < 2
-            || self.scope.trim().is_empty()
             || self.candidate_order.is_empty()
             || self.ranked_order.is_empty()
             || self.ranked_order.len() != self.support_order.len()
-            || self.effect_receipts.is_empty()
         {
             return Err(FederatedRetrievalError::Invalid(
                 "federation identity, coverage, ranking, support, or effects are incomplete".into(),
             ));
         }
-        if self
-            .ranked_order
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.federation_id, "federation_id"),
+            (&self.institution_id, "institution_id"),
+            (&self.purpose, "purpose"),
+            (&self.semantic_profile, "semantic_profile"),
+            (&self.endpoint, "endpoint"),
+            (&self.scope, "scope"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        validate_sorted_unique(&self.study_order, "study_order")?;
+        validate_sorted_unique(&self.modality_order, "modality_order")?;
+        validate_sorted_unique(&self.candidate_order, "candidate_order")?;
+        validate_unique(&self.ranked_order, "ranked_order")?;
+        validate_unique(&self.qualified_order, "qualified_order")?;
+        validate_sorted_unique(&self.blocked_order, "blocked_order")?;
+        validate_sorted_unique(&self.unknown_order, "unknown_order")?;
+        for (values, field) in [
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
+        let candidate_values = self
+            .candidate_order
             .iter()
-            .chain(self.qualified_order.iter())
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let ranked_values = self.ranked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let qualified_values = self
+            .qualified_order
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let blocked_values = self.blocked_order.iter().cloned().collect::<BTreeSet<_>>();
+        let unknown_values = self.unknown_order.iter().cloned().collect::<BTreeSet<_>>();
+        if ranked_values != candidate_values
+            || !qualified_values.is_subset(&candidate_values)
+            || !blocked_values.is_subset(&candidate_values)
+            || !unknown_values.is_subset(&blocked_values)
+            || !qualified_values.is_disjoint(&blocked_values)
+            || qualified_values
+                .union(&blocked_values)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_values
         {
             return Err(FederatedRetrievalError::Invalid(
-                "federated retrieval state is not covered".into(),
+                "federated retrieval ranking and states must partition candidates".into(),
             ));
         }
-        for values in [
-            &self.study_order,
-            &self.modality_order,
-            &self.candidate_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
-        ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(FederatedRetrievalError::Invalid(
-                    "federated retrieval ordering is not canonical".into(),
-                ));
-            }
+        let qualified_exact = self.qualified_order.iter().collect::<BTreeSet<_>>();
+        let expected_qualified = self
+            .ranked_order
+            .iter()
+            .filter(|candidate| qualified_exact.contains(candidate))
+            .cloned()
+            .collect::<Vec<_>>();
+        if self.qualified_order != expected_qualified {
+            return Err(FederatedRetrievalError::Invalid(
+                "federated qualified order must retain ranked candidate order".into(),
+            ));
         }
-        if self
-            .aggregate_order
-            .windows(2)
-            .any(|pair| pair[0] >= pair[1])
+        validate_digest_order(&self.aggregate_order)?;
+        if self.support_order.iter().any(|support| *support > 1000)
+            || self.aggregate_order.len() != self.qualified_order.len()
         {
             return Err(FederatedRetrievalError::Invalid(
-                "aggregate ordering is not canonical".into(),
+                "federated support or aggregate coverage is inconsistent".into(),
             ));
         }
         for digest in [
@@ -175,15 +204,80 @@ impl FederatedEvidenceSynthesis {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("exchange:permitted-artifacts:") && effect != "block:unsafe-release"
+        let expected_disposition = if self.omissions.iter().any(|omission| {
+            matches!(
+                omission.as_str(),
+                "request:policy-denied"
+                    | "request:protected-closure-incomplete"
+                    | "request:raw-data-locality-failed"
+                    | "request:signer-invalid"
+                    | "request:approval-required"
+            )
         }) {
+            FederatedRetrievalDisposition::Blocked
+        } else if self.qualified_order.is_empty() {
+            FederatedRetrievalDisposition::Unknown
+        } else if blocked_values.is_empty()
+            && self.omissions.is_empty()
+            && self.uncertainty.is_empty()
+            && self.negative_evidence.is_empty()
+        {
+            FederatedRetrievalDisposition::Qualified
+        } else {
+            FederatedRetrievalDisposition::Partial
+        };
+        if self.disposition != expected_disposition {
             return Err(FederatedRetrievalError::Invalid(
-                "effect is outside federation exchange gate".into(),
+                "federated retrieval disposition does not match retained state".into(),
+            ));
+        }
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            FederatedRetrievalDisposition::Qualified | FederatedRetrievalDisposition::Partial
+        ) && !self.aggregate_order.is_empty()
+        {
+            vec![format!("exchange:permitted-artifacts:{}", self.request_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(FederatedRetrievalError::Invalid(
+                "federated exchange effect does not match disposition and aggregate coverage"
+                    .into(),
+            ));
+        }
+        let expected_synthesis_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "ranked_order": self.ranked_order,
+            "qualified_order": self.qualified_order,
+            "support_order": self.support_order,
+            "aggregate_order": self.aggregate_order,
+            "comparability_digest": self.comparability_digest,
+            "envelope_digest": self.envelope_digest,
+            "disposition": self.disposition,
+        }))
+        .map_err(|error| FederatedRetrievalError::Artifact(error.to_string()))?;
+        if self.synthesis_digest != expected_synthesis_digest {
+            return Err(FederatedRetrievalError::Invalid(
+                "federated synthesis digest is not bound to the receipt".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-federated-retrieval:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != SYNTHESIS_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(FederatedRetrievalError::Invalid(
+                "federated synthesis artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedRetrievalError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedRetrievalError::Artifact(error.to_string()))
     }
 
@@ -194,6 +288,88 @@ impl FederatedEvidenceSynthesis {
         ContentHash::of_value(&value)
             .map_err(|error| FederatedRetrievalError::Artifact(error.to_string()))
     }
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedRetrievalError> {
+    if value.trim() != value
+        || value.is_empty()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedRetrievalError::Invalid(format!(
+            "{field} is empty, padded, oversized, or contains control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), FederatedRetrievalError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedRetrievalError::Invalid(format!(
+                "{field} contains a duplicate or case-colliding identity"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(values: &[String], field: &str) -> Result<(), FederatedRetrievalError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedRetrievalError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_digest_order(values: &[ContentHash]) -> Result<(), FederatedRetrievalError> {
+    if values.windows(2).any(|pair| pair[0] >= pair[1])
+        || values.iter().any(|value| value.as_str().len() != 64)
+    {
+        return Err(FederatedRetrievalError::Invalid(
+            "aggregate ordering or digest is invalid".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &FederatedEvidenceSynthesis) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "federation_id": receipt.federation_id,
+        "institution_id": receipt.institution_id,
+        "purpose": receipt.purpose,
+        "semantic_profile": receipt.semantic_profile,
+        "endpoint": receipt.endpoint,
+        "study_order": receipt.study_order,
+        "modality_order": receipt.modality_order,
+        "scope": receipt.scope,
+        "disposition": receipt.disposition,
+        "candidate_order": receipt.candidate_order,
+        "ranked_order": receipt.ranked_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "aggregate_order": receipt.aggregate_order,
+        "support_order": receipt.support_order,
+        "comparability_digest": receipt.comparability_digest,
+        "envelope_digest": receipt.envelope_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "replay_identity": receipt.replay_identity,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn federated_retrieval_synthesis_manifest() -> CapabilityManifest {
@@ -363,20 +539,28 @@ pub fn synthesize_federated_retrieval(
     let aggregate_order = aggregate.into_iter().collect::<Vec<_>>();
     let comparability_digest = ContentHash::of_value(&json!({"study_order": study_order, "modality_order": modality_order, "scope": request.scope, "semantic_profile": request.semantic_profile})).map_err(|error| FederatedRetrievalError::Artifact(error.to_string()))?;
     let envelope_digest = ContentHash::of_value(&json!({"federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "endpoint": request.endpoint, "allowed_artifacts": request.allowed_artifacts, "aggregate_order": aggregate_order})).map_err(|error| FederatedRetrievalError::Artifact(error.to_string()))?;
-    let synthesis_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "ranked_order": ranked_order, "qualified_order": qualified, "comparability_digest": comparability_digest, "envelope_digest": envelope_digest, "disposition": disposition})).map_err(|error| FederatedRetrievalError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "endpoint": request.endpoint, "study_order": study_order, "modality_order": modality_order, "scope": request.scope, "disposition": disposition, "candidate_order": candidate_order, "ranked_order": ranked_order, "qualified_order": qualified, "blocked_order": blocked, "unknown_order": unknown, "aggregate_order": aggregate_order, "comparability_digest": comparability_digest, "envelope_digest": envelope_digest, "synthesis_digest": synthesis_digest, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "replay_identity": request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
+    let synthesis_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "request_id": request.request_id, "ranked_order": ranked_order, "qualified_order": qualified, "support_order": support_order, "aggregate_order": aggregate_order, "comparability_digest": comparability_digest, "envelope_digest": envelope_digest, "disposition": disposition})).map_err(|error| FederatedRetrievalError::Artifact(error.to_string()))?;
+    let exchange_allowed = matches!(
+        disposition,
+        FederatedRetrievalDisposition::Qualified | FederatedRetrievalDisposition::Partial
+    ) && !aggregate_order.is_empty();
+    let effect_receipts = if exchange_allowed {
+        vec![format!(
+            "exchange:permitted-artifacts:{}",
+            request.request_id
+        )]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request_id, "federation_id": request.federation_id, "institution_id": request.institution_id, "purpose": request.purpose, "semantic_profile": request.semantic_profile, "endpoint": request.endpoint, "study_order": study_order, "modality_order": modality_order, "scope": request.scope, "disposition": disposition, "candidate_order": candidate_order, "ranked_order": ranked_order, "qualified_order": qualified, "blocked_order": blocked, "unknown_order": unknown, "aggregate_order": aggregate_order, "support_order": support_order, "comparability_digest": comparability_digest, "envelope_digest": envelope_digest, "synthesis_digest": synthesis_digest, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "replay_identity": request.replay_identity, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
     let artifact = TypedResearchArtifact::from_payload(
         format!("brain-federated-retrieval:{}", request.request_id),
-        "application/vnd.aurora.federated-evidence-synthesis+json",
+        SYNTHESIS_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
     )
     .map_err(|error| FederatedRetrievalError::Artifact(error.to_string()))?;
-    let exchange_allowed = matches!(
-        disposition,
-        FederatedRetrievalDisposition::Qualified | FederatedRetrievalDisposition::Partial
-    ) && !aggregate_order.is_empty();
     let receipt = FederatedEvidenceSynthesis {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -405,14 +589,7 @@ pub fn synthesize_federated_retrieval(
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
         replay_identity: request.replay_identity.clone(),
-        effect_receipts: if exchange_allowed {
-            vec![format!(
-                "exchange:permitted-artifacts:{}",
-                request.request_id
-            )]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -422,20 +599,62 @@ pub fn synthesize_federated_retrieval(
 }
 
 fn validate_request(request: &FederatedRetrievalQuery) -> Result<(), FederatedRetrievalError> {
-    if request.request_id.trim().is_empty()
-        || request.federation_id.trim().is_empty()
-        || request.institution_id.trim().is_empty()
-        || request.purpose.trim().is_empty()
-        || request.semantic_profile.trim().is_empty()
-        || request.endpoint.trim().is_empty()
-        || request.study_ids.len() < 2
+    if request.study_ids.len() < 2
         || request.required_modalities.len() < 2
-        || request.scope.trim().is_empty()
         || request.minimum_support_milli > 1000
         || request.candidates.is_empty()
         || request.boundary != PRECLINICAL_BOUNDARY
     {
         return Err(FederatedRetrievalError::Invalid("federated retrieval identity, coverage, threshold, candidates, or boundary is incomplete".into()));
+    }
+    for (value, field) in [
+        (&request.request_id, "request_id"),
+        (&request.federation_id, "federation_id"),
+        (&request.institution_id, "institution_id"),
+        (&request.purpose, "purpose"),
+        (&request.semantic_profile, "semantic_profile"),
+        (&request.endpoint, "endpoint"),
+        (&request.scope, "scope"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_unique(&request.study_ids, "study_ids")?;
+    validate_unique(&request.required_modalities, "required_modalities")?;
+    validate_unique(&request.allowed_artifacts, "allowed_artifacts")?;
+    let mut candidate_ids = BTreeSet::new();
+    for candidate in &request.candidates {
+        for (value, field) in [
+            (&candidate.evidence_id, "candidate.evidence_id"),
+            (&candidate.source_id, "candidate.source_id"),
+            (&candidate.study_id, "candidate.study_id"),
+            (&candidate.scope, "candidate.scope"),
+            (&candidate.modality, "candidate.modality"),
+            (&candidate.boundary, "candidate.boundary"),
+        ] {
+            validate_text(value, field)?;
+        }
+        if !candidate_ids.insert(candidate.evidence_id.to_ascii_lowercase()) {
+            return Err(FederatedRetrievalError::Invalid(
+                "candidate evidence identities contain a duplicate or case collision".into(),
+            ));
+        }
+        if candidate.support_milli > 1000
+            || candidate.boundary != PRECLINICAL_BOUNDARY
+            || candidate.semantic_digest.as_str().len() != 64
+            || candidate.artifact_digest.as_str().len() != 64
+            || candidate.provenance_digest.as_str().len() != 64
+            || candidate.replay_identity.as_str().len() != 64
+        {
+            return Err(FederatedRetrievalError::Invalid(
+                "federated candidate threshold, boundary, or digest is invalid".into(),
+            ));
+        }
+    }
+    if request.replay_identity.as_str().len() != 64 {
+        return Err(FederatedRetrievalError::Invalid(
+            "federated retrieval replay identity is invalid".into(),
+        ));
     }
     Ok(())
 }
@@ -547,5 +766,70 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(r.digest().unwrap(), r.digest().unwrap());
+    }
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut q = request(vec![
+            candidate("a", EvidenceState::Supported, "imaging"),
+            candidate("b", EvidenceState::Supported, "transcriptomics"),
+        ]);
+        q.raw_data_local = false;
+        let r = synthesize_federated_retrieval(&q).unwrap();
+        assert_eq!(r.disposition, FederatedRetrievalDisposition::Blocked);
+        assert!(r.raw_data_local);
+        assert!(r
+            .omissions
+            .iter()
+            .any(|value| value == "request:raw-data-locality-failed"));
+        r.validate().unwrap();
+    }
+
+    #[test]
+    fn support_order_and_aggregate_state_are_bound() {
+        let mut receipt = synthesize_federated_retrieval(&request(vec![
+            candidate("a", EvidenceState::Supported, "imaging"),
+            candidate("b", EvidenceState::Supported, "transcriptomics"),
+        ]))
+        .unwrap();
+        receipt.support_order[0] = 1;
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn case_mismatched_candidate_identity_is_rejected() {
+        let mut receipt = synthesize_federated_retrieval(&request(vec![
+            candidate("a", EvidenceState::Supported, "imaging"),
+            candidate("b", EvidenceState::Supported, "transcriptomics"),
+        ]))
+        .unwrap();
+        receipt.ranked_order[0] = receipt.ranked_order[0].to_ascii_uppercase();
+        assert!(receipt.validate().is_err());
+    }
+    #[test]
+    fn state_and_artifact_payload_are_bound() {
+        let mut state_drift = synthesize_federated_retrieval(&request(vec![
+            candidate("a", EvidenceState::Supported, "imaging"),
+            candidate("b", EvidenceState::Supported, "transcriptomics"),
+        ]))
+        .unwrap();
+        state_drift.blocked_order.push("evidence:other".into());
+        assert!(state_drift.validate().is_err());
+
+        let mut payload_drift = synthesize_federated_retrieval(&request(vec![
+            candidate("a", EvidenceState::Supported, "imaging"),
+            candidate("b", EvidenceState::Supported, "transcriptomics"),
+        ]))
+        .unwrap();
+        payload_drift.scope = "organoid:other".into();
+        assert!(payload_drift.validate().is_err());
+    }
+    #[test]
+    fn candidate_identity_aliases_are_rejected() {
+        let mut q = request(vec![
+            candidate("a", EvidenceState::Supported, "imaging"),
+            candidate("b", EvidenceState::Supported, "transcriptomics"),
+        ]);
+        q.candidates[1].evidence_id = "EVIDENCE:A".into();
+        assert!(synthesize_federated_retrieval(&q).is_err());
     }
 }

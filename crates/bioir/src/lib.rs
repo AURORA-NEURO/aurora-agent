@@ -52,8 +52,6 @@ pub mod invariants;
 pub mod knowledge;
 pub mod lens;
 pub mod lineage;
-pub mod laboratory_control_plane;
-pub mod performance_reliability_control_plane;
 pub mod quantity;
 pub mod uncertainty;
 
@@ -89,18 +87,4 @@ pub use uncertainty::{
 pub use knowledge::{
     EvidenceReferenceView, EvidenceSynthesis, KnowledgeCompiler, KnowledgeError,
     ScopedRetrievalQuery, FEATURE_CONTRACT_VERSION, FEATURE_ID,
-};
-
-pub use laboratory_control_plane::{
-    laboratory_control_plane_manifest, preflight_instrument_action,
-    InstrumentActionReceipt, InstrumentActionRequest, InstrumentCapability,
-    LaboratoryControlError, CONTRACT_VERSION as LABORATORY_CONTROL_CONTRACT_VERSION,
-    FEATURE_ID as LABORATORY_CONTROL_FEATURE_ID,
-};
-pub use performance_reliability_control_plane::{
-    evaluate_performance_reliability, performance_reliability_control_plane_manifest,
-    CapabilityInvocation, CapabilityManifestEntry, CapabilityWorkload,
-    PerformanceReliabilityError, ReliableCapabilityResult, ReliabilityDisposition,
-    CONTRACT_VERSION as PERFORMANCE_RELIABILITY_CONTRACT_VERSION,
-    FEATURE_ID as PERFORMANCE_RELIABILITY_FEATURE_ID,
 };

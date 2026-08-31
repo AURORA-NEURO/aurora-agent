@@ -78,7 +78,10 @@ impl ContextReleaseAdmissionReceipt {
             || self.remaining_units < 0.0
             || self.policy_reasons.is_empty()
             || self.effect_receipts.is_empty()
-            || !matches!(self.disposition.as_str(), "admitted" | "blocked" | "approval_required" | "unresolved")
+            || !matches!(
+                self.disposition.as_str(),
+                "admitted" | "blocked" | "approval_required" | "unresolved"
+            )
         {
             return Err(ContextReleaseAdmissionError::Invalid(
                 "context release identity, policy, grant, budget, disposition, or effects are incomplete".into(),
@@ -91,7 +94,9 @@ impl ContextReleaseAdmissionReceipt {
             &self.release_digest,
         ] {
             if digest.as_str().len() != 64 {
-                return Err(ContextReleaseAdmissionError::Invalid("context release digest is invalid".into()));
+                return Err(ContextReleaseAdmissionError::Invalid(
+                    "context release digest is invalid".into(),
+                ));
             }
         }
         if self.effect_receipts.iter().any(|effect| {
@@ -101,8 +106,65 @@ impl ContextReleaseAdmissionReceipt {
                 "context release effect is outside admission gate".into(),
             ));
         }
+        let policy_allows = matches!(
+            self.policy_decision,
+            PolicyDecision::Allow | PolicyDecision::LocalOnly
+        ) && !self
+            .policy_reasons
+            .iter()
+            .any(|reason| reason == "unresolved");
+        if self.disposition == "admitted" && !policy_allows {
+            return Err(ContextReleaseAdmissionError::Invalid(
+                "admitted context release is inconsistent with policy decision".into(),
+            ));
+        }
+        if self.disposition == "unresolved" && self.policy_decision != PolicyDecision::Unresolved {
+            return Err(ContextReleaseAdmissionError::Invalid(
+                "unresolved context release is inconsistent with policy decision".into(),
+            ));
+        }
+        let expected_effect_receipts = if self.disposition == "admitted" {
+            vec![format!("release:local-context:{}", self.request_id)]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
+            return Err(ContextReleaseAdmissionError::Invalid(
+                "context release effect does not match disposition".into(),
+            ));
+        }
+        let expected_release_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "context_digest": self.context_digest,
+            "omission_certificate_digest": self.omission_certificate_digest,
+            "replay_identity": self.replay_identity,
+            "actor": self.actor,
+            "action": RELEASE_ACTION,
+            "remaining_units": self.remaining_units,
+            "disposition": self.disposition,
+        }))
+        .map_err(|error| ContextReleaseAdmissionError::Artifact(error.to_string()))?;
+        if self.release_digest != expected_release_digest {
+            return Err(ContextReleaseAdmissionError::Invalid(
+                "context release digest is not bound to admission state".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-context-release-admission:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != "application/vnd.aurora.context-release-admission+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(ContextReleaseAdmissionError::Invalid(
+                "context release artifact identity or provenance is inconsistent".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| ContextReleaseAdmissionError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| ContextReleaseAdmissionError::Artifact(error.to_string()))
     }
 
@@ -113,6 +175,28 @@ impl ContextReleaseAdmissionReceipt {
         ContentHash::of_value(&value)
             .map_err(|error| ContextReleaseAdmissionError::Artifact(error.to_string()))
     }
+}
+
+fn receipt_payload(receipt: &ContextReleaseAdmissionReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "disposition": receipt.disposition,
+        "actor": receipt.actor,
+        "action": receipt.action,
+        "context_digest": receipt.context_digest,
+        "omission_certificate_digest": receipt.omission_certificate_digest,
+        "replay_identity": receipt.replay_identity,
+        "policy_decision": receipt.policy_decision,
+        "policy_reasons": receipt.policy_reasons,
+        "grant_scope": receipt.grant_scope,
+        "grant_expiry": receipt.grant_expiry,
+        "remaining_units": receipt.remaining_units,
+        "release_digest": receipt.release_digest,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn context_release_admission_manifest() -> CapabilityManifest {
@@ -143,6 +227,9 @@ pub fn admit_context_release(
     if request.request_id.trim().is_empty()
         || request.requested_resource.trim().is_empty()
         || request.boundary != PRECLINICAL_BOUNDARY
+        || request.context_digest.as_str().len() != 64
+        || request.omission_certificate_digest.as_str().len() != 64
+        || request.replay_identity.as_str().len() != 64
         || !request.requested_units.is_finite()
         || request.requested_units <= 0.0
     {
@@ -150,15 +237,16 @@ pub fn admit_context_release(
             "context release request identity, resource, budget, or boundary is invalid".into(),
         ));
     }
-    request
-        .policy_receipt
-        .validate()
-        .map_err(|error| ContextReleaseAdmissionError::Invalid(format!("policy receipt: {error}")))?;
-    request
+    request.policy_receipt.validate().map_err(|error| {
+        ContextReleaseAdmissionError::Invalid(format!("policy receipt: {error}"))
+    })?;
+    request.autonomy_grant.validate().map_err(|error| {
+        ContextReleaseAdmissionError::Invalid(format!("autonomy grant: {error}"))
+    })?;
+    let permitted = request
         .autonomy_grant
-        .validate()
-        .map_err(|error| ContextReleaseAdmissionError::Invalid(format!("autonomy grant: {error}")))?;
-    let permitted = request.autonomy_grant.permitted_actions.contains(RELEASE_ACTION);
+        .permitted_actions
+        .contains(RELEASE_ACTION);
     let budget = request
         .autonomy_grant
         .resource_budget
@@ -175,11 +263,26 @@ pub fn admit_context_release(
             .policy_receipt
             .evaluated_artifacts
             .contains(&request.omission_certificate_digest);
-    let policy_ok = matches!(request.policy_receipt.decision, PolicyDecision::Allow | PolicyDecision::LocalOnly)
-        && request.policy_receipt.reasons.iter().all(|reason| reason != "unresolved");
-    let disposition = if request.autonomy_grant.revoked || !permitted || budget < request.requested_units || !identity_match {
+    let policy_ok = matches!(
+        request.policy_receipt.decision,
+        PolicyDecision::Allow | PolicyDecision::LocalOnly
+    ) && request
+        .policy_receipt
+        .reasons
+        .iter()
+        .all(|reason| reason != "unresolved");
+    let disposition = if request.autonomy_grant.revoked
+        || !permitted
+        || budget < request.requested_units
+        || !identity_match
+    {
         "blocked"
-    } else if !policy_ok || matches!(request.policy_receipt.decision, PolicyDecision::ApprovalRequired) {
+    } else if !policy_ok
+        || matches!(
+            request.policy_receipt.decision,
+            PolicyDecision::ApprovalRequired
+        )
+    {
         "approval_required"
     } else if matches!(request.policy_receipt.decision, PolicyDecision::Unresolved) {
         "unresolved"
@@ -260,18 +363,68 @@ mod tests {
     use super::*;
     use std::collections::{BTreeMap, BTreeSet};
 
-    fn hash(value: &str) -> ContentHash { ContentHash::of_bytes(value.as_bytes()) }
+    fn hash(value: &str) -> ContentHash {
+        ContentHash::of_bytes(value.as_bytes())
+    }
     fn request() -> ContextReleaseAdmissionRequest {
-        let mut actions = BTreeSet::new(); actions.insert(RELEASE_ACTION.into());
-        let mut budget = BTreeMap::new(); budget.insert("context_units".into(), 10.0);
+        let mut actions = BTreeSet::new();
+        actions.insert(RELEASE_ACTION.into());
+        let mut budget = BTreeMap::new();
+        budget.insert("context_units".into(), 10.0);
         ContextReleaseAdmissionRequest {
-            request_id: "request:release".into(), context_digest: hash("context"), omission_certificate_digest: hash("omissions"), replay_identity: hash("replay"),
-            policy_receipt: PolicyReceipt { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), receipt_id: "policy:release".into(), decision: PolicyDecision::LocalOnly, reasons: vec!["local-context-release".into()], evaluated_artifacts: vec![hash("context"), hash("omissions")], authority_reference: None, boundary: PRECLINICAL_BOUNDARY.into() },
-            autonomy_grant: AutonomyGrant { schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(), actor: "researcher".into(), permitted_actions: actions, resource_budget: budget, scope: "study:preclinical".into(), expires_at: "2027-01-01T00:00:00Z".into(), revoked: false, autonomy_tier: AutonomyTier::A1, approval_reference: None, boundary: PRECLINICAL_BOUNDARY.into() }, requested_resource: "context_units".into(), requested_units: 2.0, boundary: PRECLINICAL_BOUNDARY.into()
+            request_id: "request:release".into(),
+            context_digest: hash("context"),
+            omission_certificate_digest: hash("omissions"),
+            replay_identity: hash("replay"),
+            policy_receipt: PolicyReceipt {
+                schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+                receipt_id: "policy:release".into(),
+                decision: PolicyDecision::LocalOnly,
+                reasons: vec!["local-context-release".into()],
+                evaluated_artifacts: vec![hash("context"), hash("omissions")],
+                authority_reference: None,
+                boundary: PRECLINICAL_BOUNDARY.into(),
+            },
+            autonomy_grant: AutonomyGrant {
+                schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
+                actor: "researcher".into(),
+                permitted_actions: actions,
+                resource_budget: budget,
+                scope: "study:preclinical".into(),
+                expires_at: "2027-01-01T00:00:00Z".into(),
+                revoked: false,
+                autonomy_tier: AutonomyTier::A1,
+                approval_reference: None,
+                boundary: PRECLINICAL_BOUNDARY.into(),
+            },
+            requested_resource: "context_units".into(),
+            requested_units: 2.0,
+            boundary: PRECLINICAL_BOUNDARY.into(),
         }
     }
-    #[test] fn manifest_is_a1() { assert_eq!(context_release_admission_manifest().autonomy_tier, AutonomyTier::A1); }
-    #[test] fn local_policy_is_admitted() { let receipt = admit_context_release(&request()).unwrap(); assert_eq!(receipt.disposition, "admitted"); assert_eq!(receipt.remaining_units, 8.0); }
-    #[test] fn revoked_grant_blocks() { let mut value = request(); value.autonomy_grant.revoked = true; let receipt = admit_context_release(&value).unwrap(); assert_eq!(receipt.disposition, "blocked"); }
-    #[test] fn digest_is_stable() { let receipt = admit_context_release(&request()).unwrap(); assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap()); }
+    #[test]
+    fn manifest_is_a1() {
+        assert_eq!(
+            context_release_admission_manifest().autonomy_tier,
+            AutonomyTier::A1
+        );
+    }
+    #[test]
+    fn local_policy_is_admitted() {
+        let receipt = admit_context_release(&request()).unwrap();
+        assert_eq!(receipt.disposition, "admitted");
+        assert_eq!(receipt.remaining_units, 8.0);
+    }
+    #[test]
+    fn revoked_grant_blocks() {
+        let mut value = request();
+        value.autonomy_grant.revoked = true;
+        let receipt = admit_context_release(&value).unwrap();
+        assert_eq!(receipt.disposition, "blocked");
+    }
+    #[test]
+    fn digest_is_stable() {
+        let receipt = admit_context_release(&request()).unwrap();
+        assert_eq!(receipt.digest().unwrap(), receipt.digest().unwrap());
+    }
 }

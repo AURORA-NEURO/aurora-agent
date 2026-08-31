@@ -175,11 +175,19 @@ pub struct TraceStep {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum RoleStatus {
     Done,
-    WaitingFor { peer: Role, expecting: Vec<Label> },
-    ReadyToSend { peer: Role, offering: Vec<Label> },
+    WaitingFor {
+        peer: Role,
+        expecting: Vec<Label>,
+    },
+    ReadyToSend {
+        peer: Role,
+        offering: Vec<Label>,
+    },
     /// A free recursion variable or another term with no transition. Reachable only for
     /// hand-written systems; projection of a well-formed global type never produces one.
-    Stuck { reason: String },
+    Stuck {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -514,10 +522,10 @@ fn expand(state: &State, capacity: usize) -> Expansion {
                         let mut next = state.clone();
                         next.locals
                             .insert(role.clone(), branch.continuation.clone());
-                        let queue = next
-                            .channels
-                            .get_mut(&(from.clone(), role.clone()))
-                            .expect("queue exists, it was just read");
+                        let Some(queue) = next.channels.get_mut(&(from.clone(), role.clone()))
+                        else {
+                            continue;
+                        };
                         queue.remove(0);
                         transitions.push((
                             Event::Receive {
@@ -582,7 +590,9 @@ fn explore(system: &System, bound: ExplorationBound) -> Exploration {
 
         let expansion = expand(&exploration.states[current], bound.channel_capacity);
         if expansion.capacity_blocked {
-            exploration.truncated.get_or_insert(BoundHit::ChannelCapacity);
+            exploration
+                .truncated
+                .get_or_insert(BoundHit::ChannelCapacity);
             exploration.incomplete[current] = true;
         }
         exploration.unexpected[current] = expansion.unexpected;
@@ -666,8 +676,7 @@ impl Exploration {
                     .filter(|role| !matches!(role.status, RoleStatus::Done))
                     .map(|role| match &role.status {
                         RoleStatus::WaitingFor { peer, expecting } => {
-                            let labels: Vec<&str> =
-                                expecting.iter().map(Label::as_str).collect();
+                            let labels: Vec<&str> = expecting.iter().map(Label::as_str).collect();
                             format!("{} waits for {} to send {:?}", role.role, peer, labels)
                         }
                         other => format!("{} is {:?}", role.role, other),

@@ -96,10 +96,13 @@ pub mod endpoint;
 pub mod error;
 pub mod execution;
 pub mod identity;
+pub mod interpretation_engine;
 pub mod longitudinal;
 pub mod missing;
 pub mod orthogonal;
 pub mod panel;
+pub mod performance_reliability_interoperability_gateway;
+pub mod statistical_analysis_research_workbench;
 pub mod perturbation;
 pub mod program;
 pub mod publication_release_contract_model;
@@ -108,6 +111,27 @@ pub mod units;
 pub mod verdict;
 
 pub use error::OracleXError;
+pub use interpretation_engine::{
+    assure_interpretation, interpretation_inference_manifest, EvidenceBackedResult3,
+    EvidenceState as InterpretationEvidenceState, InterpretationCandidate3,
+    InterpretationInferenceError, InteractiveInterpretation1,
+    CONTRACT_VERSION as INTERPRETATION_INFERENCE_CONTRACT_VERSION,
+    FEATURE_ID as INTERPRETATION_INFERENCE_FEATURE_ID,
+};
+pub use performance_reliability_interoperability_gateway::{
+    negotiate_performance_reliability, performance_reliability_interoperability_gateway_manifest,
+    CapabilityInvocation5, CapabilityWorkload4, PerformanceReliabilityInteroperabilityError,
+    ReliableCapabilityResult6, WorkloadEvidenceState,
+    CONTRACT_VERSION as PERFORMANCE_RELIABILITY_INTEROPERABILITY_CONTRACT_VERSION,
+    FEATURE_ID as PERFORMANCE_RELIABILITY_INTEROPERABILITY_FEATURE_ID,
+};
+pub use statistical_analysis_research_workbench::{
+    qualify_statistical_analysis, statistical_analysis_research_workbench_manifest,
+    AnalysisCandidate5, AnalysisDisposition, AnalysisQuestion4,
+    QualifiedAnalysisResult5, StatisticalAnalysisWorkbenchError,
+    CONTRACT_VERSION as STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_CONTRACT_VERSION,
+    FEATURE_ID as STATISTICAL_ANALYSIS_RESEARCH_WORKBENCH_FEATURE_ID,
+};
 pub use verdict::{
     Contradiction, Determination, Missing, NotEvaluable, Support, Unresolved, Witness,
 };
@@ -117,7 +141,7 @@ pub use verdict::{
 /// `crates/modalities` established the pattern: "no invented constants" is not expressible as a type,
 /// so it is expressed as a test over the text. `include_str!` bakes the sources in at compile time, so
 /// the test reads no files at runtime and stays deterministic.
-pub const SOURCES: [(&str, &str); 19] = [
+pub const SOURCES: [(&str, &str); 21] = [
     ("audit.rs", include_str!("audit.rs")),
     ("citation.rs", include_str!("citation.rs")),
     ("compose.rs", include_str!("compose.rs")),
@@ -134,6 +158,14 @@ pub const SOURCES: [(&str, &str); 19] = [
     ("missing.rs", include_str!("missing.rs")),
     ("orthogonal.rs", include_str!("orthogonal.rs")),
     ("panel.rs", include_str!("panel.rs")),
+    (
+        "performance_reliability_interoperability_gateway.rs",
+        include_str!("performance_reliability_interoperability_gateway.rs"),
+    ),
+    (
+        "statistical_analysis_research_workbench.rs",
+        include_str!("statistical_analysis_research_workbench.rs"),
+    ),
     ("perturbation.rs", include_str!("perturbation.rs")),
     ("program.rs", include_str!("program.rs")),
     (

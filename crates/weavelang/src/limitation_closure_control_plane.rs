@@ -459,19 +459,19 @@ pub fn assure_weavelang_limitation_closure(
         "federation_id": request.federation_id,
         "semantic_profile": request.semantic_profile,
         "disposition": disposition,
-        "case_order": case_order,
-        "selected_order": selected_order,
-        "unresolved_order": unresolved_order,
-        "blocked_order": blocked_order,
-        "missing_case_order": missing_case_order,
-        "peer_order": peer_order,
-        "qualified_peer_order": qualified_peer_order,
-        "missing_peer_order": missing_peer_order,
-        "omission_order": omission_order,
-        "uncertainty_order": uncertainty_order,
-        "negative_evidence_order": negative_evidence_order,
+        "case_order": case_order.clone(),
+        "selected_order": selected_order.clone(),
+        "unresolved_order": unresolved_order.clone(),
+        "blocked_order": blocked_order.clone(),
+        "missing_case_order": missing_case_order.clone(),
+        "peer_order": peer_order.clone(),
+        "qualified_peer_order": qualified_peer_order.clone(),
+        "missing_peer_order": missing_peer_order.clone(),
+        "omission_order": omission_order.clone(),
+        "uncertainty_order": uncertainty_order.clone(),
+        "negative_evidence_order": negative_evidence_order.clone(),
         "replay_identity": request.replay_identity,
-        "effect_receipts": effect_receipts,
+        "effect_receipts": effect_receipts.clone(),
         "raw_data_local": request.raw_data_local,
         "aggregate_only": request.aggregate_only,
         "boundary": PRECLINICAL_BOUNDARY,
@@ -494,81 +494,21 @@ pub fn assure_weavelang_limitation_closure(
         federation_id: request.federation_id.clone(),
         semantic_profile: request.semantic_profile.clone(),
         disposition,
-        case_order: payload["case_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        selected_order: payload["selected_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        unresolved_order: payload["unresolved_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        blocked_order: payload["blocked_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        missing_case_order: payload["missing_case_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        peer_order: payload["peer_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        qualified_peer_order: payload["qualified_peer_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        missing_peer_order: payload["missing_peer_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        omission_order: payload["omission_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        uncertainty_order: payload["uncertainty_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
-        negative_evidence_order: payload["negative_evidence_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
+        case_order,
+        selected_order,
+        unresolved_order,
+        blocked_order,
+        missing_case_order,
+        peer_order,
+        qualified_peer_order,
+        missing_peer_order,
+        omission_order,
+        uncertainty_order,
+        negative_evidence_order,
         replay_identity: request.replay_identity.clone(),
         closure_digest,
         artifact,
-        effect_receipts: payload["effect_receipts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|value| value.as_str().unwrap().into())
-            .collect(),
+        effect_receipts,
         raw_data_local: request.raw_data_local,
         aggregate_only: request.aggregate_only,
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -583,6 +523,10 @@ fn validate_request(request: &WeavelangClosureRequest) -> Result<(), LimitationC
         || request.federation_id.trim().is_empty()
         || request.semantic_profile.trim().is_empty()
         || request.required_case_order.is_empty()
+        || request
+            .required_case_order
+            .iter()
+            .any(|value| value.trim().is_empty())
         || !canonical(&request.required_case_order)
         || request.cases.is_empty()
         || request.peers.is_empty()

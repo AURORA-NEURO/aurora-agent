@@ -224,7 +224,8 @@ pub fn operate_interpretation_plane(
     if !request.signed_approval {
         uncertainty.insert("request:signed-approval-missing".into());
     }
-    if request.max_concurrency > request.results.len() as u32 {
+    if u64::from(request.max_concurrency) > u64::try_from(request.results.len()).unwrap_or(u64::MAX)
+    {
         uncertainty.insert("request:concurrency-ceiling-exceeds-result-set".into());
     }
     let interpretation_order = admitted.into_iter().collect::<Vec<_>>();
@@ -232,9 +233,7 @@ pub fn operate_interpretation_plane(
     let disposition =
         if !request.policy_allow || !request.signed_approval || !request.federation_allow {
             InterpretationDisposition::Blocked
-        } else if !request.protected_closure {
-            InterpretationDisposition::Unknown
-        } else if interpretation_order.is_empty() {
+        } else if !request.protected_closure || interpretation_order.is_empty() {
             InterpretationDisposition::Unknown
         } else if blocked_order.is_empty() {
             InterpretationDisposition::Admitted
@@ -444,5 +443,16 @@ mod tests {
         let receipt = operate_interpretation_plane(&request).unwrap();
         assert_eq!(receipt.disposition, InterpretationDisposition::Unknown);
         assert!(!receipt.uncertainty.is_empty());
+    }
+
+    #[test]
+    fn concurrency_ceiling_gap_is_retained_without_narrowing() {
+        let mut request = request();
+        request.max_concurrency = 2;
+        let receipt = operate_interpretation_plane(&request).unwrap();
+        assert!(receipt
+            .uncertainty
+            .iter()
+            .any(|item| item == "request:concurrency-ceiling-exceeds-result-set"));
     }
 }

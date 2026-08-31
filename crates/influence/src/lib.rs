@@ -132,6 +132,23 @@
 //! in the module that makes it, and none of them is presented as specification.
 
 pub mod analysis;
+pub mod bound_integrity_support;
+pub mod local_bound_integrity_inference;
+pub mod multimodal_bound_integrity_inference;
+pub mod throughput_bound_integrity_inference;
+pub mod federated_continual_bound_integrity_inference;
+pub mod local_bound_integrity_contract_model;
+pub mod multimodal_bound_integrity_contract_model;
+pub mod throughput_bound_integrity_contract_model;
+pub mod federated_continual_bound_integrity_contract_model;
+pub mod local_bound_integrity_research_copilot;
+pub mod multimodal_bound_integrity_research_copilot;
+pub mod throughput_bound_integrity_research_copilot;
+pub mod federated_continual_bound_integrity_research_copilot;
+pub mod local_bound_integrity_workflow_fabric;
+pub mod multimodal_bound_integrity_workflow_fabric;
+pub mod throughput_bound_integrity_workflow_fabric;
+pub mod federated_continual_bound_integrity_workflow_fabric;
 pub mod bound;
 pub mod bruteforce;
 pub mod contraction;
@@ -141,6 +158,7 @@ pub mod error;
 pub mod exact;
 pub mod federated_continual_interpretation_gateway;
 pub mod federated_mechanism_control_plane;
+pub mod local_evidence_surveillance_assurance;
 pub mod gibbs;
 pub mod interpret;
 pub mod manifest;
@@ -158,6 +176,23 @@ pub use analysis::{
     chain_of, dynamic_range_bound, structural_zero, InfluenceAnalysis, InfluenceAnalyzer,
     MethodOutcome,
 };
+pub use bound_integrity_support::{certify as certify_bound_integrity, manifest as bound_integrity_manifest, BoundIntegrityArtifact4, BoundIntegrityCard7, BoundIntegrityError, BoundIntegrityRequest4, InfluenceClaim4, BOUNDARY as BOUND_INTEGRITY_BOUNDARY, CONTENT_TYPE as BOUND_INTEGRITY_CONTENT_TYPE};
+pub use local_bound_integrity_inference::*;
+pub use multimodal_bound_integrity_inference::*;
+pub use throughput_bound_integrity_inference::*;
+pub use federated_continual_bound_integrity_inference::*;
+pub use local_bound_integrity_contract_model::*;
+pub use multimodal_bound_integrity_contract_model::*;
+pub use throughput_bound_integrity_contract_model::*;
+pub use federated_continual_bound_integrity_contract_model::*;
+pub use local_bound_integrity_research_copilot::*;
+pub use multimodal_bound_integrity_research_copilot::*;
+pub use throughput_bound_integrity_research_copilot::*;
+pub use federated_continual_bound_integrity_research_copilot::*;
+pub use local_bound_integrity_workflow_fabric::*;
+pub use multimodal_bound_integrity_workflow_fabric::*;
+pub use throughput_bound_integrity_workflow_fabric::*;
+pub use federated_continual_bound_integrity_workflow_fabric::*;
 pub use domain::{
     laws, AbstractDomain, DomainError, DomainId, EnumerableConcretisation, FactClass,
 };
@@ -195,6 +230,14 @@ pub use federated_mechanism_control_plane::{
     MechanismCandidate, MechanismDecision,
     FEATURE_ID as FEDERATED_MECHANISM_CONTROL_FEATURE_ID,
     FEATURE_VERSION as FEDERATED_MECHANISM_CONTROL_VERSION,
+};
+pub use local_evidence_surveillance_assurance::{
+    assure_local_evidence_surveillance, influence_local_evidence_surveillance_manifest,
+    InfluenceEvidenceFeedRequest, InfluenceEvidenceObservation,
+    InfluenceEvidenceSurveillanceDisposition, InfluenceEvidenceSurveillanceError,
+    InfluenceQualifiedEvidenceSet,
+    CONTRACT_VERSION as INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_CONTRACT_VERSION,
+    FEATURE_ID as INFLUENCE_LOCAL_EVIDENCE_SURVEILLANCE_FEATURE_ID,
 };
 pub use manifest::{omission_group, omission_group_from_analysis, summarise, BoundedSummary};
 pub use measure::{total_variation, AnswerDistribution};

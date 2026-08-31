@@ -146,6 +146,11 @@ impl FactDraft {
     /// so that a scope this crate emits and a scope `bioprism-world` parses are the same
     /// object by construction rather than by agreement between two hand-written mappings.
     pub fn build(self) -> Result<Value, AdapterError> {
+        self.origin
+            .validate()
+            .map_err(AdapterError::InvalidSource)?;
+        validate_strings("tag", self.tags.iter())?;
+        validate_strings("provenance", self.provenance.iter())?;
         let id = FactId::parse(self.id)
             .map_err(|error| AdapterError::identifier(self.origin.clone(), error))?;
         let provides = VariableName::parse(self.provides)
@@ -154,6 +159,9 @@ impl FactDraft {
             AdapterError::malformed_fact(self.origin.clone(), error.to_string())
         })?;
 
+        let mut provenance = self.provenance;
+        provenance.sort();
+        provenance.dedup();
         let mut map = Map::new();
         map.insert("id".to_string(), Value::String(id.to_string()));
         map.insert("provides".to_string(), Value::String(provides.to_string()));
@@ -165,10 +173,29 @@ impl FactDraft {
         );
         map.insert(
             "provenance".to_string(),
-            Value::Array(self.provenance.into_iter().map(Value::String).collect()),
+            Value::Array(provenance.into_iter().map(Value::String).collect()),
         );
         Ok(Value::Object(map))
     }
+}
+
+fn validate_strings<'a, I>(field: &str, values: I) -> Result<(), AdapterError>
+where
+    I: IntoIterator<Item = &'a String>,
+{
+    for value in values {
+        if value.is_empty() || value.trim() != value {
+            return Err(AdapterError::InvalidSource(format!(
+                "fact {field} must be non-empty and trimmed"
+            )));
+        }
+        if value.len() > 512 || value.chars().any(char::is_control) {
+            return Err(AdapterError::InvalidSource(format!(
+                "fact {field} is outside its bounded text contract"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -229,5 +256,15 @@ mod tests {
         .apply(Value::from(2.5));
         assert_eq!(qualified["unit"], Value::from("mm"));
         assert_eq!(qualified["value"], Value::from(2.5));
+    }
+
+    #[test]
+    fn draft_provenance_is_canonicalized_and_empty_entries_are_refused() {
+        let document = draft().provenances(["z", "a", "a"]).build().unwrap();
+        assert_eq!(document["provenance"], serde_json::json!(["a", "z"]));
+        assert!(matches!(
+            draft().provenance(" ").build(),
+            Err(AdapterError::InvalidSource(_))
+        ));
     }
 }

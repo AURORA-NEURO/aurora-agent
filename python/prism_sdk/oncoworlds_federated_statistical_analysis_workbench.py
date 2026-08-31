@@ -1,0 +1,55 @@
+"""Cross-language contract for ``AFA-oncoworlds-P13-F20``."""
+from __future__ import annotations
+
+import hashlib, json, re
+from dataclasses import dataclass
+from typing import Any, Mapping
+from .research_contracts import PRECLINICAL_BOUNDARY, RESEARCH_CONTRACT_SCHEMA_VERSION, ResearchContractError
+
+FEATURE_ID="AFA-oncoworlds-P13-F20"; CONTRACT_VERSION="oncoworlds-federated-continual-statistical-causal-ml-analysis-research-workbench/1.0"; INPUT_SCHEMA="AnalysisQuestion4@1"; OUTPUT_SCHEMA="QualifiedAnalysisResult8@1"; CONTENT_TYPE="application/vnd.aurora.oncoworlds-analysis-workbench-result-8+json"
+def _hash(v:Any)->str:return hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+def _ordered(v:list[str])->bool:return v==sorted(set(v))
+def _digest(v:Any)->bool:return isinstance(v,str) and re.fullmatch(r"[0-9a-f]{64}",v) is not None
+def _partition(u:list[str],p:list[list[str]],m:str)->None:
+    f=sum(p,[])
+    if len(set(u))!=len(u) or len(f)!=len(set(f)) or set(f)!=set(u):raise ResearchContractError(m)
+
+@dataclass(frozen=True)
+class OncoworldsAnalysisWorkbenchReceipt9:
+    value:dict[str,Any]
+    def to_dict(self)->dict[str,Any]:return dict(self.value)
+    def validate(self)->None:
+        v=self.value;a=v.get("artifact",{});text=("request_id","requester","purpose","federation_id","semantic_profile")
+        if not(v.get("schema_version")==RESEARCH_CONTRACT_SCHEMA_VERSION and v.get("contract_version")==CONTRACT_VERSION and v.get("feature_id")==FEATURE_ID and v.get("boundary")==PRECLINICAL_BOUNDARY and a.get("boundary")==PRECLINICAL_BOUNDARY and a.get("content_type")==CONTENT_TYPE and v.get("autonomy_tier")=="a1" and v.get("raw_data_local") is True and v.get("aggregate_only") is True and all(isinstance(v.get(k),str) and v[k].strip() for k in text) and v.get("candidate_order") and v.get("study_order") and v.get("modality_order") and v.get("model_order") and v.get("effect_receipts") and v.get("disposition") in {"qualified","approval_required","unresolved","blocked"}):raise ResearchContractError("analysis identity, axes, autonomy, locality, or effects are incomplete")
+        fields=("candidate_order","selected_order","unresolved_order","blocked_order","missing_order","study_order","modality_order","model_order","selected_study_order","selected_modality_order","selected_model_order","missing_study_order","missing_modality_order","missing_model_order","uncertainty_order","omission_order","negative_evidence_order","effect_receipts")
+        if any(not _ordered(list(v.get(k,[]))) for k in fields):raise ResearchContractError("analysis ordering is not canonical")
+        _partition(v["candidate_order"],[v["selected_order"],v["unresolved_order"],v["blocked_order"],v["missing_order"]],"analysis states do not form a complete partition")
+        for d in ("replay_identity","provenance_digest","result_digest"):
+            if not _digest(v.get(d)):raise ResearchContractError("analysis digest is invalid")
+        if a.get("content_hash")!=v.get("result_digest"):raise ResearchContractError("analysis artifact metadata is inconsistent")
+        if any(not(e.startswith("view:analysis-workbench:") or e=="block:unsafe-release") for e in v["effect_receipts"]):raise ResearchContractError("analysis effect is outside bounded researcher-view gate")
+        if v["disposition"]=="qualified" and v["effect_receipts"]!=[f"view:analysis-workbench:{v['request_id']}"]:raise ResearchContractError("qualified analysis effects are invalid")
+        if v["disposition"]!="qualified" and v["effect_receipts"]!=["block:unsafe-release"]:raise ResearchContractError("non-qualified analysis must block")
+    def digest(self)->str:self.validate();return _hash(self.value)
+
+def oncoworlds_analysis_workbench_manifest()->dict[str,Any]:return {"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"capability_id":FEATURE_ID,"version":CONTRACT_VERSION,"owner_crate":"oncoworlds","consumers":["preclinical neuroscientist","analysis workbench operator","federated research verifier"],"behavior":"presents typed federated statistical, causal, and ML analysis attestations in a deterministic researcher workbench without executing models or moving raw data","value":"lets preclinical neuroscientists compare qualified analytical results while preserving replay, provenance, negative evidence, and zero-versus-unknown distinctions","input_schema":INPUT_SCHEMA,"output_schema":OUTPUT_SCHEMA,"effects":["read_local_data","write_local_artifact"],"permissions":["view:analysis-workbench"],"authority_requirements":[{"role":"institution analysis reviewer","reason":"researcher-facing interpretation requires scoped read authority over local attestations"}],"autonomy_tier":"a1","surfaces":["ui","cli","api","sdk","mcp_tool","protocol","policy","operator"],"boundary":PRECLINICAL_BOUNDARY}
+
+def _validate_request(q:Mapping[str,Any])->None:
+    text=("request_id","requester","purpose","federation_id","semantic_profile")
+    if not(q.get("schema_version")==INPUT_SCHEMA and all(isinstance(q.get(k),str) and q[k].strip() for k in text) and q.get("required_studies") and q.get("required_modalities") and q.get("required_models") and q.get("candidates") and _digest(q.get("replay_identity")) and q.get("budget_units",0)>0 and q.get("budget_units",0)<=q.get("max_budget_units",0) and all(isinstance(q.get(k),bool) for k in ("policy_allow","protected_closure","federation_approved","signed_approval","raw_data_local","aggregate_only")) and q.get("raw_data_local") is True and q.get("aggregate_only") is True and q.get("boundary")==PRECLINICAL_BOUNDARY):raise ResearchContractError("analysis request identity, axes, budget, policy, locality, or bounds are invalid")
+    ids=[x.get("candidate_id") for x in q["candidates"]]
+    if any(not isinstance(x,str) or not x.strip() for x in ids) or len(ids)!=len(set(ids)):raise ResearchContractError("candidate identifiers must be present and unique")
+
+def qualify_oncoworlds_analysis_workbench(request:Mapping[str,Any])->OncoworldsAnalysisWorkbenchReceipt9:
+    _validate_request(request);rows=sorted((dict(x) for x in request["candidates"]),key=lambda x:(x["study_id"],x["modality"],x["model_id"],x["candidate_id"]));candidate=[x["candidate_id"] for x in rows];selected=[];unresolved=[];blocked=[];missing=[];uncertainty=set();omission=set();negative=set()
+    for x in rows:
+        i=x["candidate_id"]
+        if not x.get("artifact_digest") or not x.get("provenance_digest"):missing.append(i);omission.add(f"{i}:artifact-or-provenance-missing");continue
+        if not x.get("scope_compatible",False) or not x.get("permitted",False):blocked.append(i);omission.add(f"{i}:scope-or-permission-denied");continue
+        if x.get("evidence_state")=="contradicted":blocked.append(i);uncertainty.add(f"{i}:contradicted");continue
+        if x.get("evidence_state") in {"unknown","speculative"} or x.get("uncertainty_basis_points",0)>=5000 or x.get("replay_identity")!=request["replay_identity"]:unresolved.append(i);uncertainty.add(f"{i}:uncertain-or-replay-mismatch");continue
+        selected.append(i);negative.add(f"{i}:negative-result") if x.get("negative_result") is True else None;omission.update(f"{i}:{e}" for e in x.get("omissions",[]))
+    studies=sorted({x["study_id"] for x in rows}|set(request["required_studies"]));modalities=sorted({x["modality"] for x in rows}|set(request["required_modalities"]));models=sorted({x["model_id"] for x in rows}|set(request["required_models"]));present_studies={x["study_id"] for x in rows};present_modalities={x["modality"] for x in rows};present_models={x["model_id"] for x in rows};missing_studies=sorted(set(request["required_studies"])-present_studies);missing_modalities=sorted(set(request["required_modalities"])-present_modalities);missing_models=sorted(set(request["required_models"])-present_models);omission.update(f"study:{x}:missing" for x in missing_studies);omission.update(f"modality:{x}:missing" for x in missing_modalities);omission.update(f"model:{x}:missing" for x in missing_models);omission.update(f"request:adversarial:{x}" for x in request.get("adversarial_events",[]));selected_set=set(selected);selected_studies=sorted({x["study_id"] for x in rows if x["candidate_id"] in selected_set});selected_modalities=sorted({x["modality"] for x in rows if x["candidate_id"] in selected_set});selected_models=sorted({x["model_id"] for x in rows if x["candidate_id"] in selected_set});global_open=all(request.get(k) is True for k in ("policy_allow","protected_closure","federation_approved","raw_data_local","aggregate_only")) and not request.get("adversarial_events");disposition="blocked" if not global_open or blocked or missing_studies or missing_modalities or missing_models else ("approval_required" if not request["signed_approval"] else ("unresolved" if unresolved or missing else "qualified"));effects=[f"view:analysis-workbench:{request['request_id']}"] if disposition=="qualified" else ["block:unsafe-release"]
+    payload={"schema_version":OUTPUT_SCHEMA,"request_id":request["request_id"],"candidate_order":candidate,"selected_order":selected,"unresolved_order":unresolved,"blocked_order":blocked,"missing_order":missing,"study_order":studies,"modality_order":modalities,"model_order":models,"disposition":disposition,"replay_identity":request["replay_identity"]};digest=_hash(payload);provenance=_hash(sorted(x["provenance_digest"] for x in rows));value={"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"request_id":request["request_id"],"requester":request["requester"],"purpose":request["purpose"],"federation_id":request["federation_id"],"semantic_profile":request["semantic_profile"],"disposition":disposition,"candidate_order":candidate,"selected_order":selected,"unresolved_order":unresolved,"blocked_order":blocked,"missing_order":missing,"study_order":studies,"modality_order":modalities,"model_order":models,"selected_study_order":selected_studies,"selected_modality_order":selected_modalities,"selected_model_order":selected_models,"missing_study_order":missing_studies,"missing_modality_order":missing_modalities,"missing_model_order":missing_models,"uncertainty_order":sorted(uncertainty),"omission_order":sorted(omission),"negative_evidence_order":sorted(negative),"replay_identity":request["replay_identity"],"provenance_digest":provenance,"result_digest":digest,"artifact":{"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"artifact_id":f"qualified-analysis:{request['request_id']}","content_type":CONTENT_TYPE,"content_hash":digest,"semantic_loss":[],"provenance":[],"boundary":PRECLINICAL_BOUNDARY},"effect_receipts":effects,"raw_data_local":True,"aggregate_only":True,"autonomy_tier":"a1","boundary":PRECLINICAL_BOUNDARY};r=OncoworldsAnalysisWorkbenchReceipt9(value);r.validate();return r
+
+__all__=["FEATURE_ID","CONTRACT_VERSION","INPUT_SCHEMA","OUTPUT_SCHEMA","CONTENT_TYPE","OncoworldsAnalysisWorkbenchReceipt9","oncoworlds_analysis_workbench_manifest","qualify_oncoworlds_analysis_workbench"]

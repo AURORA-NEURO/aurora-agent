@@ -309,21 +309,19 @@ pub fn orchestrate_mechanism_workflow(
             && complete
             && budget_ok;
         if gate {
+            let (Some(evidence_digest), Some(provenance_digest)) = (
+                candidate.evidence_digest.clone(),
+                candidate.provenance_digest.clone(),
+            ) else {
+                return Err(MechanismWorkflowError::Invalid(
+                    "admitted mechanism candidate is missing a required digest".into(),
+                ));
+            };
             spent = spent.saturating_add(cost);
             admitted.insert(candidate.candidate_id.clone());
             mechanisms.insert(candidate.mechanism_id.clone());
-            evidence.insert(
-                candidate
-                    .evidence_digest
-                    .clone()
-                    .expect("complete evidence"),
-            );
-            provenance.insert(
-                candidate
-                    .provenance_digest
-                    .clone()
-                    .expect("complete provenance"),
-            );
+            evidence.insert(evidence_digest);
+            provenance.insert(provenance_digest);
             actions.extend(candidate.requested_actions.iter().cloned());
         } else {
             match candidate.state {

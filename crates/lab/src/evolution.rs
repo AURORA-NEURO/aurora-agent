@@ -268,14 +268,14 @@ impl EvolutionCard {
         &self,
         direction: Direction,
     ) -> Result<ImprovementClaim, EvolutionError> {
-        let MeasurementSurface::Clean { before, after } = &self.surface else {
-            let MeasurementSurface::Contaminated(record) = &self.surface else {
-                unreachable!("measurement surface is clean or contaminated");
-            };
-            return Err(EvolutionError::ContaminatedSurface {
-                card: self.id.clone(),
-                reason: record.refusal.to_string(),
-            });
+        let (before, after) = match &self.surface {
+            MeasurementSurface::Clean { before, after } => (before, after),
+            MeasurementSurface::Contaminated(record) => {
+                return Err(EvolutionError::ContaminatedSurface {
+                    card: self.id.clone(),
+                    reason: record.refusal.to_string(),
+                })
+            }
         };
         if self.rollback_handle.as_str().trim().is_empty() {
             return Err(EvolutionError::NoRollbackHandle {

@@ -137,9 +137,13 @@ pub mod ci;
 pub mod connector;
 pub mod error;
 pub mod mechanism_exploration_assurance;
+pub mod prospective_quality_control_contract_model;
+pub mod provenance_signing_inference_engine;
 pub mod federated;
+pub mod quality_control_research_copilot;
 pub mod federated_copilot;
 pub mod voe;
+pub mod replication_negative_results_federated_control_plane;
 
 pub use card::{
     Ancestry, AncestryStep, CardLinks, ClaimKind, Currency, HealthCheck, LatentState,
@@ -160,9 +164,40 @@ pub use mechanism_exploration_assurance::{
     CONTRACT_VERSION as MECHANISM_EXPLORATION_ASSURANCE_CONTRACT_VERSION,
     FEATURE_ID as MECHANISM_EXPLORATION_ASSURANCE_FEATURE_ID,
 };
+pub use prospective_quality_control_contract_model::{
+    model_prospective_quality_control_contract,
+    model_prospective_quality_control_contract_json,
+    prospective_quality_control_contract_manifest,
+    validate_prospective_quality_control_contract_json,
+    ContractEvidenceState, ContractQualityMetric, ContractResearchObject,
+    QualityControlContractError, QualityControlContractRequest, QualityVerdict2,
+    QualityVerdictArtifact2,
+    CONTENT_TYPE as PROSPECTIVE_QUALITY_CONTROL_CONTRACT_CONTENT_TYPE,
+    CONTRACT_VERSION as PROSPECTIVE_QUALITY_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as PROSPECTIVE_QUALITY_CONTROL_CONTRACT_FEATURE_ID,
+    INPUT_SCHEMA as PROSPECTIVE_QUALITY_CONTROL_CONTRACT_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as PROSPECTIVE_QUALITY_CONTROL_CONTRACT_OUTPUT_SCHEMA,
+};
+pub use provenance_signing_inference_engine::{
+    infer_signed_provenance, infer_signed_provenance_json,
+    provenance_signing_inference_engine_manifest, validate_signed_provenance_json,
+    ArtifactAndDerivation1, ProvenanceSigningInferenceError, ProvenanceSigningRequest1,
+    SignedProvenanceEnvelope1,
+    CONTRACT_VERSION as PROVENANCE_SIGNING_INFERENCE_CONTRACT_VERSION,
+    FEATURE_ID as PROVENANCE_SIGNING_INFERENCE_FEATURE_ID,
+    INPUT_SCHEMA as PROVENANCE_SIGNING_INFERENCE_INPUT_SCHEMA,
+    OUTPUT_SCHEMA as PROVENANCE_SIGNING_INFERENCE_OUTPUT_SCHEMA,
+};
 pub use federated::{
     pool, Aggregate, DataOrigin, Evaluation, FederatedResult, Reported, SiteParticipation,
     SiteResult, SmallCellPolicy, Unchecked,
+};
+pub use quality_control_research_copilot::{
+    qualify_quality_control, quality_control_research_copilot_manifest, QualityControlError,
+    QualityControlRequest3, QualityEvidenceState, QualityMetric3, QualityVerdict3,
+    QualityVerdictArtifact3, ResearchObject3,
+    CONTRACT_VERSION as QUALITY_CONTROL_COPILOT_CONTRACT_VERSION,
+    FEATURE_ID as QUALITY_CONTROL_COPILOT_FEATURE_ID,
 };
 pub use federated_copilot::{
     synthesize_federated_continuum, ContinualSynthesisDisposition,
@@ -175,4 +210,12 @@ pub use voe::{
     pareto_front, rank_with, Budget, Calibration, DeclaredValue, ExchangeRate, ExclusionReason,
     Excluded, Experiment, ExperimentId, Hypothesis, HypothesisId, HypothesisState, ParetoFront,
     Privacy, Ranked, Ranking,
+};
+pub use replication_negative_results_federated_control_plane::{
+    operate_replication_control, replication_control_manifest, ClaimAndProtocol1,
+    EvidenceState as ReplicationEvidenceState, PeerReplicationSummary4,
+    ReplicationArtifact8, ReplicationControlError, ReplicationObservation4,
+    ReplicationOutcome, ReplicationRecord8,
+    CONTRACT_VERSION as REPLICATION_CONTROL_CONTRACT_VERSION,
+    FEATURE_ID as REPLICATION_CONTROL_FEATURE_ID,
 };

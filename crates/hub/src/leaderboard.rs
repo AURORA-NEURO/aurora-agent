@@ -51,9 +51,7 @@ use std::collections::BTreeMap;
 
 /// The resource envelope a run was allowed. Two systems given different budgets were not asked
 /// the same question, so this is part of comparability rather than a display column.
-#[derive(
-    Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BudgetEnvelope {
     pub max_cost_units: Option<u64>,
     pub max_oracle_calls: Option<u64>,
@@ -129,7 +127,9 @@ pub enum Comparability {
     Comparable,
     /// Carries every differing dimension, because "not comparable" with no reason is the same
     /// unexplained refusal 34.16's appeal metric exists to prevent.
-    NotComparable { differences: Vec<ConditionDifference> },
+    NotComparable {
+        differences: Vec<ConditionDifference>,
+    },
 }
 
 impl ComparabilityConditions {
@@ -154,7 +154,11 @@ impl ComparabilityConditions {
             out.push(ConditionDifference::new("split", &self.split, &other.split));
         }
         if self.metric != other.metric {
-            out.push(ConditionDifference::new("metric", &self.metric, &other.metric));
+            out.push(ConditionDifference::new(
+                "metric",
+                &self.metric,
+                &other.metric,
+            ));
         }
         if self.higher_is_better != other.higher_is_better {
             out.push(ConditionDifference::new(
@@ -334,17 +338,13 @@ pub enum UnrankableReason {
         differences: Vec<ConditionDifference>,
     },
     /// Not currently accepted, or not on the ledger at all.
-    NotPublished {
-        state: Option<ModerationState>,
-    },
+    NotPublished { state: Option<ModerationState> },
     BelowVerificationFloor {
         has: VerificationStatus,
         floor: VerificationStatus,
     },
     /// Refused by the disclosure ledger or the evidence-scale check. Carries the refusal text.
-    Ineligible {
-        detail: String,
-    },
+    Ineligible { detail: String },
 }
 
 /// An entry the board is showing but will not order.
@@ -458,7 +458,7 @@ impl Board {
 
         eligible.sort_by(|a, b| {
             rank_order(&a.0, &b.0)
-                .expect("conditions were checked against the board above")
+                .unwrap_or(Ordering::Equal)
                 .then_with(|| a.0.submission.cmp(&b.0.submission))
         });
 
@@ -535,24 +535,69 @@ impl RankedBoard {
 
 /// Phrasings a hub will not publish, and the reason each one is refused.
 const FORBIDDEN_PHRASES: &[(&str, &str)] = &[
-    ("state of the art", "asserts superiority over systems not evaluated here (43.43)"),
-    ("state-of-the-art", "asserts superiority over systems not evaluated here (43.43)"),
-    ("sota", "asserts superiority over systems not evaluated here (43.43)"),
-    ("best in class", "a class this board did not evaluate (43.43)"),
-    ("best-in-class", "a class this board did not evaluate (43.43)"),
+    (
+        "state of the art",
+        "asserts superiority over systems not evaluated here (43.43)",
+    ),
+    (
+        "state-of-the-art",
+        "asserts superiority over systems not evaluated here (43.43)",
+    ),
+    (
+        "sota",
+        "asserts superiority over systems not evaluated here (43.43)",
+    ),
+    (
+        "best in class",
+        "a class this board did not evaluate (43.43)",
+    ),
+    (
+        "best-in-class",
+        "a class this board did not evaluate (43.43)",
+    ),
     ("world's best", "no board has world scope (43.43)"),
-    ("outperforms all", "quantifies over systems not evaluated (43.43)"),
+    (
+        "outperforms all",
+        "quantifies over systems not evaluated (43.43)",
+    ),
     ("beats all", "quantifies over systems not evaluated (43.43)"),
-    ("superior to all", "quantifies over systems not evaluated (43.43)"),
-    ("universally better", "explicit universal-superiority claim (43.43)"),
-    ("universally superior", "explicit universal-superiority claim (43.43)"),
-    ("no other system", "quantifies over systems not evaluated (43.43)"),
+    (
+        "superior to all",
+        "quantifies over systems not evaluated (43.43)",
+    ),
+    (
+        "universally better",
+        "explicit universal-superiority claim (43.43)",
+    ),
+    (
+        "universally superior",
+        "explicit universal-superiority claim (43.43)",
+    ),
+    (
+        "no other system",
+        "quantifies over systems not evaluated (43.43)",
+    ),
     ("unbeatable", "unfalsifiable superiority claim (43.43)"),
-    ("clinically validated", "a research benchmark establishes no clinical validity (36.12)"),
-    ("clinical grade", "a research benchmark establishes no clinical validity (36.12)"),
-    ("clinical-grade", "a research benchmark establishes no clinical validity (36.12)"),
-    ("ready for clinical use", "a research benchmark establishes no clinical validity (36.12)"),
-    ("diagnostic accuracy in patients", "implies patient-level validity (36.12)"),
+    (
+        "clinically validated",
+        "a research benchmark establishes no clinical validity (36.12)",
+    ),
+    (
+        "clinical grade",
+        "a research benchmark establishes no clinical validity (36.12)",
+    ),
+    (
+        "clinical-grade",
+        "a research benchmark establishes no clinical validity (36.12)",
+    ),
+    (
+        "ready for clinical use",
+        "a research benchmark establishes no clinical validity (36.12)",
+    ),
+    (
+        "diagnostic accuracy in patients",
+        "implies patient-level validity (36.12)",
+    ),
 ];
 
 fn contains_phrase(haystack: &str, needle: &str) -> bool {
@@ -856,7 +901,10 @@ mod tests {
             "It outperforms all published architectures.",
             "A clinically validated result.",
         ] {
-            assert!(lint_claim(text).is_err(), "should have been refused: {text}");
+            assert!(
+                lint_claim(text).is_err(),
+                "should have been refused: {text}"
+            );
         }
         for text in [
             "Rank 1 of 4 under the stated conditions.",

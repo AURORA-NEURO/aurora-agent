@@ -1,0 +1,4 @@
+from .worldgen_experiment_design_workflow_support import ExperimentDesignWorkflowRequest, ExperimentDesignWorkflowReceipt, schedule, manifest
+FEATURE_ID="AFA-worldgen-P09-F16"; CONTRACT_VERSION="worldgen-federated_continual-experiment_design-workflow/1.0"
+def worldgen_federated_continual_experiment_design_workflow_fabric_manifest(): return manifest(feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,input_schema="ExperimentDesignWorkflowRequest1@1",scale="federated continual autonomous",autonomy_tier="A1")
+def schedule_worldgen_federated_continual_experiment_design_workflow(request:ExperimentDesignWorkflowRequest)->ExperimentDesignWorkflowReceipt: return schedule(request,feature_id=FEATURE_ID,contract_version=CONTRACT_VERSION,scale="federated continual autonomous",require_approval=false,require_federation=true)

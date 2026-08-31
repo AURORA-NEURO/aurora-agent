@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "type": "object",
+  "$id": "https://aurora-neuro.org/schemas/aurora-research-contract-v1/worldgen-laboratory-integration-p11-f10.json",
+  "title": "AFA-worldgen-P11-F10 receipt",
+  "required": [
+    "schema_version",
+    "contract_version",
+    "feature_id",
+    "question_id",
+    "disposition",
+    "action_order",
+    "admitted_action_order",
+    "denied_action_order",
+    "laboratory_integration_disposition",
+    "portfolio_digest",
+    "copilot_digest",
+    "replay_identity",
+    "omissions",
+    "uncertainty",
+    "negative_evidence",
+    "effect_receipts",
+    "raw_data_local",
+    "aggregate_only",
+    "boundary",
+    "artifact"
+  ],
+  "properties": {
+    "aggregate_only": {
+      "const": true
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "content_type",
+        "content_hash",
+        "boundary"
+      ],
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "content_type": {
+          "const": "application/vnd.aurora.worldgen.laboratory-integration-copilot-receipt+json"
+        },
+        "content_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "laboratory_integration_disposition": {
+      "type": "string"
+    },
+    "replay_identity": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "question_id": {
+      "type": "string"
+    },
+    "portfolio_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "uncertainty": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "omissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "negative_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "contract_version": {
+      "const": "worldgen-multimodal-laboratory-integration-copilot/1.0"
+    },
+    "disposition": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "copilot_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "denied_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "raw_data_local": {
+      "const": true
+    },
+    "admitted_action_order": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "feature_id": {
+      "const": "AFA-worldgen-P11-F10"
+    },
+    "effect_receipts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

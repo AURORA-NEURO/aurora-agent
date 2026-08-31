@@ -434,7 +434,7 @@ pub fn assure_retrieval_bundle(
     } else {
         vec!["block:unsafe-release".into()]
     };
-    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"query_id":query.query_id,"federation_id":query.federation_id,"semantic_profile":query.semantic_profile,"disposition":disposition,"evidence_order":evidence_order,"selected_order":selected_order,"unresolved_order":unresolved_order,"blocked_order":blocked_order,"missing_evidence_order":missing_evidence_order,"stale_order":stale_order,"missing_scope_order":missing_scope_order,"peer_order":peer_order,"qualified_peer_order":qualified_peer_order,"missing_peer_order":missing_peer_order,"omission_order":omission_order,"uncertainty_order":uncertainty_order,"contradiction_order":contradiction_order,"negative_evidence_order":negative_evidence_order,"replay_identity":query.replay_identity,"effect_receipts":effect_receipts,"raw_data_local":query.raw_data_local,"aggregate_only":query.aggregate_only,"boundary":PRECLINICAL_BOUNDARY});
+    let payload = json!({"schema_version":RESEARCH_CONTRACT_SCHEMA_VERSION,"contract_version":CONTRACT_VERSION,"feature_id":FEATURE_ID,"query_id":query.query_id,"federation_id":query.federation_id,"semantic_profile":query.semantic_profile,"disposition":disposition,"evidence_order":evidence_order.clone(),"selected_order":selected_order.clone(),"unresolved_order":unresolved_order.clone(),"blocked_order":blocked_order.clone(),"missing_evidence_order":missing_evidence_order.clone(),"stale_order":stale_order.clone(),"missing_scope_order":missing_scope_order.clone(),"peer_order":peer_order.clone(),"qualified_peer_order":qualified_peer_order.clone(),"missing_peer_order":missing_peer_order.clone(),"omission_order":omission_order.clone(),"uncertainty_order":uncertainty_order.clone(),"contradiction_order":contradiction_order.clone(),"negative_evidence_order":negative_evidence_order.clone(),"replay_identity":query.replay_identity,"effect_receipts":effect_receipts.clone(),"raw_data_local":query.raw_data_local,"aggregate_only":query.aggregate_only,"boundary":PRECLINICAL_BOUNDARY});
     let synthesis_digest = ContentHash::of_value(&payload)
         .map_err(|e| BundleAssuranceError::Artifact(e.to_string()))?;
     let artifact = TypedResearchArtifact::from_payload(
@@ -445,14 +445,6 @@ pub fn assure_retrieval_bundle(
         Vec::new(),
     )
     .map_err(|e| BundleAssuranceError::Artifact(e.to_string()))?;
-    let strings = |key: &str| {
-        payload[key]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap().into())
-            .collect::<Vec<String>>()
-    };
     let result = BundleEvidenceSynthesis {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -461,24 +453,24 @@ pub fn assure_retrieval_bundle(
         federation_id: query.federation_id.clone(),
         semantic_profile: query.semantic_profile.clone(),
         disposition,
-        evidence_order: strings("evidence_order"),
-        selected_order: strings("selected_order"),
-        unresolved_order: strings("unresolved_order"),
-        blocked_order: strings("blocked_order"),
-        missing_evidence_order: strings("missing_evidence_order"),
-        stale_order: strings("stale_order"),
-        missing_scope_order: strings("missing_scope_order"),
-        peer_order: strings("peer_order"),
-        qualified_peer_order: strings("qualified_peer_order"),
-        missing_peer_order: strings("missing_peer_order"),
-        omission_order: strings("omission_order"),
-        uncertainty_order: strings("uncertainty_order"),
-        contradiction_order: strings("contradiction_order"),
-        negative_evidence_order: strings("negative_evidence_order"),
+        evidence_order,
+        selected_order,
+        unresolved_order,
+        blocked_order,
+        missing_evidence_order,
+        stale_order,
+        missing_scope_order,
+        peer_order,
+        qualified_peer_order,
+        missing_peer_order,
+        omission_order,
+        uncertainty_order,
+        contradiction_order,
+        negative_evidence_order,
         replay_identity: query.replay_identity.clone(),
         synthesis_digest,
         artifact,
-        effect_receipts: strings("effect_receipts"),
+        effect_receipts,
         raw_data_local: query.raw_data_local,
         aggregate_only: query.aggregate_only,
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -493,8 +485,16 @@ fn validate_query(query: &BundleRetrievalQuery) -> Result<(), BundleAssuranceErr
         || query.federation_id.trim().is_empty()
         || query.semantic_profile.trim().is_empty()
         || query.required_evidence_order.is_empty()
+        || query
+            .required_evidence_order
+            .iter()
+            .any(|value| value.trim().is_empty())
         || !canonical(&query.required_evidence_order)
         || query.required_scope_order.is_empty()
+        || query
+            .required_scope_order
+            .iter()
+            .any(|value| value.trim().is_empty())
         || !canonical(&query.required_scope_order)
         || query.minimum_freshness_epoch == 0
         || query.candidates.is_empty()

@@ -310,7 +310,7 @@ fn observe_compile(
 ///
 /// Every `FiberError` variant is matched explicitly rather than through a wildcard, so a new
 /// failure mode in the compiler forces a decision here instead of arriving silently as
-/// [`RefusalCode::Other`].
+/// [`RefusalCode::InvariantViolation`].
 fn observe_refusal(error: &FiberError) -> RefusalObservation {
     let (code, selected, max_facts) = match error {
         FiberError::BudgetExceeded {
@@ -324,12 +324,14 @@ fn observe_refusal(error: &FiberError) -> RefusalObservation {
         FiberError::UnorderableSplitGroups { .. } => {
             (RefusalCode::UnorderableSplitGroups, None, None)
         }
+        FiberError::InvariantViolation(_) => (RefusalCode::InvariantViolation, None, None),
         FiberError::UnsupportedQuerySchema { .. }
         | FiberError::QueryNotAnObject
         | FiberError::UnknownQueryFields { .. }
         | FiberError::MissingQueryField(_)
         | FiberError::WrongQueryFieldType { .. }
         | FiberError::InvalidIdentifier(_)
+        | FiberError::InvalidBudget(_)
         | FiberError::InvalidDecisionTime(_)
         | FiberError::InvalidDecisionContract(_)
         | FiberError::InvalidRateDistortionContract(_)

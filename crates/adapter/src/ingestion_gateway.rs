@@ -24,6 +24,8 @@ use thiserror::Error;
 
 pub const FEATURE_ID: &str = "AFA-adapter-P06-F23";
 pub const CONTRACT_VERSION: &str = "1.0";
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_BUNDLES: usize = 8_192;
 
 /// A metadata-only description of a locally-held modality payload. The payload itself is never
 /// accepted by this contract, which makes accidental federation of raw data unrepresentable.
@@ -79,10 +81,19 @@ pub struct IngestionGatewayReceipt {
     pub schema_version: String,
     pub contract_version: String,
     pub feature_id: String,
+    pub input: IngestionGatewayRequest,
+    pub input_digest: ContentHash,
     pub request_id: String,
     pub study_id: String,
+    pub reference_schema: String,
+    pub required_modalities: Vec<String>,
+    pub policy_allow: bool,
+    pub authorization_reference: Option<String>,
     pub decision: IngestionGatewayDecision,
     pub harmonized: HarmonizedResearchObject,
+    pub bundle_order: Vec<String>,
+    pub source_digest_order: Vec<ContentHash>,
+    pub bundle_digest: ContentHash,
     pub admitted_bundles: Vec<String>,
     pub omitted_bundles: Vec<String>,
     pub effect_receipts: Vec<IngestionEffectReceipt>,
@@ -91,6 +102,97 @@ pub struct IngestionGatewayReceipt {
     pub artifact: TypedResearchArtifact,
     pub raw_data_local: bool,
     pub boundary: String,
+}
+
+fn validate_text(field: &str, value: &str) -> Result<(), IngestionGatewayError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(IngestionGatewayError::InvalidRequest(format!(
+            "{field} must be non-empty and trimmed"
+        )));
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(IngestionGatewayError::InvalidRequest(format!(
+            "{field} is outside its bounded text contract"
+        )));
+    }
+    Ok(())
+}
+
+fn ingestion_gateway_input_digest(
+    request: &IngestionGatewayRequest,
+) -> Result<ContentHash, IngestionGatewayError> {
+    let value = serde_json::to_value(&canonical_ingestion_gateway_request(request))
+        .map_err(|error| IngestionGatewayError::Serialization(error.to_string()))?;
+    ContentHash::of_value(&value)
+        .map_err(|error| IngestionGatewayError::Serialization(error.to_string()))
+}
+
+fn canonical_ingestion_gateway_request(
+    request: &IngestionGatewayRequest,
+) -> IngestionGatewayRequest {
+    let mut canonical = request.clone();
+    canonical.required_modalities.sort();
+    for bundle in &mut canonical.bundles {
+        bundle.feature_names.sort();
+    }
+    canonical
+        .bundles
+        .sort_by(|left, right| left.bundle_id.cmp(&right.bundle_id));
+    canonical
+}
+
+fn validate_unique_strings(field: &str, values: &[String]) -> Result<(), IngestionGatewayError> {
+    if values.len() > MAX_BUNDLES {
+        return Err(IngestionGatewayError::InvalidRequest(format!(
+            "{field} exceeds its item bound"
+        )));
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(IngestionGatewayError::InvalidRequest(format!(
+                "{field} contains duplicate values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_strings(field: &str, values: &[String]) -> Result<(), IngestionGatewayError> {
+    validate_unique_strings(field, values)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(IngestionGatewayError::InvalidRequest(format!(
+            "{field} ordering is not canonical"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_digest(field: &str, digest: &ContentHash) -> Result<(), IngestionGatewayError> {
+    if digest.as_str().len() != 64
+        || !digest
+            .as_str()
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(IngestionGatewayError::InvalidRequest(format!(
+            "{field} must be a 64-character hex digest"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_digests(field: &str, digests: &[ContentHash]) -> Result<(), IngestionGatewayError> {
+    if digests.len() > MAX_BUNDLES {
+        return Err(IngestionGatewayError::InvalidRequest(format!(
+            "{field} exceeds its item bound"
+        )));
+    }
+    for digest in digests {
+        validate_digest(field, digest)?;
+    }
+    Ok(())
 }
 
 impl IngestionGatewayReceipt {
@@ -111,31 +213,213 @@ impl IngestionGatewayReceipt {
         if self.boundary != PRECLINICAL_BOUNDARY || !self.raw_data_local {
             return Err(IngestionGatewayError::Localization);
         }
-        if self.reasons.is_empty() || self.harmonized.study_id != self.study_id {
+        if self.reference_schema.trim().is_empty()
+            || self.required_modalities.is_empty()
+            || self.bundle_order.is_empty()
+            || self.source_digest_order.is_empty()
+            || self.reasons.is_empty()
+        {
             return Err(IngestionGatewayError::InvalidRequest(
-                "receipt reasons and matching harmonized study are required".into(),
+                "gateway schema, modality, bundle, digest, and reason closures are required".into(),
+            ));
+        }
+        validate_text("request_id", &self.request_id)?;
+        validate_text("study_id", &self.study_id)?;
+        validate_text("reference_schema", &self.reference_schema)?;
+        validate_text("boundary", &self.boundary)?;
+        validate_sorted_strings("required_modalities", &self.required_modalities)?;
+        validate_sorted_strings("bundle_order", &self.bundle_order)?;
+        validate_sorted_strings("admitted_bundles", &self.admitted_bundles)?;
+        validate_sorted_strings("omitted_bundles", &self.omitted_bundles)?;
+        validate_digests("source_digest_order", &self.source_digest_order)?;
+        validate_unique_strings("reasons", &self.reasons)?;
+        if let Some(authorization) = &self.authorization_reference {
+            validate_text("authorization_reference", authorization)?;
+        }
+        validate_digest("bundle_digest", &self.bundle_digest)?;
+        let bundle_set = self.bundle_order.iter().cloned().collect::<BTreeSet<_>>();
+        let admitted_set = self
+            .admitted_bundles
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let omitted_set = self
+            .omitted_bundles
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let classified = admitted_set
+            .union(&omitted_set)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        if classified != bundle_set
+            || admitted_set.intersection(&omitted_set).next().is_some()
+            || self.admitted_bundles.len() + self.omitted_bundles.len() != self.bundle_order.len()
+            || self.source_digest_order.len() != self.bundle_order.len()
+        {
+            return Err(IngestionGatewayError::InvalidRequest(
+                "gateway bundle states must partition the descriptor closure".into(),
+            ));
+        }
+        if self.harmonized.study_id != self.study_id
+            || self.harmonized.reference_schema != self.reference_schema
+            || self.harmonized.raw_data_local != self.raw_data_local
+        {
+            return Err(IngestionGatewayError::InvalidRequest(
+                "receipt and harmonized object identity differ".into(),
             ));
         }
         self.harmonized
             .validate()
             .map_err(IngestionGatewayError::Harmonization)?;
-        self.artifact
-            .validate_metadata()
-            .map_err(|error| IngestionGatewayError::Contract(error.to_string()))?;
-        let admitted: BTreeSet<_> = self.admitted_bundles.iter().collect();
-        if self.effect_receipts.len() != admitted.len()
+        let policy_authorized = self.policy_allow && self.authorization_reference.is_some();
+        let expected_decision = if !policy_authorized {
+            IngestionGatewayDecision::Blocked
+        } else if !self.harmonized.omitted_modalities.is_empty() {
+            IngestionGatewayDecision::Partial
+        } else {
+            IngestionGatewayDecision::Admitted
+        };
+        if self.decision != expected_decision {
+            return Err(IngestionGatewayError::InvalidRequest(
+                "gateway decision does not match policy, authorization, and harmonization state"
+                    .into(),
+            ));
+        }
+        let expected_admitted = if self.decision == IngestionGatewayDecision::Blocked {
+            Vec::new()
+        } else {
+            self.bundle_order.clone()
+        };
+        let expected_omitted = if self.decision == IngestionGatewayDecision::Blocked {
+            self.bundle_order.clone()
+        } else {
+            Vec::new()
+        };
+        if self.admitted_bundles != expected_admitted || self.omitted_bundles != expected_omitted {
+            return Err(IngestionGatewayError::InvalidRequest(
+                "gateway admitted and omitted bundles do not match decision".into(),
+            ));
+        }
+        if self.effect_receipts.len() != self.admitted_bundles.len()
             || self
                 .effect_receipts
                 .iter()
-                .any(|effect| !effect.authorized || !admitted.contains(&effect.bundle_id))
+                .enumerate()
+                .any(|(index, effect)| {
+                    !effect.authorized
+                        || effect.bundle_id != self.admitted_bundles[index]
+                        || effect.effect_id
+                            != format!("effect:{}:{}", self.request_id, effect.bundle_id)
+                        || effect.action != "admit-local-harmonization"
+                        || effect.source_digest != self.source_digest_order[index]
+                })
         {
             return Err(IngestionGatewayError::InvalidRequest(
-                "each admitted bundle needs one authorized effect receipt".into(),
+                "each admitted bundle needs one exact authorized effect receipt".into(),
             ));
         }
         if self.decision == IngestionGatewayDecision::Blocked && !self.effect_receipts.is_empty() {
             return Err(IngestionGatewayError::InvalidRequest(
                 "blocked admissions cannot contain effects".into(),
+            ));
+        }
+        let mut expected_semantic_loss = self.harmonized.semantic_loss.clone();
+        if !policy_authorized {
+            expected_semantic_loss.push(SemanticLoss {
+                field: "authorization".into(),
+                reason: "admission authority was incomplete; no external effect was authorized"
+                    .into(),
+                severity: LossSeverity::DecisionRelevant,
+            });
+        }
+        if self.semantic_loss != expected_semantic_loss {
+            return Err(IngestionGatewayError::Contract(
+                "gateway semantic-loss closure does not match harmonization and authorization"
+                    .into(),
+            ));
+        }
+        let mut expected_reasons = vec![
+            "raw modality payloads remain institution-local; only typed descriptors crossed the gateway".to_string(),
+        ];
+        if !self.policy_allow {
+            expected_reasons.push("institution policy denied prospective admission".into());
+        } else if self.authorization_reference.is_none() {
+            expected_reasons.push(
+                "policy allowed the request but supplied no independent authorization reference"
+                    .into(),
+            );
+        }
+        if !policy_authorized {
+            // The authorization loss is represented in semantic_loss; no extra reason is needed.
+        } else if !self.harmonized.omitted_modalities.is_empty() {
+            expected_reasons
+                .push("required modalities were omitted; admission is explicitly partial".into());
+        } else {
+            expected_reasons
+                .push("policy, authorization, locality, and comparability gates passed".into());
+        }
+        if self.reasons != expected_reasons {
+            return Err(IngestionGatewayError::InvalidRequest(
+                "gateway reasons are not bound to admission state".into(),
+            ));
+        }
+        let mut expected_provenance = Vec::new();
+        for (bundle_id, digest) in self.bundle_order.iter().zip(&self.source_digest_order) {
+            expected_provenance.push(ProvenanceLink {
+                source_id: bundle_id.clone(),
+                relation: "admitted-from-local-modality-descriptor".into(),
+                digest: digest.clone(),
+            });
+        }
+        if self.artifact.artifact_id != format!("ingestion-gateway:{}", self.request_id)
+            || self.artifact.content_type
+                != "application/vnd.aurora.multimodal-ingestion-gateway+json"
+            || self.artifact.semantic_loss != self.semantic_loss
+            || self.artifact.provenance != expected_provenance
+        {
+            return Err(IngestionGatewayError::Contract(
+                "gateway artifact is not bound to descriptor and admission state".into(),
+            ));
+        }
+        let payload = json!({
+            "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+            "contract_version": CONTRACT_VERSION,
+            "feature_id": FEATURE_ID,
+            "request_id": self.request_id,
+            "study_id": self.study_id,
+            "reference_schema": self.reference_schema,
+            "required_modalities": self.required_modalities,
+            "policy_allow": self.policy_allow,
+            "authorization_reference": self.authorization_reference,
+            "decision": self.decision,
+            "admitted_bundles": self.admitted_bundles,
+            "omitted_bundles": self.omitted_bundles,
+            "effect_receipts": self.effect_receipts,
+            "semantic_loss": self.semantic_loss,
+            "reasons": self.reasons,
+            "bundle_order": self.bundle_order,
+            "source_digest_order": self.source_digest_order,
+            "bundle_digest": self.bundle_digest,
+            "raw_data_local": self.raw_data_local,
+            "boundary": PRECLINICAL_BOUNDARY,
+        });
+        self.artifact
+            .verify_payload(&payload)
+            .map_err(|error| IngestionGatewayError::Contract(error.to_string()))?;
+        self.artifact
+            .validate_metadata()
+            .map_err(|error| IngestionGatewayError::Contract(error.to_string()))?;
+        validate_request(&self.input)?;
+        if self.input_digest != ingestion_gateway_input_digest(&self.input)? {
+            return Err(IngestionGatewayError::Contract(
+                "ingestion gateway retained input digest does not match the request".into(),
+            ));
+        }
+        let expected = build_ingestion_gateway(&self.input)?;
+        if self != &expected {
+            return Err(IngestionGatewayError::Contract(
+                "ingestion gateway receipt is not derived from its retained request".into(),
             ));
         }
         Ok(())
@@ -173,9 +457,35 @@ pub enum IngestionGatewayError {
 pub fn run_ingestion_gateway(
     request: &IngestionGatewayRequest,
 ) -> Result<IngestionGatewayReceipt, IngestionGatewayError> {
+    let receipt = build_ingestion_gateway(request)?;
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+fn build_ingestion_gateway(
+    request: &IngestionGatewayRequest,
+) -> Result<IngestionGatewayReceipt, IngestionGatewayError> {
     validate_request(request)?;
     let mut bundles = request.bundles.clone();
+    for bundle in &mut bundles {
+        bundle.feature_names.sort();
+    }
     bundles.sort_by(|left, right| left.bundle_id.cmp(&right.bundle_id));
+    let mut required_modalities = request.required_modalities.clone();
+    required_modalities.sort();
+    let bundle_order = bundles
+        .iter()
+        .map(|bundle| bundle.bundle_id.clone())
+        .collect::<Vec<_>>();
+    let source_digest_order = bundles
+        .iter()
+        .map(|bundle| bundle.source_digest.clone())
+        .collect::<Vec<_>>();
+    let bundle_digest = ContentHash::of_value(
+        &serde_json::to_value(&bundles)
+            .map_err(|error| IngestionGatewayError::Serialization(error.to_string()))?,
+    )
+    .map_err(|error| IngestionGatewayError::Serialization(error.to_string()))?;
     let manifests = bundles
         .iter()
         .map(|bundle| ModalityManifest {
@@ -193,7 +503,7 @@ pub fn run_ingestion_gateway(
         study_id: request.study_id.clone(),
         reference_schema: request.reference_schema.clone(),
         modalities: manifests,
-        required_modalities: request.required_modalities.clone(),
+        required_modalities: required_modalities.clone(),
         raw_data_local: true,
     })?;
     let mut reasons = vec![
@@ -258,11 +568,19 @@ pub fn run_ingestion_gateway(
         "feature_id": FEATURE_ID,
         "request_id": request.request_id,
         "study_id": request.study_id,
+        "reference_schema": request.reference_schema,
+        "required_modalities": required_modalities,
+        "policy_allow": request.policy_allow,
+        "authorization_reference": request.authorization_reference,
         "decision": decision,
         "admitted_bundles": admitted_bundles,
         "omitted_bundles": omitted_bundles,
+        "effect_receipts": effect_receipts,
         "semantic_loss": semantic_loss,
         "reasons": reasons,
+        "bundle_order": bundle_order,
+        "source_digest_order": source_digest_order,
+        "bundle_digest": bundle_digest,
         "raw_data_local": true,
         "boundary": PRECLINICAL_BOUNDARY,
     });
@@ -286,20 +604,28 @@ pub fn run_ingestion_gateway(
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
+        input: canonical_ingestion_gateway_request(request),
+        input_digest: ingestion_gateway_input_digest(request)?,
         request_id: request.request_id.clone(),
         study_id: request.study_id.clone(),
+        reference_schema: request.reference_schema.clone(),
+        required_modalities,
+        policy_allow: request.policy_allow,
+        authorization_reference: request.authorization_reference.clone(),
         decision,
         harmonized,
+        bundle_order,
+        source_digest_order,
+        bundle_digest,
         admitted_bundles,
         omitted_bundles,
         effect_receipts,
         semantic_loss,
         reasons,
         artifact,
-        raw_data_local: true,
+        raw_data_local: request.raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
-    receipt.validate()?;
     Ok(receipt)
 }
 
@@ -308,6 +634,7 @@ fn validate_request(request: &IngestionGatewayRequest) -> Result<(), IngestionGa
         || request.study_id.trim().is_empty()
         || request.reference_schema.trim().is_empty()
         || request.bundles.is_empty()
+        || request.bundles.len() > MAX_BUNDLES
         || request.boundary != PRECLINICAL_BOUNDARY
         || !request.raw_data_local
     {
@@ -318,6 +645,14 @@ fn validate_request(request: &IngestionGatewayRequest) -> Result<(), IngestionGa
                 "request, study, reference schema, bundles, and boundary are required".into(),
             ))
         };
+    }
+    validate_text("request_id", &request.request_id)?;
+    validate_text("study_id", &request.study_id)?;
+    validate_text("reference_schema", &request.reference_schema)?;
+    validate_text("boundary", &request.boundary)?;
+    validate_unique_strings("required_modalities", &request.required_modalities)?;
+    if let Some(authorization) = &request.authorization_reference {
+        validate_text("authorization_reference", authorization)?;
     }
     let mut bundle_ids = BTreeSet::new();
     let mut modality_ids = BTreeSet::new();
@@ -334,6 +669,21 @@ fn validate_request(request: &IngestionGatewayRequest) -> Result<(), IngestionGa
                 "bundle identifiers, schema, instrument, acquisition label, and features are required".into(),
             ));
         }
+        validate_text("bundle.bundle_id", &bundle.bundle_id)?;
+        validate_text("bundle.modality_id", &bundle.modality_id)?;
+        validate_text("bundle.modality_type", &bundle.modality_type)?;
+        validate_text("bundle.schema_version", &bundle.schema_version)?;
+        validate_text("bundle.instrument_id", &bundle.instrument_id)?;
+        validate_text("bundle.acquisition_label", &bundle.acquisition_label)?;
+        validate_digest("bundle.source_digest", &bundle.source_digest)?;
+        validate_unique_strings("bundle.feature_names", &bundle.feature_names)?;
+        for (key, value) in &bundle.units {
+            validate_text("bundle.units.key", key)?;
+            validate_text("bundle.units.value", value)?;
+        }
+        if let Some(coordinate_system) = &bundle.coordinate_system {
+            validate_text("bundle.coordinate_system", coordinate_system)?;
+        }
         if !bundle.raw_data_local {
             return Err(IngestionGatewayError::Localization);
         }
@@ -347,15 +697,6 @@ fn validate_request(request: &IngestionGatewayRequest) -> Result<(), IngestionGa
                 bundle.modality_id.clone(),
             ));
         }
-    }
-    if request
-        .required_modalities
-        .iter()
-        .any(|name| name.trim().is_empty())
-    {
-        return Err(IngestionGatewayError::InvalidRequest(
-            "required modality names cannot be empty".into(),
-        ));
     }
     Ok(())
 }
@@ -372,7 +713,7 @@ mod tests {
             schema_version: "ome-ngff/0.5".into(),
             source_digest: ContentHash::of_bytes(id.as_bytes()),
             units: [("intensity".into(), "a.u.".into())].into(),
-            feature_names: vec!["z".into(), "a".into(), "a".into()],
+            feature_names: vec!["z".into(), "a".into()],
             coordinate_system: Some("micron-v1".into()),
             instrument_id: format!("instrument:{id}"),
             acquisition_label: "batch-01".into(),
@@ -434,5 +775,43 @@ mod tests {
             run_ingestion_gateway(&request).unwrap_err(),
             IngestionGatewayError::DuplicateBundle(_)
         ));
+    }
+
+    #[test]
+    fn descriptor_feature_order_is_canonicalized() {
+        let mut reversed = request();
+        reversed.bundles[0].feature_names.reverse();
+        assert_eq!(
+            run_ingestion_gateway(&request()).unwrap().digest().unwrap(),
+            run_ingestion_gateway(&reversed).unwrap().digest().unwrap()
+        );
+    }
+
+    #[test]
+    fn duplicate_feature_name_is_rejected() {
+        let mut value = request();
+        value.bundles[0].feature_names.push("a".into());
+        assert!(run_ingestion_gateway(&value).is_err());
+    }
+
+    #[test]
+    fn receipt_artifact_tampering_is_rejected() {
+        let mut receipt = run_ingestion_gateway(&request()).unwrap();
+        receipt.bundle_digest = ContentHash::of_bytes(b"tampered-bundles");
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn retained_request_tampering_is_rejected() {
+        let mut receipt = run_ingestion_gateway(&request()).unwrap();
+        receipt.input.reference_schema = "schema:tampered".into();
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn blank_authorization_reference_is_rejected() {
+        let mut value = request();
+        value.authorization_reference = Some(" ".into());
+        assert!(run_ingestion_gateway(&value).is_err());
     }
 }

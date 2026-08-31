@@ -53,6 +53,12 @@ impl QueryBackend for DirectMaterialization {
 
     fn estimate(&self, region: &QueryRegion) -> Result<Estimate, Declined> {
         let name = backend_name(self.backend());
+        self.budget
+            .validate()
+            .map_err(|detail| Declined::InvalidConfiguration {
+                backend: name,
+                detail,
+            })?;
         let schedule = self.plan(region);
 
         let peak = schedule.peak_entries();
@@ -78,7 +84,7 @@ impl QueryBackend for DirectMaterialization {
                 .to_string(),
         );
 
-        Ok(Estimate {
+        let estimate = Estimate {
             backend: self.backend(),
             method: self.method(),
             width_metric: WidthMetric::NotApplicable,
@@ -91,7 +97,14 @@ impl QueryBackend for DirectMaterialization {
             predicted_total_entries: schedule.total_entries(),
             uncertainty: region.assumed_cardinality_fraction(),
             assumptions,
-        })
+        };
+        estimate
+            .validate()
+            .map_err(|detail| Declined::InvalidEstimate {
+                backend: name,
+                detail,
+            })?;
+        Ok(estimate)
     }
 
     fn execute(&self, region: &QueryRegion) -> Result<ComputedRegion, Declined> {

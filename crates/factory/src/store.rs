@@ -521,10 +521,9 @@ impl JobStore {
             return Ok(None);
         }
         candidates.sort_by(|a, b| b.priority.cmp(&a.priority).then_with(|| a.id.cmp(&b.id)));
-        let job = candidates
-            .into_iter()
-            .next()
-            .expect("candidate list is non-empty");
+        let Some(job) = candidates.into_iter().next() else {
+            return Ok(None);
+        };
         job.attempts += 1;
         job.state = JobState::Leased;
         let lease = Lease {

@@ -26,6 +26,8 @@ pub const ACTION_ORDER: [&str; 4] = [
     "control:authorize",
     "control:publish",
 ];
+const CONTROL_CONTENT_TYPE: &str = "application/vnd.aurora.throughput-retrieval-control-plane+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThroughputRetrievalControlPlaneRequest {
@@ -91,14 +93,17 @@ impl ThroughputRetrievalControlPlaneReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
             || self.request_id.trim().is_empty()
             || self.plane_id.trim().is_empty()
             || self.session_id.trim().is_empty()
             || self.batch_id.trim().is_empty()
             || self.partition.trim().is_empty()
             || self.checkpoint_seq == 0
-            || self.action_order != ACTION_ORDER
+            || self.action_order
+                != ACTION_ORDER
+                    .iter()
+                    .map(|value| (*value).to_string())
+                    .collect::<Vec<_>>()
             || self.completed_action_order.is_empty()
             || self.candidate_order.is_empty()
             || self.effect_receipts.is_empty()
@@ -137,35 +142,69 @@ impl ThroughputRetrievalControlPlaneReceipt {
                 ));
             }
         }
-        if self
-            .ranked_order
-            .iter()
-            .chain(self.qualified_order.iter())
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
+        if self.completed_action_order.len() > self.action_order.len()
+            || self.completed_action_order != self.action_order[..self.completed_action_order.len()]
+            || self.blocked_action_order != self.action_order[self.completed_action_order.len()..]
         {
             return Err(ThroughputRetrievalControlPlaneError::Invalid(
-                "throughput control-plane evidence state is not covered by candidates".into(),
+                "throughput control-plane actions are not a canonical prefix and suffix".into(),
             ));
         }
-        for values in [
-            &self.compensation_order,
-            &self.candidate_order,
-            &self.ranked_order,
-            &self.qualified_order,
-            &self.blocked_order,
-            &self.unknown_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.effect_receipts,
+        validate_sorted_unique(&self.compensation_order, "compensation_order")?;
+        validate_sorted_unique(&self.candidate_order, "candidate_order")?;
+        for (values, field) in [
+            (&self.ranked_order, "ranked_order"),
+            (&self.qualified_order, "qualified_order"),
+            (&self.blocked_order, "blocked_order"),
+            (&self.unknown_order, "unknown_order"),
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(ThroughputRetrievalControlPlaneError::Invalid(
-                    "throughput control-plane ordering is not canonical".into(),
-                ));
-            }
+            validate_unique(values, field)?;
+        }
+        for (values, field) in [
+            (&self.omissions, "omissions"),
+            (&self.uncertainty, "uncertainty"),
+            (&self.negative_evidence, "negative_evidence"),
+            (&self.effect_receipts, "effect_receipts"),
+        ] {
+            validate_sorted_unique(values, field)?;
+        }
+        let candidate_keys = identity_keys(&self.candidate_order);
+        if identity_keys(&self.ranked_order) != candidate_keys {
+            return Err(ThroughputRetrievalControlPlaneError::Invalid(
+                "throughput control-plane ranked order must contain every candidate exactly once"
+                    .into(),
+            ));
+        }
+        let qualified_keys = identity_keys(&self.qualified_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        if !qualified_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+            || self
+                .ranked_order
+                .iter()
+                .any(|candidate| !self.candidate_order.contains(candidate))
+            || self
+                .qualified_order
+                .iter()
+                .any(|candidate| !self.candidate_order.contains(candidate))
+            || self
+                .blocked_order
+                .iter()
+                .any(|candidate| !self.candidate_order.contains(candidate))
+            || self
+                .unknown_order
+                .iter()
+                .any(|candidate| !self.blocked_order.contains(candidate))
+            || qualified_keys
+                .union(&blocked_keys)
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                != candidate_keys
+        {
+            return Err(ThroughputRetrievalControlPlaneError::Invalid(
+                "throughput control-plane candidate states must partition candidates".into(),
+            ));
         }
         for digest in [
             &self.queue_digest,
@@ -179,16 +218,71 @@ impl ThroughputRetrievalControlPlaneReceipt {
                 ));
             }
         }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("manage:local-throughput-retrieval-control:")
-                && effect != "block:unsafe-release"
-        }) {
+        let expected_effect_receipts = if matches!(
+            self.disposition,
+            SynthesisDisposition::Qualified | SynthesisDisposition::Partial
+        ) {
+            vec![format!(
+                "manage:local-throughput-retrieval-control:{}",
+                self.plane_id
+            )]
+        } else {
+            vec!["block:unsafe-release".into()]
+        };
+        if self.effect_receipts != expected_effect_receipts {
             return Err(ThroughputRetrievalControlPlaneError::Invalid(
-                "throughput control-plane effect is outside local management gate".into(),
+                "throughput control-plane effects do not match disposition".into(),
+            ));
+        }
+        if !self.raw_data_local
+            && (self.disposition != SynthesisDisposition::Blocked
+                || !self
+                    .omissions
+                    .iter()
+                    .any(|item| item == "control:raw-data-locality-failed"))
+        {
+            return Err(ThroughputRetrievalControlPlaneError::Invalid(
+                "non-local control planes must be blocked and retain locality evidence".into(),
+            ));
+        }
+        let expected_control_digest = ContentHash::of_value(&json!({
+            "feature_id": FEATURE_ID,
+            "plane_id": self.plane_id,
+            "session_id": self.session_id,
+            "batch_id": self.batch_id,
+            "partition": self.partition,
+            "checkpoint_seq": self.checkpoint_seq,
+            "action_order": self.action_order,
+            "completed": self.completed_action_order,
+            "blocked": self.blocked_action_order,
+            "compensation": self.compensation_order,
+            "queue_digest": self.queue_digest,
+            "synthesis_digest": self.synthesis_digest,
+            "replay_identity": self.replay_identity,
+            "raw_data_local": self.raw_data_local,
+        }))
+        .map_err(|error| ThroughputRetrievalControlPlaneError::Artifact(error.to_string()))?;
+        if self.control_digest != expected_control_digest {
+            return Err(ThroughputRetrievalControlPlaneError::Invalid(
+                "throughput control-plane digest is not bound to control state".into(),
+            ));
+        }
+        let expected_artifact_id =
+            format!("brain-throughput-retrieval-control-plane:{}", self.plane_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != CONTROL_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(ThroughputRetrievalControlPlaneError::Invalid(
+                "throughput control-plane artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| ThroughputRetrievalControlPlaneError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| ThroughputRetrievalControlPlaneError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, ThroughputRetrievalControlPlaneError> {
@@ -207,12 +301,24 @@ pub fn throughput_retrieval_control_plane_manifest() -> CapabilityManifest {
 pub fn operate_throughput_retrieval_control_plane(
     request: &ThroughputRetrievalControlPlaneRequest,
 ) -> Result<ThroughputRetrievalControlPlaneReceipt, ThroughputRetrievalControlPlaneError> {
+    for (value, field) in [
+        (&request.plane_id, "plane_id"),
+        (&request.session_id, "session_id"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
     if request.plane_id.trim().is_empty()
         || request.session_id.trim().is_empty()
         || request.boundary != PRECLINICAL_BOUNDARY
         || request.request.boundary != PRECLINICAL_BOUNDARY
-        || request.requested_action_order != ACTION_ORDER
+        || request.requested_action_order
+            != ACTION_ORDER
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
         || request.budget_units == 0
+        || request.request.replay_identity.as_str().len() != 64
     {
         return Err(ThroughputRetrievalControlPlaneError::Invalid(
             "throughput control-plane identity, action order, budget, or boundary is invalid"
@@ -224,7 +330,7 @@ pub fn operate_throughput_retrieval_control_plane(
     let gate = request.policy_allow
         && request.protected_closure
         && request.raw_data_local
-        && request.budget_units >= ACTION_ORDER.len() as u32;
+        && u64::from(request.budget_units) >= u64::try_from(ACTION_ORDER.len()).unwrap_or(u64::MAX);
     let disposition = if gate {
         synthesis.disposition
     } else {
@@ -276,19 +382,7 @@ pub fn operate_throughput_retrieval_control_plane(
     if disposition != SynthesisDisposition::Qualified {
         compensation.insert("compensate:retain-unresolved-throughput-retrieval".into());
     }
-    let control_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "plane_id": request.plane_id, "session_id": request.session_id, "batch_id": synthesis.batch_id, "partition": synthesis.partition, "checkpoint_seq": synthesis.checkpoint_seq, "action_order": ACTION_ORDER, "completed": completed_action_order, "blocked": blocked_action_order, "compensation": compensation, "queue_digest": synthesis.queue_digest, "synthesis_digest": synthesis.synthesis_digest, "replay_identity": request.request.replay_identity})).map_err(|error| ThroughputRetrievalControlPlaneError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "plane_id": request.plane_id, "session_id": request.session_id, "batch_id": synthesis.batch_id, "partition": synthesis.partition, "checkpoint_seq": synthesis.checkpoint_seq, "disposition": disposition, "action_order": ACTION_ORDER, "completed_action_order": completed_action_order, "blocked_action_order": blocked_action_order, "compensation_order": compensation, "queue_digest": synthesis.queue_digest, "synthesis_digest": synthesis.synthesis_digest, "control_digest": control_digest, "replay_identity": request.request.replay_identity, "boundary": PRECLINICAL_BOUNDARY});
-    let artifact = TypedResearchArtifact::from_payload(
-        format!(
-            "brain-throughput-retrieval-control-plane:{}",
-            request.plane_id
-        ),
-        "application/vnd.aurora.throughput-retrieval-control-plane+json",
-        &payload,
-        Vec::new(),
-        Vec::new(),
-    )
-    .map_err(|error| ThroughputRetrievalControlPlaneError::Artifact(error.to_string()))?;
+    let control_digest = ContentHash::of_value(&json!({"feature_id": FEATURE_ID, "plane_id": request.plane_id, "session_id": request.session_id, "batch_id": synthesis.batch_id, "partition": synthesis.partition, "checkpoint_seq": synthesis.checkpoint_seq, "action_order": ACTION_ORDER, "completed": completed_action_order, "blocked": blocked_action_order, "compensation": compensation, "queue_digest": synthesis.queue_digest, "synthesis_digest": synthesis.synthesis_digest, "replay_identity": request.request.replay_identity, "raw_data_local": true})).map_err(|error| ThroughputRetrievalControlPlaneError::Artifact(error.to_string()))?;
     let effect_receipts = if matches!(
         disposition,
         SynthesisDisposition::Qualified | SynthesisDisposition::Partial
@@ -300,6 +394,18 @@ pub fn operate_throughput_retrieval_control_plane(
     } else {
         vec!["block:unsafe-release".into()]
     };
+    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "plane_id": request.plane_id, "session_id": request.session_id, "batch_id": synthesis.batch_id, "partition": synthesis.partition, "checkpoint_seq": synthesis.checkpoint_seq, "disposition": disposition, "action_order": ACTION_ORDER, "completed_action_order": completed_action_order, "blocked_action_order": blocked_action_order, "compensation_order": compensation, "candidate_order": synthesis.candidate_order, "ranked_order": synthesis.ranked_order, "qualified_order": synthesis.qualified_order, "blocked_order": synthesis.blocked_order, "unknown_order": synthesis.unknown_order, "queue_digest": synthesis.queue_digest, "synthesis_digest": synthesis.synthesis_digest, "control_digest": control_digest, "replay_identity": request.request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "effect_receipts": effect_receipts, "raw_data_local": true, "boundary": PRECLINICAL_BOUNDARY});
+    let artifact = TypedResearchArtifact::from_payload(
+        format!(
+            "brain-throughput-retrieval-control-plane:{}",
+            request.plane_id
+        ),
+        CONTROL_CONTENT_TYPE,
+        &payload,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(|error| ThroughputRetrievalControlPlaneError::Artifact(error.to_string()))?;
     let receipt = ThroughputRetrievalControlPlaneReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -335,6 +441,90 @@ pub fn operate_throughput_retrieval_control_plane(
     };
     receipt.validate()?;
     Ok(receipt)
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), ThroughputRetrievalControlPlaneError> {
+    if value.trim().is_empty()
+        || value != value.trim()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(ThroughputRetrievalControlPlaneError::Invalid(format!(
+            "{field} must be bounded, non-empty text without padding or control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), ThroughputRetrievalControlPlaneError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(ThroughputRetrievalControlPlaneError::Invalid(format!(
+                "{field} contains duplicate or case-colliding values"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(
+    values: &[String],
+    field: &str,
+) -> Result<(), ThroughputRetrievalControlPlaneError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(ThroughputRetrievalControlPlaneError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn receipt_payload(receipt: &ThroughputRetrievalControlPlaneReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "plane_id": receipt.plane_id,
+        "session_id": receipt.session_id,
+        "batch_id": receipt.batch_id,
+        "partition": receipt.partition,
+        "checkpoint_seq": receipt.checkpoint_seq,
+        "action_order": receipt.action_order,
+        "completed_action_order": receipt.completed_action_order,
+        "blocked_action_order": receipt.blocked_action_order,
+        "compensation_order": receipt.compensation_order,
+        "disposition": receipt.disposition,
+        "candidate_order": receipt.candidate_order,
+        "ranked_order": receipt.ranked_order,
+        "qualified_order": receipt.qualified_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "queue_digest": receipt.queue_digest,
+        "synthesis_digest": receipt.synthesis_digest,
+        "control_digest": receipt.control_digest,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 #[cfg(test)]
@@ -406,6 +596,35 @@ mod tests {
         assert_eq!(receipt.disposition, SynthesisDisposition::Blocked);
         assert!(!receipt.compensation_order.is_empty());
     }
+
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut value = request();
+        value.raw_data_local = false;
+        let receipt = operate_throughput_retrieval_control_plane(&value).unwrap();
+        assert_eq!(receipt.disposition, SynthesisDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .omissions
+            .iter()
+            .any(|item| item == "control:raw-data-locality-failed"));
+        assert!(receipt.validate().is_ok());
+    }
+
+    #[test]
+    fn control_artifact_payload_is_bound() {
+        let mut receipt = operate_throughput_retrieval_control_plane(&request()).unwrap();
+        receipt.plane_id = "plane:tampered".into();
+        assert!(receipt.validate().is_err());
+    }
+
+    #[test]
+    fn case_mismatched_candidate_identity_is_rejected() {
+        let mut receipt = operate_throughput_retrieval_control_plane(&request()).unwrap();
+        receipt.qualified_order[0] = receipt.qualified_order[0].to_ascii_uppercase();
+        assert!(receipt.validate().is_err());
+    }
+
     #[test]
     fn digest_is_stable() {
         let receipt = operate_throughput_retrieval_control_plane(&request()).unwrap();

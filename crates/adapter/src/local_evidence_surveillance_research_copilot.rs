@@ -19,6 +19,8 @@ pub const FEATURE_ID: &str = "AFA-adapter-P01-F09";
 pub const CONTRACT_VERSION: &str = "adapter-local-evidence-surveillance-research-copilot/1.0";
 pub const INPUT_SCHEMA: &str = "EvidenceFeed1@1";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet3@1";
+const MAX_TEXT_BYTES: usize = 512;
+const MAX_ITEMS: usize = 16384;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CopilotEvidenceObservation {
@@ -84,6 +86,8 @@ pub struct LocalEvidenceSurveillanceResearchCopilotReceipt {
     pub schema_version: String,
     pub contract_version: String,
     pub feature_id: String,
+    pub input: LocalEvidenceSurveillanceResearchCopilotRequest,
+    pub input_digest: ContentHash,
     pub request_id: String,
     pub agent_id: String,
     pub study_id: String,
@@ -119,8 +123,98 @@ pub enum LocalEvidenceSurveillanceResearchCopilotError {
     Artifact(String),
 }
 
-fn sorted_unique(values: &[String]) -> bool {
-    values.windows(2).all(|pair| pair[0] < pair[1])
+fn validate_text(
+    field: &str,
+    value: &str,
+) -> Result<(), LocalEvidenceSurveillanceResearchCopilotError> {
+    if value.is_empty() || value.trim() != value {
+        return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+            format!("{field} must be non-empty and trimmed"),
+        ));
+    }
+    if value.len() > MAX_TEXT_BYTES || value.chars().any(char::is_control) {
+        return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+            format!("{field} is outside its bounded text contract"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_unique_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), LocalEvidenceSurveillanceResearchCopilotError> {
+    if values.len() > MAX_ITEMS {
+        return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+            format!("{field} exceeds its item bound"),
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    for value in values {
+        validate_text(field, value)?;
+        if !unique.insert(value) {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                format!("{field} contains duplicate values"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_strings(
+    field: &str,
+    values: &[String],
+) -> Result<(), LocalEvidenceSurveillanceResearchCopilotError> {
+    validate_unique_strings(field, values)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+            format!("{field} ordering is not canonical"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_digest(
+    field: &str,
+    digest: &ContentHash,
+) -> Result<(), LocalEvidenceSurveillanceResearchCopilotError> {
+    if digest.as_str().len() != 64
+        || !digest
+            .as_str()
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+            format!("{field} must be a 64-character hex digest"),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn canonical_local_evidence_surveillance_research_copilot_request(
+    request: &LocalEvidenceSurveillanceResearchCopilotRequest,
+) -> LocalEvidenceSurveillanceResearchCopilotRequest {
+    let mut canonical = request.clone();
+    canonical.declared_tools.sort();
+    canonical.required_source_ids.sort();
+    canonical.observations.sort_by(|left, right| {
+        right
+            .relevance_score
+            .cmp(&left.relevance_score)
+            .then_with(|| left.source_id.cmp(&right.source_id))
+    });
+    canonical
+}
+
+fn copilot_input_digest(
+    request: &LocalEvidenceSurveillanceResearchCopilotRequest,
+) -> Result<ContentHash, LocalEvidenceSurveillanceResearchCopilotError> {
+    let canonical = canonical_local_evidence_surveillance_research_copilot_request(request);
+    let value = serde_json::to_value(canonical).map_err(|error| {
+        LocalEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+    })?;
+    ContentHash::of_value(&value)
+        .map_err(|error| LocalEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string()))
 }
 
 impl LocalEvidenceSurveillanceResearchCopilotReceipt {
@@ -142,26 +236,74 @@ impl LocalEvidenceSurveillanceResearchCopilotReceipt {
         {
             return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid("copilot identity, locality, candidates, effects, or qualified-set linkage is incomplete".into()));
         }
-        for values in [
-            &self.candidate_order,
-            &self.selected_order,
-            &self.unresolved_order,
-            &self.denied_order,
-            &self.omissions,
-            &self.uncertainty,
-            &self.negative_evidence,
-            &self.tool_receipts,
-            &self.effect_receipts,
+        validate_text("request_id", &self.request_id)?;
+        validate_text("agent_id", &self.agent_id)?;
+        validate_text("study_id", &self.study_id)?;
+        validate_text("intent", &self.intent)?;
+        validate_text("requested_tool", &self.requested_tool)?;
+        validate_unique_strings("candidate_order", &self.candidate_order)?;
+        validate_sorted_strings("selected_order", &self.selected_order)?;
+        validate_sorted_strings("unresolved_order", &self.unresolved_order)?;
+        validate_sorted_strings("denied_order", &self.denied_order)?;
+        validate_sorted_strings("omissions", &self.omissions)?;
+        validate_sorted_strings("uncertainty", &self.uncertainty)?;
+        validate_sorted_strings("negative_evidence", &self.negative_evidence)?;
+        validate_sorted_strings("tool_receipts", &self.tool_receipts)?;
+        validate_sorted_strings("effect_receipts", &self.effect_receipts)?;
+        validate_sorted_strings(
+            "qualified_set.selected_order",
             &self.qualified_set.selected_order,
+        )?;
+        validate_sorted_strings(
+            "qualified_set.negative_order",
             &self.qualified_set.negative_order,
-            &self.qualified_set.omissions,
-            &self.qualified_set.uncertainty,
-        ] {
-            if !sorted_unique(values) {
-                return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
-                    "copilot ordering is not canonical".into(),
-                ));
-            }
+        )?;
+        validate_sorted_strings("qualified_set.omissions", &self.qualified_set.omissions)?;
+        validate_sorted_strings("qualified_set.uncertainty", &self.qualified_set.uncertainty)?;
+        if self.qualified_set.schema_version != RESEARCH_CONTRACT_SCHEMA_VERSION
+            || self.qualified_set.set_id != format!("qualified-evidence-copilot:{}", self.request_id)
+            || self.qualified_set.ordering_rule
+                != "relevance_score descending, source_id ascending; selected digests follow selected source order"
+            || self.qualified_set.tool_mode
+                != if self.dry_run { "dry_run" } else { "bounded_invocation" }
+            || self.qualified_set.boundary != PRECLINICAL_BOUNDARY
+            || self.qualified_set.evidence_state
+                != if self.disposition == ResearchCopilotDisposition::Completed {
+                    EvidenceState::Supported
+                } else {
+                    EvidenceState::Unknown
+                }
+            || self.qualified_set.selected_digests.len() != self.selected_order.len()
+            || self.qualified_set.omissions != self.omissions
+            || self.qualified_set.uncertainty != self.uncertainty
+            || self.qualified_set.negative_order != self.negative_evidence
+        {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                "qualified evidence set is not bound to the receipt".into(),
+            ));
+        }
+        if self.disposition == ResearchCopilotDisposition::Completed
+            && (!self.unresolved_order.is_empty()
+                || !self.denied_order.is_empty()
+                || !self.omissions.is_empty()
+                || !self.uncertainty.is_empty())
+        {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                "completed copilot cannot retain unresolved, denied, omitted, or uncertain states"
+                    .into(),
+            ));
+        }
+        if matches!(
+            self.disposition,
+            ResearchCopilotDisposition::Unknown | ResearchCopilotDisposition::Blocked
+        ) && !self.selected_order.is_empty()
+        {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                "unknown or blocked copilot cannot retain selected evidence".into(),
+            ));
+        }
+        for digest in &self.qualified_set.selected_digests {
+            validate_digest("qualified_set.selected_digest", digest)?;
         }
         let classified = self
             .selected_order
@@ -177,19 +319,15 @@ impl LocalEvidenceSurveillanceResearchCopilotReceipt {
                 "copilot states do not partition candidates".into(),
             ));
         }
-        for digest in [
-            &self.replay_identity,
-            &self.capability_digest,
-            &self.evidence_digest,
-            &self.provenance_digest,
-            &self.run_digest,
-            &self.artifact.content_hash,
+        for (field, digest) in [
+            ("replay_identity", &self.replay_identity),
+            ("capability_digest", &self.capability_digest),
+            ("evidence_digest", &self.evidence_digest),
+            ("provenance_digest", &self.provenance_digest),
+            ("run_digest", &self.run_digest),
+            ("artifact.content_hash", &self.artifact.content_hash),
         ] {
-            if digest.as_str().len() != 64 {
-                return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
-                    "copilot digest is invalid".into(),
-                ));
-            }
+            validate_digest(field, digest)?;
         }
         if self.effect_receipts.iter().any(|effect| {
             !effect.starts_with("dry-run:bounded-tool:")
@@ -217,9 +355,92 @@ impl LocalEvidenceSurveillanceResearchCopilotReceipt {
                 "dry-run copilot cannot invoke tools".into(),
             ));
         }
+        let expected_effect = if self.disposition == ResearchCopilotDisposition::Blocked {
+            "block:unsafe-release".to_string()
+        } else if self.dry_run {
+            format!("dry-run:bounded-tool:{}", self.agent_id)
+        } else {
+            format!("invoke:declared-tool:{}", self.agent_id)
+        };
+        if self.effect_receipts != [expected_effect] {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                "copilot effect receipt does not match mode or disposition".into(),
+            ));
+        }
+        let expected_evidence = ContentHash::of_value(&json!({
+            "candidate_order": self.candidate_order,
+            "selected_order": self.selected_order,
+            "unresolved_order": self.unresolved_order,
+            "denied_order": self.denied_order,
+        }))
+        .map_err(|error| {
+            LocalEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+        })?;
+        if self.evidence_digest != expected_evidence {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                "copilot evidence digest does not match state partitions".into(),
+            ));
+        }
+        let expected_provenance = ContentHash::of_value(&json!({
+            "request_id": self.request_id,
+            "agent_id": self.agent_id,
+            "replay_identity": self.replay_identity,
+            "capability_digest": self.capability_digest,
+            "evidence_digest": self.evidence_digest,
+        }))
+        .map_err(|error| {
+            LocalEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+        })?;
+        if self.provenance_digest != expected_provenance {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                "copilot provenance digest does not match receipt identity".into(),
+            ));
+        }
+        let expected_run = ContentHash::of_value(&json!({
+            "request_id": self.request_id,
+            "dry_run": self.dry_run,
+            "tool_receipts": self.tool_receipts,
+            "provenance_digest": self.provenance_digest,
+        }))
+        .map_err(|error| {
+            LocalEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+        })?;
+        if self.run_digest != expected_run {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                "copilot run digest does not match execution receipts".into(),
+            ));
+        }
+        if self.artifact.artifact_id != self.qualified_set.set_id
+            || self.artifact.content_type != "application/vnd.aurora.qualified-evidence-set3+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Artifact(
+                "copilot artifact is not bound to the qualified evidence set".into(),
+            ));
+        }
+        self.artifact
+            .verify_payload(&serde_json::to_value(&self.qualified_set).map_err(|error| {
+                LocalEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+            })?)
+            .map_err(|error| {
+                LocalEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
+            })?;
         self.artifact.validate_metadata().map_err(|error| {
             LocalEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string())
-        })
+        })?;
+        if self.input_digest != copilot_input_digest(&self.input)? {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                "local copilot retained input digest mismatch".into(),
+            ));
+        }
+        let expected = build_local_evidence_surveillance_research_copilot(&self.input)?;
+        if self != &expected {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                "local copilot receipt does not match its retained input".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -228,6 +449,17 @@ pub fn local_evidence_surveillance_research_copilot_manifest() -> CapabilityMani
 }
 
 pub fn run_local_evidence_surveillance_research_copilot(
+    request: &LocalEvidenceSurveillanceResearchCopilotRequest,
+) -> Result<
+    LocalEvidenceSurveillanceResearchCopilotReceipt,
+    LocalEvidenceSurveillanceResearchCopilotError,
+> {
+    let receipt = build_local_evidence_surveillance_research_copilot(request)?;
+    receipt.validate()?;
+    Ok(receipt)
+}
+
+fn build_local_evidence_surveillance_research_copilot(
     request: &LocalEvidenceSurveillanceResearchCopilotRequest,
 ) -> Result<
     LocalEvidenceSurveillanceResearchCopilotReceipt,
@@ -247,15 +479,28 @@ pub fn run_local_evidence_surveillance_research_copilot(
     {
         return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid("copilot identity, tool declaration, observations, replay, locality, or boundary is invalid".into()));
     }
+    validate_text("request_id", &request.request_id)?;
+    validate_text("agent_id", &request.agent_id)?;
+    validate_text("study_id", &request.study_id)?;
+    validate_text("intent", &request.intent)?;
+    validate_text("requested_tool", &request.requested_tool)?;
+    if request.declared_tools.len() > MAX_ITEMS
+        || request.required_source_ids.len() > MAX_ITEMS
+        || request.observations.len() > MAX_ITEMS
+    {
+        return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+            "copilot tool, source, or observation count exceeds its bound".into(),
+        ));
+    }
+    validate_unique_strings("declared_tools", &request.declared_tools)?;
+    validate_unique_strings("required_source_ids", &request.required_source_ids)?;
+    validate_digest("replay_identity", &request.replay_identity)?;
     let declared_tools = request
         .declared_tools
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    if declared_tools.len() != request.declared_tools.len()
-        || declared_tools.iter().any(|tool| tool.trim().is_empty())
-        || !declared_tools.contains(&request.requested_tool)
-    {
+    if !declared_tools.contains(&request.requested_tool) {
         return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
             "requested tool must be declared exactly once".into(),
         ));
@@ -271,12 +516,20 @@ pub fn run_local_evidence_surveillance_research_copilot(
         .iter()
         .map(|observation| observation.source_id.clone())
         .collect::<Vec<_>>();
-    if candidate.windows(2).any(|pair| pair[0] == pair[1])
-        || candidate.iter().any(|value| value.trim().is_empty())
-    {
-        return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
-            "observation source identities must be unique and non-empty".into(),
-        ));
+    let mut source_ids = BTreeSet::new();
+    for observation in &observations {
+        validate_text("observation.source_id", &observation.source_id)?;
+        validate_text("observation.study_id", &observation.study_id)?;
+        validate_text("observation.source_type", &observation.source_type)?;
+        validate_text("observation.locator", &observation.locator)?;
+        if let Some(digest) = &observation.digest {
+            validate_digest("observation.digest", digest)?;
+        }
+        if !source_ids.insert(observation.source_id.as_str()) {
+            return Err(LocalEvidenceSurveillanceResearchCopilotError::Invalid(
+                "observation source identities must be unique".into(),
+            ));
+        }
     }
     let mut selected = BTreeSet::new();
     let mut selected_digest_map = BTreeMap::new();
@@ -328,13 +581,18 @@ pub fn run_local_evidence_surveillance_research_copilot(
             denied.insert(observation.source_id.clone());
             negative.insert(format!("source:{}:contradicted", observation.source_id));
         } else {
-            selected.insert(observation.source_id.clone());
-            selected_digest_map.insert(
-                observation.source_id.clone(),
-                observation.digest.clone().expect("digest checked"),
-            );
-            if observation.negative_result {
-                negative.insert(format!("source:{}:negative-result", observation.source_id));
+            if let Some(digest) = observation.digest.clone() {
+                selected.insert(observation.source_id.clone());
+                selected_digest_map.insert(observation.source_id.clone(), digest);
+                if observation.negative_result {
+                    negative.insert(format!("source:{}:negative-result", observation.source_id));
+                }
+            } else {
+                unresolved.insert(observation.source_id.clone());
+                omissions.insert(format!(
+                    "source:{}:content-digest-missing",
+                    observation.source_id
+                ));
             }
         }
     }
@@ -410,7 +668,7 @@ pub fn run_local_evidence_surveillance_research_copilot(
             EvidenceState::Unknown
         },
         ordering_rule:
-            "relevance_score descending, source_id ascending; artifact digests ascending".into(),
+            "relevance_score descending, source_id ascending; selected digests follow selected source order".into(),
         tool_mode: tool_mode.into(),
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
@@ -425,10 +683,13 @@ pub fn run_local_evidence_surveillance_research_copilot(
         Vec::new(),
     )
     .map_err(|error| LocalEvidenceSurveillanceResearchCopilotError::Artifact(error.to_string()))?;
+    let canonical_request = canonical_local_evidence_surveillance_research_copilot_request(request);
     let receipt = LocalEvidenceSurveillanceResearchCopilotReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
         feature_id: FEATURE_ID.into(),
+        input: canonical_request,
+        input_digest: copilot_input_digest(request)?,
         request_id: request.request_id.clone(),
         agent_id: request.agent_id.clone(),
         study_id: request.study_id.clone(),
@@ -461,7 +722,6 @@ pub fn run_local_evidence_surveillance_research_copilot(
         raw_data_local: request.raw_data_local,
         boundary: PRECLINICAL_BOUNDARY.into(),
     };
-    receipt.validate()?;
     Ok(receipt)
 }
 
@@ -563,5 +823,57 @@ mod tests {
         let first = run_local_evidence_surveillance_research_copilot(&request()).unwrap();
         let second = run_local_evidence_surveillance_research_copilot(&request()).unwrap();
         assert_eq!(first.run_digest, second.run_digest);
+    }
+
+    #[test]
+    fn reordered_inputs_share_the_same_retained_input_identity() {
+        let mut reordered = request();
+        reordered.declared_tools.reverse();
+        reordered.required_source_ids.reverse();
+        reordered.observations.reverse();
+        let first = run_local_evidence_surveillance_research_copilot(&request()).unwrap();
+        let second = run_local_evidence_surveillance_research_copilot(&reordered).unwrap();
+        assert_eq!(first.input_digest, second.input_digest);
+        assert_eq!(first.run_digest, second.run_digest);
+    }
+
+    #[test]
+    fn relevance_ranked_candidate_order_is_valid() {
+        let mut value = request();
+        value.observations[0].relevance_score = 60;
+        value.observations[1].relevance_score = 95;
+        let receipt = run_local_evidence_surveillance_research_copilot(&value).unwrap();
+        assert_eq!(receipt.candidate_order, vec!["source:b", "source:a"]);
+    }
+
+    #[test]
+    fn duplicate_required_source_is_rejected() {
+        let mut value = request();
+        value.required_source_ids.push("source:a".into());
+        assert!(run_local_evidence_surveillance_research_copilot(&value).is_err());
+    }
+
+    #[test]
+    fn receipt_rejects_a_tampered_run_digest() {
+        let mut receipt = run_local_evidence_surveillance_research_copilot(&request()).unwrap();
+        receipt.run_digest = ContentHash::of_bytes(b"tampered");
+        let error = receipt.validate().unwrap_err();
+        assert!(error.to_string().contains("run digest"));
+    }
+
+    #[test]
+    fn receipt_rejects_a_tampered_qualified_set_artifact() {
+        let mut receipt = run_local_evidence_surveillance_research_copilot(&request()).unwrap();
+        receipt.qualified_set.selected_digests[0] = ContentHash::of_bytes(b"tampered");
+        let error = receipt.validate().unwrap_err();
+        assert!(error.to_string().contains("digest mismatch"));
+    }
+
+    #[test]
+    fn receipt_rejects_tampered_retained_observation() {
+        let mut receipt = run_local_evidence_surveillance_research_copilot(&request()).unwrap();
+        receipt.input.observations[0].source_type = "tampered-source".into();
+        let error = receipt.validate().unwrap_err();
+        assert!(error.to_string().contains("retained input digest mismatch"));
     }
 }

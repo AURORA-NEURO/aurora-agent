@@ -58,11 +58,18 @@ impl fmt::Display for ReleaseVersion {
 pub enum ReleaseState {
     Published,
     /// Superseded by a later version, still usable, still citable.
-    Superseded { by: ReleaseVersion },
+    Superseded {
+        by: ReleaseVersion,
+    },
     /// Scheduled for retirement after a stated support window, in logical epochs.
-    Deprecated { support_epochs: u32, reason: String },
+    Deprecated {
+        support_epochs: u32,
+        reason: String,
+    },
     /// Invalidated. Results against it remain retrievable and are marked, not deleted.
-    Withdrawn { reason: String },
+    Withdrawn {
+        reason: String,
+    },
 }
 
 /// One published release.
@@ -112,7 +119,13 @@ impl ReleaseLedger {
                     attempted: content_digest,
                 });
             }
-            return Ok(self.releases.get(&version).expect("just checked"));
+            let Some(release) = self.releases.get(&version) else {
+                return Err(ReleaseError::UnknownRelease {
+                    version: version.to_string(),
+                    action: "republished",
+                });
+            };
+            return Ok(release);
         }
         self.releases.insert(
             version,
@@ -173,13 +186,13 @@ impl ReleaseLedger {
         support_epochs: u32,
         reason: impl Into<String>,
     ) -> Result<(), ReleaseError> {
-        let entry = self
-            .releases
-            .get_mut(&version)
-            .ok_or_else(|| ReleaseError::UnknownRelease {
-                version: version.to_string(),
-                action: "deprecated",
-            })?;
+        let entry =
+            self.releases
+                .get_mut(&version)
+                .ok_or_else(|| ReleaseError::UnknownRelease {
+                    version: version.to_string(),
+                    action: "deprecated",
+                })?;
         entry.state = ReleaseState::Deprecated {
             support_epochs,
             reason: reason.into(),
@@ -193,13 +206,13 @@ impl ReleaseLedger {
         version: ReleaseVersion,
         reason: impl Into<String>,
     ) -> Result<(), ReleaseError> {
-        let entry = self
-            .releases
-            .get_mut(&version)
-            .ok_or_else(|| ReleaseError::UnknownRelease {
-                version: version.to_string(),
-                action: "withdrawn",
-            })?;
+        let entry =
+            self.releases
+                .get_mut(&version)
+                .ok_or_else(|| ReleaseError::UnknownRelease {
+                    version: version.to_string(),
+                    action: "withdrawn",
+                })?;
         if matches!(entry.state, ReleaseState::Withdrawn { .. }) {
             return Err(ReleaseError::AlreadyWithdrawn(version.to_string()));
         }

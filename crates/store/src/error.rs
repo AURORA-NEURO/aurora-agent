@@ -14,6 +14,12 @@ pub enum StoreError {
     #[error("index value for key {0:?} contains a newline")]
     UnsupportedValue(String),
 
+    #[error("invalid index name: {0:?}")]
+    InvalidIndexName(String),
+
+    #[error("index is too large to address")]
+    IndexTooLarge,
+
     #[error("corrupt index: {0}")]
     CorruptIndex(String),
 

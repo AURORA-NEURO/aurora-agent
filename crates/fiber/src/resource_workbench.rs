@@ -120,8 +120,72 @@ impl QualifiedResourceSet {
                 "candidate counts, resources, or reasons".into(),
             ));
         }
+        let accounted = self
+            .resources
+            .len()
+            .checked_add(self.omissions.len())
+            .ok_or_else(|| {
+                ResourceWorkbenchError::InvalidField(
+                    "resource candidate accounting overflowed".into(),
+                )
+            })?;
+        if accounted != self.considered_candidates {
+            return Err(ResourceWorkbenchError::InvalidField(
+                "resource candidates are not fully partitioned into qualified and omitted".into(),
+            ));
+        }
+        let mut resource_ids = BTreeSet::new();
+        for (index, resource) in self.resources.iter().enumerate() {
+            if resource.rank != index + 1 || !resource_ids.insert(&resource.resource_id) {
+                return Err(ResourceWorkbenchError::InvalidField(
+                    "qualified resource ranks or identities are not canonical".into(),
+                ));
+            }
+        }
+        let mut omission_ids = BTreeSet::new();
+        if self.omissions.iter().any(|omission| {
+            omission.resource_id.trim().is_empty()
+                || omission.reason.trim().is_empty()
+                || !omission_ids.insert(&omission.resource_id)
+                || resource_ids.contains(&omission.resource_id)
+        }) {
+            return Err(ResourceWorkbenchError::InvalidField(
+                "qualified and omitted resources overlap or repeat".into(),
+            ));
+        }
+        if self.disposition == ResourceDiscoveryDisposition::Qualified && self.resources.is_empty()
+        {
+            return Err(ResourceWorkbenchError::InvalidField(
+                "qualified resource disposition requires a resource".into(),
+            ));
+        }
+        if self.artifact.artifact_id != "qualified-resource-set"
+            || self.artifact.content_type != "application/vnd.aurora.qualified-resource-set+json"
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
+        {
+            return Err(ResourceWorkbenchError::Artifact(
+                "qualified resource artifact identity or provenance is invalid".into(),
+            ));
+        }
         self.artifact
             .validate_metadata()
+            .map_err(|error| ResourceWorkbenchError::Artifact(error.to_string()))?;
+        let payload = json!({
+            "schema_version": self.schema_version,
+            "feature_id": self.feature_id,
+            "need_id": self.need_id,
+            "requester": self.requester,
+            "disposition": self.disposition,
+            "considered_candidates": self.considered_candidates,
+            "qualified_count": self.qualified_count,
+            "resources": self.resources,
+            "omissions": self.omissions,
+            "reasons": self.reasons,
+            "boundary": self.boundary,
+        });
+        self.artifact
+            .verify_payload(&payload)
             .map_err(|error| ResourceWorkbenchError::Artifact(error.to_string()))
     }
 
@@ -378,5 +442,23 @@ mod tests {
         let result = discover_resources(&need(), &[candidate]).unwrap();
         assert_eq!(result.disposition, ResourceDiscoveryDisposition::Blocked);
         assert_eq!(result.omissions.len(), 1);
+    }
+
+    #[test]
+    fn tampered_resource_set_is_rejected() {
+        let mut result = discover_resources(
+            &need(),
+            &[candidate("resource:a", 0.9), candidate("resource:b", 0.7)],
+        )
+        .unwrap();
+        result.resources[0].origin = "site:tampered".into();
+        assert!(result.validate().is_err());
+    }
+
+    #[test]
+    fn resource_counts_must_cover_every_candidate() {
+        let mut result = discover_resources(&need(), &[candidate("resource:a", 0.9)]).unwrap();
+        result.considered_candidates += 1;
+        assert!(result.validate().is_err());
     }
 }

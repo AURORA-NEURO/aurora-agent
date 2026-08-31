@@ -35,7 +35,9 @@ fn fact(id: &str, scope: serde_json::Value, tags: &[&str]) -> Fact {
 }
 
 fn public_scope() -> ScopeKey {
-    ScopeKey::new().exact("cohort", "PUBLIC").exact("residency", "eu")
+    ScopeKey::new()
+        .exact("cohort", "PUBLIC")
+        .exact("residency", "eu")
 }
 
 fn controlled_scope() -> ScopeKey {
@@ -106,7 +108,11 @@ fn a_low_request_compiles_the_same_content_whether_or_not_controlled_evidence_ex
         now(),
     );
 
-    let open = fact("fact.open", json!({"cohort": "PUBLIC", "residency": "eu"}), &[]);
+    let open = fact(
+        "fact.open",
+        json!({"cohort": "PUBLIC", "residency": "eu"}),
+        &[],
+    );
     let secret = fact(
         "fact.secret",
         json!({"cohort": "CONTROLLED", "residency": "eu"}),
@@ -119,7 +125,10 @@ fn a_low_request_compiles_the_same_content_whether_or_not_controlled_evidence_ex
     let ids_without: Vec<&str> = without_high.facts().map(|f| f.id.as_str()).collect();
     let ids_with: Vec<&str> = with_high.facts().map(|f| f.id.as_str()).collect();
 
-    assert_eq!(ids_without, ids_with, "high evidence must not change the low view");
+    assert_eq!(
+        ids_without, ids_with,
+        "high evidence must not change the low view"
+    );
     assert_eq!(without_high.derived_label(), with_high.derived_label());
     assert_eq!(without_high.obligations(), with_high.obligations());
 
@@ -200,7 +209,11 @@ fn a_tag_registered_as_restrictive_tightens_a_fact_that_its_scope_rule_left_open
         now(),
     );
 
-    let plain = fact("fact.plain", json!({"cohort": "PUBLIC", "residency": "eu"}), &[]);
+    let plain = fact(
+        "fact.plain",
+        json!({"cohort": "PUBLIC", "residency": "eu"}),
+        &[],
+    );
     let peds = fact(
         "fact.peds",
         json!({"cohort": "PUBLIC", "residency": "eu"}),
@@ -269,8 +282,12 @@ fn two_separately_admissible_facts_can_combine_into_something_no_site_may_hold()
     assert_eq!(
         both.derived_label(),
         derive([
-            &lattice.resolve(&ScopeKey::new().exact("cohort", "EU")).label,
-            &lattice.resolve(&ScopeKey::new().exact("cohort", "US")).label,
+            &lattice
+                .resolve(&ScopeKey::new().exact("cohort", "EU"))
+                .label,
+            &lattice
+                .resolve(&ScopeKey::new().exact("cohort", "US"))
+                .label,
         ])
     );
 }
@@ -278,7 +295,11 @@ fn two_separately_admissible_facts_can_combine_into_something_no_site_may_hold()
 #[test]
 fn changing_only_the_purpose_changes_what_a_compilation_may_select() {
     let lattice = two_cohort_lattice();
-    let open = fact("fact.open", json!({"cohort": "PUBLIC", "residency": "eu"}), &[]);
+    let open = fact(
+        "fact.open",
+        json!({"cohort": "PUBLIC", "residency": "eu"}),
+        &[],
+    );
 
     let research = Request::new(
         low_principal(),
@@ -297,13 +318,22 @@ fn changing_only_the_purpose_changes_what_a_compilation_may_select() {
 
     let refused = lattice.screen([&open], &training);
     assert!(refused.admitted.is_empty());
-    assert_eq!(refused.refused[0].refusal.constraint(), "purpose_not_consented");
+    assert_eq!(
+        refused.refused[0].refusal.constraint(),
+        "purpose_not_consented"
+    );
 }
 
 #[test]
 fn withdrawing_consent_removes_evidence_an_otherwise_identical_compilation_admitted() {
-    let scope = ScopeKey::new().exact("cohort", "PUBLIC").exact("residency", "eu");
-    let open = fact("fact.open", json!({"cohort": "PUBLIC", "residency": "eu"}), &[]);
+    let scope = ScopeKey::new()
+        .exact("cohort", "PUBLIC")
+        .exact("residency", "eu");
+    let open = fact(
+        "fact.open",
+        json!({"cohort": "PUBLIC", "residency": "eu"}),
+        &[],
+    );
     let request = Request::new(
         low_principal(),
         Purpose::ResearchAnalysis,
@@ -336,12 +366,17 @@ fn withdrawing_consent_removes_evidence_an_otherwise_identical_compilation_admit
     let after = build(withdrawn);
     let screening = after.screen([&open], &request);
     assert!(screening.admitted.is_empty());
-    assert_eq!(screening.refused[0].refusal.constraint(), "consent_withdrawn");
+    assert_eq!(
+        screening.refused[0].refusal.constraint(),
+        "consent_withdrawn"
+    );
 }
 
 #[test]
 fn a_policy_change_moves_the_version_that_cache_admissions_are_keyed_to() {
-    let scope = ScopeKey::new().exact("cohort", "PUBLIC").exact("residency", "eu");
+    let scope = ScopeKey::new()
+        .exact("cohort", "PUBLIC")
+        .exact("residency", "eu");
     let before = PolicyLattice::new()
         .with_rule(PolicyRule::new(
             "rule.public-cohort",
@@ -430,13 +465,7 @@ fn declassification_is_the_only_path_that_gets_controlled_evidence_into_a_prompt
         .expect("rule registers");
 
     let (released, receipt) = registry
-        .apply(
-            "declass.suppressed-counts",
-            1,
-            &controlled,
-            &steward,
-            now(),
-        )
+        .apply("declass.suppressed-counts", 1, &controlled, &steward, now())
         .expect("the steward may release suppressed counts");
 
     assert!(released.classification <= Channel::ModelPrompt.ceiling());
@@ -453,7 +482,9 @@ fn an_admitted_fact_can_be_transported_only_as_a_declared_move_with_a_sound_ledg
     let lattice = two_cohort_lattice();
     let label = lattice.resolve(&public_scope()).label;
 
-    let pooled = ScopeKey::new().exact("cohort", "POOLED").exact("residency", "eu");
+    let pooled = ScopeKey::new()
+        .exact("cohort", "POOLED")
+        .exact("residency", "eu");
     let mapping = propose_transport(&label, &public_scope(), &pooled, "approved EU pooling")
         .expect("an in-territory pooling is legal");
 
@@ -461,7 +492,9 @@ fn an_admitted_fact_can_be_transported_only_as_a_declared_move_with_a_sound_ledg
     assert_eq!(mapping.check(), MappingCheck::Sound);
     assert!(!mapping.loss.policy_conditions.is_empty());
 
-    let offshore = ScopeKey::new().exact("cohort", "POOLED").exact("residency", "us");
+    let offshore = ScopeKey::new()
+        .exact("cohort", "POOLED")
+        .exact("residency", "us");
     assert!(matches!(
         propose_transport(&label, &public_scope(), &offshore, "central pooling"),
         Err(Refusal::ResidencyViolation { .. })

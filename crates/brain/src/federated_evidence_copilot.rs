@@ -22,6 +22,8 @@ pub const FEATURE_ID: &str = "AFA-brain-P01-F12";
 pub const CONTRACT_VERSION: &str = "brain-federated-evidence-research-copilot/1.0";
 pub const OUTPUT_SCHEMA: &str = "QualifiedEvidenceSet3@1";
 pub const MAX_ACTIONS: usize = 128;
+const COPILOT_CONTENT_TYPE: &str = "application/vnd.aurora.qualified-evidence-set-3+json";
+const MAX_TEXT_BYTES: usize = 512;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FederatedCopilotRequest {
@@ -91,33 +93,26 @@ impl FederatedCopilotReceipt {
             || self.contract_version != CONTRACT_VERSION
             || self.feature_id != FEATURE_ID
             || self.boundary != PRECLINICAL_BOUNDARY
-            || !self.raw_data_local
-            || self.request_id.trim().is_empty()
-            || self.operator_id.trim().is_empty()
-            || self.federation_id.trim().is_empty()
-            || self.institution_id.trim().is_empty()
-            || self.purpose.trim().is_empty()
-            || self.semantic_profile.trim().is_empty()
-            || self.endpoint.trim().is_empty()
             || self.candidate_order.is_empty()
             || self.plan_order.is_empty()
             || self.plan_order.len() != self.action_order.len()
-            || self.tool_order.is_empty()
-            || self.effect_receipts.is_empty()
+            || self.tool_order.len() != 1
+            || self.effect_receipts.len() != 1
             || self.budget_units == 0
         {
             return Err(FederatedCopilotError::Invalid("federated copilot identity, envelope, bounded plan, tool, locality, budget, or effects are incomplete".into()));
         }
-        if self
-            .admitted_order
-            .iter()
-            .chain(self.blocked_order.iter())
-            .chain(self.unknown_order.iter())
-            .any(|id| !self.candidate_order.contains(id))
-        {
-            return Err(FederatedCopilotError::Invalid(
-                "federated copilot state is not covered by candidate order".into(),
-            ));
+        for (value, field) in [
+            (&self.request_id, "request_id"),
+            (&self.operator_id, "operator_id"),
+            (&self.federation_id, "federation_id"),
+            (&self.institution_id, "institution_id"),
+            (&self.purpose, "purpose"),
+            (&self.semantic_profile, "semantic_profile"),
+            (&self.endpoint, "endpoint"),
+            (&self.boundary, "boundary"),
+        ] {
+            validate_text(value, field)?;
         }
         for values in [
             &self.plan_order,
@@ -132,49 +127,113 @@ impl FederatedCopilotReceipt {
             &self.negative_evidence,
             &self.effect_receipts,
         ] {
-            if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-                return Err(FederatedCopilotError::Invalid(
-                    "federated copilot ordering is not canonical".into(),
-                ));
-            }
+            validate_sorted_unique(values, "federated copilot collection")?;
+        }
+        if self
+            .plan_order
+            .iter()
+            .zip(&self.action_order)
+            .any(|(plan, action)| plan.strip_prefix("plan:") != action.strip_prefix("action:"))
+            || !self
+                .plan_order
+                .iter()
+                .any(|plan| plan == "plan:exchange-permitted-summary")
+        {
+            return Err(FederatedCopilotError::Invalid(
+                "federated copilot plan and action orders are not paired canonically".into(),
+            ));
+        }
+        let candidate_keys = identity_keys(&self.candidate_order);
+        let admitted_keys = identity_keys(&self.admitted_order);
+        let blocked_keys = identity_keys(&self.blocked_order);
+        let unknown_keys = identity_keys(&self.unknown_order);
+        if admitted_keys
+            .union(&blocked_keys)
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            != candidate_keys
+            || !admitted_keys.is_disjoint(&blocked_keys)
+            || !unknown_keys.is_subset(&blocked_keys)
+            || self.aggregate_order.len() != self.admitted_order.len()
+        {
+            return Err(FederatedCopilotError::Invalid(
+                "federated copilot state is not a disjoint candidate partition".into(),
+            ));
         }
         if self
             .aggregate_order
             .windows(2)
             .any(|pair| pair[0] >= pair[1])
-        {
-            return Err(FederatedCopilotError::Invalid(
-                "federated aggregate ordering is not canonical".into(),
-            ));
-        }
-        if self.effect_receipts.iter().any(|effect| {
-            !effect.starts_with("invoke:declared-tool:") && effect != "block:unsafe-release"
-        }) {
-            return Err(FederatedCopilotError::Invalid(
-                "federated copilot effect is outside declared-tool gate".into(),
-            ));
-        }
-        if self.disposition != FederatedEvidenceDisposition::Blocked
-            && !self.admitted_order.is_empty()
-            && !self
-                .effect_receipts
+            || self
+                .aggregate_order
                 .iter()
-                .any(|effect| effect.starts_with("invoke:declared-tool:"))
+                .any(|value| value.as_str().len() != 64)
         {
             return Err(FederatedCopilotError::Invalid(
-                "admitted federation requires a declared-tool receipt".into(),
+                "federated aggregate ordering or digest is invalid".into(),
             ));
         }
-        if self.disposition != FederatedEvidenceDisposition::Qualified
-            && self.disposition != FederatedEvidenceDisposition::Partial
-            && self.effect_receipts != ["block:unsafe-release"]
+        for digest in [
+            &self.envelope_digest,
+            &self.evidence_receipt_digest,
+            &self.plan_digest,
+            &self.approval_reference,
+            &self.replay_identity,
+        ] {
+            if digest.as_str().len() != 64 {
+                return Err(FederatedCopilotError::Invalid(
+                    "federated copilot digest is invalid".into(),
+                ));
+            }
+        }
+        if !self.raw_data_local {
+            return Err(FederatedCopilotError::Invalid(
+                "federated copilot receipts must declare local emitted data".into(),
+            ));
+        }
+        let expected_effect = if self.disposition != FederatedEvidenceDisposition::Blocked
+            && self.disposition != FederatedEvidenceDisposition::Unknown
+            && !self.admitted_order.is_empty()
+        {
+            format!("invoke:declared-tool:{}", self.tool_order[0])
+        } else {
+            "block:unsafe-release".into()
+        };
+        if self.effect_receipts != [expected_effect] {
+            return Err(FederatedCopilotError::Invalid(
+                "federated copilot effect does not match disposition and admission".into(),
+            ));
+        }
+        let expected_plan_digest = ContentHash::of_value(&json!({
+            "request_id": self.request_id,
+            "federation_id": self.federation_id,
+            "plan_order": self.plan_order,
+            "action_order": self.action_order,
+            "tool_order": self.tool_order,
+            "approval_reference": self.approval_reference,
+            "replay_identity": self.replay_identity,
+        }))
+        .map_err(|error| FederatedCopilotError::Artifact(error.to_string()))?;
+        if self.plan_digest != expected_plan_digest {
+            return Err(FederatedCopilotError::Invalid(
+                "federated copilot plan digest is not bound to the plan".into(),
+            ));
+        }
+        let expected_artifact_id = format!("brain-federated-evidence-copilot:{}", self.request_id);
+        if self.artifact.artifact_id != expected_artifact_id
+            || self.artifact.content_type != COPILOT_CONTENT_TYPE
+            || !self.artifact.semantic_loss.is_empty()
+            || !self.artifact.provenance.is_empty()
         {
             return Err(FederatedCopilotError::Invalid(
-                "non-admitted federation must be explicitly blocked".into(),
+                "federated copilot artifact identity or provenance is inconsistent".into(),
             ));
         }
         self.artifact
             .validate_metadata()
+            .map_err(|error| FederatedCopilotError::Artifact(error.to_string()))?;
+        self.artifact
+            .verify_payload(&receipt_payload(self))
             .map_err(|error| FederatedCopilotError::Artifact(error.to_string()))
     }
     pub fn digest(&self) -> Result<ContentHash, FederatedCopilotError> {
@@ -184,6 +243,85 @@ impl FederatedCopilotReceipt {
         ContentHash::of_value(&value)
             .map_err(|error| FederatedCopilotError::Artifact(error.to_string()))
     }
+}
+
+fn validate_text(value: &str, field: &str) -> Result<(), FederatedCopilotError> {
+    if value.trim() != value
+        || value.is_empty()
+        || value.len() > MAX_TEXT_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(FederatedCopilotError::Invalid(format!(
+            "{field} is empty, padded, oversized, or contains control characters"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_unique(values: &[String], field: &str) -> Result<(), FederatedCopilotError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate_text(value, field)?;
+        if !seen.insert(value.to_ascii_lowercase()) {
+            return Err(FederatedCopilotError::Invalid(format!(
+                "{field} contains a duplicate or case-colliding identity"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sorted_unique(values: &[String], field: &str) -> Result<(), FederatedCopilotError> {
+    validate_unique(values, field)?;
+    if values.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(FederatedCopilotError::Invalid(format!(
+            "{field} is not in canonical order"
+        )));
+    }
+    Ok(())
+}
+
+fn identity_keys(values: &[String]) -> BTreeSet<String> {
+    values
+        .iter()
+        .map(|value| value.to_ascii_lowercase())
+        .collect()
+}
+
+fn receipt_payload(receipt: &FederatedCopilotReceipt) -> serde_json::Value {
+    json!({
+        "schema_version": receipt.schema_version,
+        "contract_version": receipt.contract_version,
+        "feature_id": receipt.feature_id,
+        "request_id": receipt.request_id,
+        "operator_id": receipt.operator_id,
+        "federation_id": receipt.federation_id,
+        "institution_id": receipt.institution_id,
+        "purpose": receipt.purpose,
+        "semantic_profile": receipt.semantic_profile,
+        "endpoint": receipt.endpoint,
+        "disposition": receipt.disposition,
+        "plan_order": receipt.plan_order,
+        "action_order": receipt.action_order,
+        "tool_order": receipt.tool_order,
+        "candidate_order": receipt.candidate_order,
+        "admitted_order": receipt.admitted_order,
+        "blocked_order": receipt.blocked_order,
+        "unknown_order": receipt.unknown_order,
+        "aggregate_order": receipt.aggregate_order,
+        "envelope_digest": receipt.envelope_digest,
+        "evidence_receipt_digest": receipt.evidence_receipt_digest,
+        "plan_digest": receipt.plan_digest,
+        "approval_reference": receipt.approval_reference,
+        "replay_identity": receipt.replay_identity,
+        "budget_units": receipt.budget_units,
+        "omissions": receipt.omissions,
+        "uncertainty": receipt.uncertainty,
+        "negative_evidence": receipt.negative_evidence,
+        "effect_receipts": receipt.effect_receipts,
+        "raw_data_local": receipt.raw_data_local,
+        "boundary": receipt.boundary,
+    })
 }
 
 pub fn federated_evidence_research_copilot_manifest() -> CapabilityManifest {
@@ -233,7 +371,7 @@ pub fn compile_federated_evidence_copilot(
     {
         negative.insert("copilot:exchange-permitted-summary-not-allowed".into());
     }
-    if request.budget_units < action_order.len() as u32 {
+    if u64::from(request.budget_units) < u64::try_from(action_order.len()).unwrap_or(u64::MAX) {
         omissions.insert("copilot:action-budget-exhausted".into());
     }
     if !request.policy_allow {
@@ -253,7 +391,7 @@ pub fn compile_federated_evidence_copilot(
             .action_allow_list
             .iter()
             .any(|item| item == "exchange-permitted-summary")
-        && request.budget_units >= action_order.len() as u32
+        && u64::from(request.budget_units) >= u64::try_from(action_order.len()).unwrap_or(u64::MAX)
         && request.policy_allow
         && request.protected_closure
         && request.raw_data_local
@@ -266,23 +404,71 @@ pub fn compile_federated_evidence_copilot(
     let plan_vec = plan_order.into_iter().collect::<Vec<_>>();
     let action_vec = action_order.into_iter().collect::<Vec<_>>();
     let tool_vec = vec![request.declared_tool_id.clone()];
+    let effect_receipts = if disposition != FederatedEvidenceDisposition::Blocked
+        && disposition != FederatedEvidenceDisposition::Unknown
+        && !evidence.admitted_order.is_empty()
+    {
+        vec![format!("invoke:declared-tool:{}", request.declared_tool_id)]
+    } else {
+        vec!["block:unsafe-release".into()]
+    };
     let evidence_digest = evidence
         .digest()
         .map_err(|error| FederatedCopilotError::Engine(error.to_string()))?;
-    let plan_digest = ContentHash::of_value(&json!({"request_id": request.request.request_id, "federation_id": request.request.federation_id, "plan_order": plan_vec, "action_order": action_vec, "tool_order": tool_vec, "approval_reference": request.approval_reference, "replay_identity": request.replay_identity})).map_err(|error| FederatedCopilotError::Artifact(error.to_string()))?;
-    let payload = json!({"schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION, "contract_version": CONTRACT_VERSION, "feature_id": FEATURE_ID, "request_id": request.request.request_id, "operator_id": request.operator_id, "federation_id": request.request.federation_id, "institution_id": request.request.institution_id, "purpose": request.request.purpose, "semantic_profile": request.request.semantic_profile, "endpoint": request.request.endpoint, "disposition": disposition, "plan_order": plan_vec, "action_order": action_vec, "tool_order": tool_vec, "candidate_order": evidence.candidate_order, "admitted_order": evidence.admitted_order, "blocked_order": evidence.blocked_order, "unknown_order": evidence.unknown_order, "aggregate_order": evidence.aggregate_order, "envelope_digest": evidence.artifact.content_hash, "evidence_receipt_digest": evidence_digest, "plan_digest": plan_digest, "approval_reference": request.approval_reference, "replay_identity": request.replay_identity, "budget_units": request.budget_units, "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative, "boundary": PRECLINICAL_BOUNDARY});
+    let plan_digest = ContentHash::of_value(&json!({
+        "request_id": request.request.request_id,
+        "federation_id": request.request.federation_id,
+        "plan_order": plan_vec,
+        "action_order": action_vec,
+        "tool_order": tool_vec,
+        "approval_reference": request.approval_reference,
+        "replay_identity": request.replay_identity,
+    }))
+    .map_err(|error| FederatedCopilotError::Artifact(error.to_string()))?;
+    let payload = json!({
+        "schema_version": RESEARCH_CONTRACT_SCHEMA_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "feature_id": FEATURE_ID,
+        "request_id": request.request.request_id,
+        "operator_id": request.operator_id,
+        "federation_id": request.request.federation_id,
+        "institution_id": request.request.institution_id,
+        "purpose": request.request.purpose,
+        "semantic_profile": request.request.semantic_profile,
+        "endpoint": request.request.endpoint,
+        "disposition": disposition,
+        "plan_order": plan_vec,
+        "action_order": action_vec,
+        "tool_order": tool_vec,
+        "candidate_order": evidence.candidate_order,
+        "admitted_order": evidence.admitted_order,
+        "blocked_order": evidence.blocked_order,
+        "unknown_order": evidence.unknown_order,
+        "aggregate_order": evidence.aggregate_order,
+        "envelope_digest": evidence.artifact.content_hash,
+        "evidence_receipt_digest": evidence_digest,
+        "plan_digest": plan_digest,
+        "approval_reference": request.approval_reference,
+        "replay_identity": request.replay_identity,
+        "budget_units": request.budget_units,
+        "omissions": omissions,
+        "uncertainty": uncertainty,
+        "negative_evidence": negative,
+        "effect_receipts": effect_receipts,
+        "raw_data_local": true,
+        "boundary": PRECLINICAL_BOUNDARY,
+    });
     let artifact = TypedResearchArtifact::from_payload(
         format!(
             "brain-federated-evidence-copilot:{}",
             request.request.request_id
         ),
-        "application/vnd.aurora.qualified-evidence-set-3+json",
+        COPILOT_CONTENT_TYPE,
         &payload,
         Vec::new(),
         Vec::new(),
     )
     .map_err(|error| FederatedCopilotError::Artifact(error.to_string()))?;
-    let has_effect = actionable && !evidence.admitted_order.is_empty();
     let receipt = FederatedCopilotReceipt {
         schema_version: RESEARCH_CONTRACT_SCHEMA_VERSION.into(),
         contract_version: CONTRACT_VERSION.into(),
@@ -295,14 +481,8 @@ pub fn compile_federated_evidence_copilot(
         semantic_profile: request.request.semantic_profile.clone(),
         endpoint: request.request.endpoint.clone(),
         disposition,
-        plan_order: payload
-            .get("plan_order")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default(),
-        action_order: payload
-            .get("action_order")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default(),
+        plan_order: plan_vec,
+        action_order: action_vec,
         tool_order: tool_vec,
         candidate_order: evidence.candidate_order.clone(),
         admitted_order: evidence.admitted_order.clone(),
@@ -318,11 +498,7 @@ pub fn compile_federated_evidence_copilot(
         omissions: omissions.into_iter().collect(),
         uncertainty: uncertainty.into_iter().collect(),
         negative_evidence: negative.into_iter().collect(),
-        effect_receipts: if has_effect {
-            vec![format!("invoke:declared-tool:{}", request.declared_tool_id)]
-        } else {
-            vec!["block:unsafe-release".into()]
-        },
+        effect_receipts,
         artifact,
         raw_data_local: true,
         boundary: PRECLINICAL_BOUNDARY.into(),
@@ -332,18 +508,41 @@ pub fn compile_federated_evidence_copilot(
 }
 
 fn validate_request(request: &FederatedCopilotRequest) -> Result<(), FederatedCopilotError> {
-    if request.operator_id.trim().is_empty()
-        || request.action_allow_list.is_empty()
-        || request.declared_tool_id.trim().is_empty()
+    if request.action_allow_list.is_empty()
         || request.max_actions == 0
         || request.max_actions > MAX_ACTIONS
         || request.budget_units == 0
         || request.boundary != PRECLINICAL_BOUNDARY
         || request.request.boundary != PRECLINICAL_BOUNDARY
         || request.request.replay_identity != request.replay_identity
+        || request.request.policy_allow != request.policy_allow
+        || request.request.protected_closure != request.protected_closure
+        || request.request.raw_data_local != request.raw_data_local
         || request.approval_reference == ContentHash::of_bytes(&[])
     {
-        return Err(FederatedCopilotError::Invalid("federated copilot operator, declared tool, approval, bounded actions, budget, replay, or boundary is incomplete".into()));
+        return Err(FederatedCopilotError::Invalid("federated copilot operator, declared tool, approval, bounded actions, budget, replay, policy, locality, or boundary is incomplete".into()));
+    }
+    for (value, field) in [
+        (&request.request.request_id, "request_id"),
+        (&request.operator_id, "operator_id"),
+        (&request.request.federation_id, "federation_id"),
+        (&request.request.institution_id, "institution_id"),
+        (&request.request.purpose, "purpose"),
+        (&request.request.semantic_profile, "semantic_profile"),
+        (&request.request.endpoint, "endpoint"),
+        (&request.declared_tool_id, "declared_tool_id"),
+        (&request.boundary, "boundary"),
+    ] {
+        validate_text(value, field)?;
+    }
+    validate_unique(&request.action_allow_list, "action_allow_list")?;
+    validate_unique(&request.request.allowed_artifacts, "allowed_artifacts")?;
+    for digest in [&request.approval_reference, &request.replay_identity] {
+        if digest.as_str().len() != 64 {
+            return Err(FederatedCopilotError::Invalid(
+                "federated copilot approval or replay digest is invalid".into(),
+            ));
+        }
     }
     if request.request.observations.len() > request.max_actions.saturating_mul(64) {
         return Err(FederatedCopilotError::Invalid(
@@ -454,6 +653,41 @@ mod tests {
         input.action_allow_list = vec!["write-external".into()];
         let receipt = compile_federated_evidence_copilot(&input).unwrap();
         assert_eq!(receipt.disposition, FederatedEvidenceDisposition::Blocked);
+    }
+    #[test]
+    fn locality_failure_is_blocked_and_retained() {
+        let mut input = request(vec![observation("a", EvidenceState::Supported)]);
+        input.raw_data_local = false;
+        input.request.raw_data_local = false;
+        let receipt = compile_federated_evidence_copilot(&input).unwrap();
+        assert_eq!(receipt.disposition, FederatedEvidenceDisposition::Blocked);
+        assert!(receipt.raw_data_local);
+        assert!(receipt
+            .negative_evidence
+            .iter()
+            .any(|item| item == "request:raw-data-locality-failed"));
+        receipt.validate().unwrap();
+    }
+    #[test]
+    fn plan_and_payload_drift_are_rejected() {
+        let receipt = compile_federated_evidence_copilot(&request(vec![observation(
+            "a",
+            EvidenceState::Supported,
+        )]))
+        .unwrap();
+        let mut plan_drift = receipt.clone();
+        plan_drift.action_order.pop();
+        assert!(plan_drift.validate().is_err());
+
+        let mut payload_drift = receipt;
+        payload_drift.endpoint = "https://other.example/research".into();
+        assert!(payload_drift.validate().is_err());
+    }
+    #[test]
+    fn padded_operator_identity_is_rejected() {
+        let mut input = request(vec![observation("a", EvidenceState::Supported)]);
+        input.operator_id = " operator:researcher".into();
+        assert!(compile_federated_evidence_copilot(&input).is_err());
     }
     #[test]
     fn approval_identity_is_required() {

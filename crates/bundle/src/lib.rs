@@ -104,6 +104,23 @@
 //! the symmetric shared-secret compatibility path.
 
 pub mod attestation;
+pub mod research_bundle_integrity_support;
+pub mod local_research_bundle_integrity_inference;
+pub mod multimodal_research_bundle_integrity_inference;
+pub mod throughput_research_bundle_integrity_inference;
+pub mod federated_continual_research_bundle_integrity_inference;
+pub mod local_research_bundle_integrity_contract_model;
+pub mod multimodal_research_bundle_integrity_contract_model;
+pub mod throughput_research_bundle_integrity_contract_model;
+pub mod federated_continual_research_bundle_integrity_contract_model;
+pub mod local_research_bundle_integrity_research_copilot;
+pub mod multimodal_research_bundle_integrity_research_copilot;
+pub mod throughput_research_bundle_integrity_research_copilot;
+pub mod federated_continual_research_bundle_integrity_research_copilot;
+pub mod local_research_bundle_integrity_workflow_fabric;
+pub mod multimodal_research_bundle_integrity_workflow_fabric;
+pub mod throughput_research_bundle_integrity_workflow_fabric;
+pub mod federated_continual_research_bundle_integrity_workflow_fabric;
 pub mod audit;
 pub mod bundle;
 pub mod environment;
@@ -119,6 +136,10 @@ pub mod retrieval_bundle_assurance;
 pub use attestation::{
     Attestation, AttestationCheck, AttestationPurpose, ClaimedProducer, KeyHolderAuthenticated,
     ATTESTATION_SCHEMA_VERSION,
+};
+pub use research_bundle_integrity_support::{
+    BundleArtifact4, BundleCard7, BundleEntry4, BundleReleaseRequest4,
+    ResearchBundleIntegrityError,
 };
 pub use audit::{
     AuditAction, AuditCheckpoint, AuditEvent, AuditLog, AuditOutcome, ChainVerification,

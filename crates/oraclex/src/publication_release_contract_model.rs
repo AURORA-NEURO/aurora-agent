@@ -482,9 +482,9 @@ pub fn compile_publication_release(
     };
     let payload = json!({
         "feature_id": feature_id(), "request_id": request.request_id, "batch_id": request.batch_id,
-        "release_channel": request.release_channel, "verdict": verdict, "candidate_order": candidate_order,
+        "release_channel": request.release_channel, "verdict": verdict, "candidate_order": candidate_order.clone(),
         "accepted_order": accepted_order, "conditional_order": conditional_order,
-        "blocked_order": blocked_order, "unknown_order": unknown_order, "decisions": decisions,
+        "blocked_order": blocked_order, "unknown_order": unknown_order, "decisions": decisions.clone(),
         "gate_order": gate_order, "passed_gates": passed_gates, "failed_gates": failed_gates,
         "omissions": omissions, "uncertainty": uncertainty, "negative_evidence": negative_evidence,
         "semantic_loss": semantic_loss, "replay_identity": request.replay_identity,
@@ -513,17 +513,12 @@ pub fn compile_publication_release(
         batch_id: request.batch_id.clone(),
         release_channel: request.release_channel.clone(),
         verdict: verdict.into(),
-        candidate_order: payload["candidate_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap().into())
-            .collect(),
+        candidate_order,
         accepted_order: accepted_order.clone(),
         conditional_order: conditional_order.clone(),
         blocked_order: blocked_order.clone(),
         unknown_order: unknown_order.clone(),
-        decisions: serde_json::from_value(payload["decisions"].clone()).unwrap_or_default(),
+        decisions,
         gate_order: gate_order.clone(),
         passed_gates: passed_gates.clone(),
         failed_gates: failed_gates.clone(),

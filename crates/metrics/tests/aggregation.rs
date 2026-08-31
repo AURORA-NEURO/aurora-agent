@@ -3,6 +3,7 @@
 mod common;
 
 use bioprism_atlas::UnmeasuredReason;
+use bioprism_metrics::Subject;
 use bioprism_metrics::{
     AggregationRule, CoveredAggregate, CoveredAggregateFields, DeclaredWeighting, Estimate,
     GridCell, MetricsError,
@@ -162,6 +163,69 @@ fn a_deserialized_aggregate_with_no_contributing_cell_is_refused() {
     let document = serde_json::to_string(&fields).expect("serializable");
 
     assert!(serde_json::from_str::<CoveredAggregate>(&document).is_err());
+}
+
+#[test]
+fn a_deserialized_aggregate_cannot_place_one_capability_in_two_coverage_buckets() {
+    let grid = grid_of(
+        "system-a",
+        recorded("system-a"),
+        vec![("verify.oracle", point_cell(0.9, 12))],
+    );
+    let aggregate = CoveredAggregate::mean(&grid).expect("one cell contributed");
+
+    let mut fields: CoveredAggregateFields = aggregate.into();
+    fields
+        .coverage
+        .measured_but_excluded
+        .push(cap("verify.oracle"));
+    let document = serde_json::to_string(&fields).expect("serializable");
+
+    assert!(matches!(
+        serde_json::from_str::<CoveredAggregate>(&document),
+        Err(error) if error.to_string().contains("more than once")
+    ));
+}
+
+#[test]
+fn a_deserialized_aggregate_must_keep_its_grid_subject() {
+    let grid = grid_of(
+        "system-a",
+        recorded("system-a"),
+        vec![("verify.oracle", point_cell(0.9, 12))],
+    );
+    let aggregate = CoveredAggregate::mean(&grid).expect("one cell contributed");
+
+    let mut fields: CoveredAggregateFields = aggregate.into();
+    fields.conditions.subject = Subject::grid("system-b");
+    let document = serde_json::to_string(&fields).expect("serializable");
+
+    assert!(matches!(
+        serde_json::from_str::<CoveredAggregate>(&document),
+        Err(error) if error.to_string().contains("has subject")
+    ));
+}
+
+#[test]
+fn a_deserialized_worst_aggregate_must_bind_its_worst_value_to_its_estimate() {
+    let grid = grid_of(
+        "system-a",
+        recorded("system-a"),
+        vec![
+            ("verify.oracle", point_cell(0.9, 12)),
+            ("memory.recall", point_cell(0.2, 12)),
+        ],
+    );
+    let aggregate = CoveredAggregate::worst(&grid).expect("two cells contributed");
+
+    let mut fields: CoveredAggregateFields = aggregate.into();
+    fields.worst.value = 0.3;
+    let document = serde_json::to_string(&fields).expect("serializable");
+
+    assert!(matches!(
+        serde_json::from_str::<CoveredAggregate>(&document),
+        Err(error) if error.to_string().contains("does not match worst-cell value")
+    ));
 }
 
 #[test]

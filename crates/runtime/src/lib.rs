@@ -75,6 +75,7 @@ pub mod seam;
 pub mod secret;
 pub mod tape;
 pub mod context_compilation_contract;
+pub mod federated_knowledge_representation_assurance;
 
 pub use budget::{
     Accounting, BudgetController, BudgetPlan, BudgetWarning, ChargeStatus, Limit, RuntimeResource,
@@ -118,6 +119,18 @@ pub use research_run::{
     ResearchExecutionSession, ResearchReplayBundle, ResearchRuntimeError,
     FEATURE_CONTRACT_VERSION as RESEARCH_FEATURE_CONTRACT_VERSION,
     FEATURE_ID as RESEARCH_FEATURE_ID,
+};
+pub use federated_knowledge_representation_assurance::{
+    assure_knowledge_representation as assure_runtime_knowledge_representation,
+    knowledge_representation_assurance_manifest as runtime_knowledge_representation_assurance_manifest,
+    KnowledgeEvidenceState as RuntimeKnowledgeEvidenceState,
+    KnowledgePeer4 as RuntimeKnowledgePeer4,
+    ResearchClaim4 as RuntimeResearchClaim4,
+    ScopedResearchClaims4 as RuntimeScopedResearchClaims4,
+    TypedKnowledgeWorld7 as RuntimeTypedKnowledgeWorld7,
+    KnowledgeRepresentationAssuranceError as RuntimeKnowledgeRepresentationAssuranceError,
+    FEATURE_ID as RUNTIME_KNOWLEDGE_REPRESENTATION_FEATURE_ID,
+    CONTRACT_VERSION as RUNTIME_KNOWLEDGE_REPRESENTATION_CONTRACT_VERSION,
 };
 pub use replay_audit::{
     audit_replay, replay_audit_manifest, ReplayAuditError, ReplayAuditRequest,
