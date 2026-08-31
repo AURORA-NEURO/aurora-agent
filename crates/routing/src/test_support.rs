@@ -47,7 +47,7 @@ pub fn synthetic_fingerprint(
         distractor_density: 0.9,
         tag_informativeness,
         mean_factor_arity: 2.0,
-        max_factor_arity: 4,
+        max_factor_arity: 2,
         arity_histogram: BTreeMap::from([(2, facts)]),
         max_unary_chain,
         hub_share: 0.9,
