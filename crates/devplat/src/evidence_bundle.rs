@@ -72,7 +72,24 @@ fn bool_field(object: &Map<String, Value>, field: &str) -> Result<bool, Evidence
 }
 
 fn digest_field(object: &Map<String, Value>, field: &str) -> Result<String, EvidenceBundleError> {
-    let value = text_field(object, field)?;
+    let value = match object.get(field) {
+        None
+        | Some(Value::Null)
+        | Some(Value::Bool(_))
+        | Some(Value::Number(_))
+        | Some(Value::Array(_))
+        | Some(Value::Object(_)) => {
+            return Err(EvidenceBundleError::Invalid {
+                reason: format!("{field} must be a non-empty string"),
+            });
+        }
+        Some(Value::String(value)) if value.is_empty() => {
+            return Err(EvidenceBundleError::Invalid {
+                reason: format!("{field} must be a non-empty string"),
+            });
+        }
+        Some(Value::String(value)) => value,
+    };
     if value.len() != 64
         || !value
             .bytes()
