@@ -47187,6 +47187,17 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "adapter_federated_continual_evidence_surveillance_workflow_fabric",
+            "description": "Schedule an A2 federated continual evidence-surveillance workflow with purpose-bound peer quorum, checkpoint identity, aggregate-only federation, replay, compensation, and institution-local raw observations.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "request": { "type": "object", "description": "Serialized FederatedContinualEvidenceSurveillanceWorkflowRequest with EvidenceFeed4 copilot contributions, workflow/checkpoint/stage metadata, budget, replay identity, federation scope, and preclinical boundary." }
+                },
+                "required": ["request"]
+            }
+        }),
+        json!({
             "name": "adapter_resource_workbench",
             "description": "Qualify multimodal research resources with deterministic trust ranking, capability/origin/locality gates, and explicit protected or unavailable omissions.",
             "inputSchema": {

@@ -344,8 +344,8 @@ pub fn assure_context_compilation(
     };
     let effects = if disposition == "qualified" {
         vec![
-            format!("retain:context-assurance:{}", q.request_id),
             format!("exchange:aggregate-context-summary:{}", q.request_id),
+            format!("retain:context-assurance:{}", q.request_id),
         ]
     } else {
         vec!["block:unsafe-release".into()]
